@@ -1,0 +1,10 @@
+main.cpp:74:5:int main()	16	static
+main.cpp:148:6:void SystemClock_Config()	88	static
+main.cpp:191:13:void MX_NVIC_Init()	8	static
+main.cpp:212:13:void MX_USART2_UART_Init()	8	static
+main.cpp:245:13:void MX_USART3_UART_Init()	8	static
+main.cpp:276:13:void MX_DMA_Init()	16	static
+main.cpp:289:13:void MX_GPIO_Init()	56	static
+main.cpp:379:5:int __io_putchar(int)	24	static
+main.cpp:387:5:int _write(int, char*, int)	32	static
+main.cpp:402:6:void Error_Handler()	4	static,ignoring_inline_asm

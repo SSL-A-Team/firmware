@@ -1,0 +1,11 @@
+OdinW2Radio.cpp:12:1:ateam::OdinW2Radio::OdinW2Radio(UART_HandleTypeDef*, GPIO_TypeDef*, uint16_t, int, int)	24	static
+OdinW2Radio.cpp:20:1:ateam::OdinW2Radio::OdinW2Radio(UART_HandleTypeDef*, DMA_HandleTypeDef*, GPIO_TypeDef*, uint16_t, int, int)	24	static
+OdinW2Radio.cpp:27:1:ateam::OdinW2Radio::~OdinW2Radio()	16	static
+OdinW2Radio.cpp:27:1:virtual ateam::OdinW2Radio::~OdinW2Radio()	16	static
+OdinW2Radio.cpp:31:6:void ateam::OdinW2Radio::allocate_uart_buffers()	16	static
+OdinW2Radio.cpp:36:6:void ateam::OdinW2Radio::start()	16	static
+OdinW2Radio.cpp:40:6:void ateam::OdinW2Radio::hard_reset(int)	16	static
+OdinW2Radio.cpp:46:6:void ateam::OdinW2Radio::__dma_interrupt_tx_complete()	16	static
+OdinW2Radio.cpp:50:6:void ateam::OdinW2Radio::__dma_interrupt_tx_error()	16	static
+OdinW2Radio.cpp:54:6:bool ateam::OdinW2Radio::write_uart_dma_nb(int)	16	static
+OdinW2Radio.cpp:64:6:bool ateam::OdinW2Radio::write_uart_dma_b(int)	16	static
