@@ -34,4 +34,4 @@
 "./USB_DEVICE/Target/usbd_conf.o"
 "./ateam/OdinW2Radio.o"
 "./ateam/Robot.o"
-"./ateam/ateam_entry.o"
+"./ateam/ateam_ext.o"

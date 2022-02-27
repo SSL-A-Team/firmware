@@ -11,10 +11,10 @@
 
 namespace ateam {
 
-Robot *Robot::robot;
+Robot *Robot::instance;
 
 Robot::Robot(UART_HandleTypeDef *radio_uart, UART_HandleTypeDef *serial_uart) {
-	this->robot = this;
+	this->instance = this;
 	this->radio_uart = radio_uart;
 	this->serial_uart = serial_uart;
 }
@@ -42,6 +42,18 @@ void Robot::run_forever() {
 		  HAL_Delay(500);
 		  nLoop++;
 		  printf("nLoop == %d\r\n", nLoop);
+	}
+}
+
+void Robot::__uart_transfer_complete_int_cb(UART_HandleTypeDef *uart_instance) {
+	if (uart_instance == radio_uart) {
+		radio->__dma_interrupt_tx_complete();
+	}
+}
+
+void Robot::__uart_transfer_error_int_cb(UART_HandleTypeDef *uart_instance) {
+	if (uart_instance == radio_uart) {
+		radio->__dma_interrupt_tx_error();
 	}
 }
 

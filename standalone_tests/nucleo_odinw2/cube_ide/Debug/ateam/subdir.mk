@@ -7,17 +7,17 @@
 CPP_SRCS += \
 ../ateam/OdinW2Radio.cpp \
 ../ateam/Robot.cpp \
-../ateam/ateam_entry.cpp 
+../ateam/ateam_ext.cpp 
 
 OBJS += \
 ./ateam/OdinW2Radio.o \
 ./ateam/Robot.o \
-./ateam/ateam_entry.o 
+./ateam/ateam_ext.o 
 
 CPP_DEPS += \
 ./ateam/OdinW2Radio.d \
 ./ateam/Robot.d \
-./ateam/ateam_entry.d 
+./ateam/ateam_ext.d 
 
 
 # Each subdirectory must supply rules for building sources it contributes

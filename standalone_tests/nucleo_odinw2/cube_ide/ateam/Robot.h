@@ -19,12 +19,17 @@ public:
 	Robot(UART_HandleTypeDef *radio_uart, UART_HandleTypeDef *serial_uart);
 	virtual ~Robot();
 
-	static Robot *robot;
+	static Robot *instance;
 
 	UART_HandleTypeDef *radio_uart;
 	UART_HandleTypeDef *serial_uart;
 
+	OdinW2Radio *radio;
+
 	void run_forever();
+
+	void __uart_transfer_complete_int_cb(UART_HandleTypeDef *uart_inst);
+	void __uart_transfer_error_int_cb(UART_HandleTypeDef *uart_inst);
 };
 
 } /* namespace ateam */

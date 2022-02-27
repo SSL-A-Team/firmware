@@ -83,6 +83,10 @@ public:
 //	std::string get_connection_port();
 //
 //	void host_connect_blocking();
+
+	// interrupt callbacks
+	void __dma_interrupt_tx_complete();
+	void __dma_interrupt_tx_error();
 protected:
 	int rx_buf_len, tx_buf_len;
 
@@ -102,8 +106,7 @@ protected:
 
 	void allocate_uart_buffers();
 
-	void __dma_interrupt_tx_complete();
-	void __dma_interrupt_tx_error();
+
 	bool write_uart_dma_nb(int len);
 	bool write_uart_dma_b(int len);
 

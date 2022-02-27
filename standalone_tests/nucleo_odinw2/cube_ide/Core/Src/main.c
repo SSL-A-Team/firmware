@@ -18,7 +18,7 @@
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
-#include "ateam_entry.h"
+#include <ateam_ext.h>
 #include "main.h"
 #include "usb_device.h"
 
@@ -353,9 +353,6 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 int __io_putchar(int ch) {
 	uint8_t c[1];
 	c[0] = ch & 0x00FF;
@@ -373,9 +370,13 @@ int _write(int file,char *ptr, int len) {
 	return len;
 }
 
-#ifdef __cplusplus
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
+	dma_transfer_complete_interrupt(huart);
 }
-#endif
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
+	dma_transfer_error_interrupt(huart);
+}
 
 /* USER CODE END 4 */
 
