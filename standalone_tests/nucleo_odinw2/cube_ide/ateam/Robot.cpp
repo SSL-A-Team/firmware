@@ -11,7 +11,10 @@
 
 namespace ateam {
 
+Robot *Robot::robot;
+
 Robot::Robot(UART_HandleTypeDef *radio_uart, UART_HandleTypeDef *serial_uart) {
+	this->robot = this;
 	this->radio_uart = radio_uart;
 	this->serial_uart = serial_uart;
 }

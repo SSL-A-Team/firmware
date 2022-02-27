@@ -19,6 +19,8 @@ public:
 	Robot(UART_HandleTypeDef *radio_uart, UART_HandleTypeDef *serial_uart);
 	virtual ~Robot();
 
+	static Robot *robot;
+
 	UART_HandleTypeDef *radio_uart;
 	UART_HandleTypeDef *serial_uart;
 

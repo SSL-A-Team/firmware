@@ -1,1 +1,1 @@
-ateam_entry.cpp:9:5:int robot_entry(UART_HandleTypeDef*, UART_HandleTypeDef*)	32	static
+ateam_entry.cpp:9:6:void robot_entry(UART_HandleTypeDef*, UART_HandleTypeDef*)	32	static
