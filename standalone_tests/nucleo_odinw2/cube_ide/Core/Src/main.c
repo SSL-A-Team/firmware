@@ -18,14 +18,13 @@
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
+#include "ateam_entry.h"
 #include "main.h"
 #include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h>
 
-#include "OdinW2Radio.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -105,35 +104,13 @@ int main(void)
 
 
   /* USER CODE BEGIN 2 */
-
-  // LD1=Green, LD2=Blue, LD3=Red
-  HAL_GPIO_WritePin(GPIOB, LD1_Pin|LD3_Pin|LD2_Pin, GPIO_PIN_SET);
-  HAL_Delay(500);
-  HAL_GPIO_WritePin(GPIOB, LD3_Pin|LD2_Pin, GPIO_PIN_RESET);
-  HAL_Delay(500);
-
-  //ateam::OdinW2Radio radio(&huart2, USART2_RST_GPIO_Port, USART2_RST_Pin);
-  HAL_GPIO_WritePin(GPIOB, LD2_Pin, GPIO_PIN_SET);
-  //radio.hard_reset();
-  HAL_GPIO_WritePin(GPIOB, LD2_Pin, GPIO_PIN_RESET);
-  HAL_Delay(1000);
-
-
-
-  int nLoop=0;
-
-
+  robot_entry(&huart2, &huart3);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  HAL_GPIO_TogglePin(GPIOB, LD2_Pin); // PORTA, Pin PA5
-	  HAL_Delay(500);
-	  nLoop++;
-	  printf("nLoop == %d \n\r", nLoop);
-
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -376,6 +353,9 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 int __io_putchar(int ch) {
 	uint8_t c[1];
 	c[0] = ch & 0x00FF;
@@ -392,6 +372,10 @@ int _write(int file,char *ptr, int len) {
 
 	return len;
 }
+
+#ifdef __cplusplus
+}
+#endif
 
 /* USER CODE END 4 */
 

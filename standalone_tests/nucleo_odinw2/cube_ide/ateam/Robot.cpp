@@ -1,0 +1,45 @@
+/*
+ * Robot.cpp
+ *
+ *  Created on: Feb 27, 2022
+ *      Author: guyfl
+ */
+
+#include "Robot.h"
+
+#include <stdio.h>
+
+namespace ateam {
+
+Robot::Robot(UART_HandleTypeDef *radio_uart, UART_HandleTypeDef *serial_uart) {
+	this->radio_uart = radio_uart;
+	this->serial_uart = serial_uart;
+}
+
+Robot::~Robot() {
+	// TODO Auto-generated destructor stub
+}
+
+void Robot::run_forever() {
+	// LD1=Green, LD2=Blue, LD3=Red
+	HAL_GPIO_WritePin(GPIOB, LD1_Pin|LD3_Pin|LD2_Pin, GPIO_PIN_SET);
+	HAL_Delay(500);
+	HAL_GPIO_WritePin(GPIOB, LD3_Pin|LD2_Pin, GPIO_PIN_RESET);
+	HAL_Delay(500);
+
+	OdinW2Radio radio(this->radio_uart, USART2_RST_GPIO_Port, USART2_RST_Pin);
+	HAL_GPIO_WritePin(GPIOB, LD2_Pin, GPIO_PIN_SET);
+	radio.hard_reset();
+	HAL_GPIO_WritePin(GPIOB, LD2_Pin, GPIO_PIN_RESET);
+	HAL_Delay(1000);
+
+	int nLoop=0;
+	while (true) {
+		  HAL_GPIO_TogglePin(GPIOB, LD2_Pin);
+		  HAL_Delay(500);
+		  nLoop++;
+		  printf("nLoop == %d\r\n", nLoop);
+	}
+}
+
+} /* namespace ateam */
