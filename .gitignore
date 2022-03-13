@@ -1,2 +1,8 @@
+# nix aritfacts
 result
 result/
+
+# build files
+build/
+.o
+.d
