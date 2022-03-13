@@ -1,5 +1,5 @@
 {
-  description = "A very basic flake";
+  description = "The firmware repository for the SSL A-Team.";
 
   outputs = { self, nixpkgs }: {
 
