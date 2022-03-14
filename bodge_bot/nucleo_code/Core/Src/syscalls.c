@@ -30,6 +30,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <sys/times.h>
+#include <unistd.h>
 
 
 /* Variables */
@@ -40,10 +41,24 @@ extern int __io_getchar(void) __attribute__((weak));
 char *__env[1] = { 0 };
 char **environ = __env;
 
+#define MAX_OPEN_FILES 20
+typedef struct FileRecord {
+	int fh;
+	int pos;
+} FileRecord_t;
+
+static int num_open_files = 0;
+static FileRecord_t file_records[MAX_OPEN_FILES + 3];
 
 /* Functions */
 void initialise_monitor_handles()
 {
+	file_records[MAX_OPEN_FILES - 1].fh = stdout;
+	file_records[MAX_OPEN_FILES - 1].pos = 0;
+	file_records[MAX_OPEN_FILES - 2].fh = stderr;
+	file_records[MAX_OPEN_FILES - 2].pos = 0;
+	file_records[MAX_OPEN_FILES - 3].fh = stdin;
+	file_records[MAX_OPEN_FILES - 3].pos = 0;
 }
 
 int _getpid(void)
@@ -72,18 +87,26 @@ __attribute__((weak)) int _read(int file, char *ptr, int len)
 		*ptr++ = __io_getchar();
 	}
 
-return len;
+	return len;
 }
 
-__attribute__((weak)) int _write(int file, char *ptr, int len)
-{
-	int DataIdx;
+__attribute__((weak)) int _write(int file, char *ptr, int len) {
+	// write location is stdout or stderr
+	//   so write blocking to the default terminal device
+	//   default terminal device is handled in __io_putchar
+	if (file == STDOUT_FILENO || file == STDERR_FILENO) {
+		int DataIdx;
+		for(DataIdx= 0; DataIdx< len; DataIdx++) {
+			__io_putchar(*ptr++);
+		}
 
-	for (DataIdx = 0; DataIdx < len; DataIdx++)
-	{
-		__io_putchar(*ptr++);
+		return len;
 	}
-	return len;
+
+	return 0;
+//	char *warn = "invalid file descriptor passed to _write\r\n";
+//	_write(STDOUT_FILENO, warn, strlen(warn));
+//	return _write(STDOUT_FILENO, ptr, len);
 }
 
 int _close(int file)
@@ -94,6 +117,8 @@ int _close(int file)
 
 int _fstat(int file, struct stat *st)
 {
+	//char* msg = "_fstat invoked!";
+	//_write(STDOUT_FILENO, msg, strlen(msg));
 	st->st_mode = S_IFCHR;
 	return 0;
 }

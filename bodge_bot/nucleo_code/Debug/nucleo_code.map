@@ -431,18 +431,24 @@ Discarded input sections
  .group         0x0000000000000000        0xc ./Core/Src/syscalls.o
  .group         0x0000000000000000        0xc ./Core/Src/syscalls.o
  .group         0x0000000000000000        0xc ./Core/Src/syscalls.o
+ .group         0x0000000000000000        0xc ./Core/Src/syscalls.o
+ .group         0x0000000000000000        0xc ./Core/Src/syscalls.o
  .text          0x0000000000000000        0x0 ./Core/Src/syscalls.o
  .data          0x0000000000000000        0x0 ./Core/Src/syscalls.o
  .bss           0x0000000000000000        0x0 ./Core/Src/syscalls.o
  .bss.__env     0x0000000000000000        0x4 ./Core/Src/syscalls.o
  .data.environ  0x0000000000000000        0x4 ./Core/Src/syscalls.o
+ .bss.num_open_files
+                0x0000000000000000        0x4 ./Core/Src/syscalls.o
+ .bss.file_records
+                0x0000000000000000       0xb8 ./Core/Src/syscalls.o
  .text.initialise_monitor_handles
-                0x0000000000000000        0xe ./Core/Src/syscalls.o
+                0x0000000000000000       0x58 ./Core/Src/syscalls.o
  .text._getpid  0x0000000000000000       0x10 ./Core/Src/syscalls.o
  .text._kill    0x0000000000000000       0x20 ./Core/Src/syscalls.o
  .text._exit    0x0000000000000000       0x14 ./Core/Src/syscalls.o
  .text._read    0x0000000000000000       0x3a ./Core/Src/syscalls.o
- .text._write   0x0000000000000000       0x38 ./Core/Src/syscalls.o
+ .text._write   0x0000000000000000       0x48 ./Core/Src/syscalls.o
  .text._close   0x0000000000000000       0x18 ./Core/Src/syscalls.o
  .text._fstat   0x0000000000000000       0x20 ./Core/Src/syscalls.o
  .text._isatty  0x0000000000000000       0x16 ./Core/Src/syscalls.o
@@ -455,12 +461,12 @@ Discarded input sections
  .text._link    0x0000000000000000       0x20 ./Core/Src/syscalls.o
  .text._fork    0x0000000000000000       0x16 ./Core/Src/syscalls.o
  .text._execve  0x0000000000000000       0x22 ./Core/Src/syscalls.o
- .debug_info    0x0000000000000000      0xfa8 ./Core/Src/syscalls.o
- .debug_abbrev  0x0000000000000000      0x286 ./Core/Src/syscalls.o
+ .debug_info    0x0000000000000000     0x105a ./Core/Src/syscalls.o
+ .debug_abbrev  0x0000000000000000      0x298 ./Core/Src/syscalls.o
  .debug_aranges
                 0x0000000000000000       0xa8 ./Core/Src/syscalls.o
  .debug_ranges  0x0000000000000000       0x98 ./Core/Src/syscalls.o
- .debug_macro   0x0000000000000000      0x24c ./Core/Src/syscalls.o
+ .debug_macro   0x0000000000000000      0x273 ./Core/Src/syscalls.o
  .debug_macro   0x0000000000000000      0xaa8 ./Core/Src/syscalls.o
  .debug_macro   0x0000000000000000       0x22 ./Core/Src/syscalls.o
  .debug_macro   0x0000000000000000       0x4c ./Core/Src/syscalls.o
@@ -508,8 +514,10 @@ Discarded input sections
  .debug_macro   0x0000000000000000      0x189 ./Core/Src/syscalls.o
  .debug_macro   0x0000000000000000       0x16 ./Core/Src/syscalls.o
  .debug_macro   0x0000000000000000       0xce ./Core/Src/syscalls.o
- .debug_line    0x0000000000000000      0x802 ./Core/Src/syscalls.o
- .debug_str     0x0000000000000000     0x8ed7 ./Core/Src/syscalls.o
+ .debug_macro   0x0000000000000000       0x16 ./Core/Src/syscalls.o
+ .debug_macro   0x0000000000000000      0x51a ./Core/Src/syscalls.o
+ .debug_line    0x0000000000000000      0x847 ./Core/Src/syscalls.o
+ .debug_str     0x0000000000000000     0x9ee7 ./Core/Src/syscalls.o
  .comment       0x0000000000000000       0x54 ./Core/Src/syscalls.o
  .debug_frame   0x0000000000000000      0x2ac ./Core/Src/syscalls.o
  .ARM.attributes

@@ -8,6 +8,7 @@
 #include "Robot.h"
 
 #include <stdio.h>
+#include <unistd.h>
 
 namespace ateam {
 
@@ -36,12 +37,20 @@ void Robot::run_forever() {
 	HAL_GPIO_WritePin(GPIOB, LD2_Pin, GPIO_PIN_RESET);
 	HAL_Delay(1000);
 
+	printf("stdout == %d\r\n", STDOUT_FILENO);
+	fprintf(stderr, "stdout == %d\r\n", STDERR_FILENO);
+//	fprintf(stdout, "stdout == %d\r\n", STDIN_FILENO);
+	fprintf((FILE*)0xFFFF, "invalid fh\r\n");
+
+	//while(true);
+
 	int nLoop=0;
 	while (true) {
 		  HAL_GPIO_TogglePin(GPIOB, LD2_Pin);
 		  HAL_Delay(500);
 		  nLoop++;
-		  printf("nLoop == %d\r\n", nLoop);
+		  //fprintf(stdout, "nLoop == %d\r\n", nLoop);
+		  //fprintf((FILE*) 0xFFFF, "stdout == %d\r\n", stdout);
 	}
 }
 

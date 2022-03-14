@@ -87,6 +87,8 @@ public:
 	// interrupt callbacks
 	void __dma_interrupt_tx_complete();
 	void __dma_interrupt_tx_error();
+	void __dma_interrupt_rx_complete();
+	void __dma_interrupt_rx_error();
 protected:
 	int rx_buf_len, tx_buf_len;
 
@@ -105,14 +107,16 @@ protected:
 	RadioCommandState command_state = RadioCommandState::IDLE;
 
 	void allocate_uart_buffers();
-
+	void clear_tx_buf();
+	void clear_rx_buf();
 
 	bool write_uart_dma_nb(int len);
 	bool write_uart_dma_b(int len);
 
-//	void __dma_interrupt_put_data8(uint8_t data);
-//	void __dma_interrupt_rx_error();
-//	void read_uart_dma_b(int len);
+	void read_uart_dma_line_nb();
+	void read_uart_dma_line_b();
+	void read_uart_dma_raw_len_nb(int len);
+	void read_uart_dma_raw_len_b();
 
 //	void dispatch_command()
 

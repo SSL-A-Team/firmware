@@ -24,7 +24,6 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -361,13 +360,11 @@ int __io_putchar(int ch) {
 	return ch;
 }
 
-int _write(int file,char *ptr, int len) {
-	int DataIdx;
-	for(DataIdx= 0; DataIdx< len; DataIdx++) {
-		__io_putchar(*ptr++);
-	}
+int __io_getchar(void) {
+	uint8_t c[1];
+	return HAL_UART_Receive(&huart3, &*c, 1, 10);
 
-	return len;
+	return c[0];
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {

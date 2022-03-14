@@ -65,7 +65,7 @@ bool OdinW2Radio::write_uart_dma_b(int len) {
 	write_uart_dma_nb(len);
 
 	while (this->uart_tx_state != UartTxState::DMA_TRANSMIT_COMPLETE_SUCC || this->uart_tx_state != UartTxState::DMA_TRANSMIT_COMPLETE_ERROR) {
-
+		HAL_Delay(5);
 	}
 
 	return this->uart_tx_state == UartTxState::DMA_TRANSMIT_COMPLETE_SUCC;
