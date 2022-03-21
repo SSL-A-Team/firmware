@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
 
-include(stm32-defines)
+project(ATeam-Firmware)
+
+include(cmake/stm32-defines.cmake)
 
 #######################################
 #  Standalone Breadbaord Radio Tests  #
@@ -18,7 +20,7 @@ add_executable(test-breadboard-radio.elf
 
 file(GLOB_RECURSE BB_RADIO_INCLUDE_FILES "test/nucleo_odinw2/cube_ide/*.h")
 
-target_include_directories(test-breadboard-radio.elf
+target_include_directories(test-breadboard-radio.elf PRIVATE
 	${BB_RADIO_INCLUDE_FILES}
 )
 
