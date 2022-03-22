@@ -3,14 +3,17 @@ cmake_minimum_required(VERSION 3.22)
 project(ATeam-Firmware)
 
 include(cmake/stm32-defines.cmake)
+include(cmake/header-utils.cmake)
 
 #######################################
 #  Standalone Breadbaord Radio Tests  #
 #######################################
 
-file(GLOB_RECURSE BB_RADIO_ASM_FILES "test/nucleo_odinw2/cube_ide/*.s")
-file(GLOB_RECURSE BB_RADIO_C_FILES "test/nucleo_odinw2/cube_ide/*.c")
-file(GLOB_RECURSE BB_RADIO_CXX_FILES "test/nucleo_odinw2/cube_ide/*.cpp")
+set(BB_RADIO_DIR "test/nucleo_odinw2/cube_ide")
+
+file(GLOB_RECURSE BB_RADIO_ASM_FILES "${BB_RADIO_DIR}/*.s")
+file(GLOB_RECURSE BB_RADIO_C_FILES "${BB_RADIO_DIR}/*.c")
+file(GLOB_RECURSE BB_RADIO_CXX_FILES "${BB_RADIO_DIR}/*.cpp")
 
 add_executable(test-breadboard-radio.elf
 	${BB_RADIO_ASM_FILES}
@@ -18,11 +21,20 @@ add_executable(test-breadboard-radio.elf
 	${BB_RADIO_CXX_FILES}
 )
 
-file(GLOB_RECURSE BB_RADIO_INCLUDE_FILES "test/nucleo_odinw2/cube_ide/*.h")
-
+#file(GLOB_RECURSE BB_RADIO_INCLUDE_FILES "test/nucleo_odinw2/cube_ide/*.h")
+HEADER_DIRECTORIES(BB_RADIO_INCLUDE_DIRS ${BB_RADIO_DIR})
 target_include_directories(test-breadboard-radio.elf PRIVATE
-	${BB_RADIO_INCLUDE_FILES}
+	${BB_RADIO_INCLUDE_DIRS}
 )
+
+target_compile_definitions(test-breadboard-radio.elf PRIVATE
+	${NUCLEO_F429ZI_DEFINITIONS}
+)
+
+target_compile_options(test-breadboard-radio.elf PRIVATE
+	$<$<COMPILE_LANGUAGE:C>:${NUCLEO_F429ZI_C_OPTIONS}>
+	$<$<COMPILE_LANGUAGE:CXX>:${NUCLEO_F429ZI_CXX_OPTIONS}>
+) 
 
 add_custom_target(test-breadboard-radio
 	objcopy -Obinary "test-breadboard-radio.elf" "test-breadboard-radio.bin"
