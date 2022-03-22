@@ -6,3 +6,10 @@ result/
 build/
 .o
 .d
+
+# IDE files
+*.launch
+**/*.cproject
+**/*.mxproject
+**/Debug
+**/.settings
