@@ -13,10 +13,11 @@
       packageName = "ateam-firmware";
 
       in {
-        defaultPackage = self.packages.${system}.${packageName};
+	# packages.${system} = with pkgs; [ gnumake cmake gcc-arm-embedded openocd ];
+        # defaultPackage = self.packages.${system}.${packageName};
 
         devShell = pkgs.mkShell {
-          buildInputs = with pkgs; [ cmake gcc-arm-embedded-10 openocd ];
+          buildInputs = with pkgs; [ gnumake cmake gcc-arm-embedded-10 openocd ];
         };
       }
     );

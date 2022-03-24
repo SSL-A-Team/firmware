@@ -2,8 +2,11 @@ cmake_minimum_required(VERSION 3.22)
 
 project(ATeam-Firmware)
 
+include(cmake/stm32-find-toolchain.cmake)
 include(cmake/stm32-defines.cmake)
 include(cmake/header-utils.cmake)
+
+find_arm_none_eabi_root(toolchain_root)
 
 #######################################
 #  Standalone Breadbaord Radio Tests  #
