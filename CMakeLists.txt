@@ -1,11 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 
-include(${CMAKE_SOURCE_DIR}/cmake/stm32-find-toolchain.cmake)
 include(${CMAKE_SOURCE_DIR}/cmake/stm32-defines.cmake)
 include(${CMAKE_SOURCE_DIR}/cmake/header-utils.cmake)
-
-find_arm_none_eabi_root(stm32_toolchain_root)
-set_property(GLOBAL PROPERTY STM32_TOOLCHAIN_PATH "${stm32_toolchain_root}")
 
 set(CMAKE_TOOLCHAIN_FILE ${CMAKE_SOURCE_DIR}/cmake/stm32-toolchain.cmake)
 
