@@ -12,7 +12,7 @@ jobs:
       - name: Setup Nix Environment
         shell: bash
         run: |
-          co ./.github/workflows/nix.conf /tmp
+          cp ./.github/workflows/nix.conf /tmp
           ./.github/workflows/nix-debian-bootstrap.sh
       - name: Validate Nix Envoirnment
         shell: bash
