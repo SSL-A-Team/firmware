@@ -2,6 +2,8 @@
 
 export DEBIAN_FRONTEND=noninteractive
 
+echo "install packages..."
+
 apt update
 apt install -y \
   bzip2 \
@@ -11,7 +13,11 @@ apt install -y \
   sudo \
   xz-utils
 
+echo "setup locale..."
+
 localedef -f UTF-8 -i en_US -A /usr/share/locale/locale.alias -c en_US.UTF-8
+
+echo "setup nix groups..."
 
 groupadd -g 30000 --system nixbld
 
@@ -28,25 +34,35 @@ for i in $(seq 1 32); do
     nixbld$i
 done
 
+echo "configure nix install..."
+
 mkdir -p \
   /root/.config/nix \
   /root/.nixpkgs
 mv /tmp/nix.conf /root/.config/nix/nix.conf
 echo "{ allowUnfree = true; }" > /root/.nixpkgs/config.nix
 
+echo "install nix..."
+
 cd /tmp
 curl https://nixos.org/releases/nix/nix-2.3/nix-2.3-x86_64-linux.tar.xz | tar xJf -
 cd nix-2.3-x86_64-linux
 USER=root ./install --no-daemon
+
+echo "setup nix paths..."
 
 export NIX_PATH=nixpkgs=/root/.nix-defexpr/channels/nixpkgs:/root/.nix-defexpr/channels
 export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 export PATH=/root/.nix-profile/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export SUDO_FORCE_REMOVE=yes
 
+echo "udpate nix package manifest..."
+
 nix-channel --update
 nix-env -iA \
   nixpkgs.nix
+
+echo "cleanup..."
 
 rm -rf /var/lib/apt/lists/*
 nix-channel --remove nixpkgs
@@ -55,3 +71,5 @@ nix-collect-garbage -d
 nix-store --verify --check-contents
 nix optimise-store
 rm -rf /tmp/*
+
+echo "setup complete..."
