@@ -2,6 +2,11 @@
 
 set -e
 
+if grep -q "Ubuntu" /etc/lsb-release; then
+	sudo apt-get update
+	sudo apt-get install curl
+fi
+
 if ! command -v nix > /dev/null; then
 	echo "Nix not loaded in the current shell."
 	
