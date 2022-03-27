@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 if ! command -v nix > /dev/null; then
 	echo "Nix not loaded in the current shell."
 	
