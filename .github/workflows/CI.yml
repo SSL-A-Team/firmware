@@ -15,9 +15,13 @@ jobs:
         with:
           extra_nix_config: |
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      - name: Build Firmware
+        shell: bash
         run: |
           nix develop -c make clean
           nix devleop -c make all
+      - name: Validate Nix Envoirnment
+        shell: bash
         run: |
           export NIXPKGS_ALLOW_UNSUPPORTED_SYSTEM=1
           nix flake check
