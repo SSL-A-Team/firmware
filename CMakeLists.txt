@@ -5,7 +5,8 @@ include(${CMAKE_SOURCE_DIR}/cmake/header-utils.cmake)
 
 set(CMAKE_TOOLCHAIN_FILE ${CMAKE_SOURCE_DIR}/cmake/stm32-toolchain.cmake)
 
-project(ATeam-Firmware)
+project(ATeam-Firmware
+	LANGUAGES C CXX ASM)
 
 #######################################
 #  Standalone Breadbaord Radio Tests  #
@@ -37,8 +38,14 @@ target_compile_options(test-breadboard-radio.elf PRIVATE
 	$<$<COMPILE_LANGUAGE:CXX>:${NUCLEO_F429ZI_CXX_OPTIONS}>
 ) 
 
+set(bb_radio_linker_file "${CMAKE_CURRENT_SOURCE_DIR}/${BB_RADIO_DIR}/STM32F429ZITX_FLASH.ld")
+target_link_options(test-breadboard-radio.elf PRIVATE ${NUCLEO_F429ZI_LINKER_OPTIONS} -T ${bb_radio_linker_file})
+	
+#set_target_properties(test-breadboard-radio.elf PROPERTIES
+#	LINK_DEPENDS ${bb_radio_linker_file})
+
 add_custom_target(test-breadboard-radio
-	objcopy -Obinary "test-breadboard-radio.elf" "test-breadboard-radio.bin"
+	arm-none-eabi-objcopy -Obinary "test-breadboard-radio.elf" "test-breadboard-radio.bin"
 	WORKING_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
 	DEPENDS test-breadboard-radio.elf
 	COMMENT "create flat binary for programming"
