@@ -12,7 +12,7 @@ jobs:
       - name: Setup Nix Environment
         shell: bash
         run: |
-          ./util/linux_setup.sh
+          ./.github/workflows/nix-debian-bootstrap.sh
       - name: Validate Nix Envoirnment
         shell: bash
         run: |
