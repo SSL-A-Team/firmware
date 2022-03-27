@@ -1,0 +1,24 @@
+name: A-Team Firmware
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    container: ros:galactic
+    steps:
+      - uses: actions/checkout@v2
+      - uses: cachix/install-nix-action@v15
+        with:
+          extra_nix_config: |
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+        run: |
+          nix develop -c make clean
+          nix devleop -c make all
+        run: |
+          export NIXPKGS_ALLOW_UNSUPPORTED_SYSTEM=1
+          nix flake check
+
