@@ -57,6 +57,8 @@ export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 export PATH=/root/.nix-profile/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export SUDO_FORCE_REMOVE=yes
 
+. /github/home/.nix-profile/etc/profile.d/nix.sh
+
 echo "udpate nix package manifest..."
 
 nix-channel --update
