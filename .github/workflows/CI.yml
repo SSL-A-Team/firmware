@@ -10,7 +10,8 @@ jobs:
       - uses: actions/checkout@v2.4.0
       - uses: cachix/install-nix-action@v16
         with:
-          access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config:
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
       - name: Validate Nix Envoirnment
         shell: bash
         run: |
