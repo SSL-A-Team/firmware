@@ -2,8 +2,6 @@
 
 export DEBIAN_FRONTEND=noninteractive
 
-SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-
 apt update
 apt install -y \
   bzip2 \
@@ -14,8 +12,6 @@ apt install -y \
   xz-utils
 
 localedef -f UTF-8 -i en_US -A /usr/share/locale/locale.alias -c en_US.UTF-8
-
-cp $SCRIPT_DIR/nix.conf /tmp
 
 groupadd -g 30000 --system nixbld
 
