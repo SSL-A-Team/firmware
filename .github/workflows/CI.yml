@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-20.04
     container: ros:galactic
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v2.4.0
       - uses: cachix/install-nix-action@v15
         with:
           extra_nix_config: |
