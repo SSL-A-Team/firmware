@@ -13,6 +13,8 @@ apt install -y \
 
 localedef -f UTF-8 -i en_US -A /usr/share/locale/locale.alias -c en_US.UTF-8
 
+cp ./nix.conf /tmp
+
 groupadd -g 30000 --system nixbld
 
 for i in $(seq 1 32); do
