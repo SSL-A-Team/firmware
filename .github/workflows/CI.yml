@@ -1,6 +1,7 @@
 name: A-Team Firmware
 on:
   push:
+    branches: [ main ]
   pull_request:
 jobs:
   tests:
