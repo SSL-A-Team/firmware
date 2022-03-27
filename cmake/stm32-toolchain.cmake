@@ -1,24 +1,92 @@
-# MIT License
+macro(VALIDATE_ARM_NONE_EABI_ROOT toolchain_root)
+	message(STATUS "ARM NONE EABI Toolchain - validating root (${toolchain_root})")
+	if (NOT EXISTS ${toolchain_root})
+		message(FATAL_ERROR "ARM NONE EABI Toolchain - root does not exist")
+	endif()
 
-# Copyright (c) 2012-2017 Konstantin Oblaukhov
+	set(root "${toolchain_root}")
+	set(path_list "")
+	cmake_path(APPEND root "bin" OUTPUT_VARIABLE toolchain_bin_dir)
+	cmake_path(APPEND root "arm-none-eabi" "include" OUTPUT_VARIABLE toolchain_include_dir)
+	cmake_path(APPEND root "arm-none-eabi" "lib" OUTPUT_VARIABLE toolchain_lib_dir)
+	list(APPEND path_list ${toolchain_bin_dir} ${toolchain_include_dir} ${toolchain_lib_dir})
 
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
+	set(path_error FALSE)
+	foreach(toolchain_path ${path_list})
+		if (NOT EXISTS ${toolchain_path})
+			message(WARNING "ARM NONE EABI Toolchain - path does not exist (${toolchain_path})")
+			set(path_error TRUE)
+		else()
+			message(STATUS "ARM NONE EABI Toolchain - found path (${toolchain_path})")
+		endif()
 
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+	endforeach()
 
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+	if (${path_error})
+		message(FATAL_ERROR "ARM NONE EABI Toolchain - Tool validation failed. One or more tool path was missing.")
+	endif()
+
+	set(bin_list "")
+	cmake_path(APPEND toolchain_bin_dir "arm-none-eabi-as" OUTPUT_VARIABLE toolchain_assembler)
+	cmake_path(APPEND toolchain_bin_dir "arm-none-eabi-gcc" OUTPUT_VARIABLE toolchain_c_compliler)
+	cmake_path(APPEND toolchain_bin_dir "arm-none-eabi-g++" OUTPUT_VARIABLE toolchain_cxx_compiler)
+	cmake_path(APPEND toolchain_bin_dir "arm-none-eabi-ld" OUTPUT_VARIABLE toolchain_linker)
+	cmake_path(APPEND toolchain_bin_dir "arm-none-eabi-objcopy" OUTPUT_VARIABLE toolchain_objcopy)
+	cmake_path(APPEND toolchain_bin_dir "arm-none-eabi-objdump" OUTPUT_VARIABLE toolchain_objdump)
+	cmake_path(APPEND toolchain_bin_dir "arm-none-eabi-readelf" OUTPUT_VARIABLE toolchain_readelf)
+	cmake_path(APPEND toolchain_bin_dir "arm-none-eabi-size" OUTPUT_VARIABLE toolchain_size)
+	list(APPEND bin_list 
+		${toolchain_assembler} 
+		${toolchain_c_compliler} 
+		${toolchain_cxx_compiler}
+		${toolchain_linker}
+		${toolchain_objcopy}
+		${toolchain_objdump}
+		${toolchain_readelf}
+		${toolchain_size})
+
+	foreach(tool ${bin_list})
+		set(tool_error FALSE)
+		if (NOT EXISTS ${tool})
+			message(WARNING "ARM NONE EABI Toolchain - tool does not exist (${tool})")
+			set(tool_error TRUE)
+		else()
+			message(STATUS "ARM NONE EABI Toolchain - found tool (${tool})")
+		endif()
+
+		if (${tool_error})
+			message(FATAL_ERROR "ARM NONE EABI Toolchain - Tool validation failed. One or more tool path was missing.")
+		endif()
+	endforeach()
+
+	message(STATUS "ARM NONE EABI Toolchain - root validated!")
+endmacro()
+
+macro(FIND_ARM_NONE_EABI_ROOT toolchain_root)
+	find_program(ARM_NONE_EABI_GCC "arm-none-eabi-gcc")
+	if (ARM_NONE_EABI_GCC)
+		message(STATUS "ARM NONE EABI Toolchain - Compiler already on path (${ARM_NONE_EABI_GCC}).")
+		cmake_path(GET ARM_NONE_EABI_GCC PARENT_PATH ARM_NONE_EABI_PATH)
+		cmake_path(GET ARM_NONE_EABI_PATH PARENT_PATH ARM_NONE_EABI_PATH)
+		message(STATUS "ARM NONE EABI Toolchain - Recovered root path (${ARM_NONE_EABI_PATH}).")
+		
+		validate_arm_none_eabi_root(${ARM_NONE_EABI_PATH})
+
+		set(${toolchain_root} ${ARM_NONE_EABI_PATH})
+	elseif (DEFINED ENV{ARM_NONE_EABI_ROOT})
+		message(STATUS "ARM NONE EABI Toolchain - Arm toolchain specificed in environment variable.")
+
+		set(ARM_NONE_EABI_ROOT ENV{ARM_NONE_EABI_ROOT})
+		validate_arm_none_eabi_root(${ARM_NONE_EABI_ROOT})
+		set(${toolchain_root} ${ARM_NONE_EABI_ROOT})
+	else()
+		if(DEFINED ENV{IN_NIX_SHELL})
+			message(FATAL_ERROR "ARM NONE EABI Toolchain - In a nix shell. Expected tools on the path. Are you in the right environment?")
+		else()
+			message(FATAL_ERROR "ARM NONE EABI Toolchain - Unable to locate arm none eabi tools.")
+		endif()
+	endif()
+endmacro() 
 
 set( CMAKE_CXX_STANDARD 17 CACHE STRING "")
 set( CMAKE_CXX_STANDARD_REQUIRED ON CACHE BOOL "")
@@ -26,13 +94,12 @@ set( CMAKE_RUNTIME_OUTPUT_DIRECTORY  "${CMAKE_BINARY_DIR}/bin" CACHE PATH "")
 set( CMAKE_LIBRARY_OUTPUT_DIRECTORY  "${CMAKE_BINARY_DIR}/lib" CACHE PATH "")
 set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY  "${CMAKE_BINARY_DIR}/lib" CACHE PATH "")
 
-get_filename_component(STM32_CMAKE_DIR ${CMAKE_CURRENT_LIST_FILE} DIRECTORY)
-list(APPEND CMAKE_MODULE_PATH ${STM32_CMAKE_DIR})
+find_arm_none_eabi_root(STM32_TOOLCHAIN_PATH)
 
 if(NOT STM32_TOOLCHAIN_PATH)
-     set(STM32_TOOLCHAIN_PATH "/usr/lib/arm-none-eabi")
+	message(FATAL_ERROR "stm32 toolchain path not set. Use find_arm_none_eabi_root macro")
 else()
-     file(TO_CMAKE_PATH "${STM32_TOOLCHAIN_PATH}" STM32_TOOLCHAIN_PATH)
+	file(TO_CMAKE_PATH "${STM32_TOOLCHAIN_PATH}" STM32_TOOLCHAIN_PATH)
 endif()
 
 set(STM32_TARGET_TRIPLET "arm-none-eabi")

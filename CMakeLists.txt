@@ -1,18 +1,21 @@
 cmake_minimum_required(VERSION 3.22)
 
+include(${CMAKE_SOURCE_DIR}/cmake/stm32-find-toolchain.cmake)
+include(${CMAKE_SOURCE_DIR}/cmake/stm32-defines.cmake)
+include(${CMAKE_SOURCE_DIR}/cmake/header-utils.cmake)
+
+find_arm_none_eabi_root(stm32_toolchain_root)
+set_property(GLOBAL PROPERTY STM32_TOOLCHAIN_PATH "${stm32_toolchain_root}")
+
+set(CMAKE_TOOLCHAIN_FILE ${CMAKE_SOURCE_DIR}/cmake/stm32-toolchain.cmake)
+
 project(ATeam-Firmware)
-
-include(cmake/stm32-find-toolchain.cmake)
-include(cmake/stm32-defines.cmake)
-include(cmake/header-utils.cmake)
-
-find_arm_none_eabi_root(toolchain_root)
 
 #######################################
 #  Standalone Breadbaord Radio Tests  #
 #######################################
 
-set(BB_RADIO_DIR "test/nucleo_odinw2/cube_ide")
+set(BB_RADIO_DIR "test/breadboard-radio/cube_ide")
 
 file(GLOB_RECURSE BB_RADIO_ASM_FILES "${BB_RADIO_DIR}/*.s")
 file(GLOB_RECURSE BB_RADIO_C_FILES "${BB_RADIO_DIR}/*.c")
@@ -24,8 +27,7 @@ add_executable(test-breadboard-radio.elf
 	${BB_RADIO_CXX_FILES}
 )
 
-#file(GLOB_RECURSE BB_RADIO_INCLUDE_FILES "test/nucleo_odinw2/cube_ide/*.h")
-HEADER_DIRECTORIES(BB_RADIO_INCLUDE_DIRS ${BB_RADIO_DIR})
+header_directories(BB_RADIO_INCLUDE_DIRS ${BB_RADIO_DIR})
 target_include_directories(test-breadboard-radio.elf PRIVATE
 	${BB_RADIO_INCLUDE_DIRS}
 )
