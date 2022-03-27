@@ -19,5 +19,12 @@ test-$1: setup
 	make test-$1
 all:: test-$1
 endef
-
 $(foreach element,$(test_directories),$(eval $(call make-test-target,$(element))))
+
+define make-test-prog-target
+.PHONY: test-$1-prog
+test-$1-prog: test-$1
+	cd build/ && \
+	make test-$1-prog
+endef
+$(foreach element,$(test_directories),$(eval $(call make-test-prog-target,$(element))))

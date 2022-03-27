@@ -1,3 +1,5 @@
+set(STM32_FLASH_START_ADDR 0x08000000)
+
 ###################
 #  Nucleo F429ZI  #
 ###################
@@ -8,3 +10,4 @@ set(NUCLEO_F429ZI_CXX_OPTIONS ${NUCLEO_F429ZI_MACHINE_OPTIONS} -Wno-register -fn
 set(NUCLEO_F429ZI_LINKER_OPTIONS ${NUCLEO_F429ZI_MACHINE_OPTIONS} --specs=nosys.specs --specs=nano.specs -u _printf_float CACHE STRING "")
 set(NUCLEO_F429ZI_DEFINITIONS -DSTM32F429xx)
 set(NUCLEO_F429ZI_CHIP STM32F429ZI CACHE STRING "Full STM32 Chip Model")
+set(NUCLEO_F429ZI_OPENOCD_CFG "board/stm32f429discovery.cfg")

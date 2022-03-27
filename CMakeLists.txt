@@ -52,7 +52,7 @@ add_custom_target(test-breadboard-radio
 )
 
 add_custom_target(test-breadboard-radio-prog
-	echo "TODO"
+	openocd -f ${NUCLEO_F429ZI_OPENOCD_CFG} -c "program bin/test-breadboard-radio.bin verify reset exit ${STM32_FLASH_START_ADDR}"
 )
 
 
