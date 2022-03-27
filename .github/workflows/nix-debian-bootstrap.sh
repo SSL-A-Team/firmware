@@ -45,8 +45,9 @@ echo "{ allowUnfree = true; }" > /root/.nixpkgs/config.nix
 echo "install nix..."
 
 cd /tmp
-curl https://nixos.org/releases/nix/nix-2.3/nix-2.3-x86_64-linux.tar.xz | tar xJf -
-cd nix-2.3-x86_64-linux
+curl https://releases.nixos.org/nix/nix-2.6.1/nix-2.6.1-x86_64-linux.tar.xz
+tar xJf ./nix-2.6.1-x86_64-linux.tar.xz
+cd nix-2.6.1-x86_64-linux
 USER=root ./install --no-daemon
 
 echo "setup nix paths..."
