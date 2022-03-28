@@ -27,10 +27,14 @@ We support the following platforms that have a valid Nix install:
 
 ## Building Firmware
 
-Run `make <target>` to build an ELF and flat bin of each target.
+Run `make <target>` to build an ELF and flat bin of each target. Available targets:
+
+- all
+- clean
+- test-breadboard-radio
 
 ## Programming Targets
 
-TODO
+- test-breadboard-radio-prog
 
 
