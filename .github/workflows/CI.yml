@@ -15,13 +15,11 @@ jobs:
       - name: Validate Nix Envoirnment
         shell: bash
         run: |
-          . /github/home/.nix-profile/etc/profile.d/nix.sh
           export NIXPKGS_ALLOW_UNSUPPORTED_SYSTEM=1
           nix flake check
       - name: Build Firmware
         shell: bash
         run: |
-          . /github/home/.nix-profile/etc/profile.d/nix.sh
           nix develop -c make clean
           nix devleop -c make all
 
