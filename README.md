@@ -17,6 +17,14 @@ Run `exit` to leave the shell.
 
 Edit flake.nix and run `nix update`. You should commit both flake.nix and flake.lock.
 
+### Supported Platforms
+
+We support the following platforms that have a valid Nix install:
+- "aarch64-darwin"
+- "aarch64-linux"
+- "x86\_64-darwin"
+- "x86\_64-linux"
+
 ## Building Firmware
 
 Run `make <target>` to build an ELF and flat bin of each target.
