@@ -1,8 +1,6 @@
-# Firmware
+# Firmware ![example workflow](https://github.com/SSL-A-Team/firmware/actions/workflows/CI.yml/badge.svg)
 
 This is the unified firmware repository for the A-Team.
-
-![example workflow](https://github.com/SSL-A-Team/firmware/actions/workflows/CI.yml/badge.svg)
 
 ## Environment Setup
 
