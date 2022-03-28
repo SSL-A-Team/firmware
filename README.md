@@ -2,14 +2,14 @@
 
 ## Environment Setup
 
-We use the (Nix package manager)[https://nixos.org/] to handle dependencies. Install options are below:
+We use the [Nix package manager](https://nixos.org/) to handle dependencies. Install options are below:
 - Linux Auto-Setup: `./util/linux_setup.sh`.
-- Linux Manual: `$ sh <(curl -L https://nixos.org/nix/install) --daemon`
+- Linux Manual: `sh <(curl -L https://nixos.org/nix/install) --daemon`
 - OSX Manual: `sh <(curl -L https://nixos.org/nix/install)`
 
 ### Enter the Development Environment
 
-Run `nix devleop` to enter a shell with all required dependencies on the path.
+Run `nix develop` to enter a shell with all required dependencies on the path.
 
 Run `exit` to leave the shell.
 
