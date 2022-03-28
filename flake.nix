@@ -7,7 +7,13 @@
   };
 
   outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:  
+    flake-utils.lib.eachSystem [
+        "aarch64-linux"
+        "aarch64-darwin"
+        # "i686-linux" # gcc10 doesn't seem to have support in the Nix repos
+        "x86_64-darwin"
+        "x86_64-linux" ]
+    (system: 
       let 
         pkgs = nixpkgs.legacyPackages.${system};
         python = "python39";
