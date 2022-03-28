@@ -1,5 +1,9 @@
 # Firmware
 
+This is the unified firmware repository for the A-Team.
+
+![example workflow](https://github.com/SSL-A-Team/firmware/actions/workflows/CI.yml/badge.svg)
+
 ## Environment Setup
 
 We use the [Nix package manager](https://nixos.org/) to handle dependencies. Install options are below:
