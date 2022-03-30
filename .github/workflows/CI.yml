@@ -1,0 +1,25 @@
+name: A-Team Firmware
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+jobs:
+  test-firmware-build:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2.4.0
+      - uses: cachix/install-nix-action@v16
+        with:
+          extra_nix_config:
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      - name: Validate Nix Envoirnment
+        shell: bash
+        run: |
+          nix flake check
+          nix develop -c arm-none-eabi-gcc --version
+      - name: Build Firmware
+        shell: bash
+        run: |
+          nix develop -c make clean
+          nix develop -c make all
+
