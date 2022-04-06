@@ -201,7 +201,8 @@ static void MX_USART2_UART_Init(void)
   huart2.Init.StopBits = UART_STOPBITS_1;
   huart2.Init.Parity = UART_PARITY_NONE;
   huart2.Init.Mode = UART_MODE_TX_RX;
-  huart2.Init.HwFlowCtl = UART_HWCONTROL_RTS_CTS;
+  //huart2.Init.HwFlowCtl = UART_HWCONTROL_RTS_CTS;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
   huart2.Init.OverSampling = UART_OVERSAMPLING_16;
   if (HAL_UART_Init(&huart2) != HAL_OK)
   {
@@ -371,8 +372,16 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
 	dma_transfer_complete_interrupt(huart);
 }
 
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+  dma_receive_complete_interrupt(huart);
+}
+
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size) {
+  dma_receive_line_idle_interrupt(huart, size);
+}
+
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
-	dma_transfer_error_interrupt(huart);
+	dma_error_interrupt(huart);
 }
 
 /* USER CODE END 4 */

@@ -21,7 +21,9 @@ extern "C" {
 void robot_entry(UART_HandleTypeDef *radio_uart, UART_HandleTypeDef *serial_uart);
 
 void dma_transfer_complete_interrupt(UART_HandleTypeDef *huart);
-void dma_transfer_error_interrupt(UART_HandleTypeDef *huart);
+void dma_receive_complete_interrupt(UART_HandleTypeDef *huart);
+void dma_receive_line_idle_interrupt(UART_HandleTypeDef *huart, uint16_t len);
+void dma_error_interrupt(UART_HandleTypeDef *huart);
 
 #ifdef __cplusplus
 }

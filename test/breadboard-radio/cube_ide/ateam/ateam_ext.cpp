@@ -15,8 +15,16 @@ void dma_transfer_complete_interrupt(UART_HandleTypeDef *huart) {
 	ateam::Robot::instance->__uart_transfer_complete_int_cb(huart);
 }
 
-void dma_transfer_error_interrupt(UART_HandleTypeDef *huart) {
-	ateam::Robot::instance->__uart_transfer_error_int_cb(huart);
+void dma_receive_complete_interrupt(UART_HandleTypeDef *huart) {
+	ateam::Robot::instance->__uart_receive_complete_int_cb(huart);
+}
+
+void dma_receive_line_idle_interrupt(UART_HandleTypeDef *huart, uint16_t len) {
+	ateam::Robot::instance->__uart_receive_line_idle_int_cb(huart, len);
+}
+
+void dma_error_interrupt(UART_HandleTypeDef *huart) {
+	ateam::Robot::instance->__uart_error_int_cb(huart);
 }
 
 #ifdef __cplusplus

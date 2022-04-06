@@ -86,9 +86,10 @@ public:
 
 	// interrupt callbacks
 	void __dma_interrupt_tx_complete();
-	void __dma_interrupt_tx_error();
 	void __dma_interrupt_rx_complete();
-	void __dma_interrupt_rx_error();
+	void __dma_interrupt_rx_line_idle(uint16_t len);
+	void __dma_interrupt_error();
+
 protected:
 	int rx_buf_len, tx_buf_len;
 
@@ -99,11 +100,13 @@ protected:
 	uint16_t reset_pin_ind;
 
 	uint8_t *rx_buf;
+	volatile uint16_t rx_req_len = 0;
+	volatile uint16_t rx_rx_len = 0;
 	uint8_t *tx_buf;
 
 	ConnectionState connection_state = ConnectionState::DISCONNECTED;
-	UartRxState uart_rx_state = UartRxState::IDLE;
-	UartTxState uart_tx_state = UartTxState::IDLE;
+	volatile UartRxState uart_rx_state = UartRxState::IDLE;
+	volatile UartTxState uart_tx_state = UartTxState::IDLE;
 	RadioCommandState command_state = RadioCommandState::IDLE;
 
 	void allocate_uart_buffers();
@@ -112,6 +115,8 @@ protected:
 
 	bool write_uart_dma_nb(int len);
 	bool write_uart_dma_b(int len);
+	bool read_uart_dma_nb(int len);
+	bool read_uart_dma_b(int len);
 
 	void read_uart_dma_line_nb();
 	void read_uart_dma_line_b();

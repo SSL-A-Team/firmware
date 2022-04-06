@@ -29,7 +29,9 @@ public:
 	void run_forever();
 
 	void __uart_transfer_complete_int_cb(UART_HandleTypeDef *uart_inst);
-	void __uart_transfer_error_int_cb(UART_HandleTypeDef *uart_inst);
+	void __uart_receive_complete_int_cb(UART_HandleTypeDef *uart_inst);
+	void __uart_receive_line_idle_int_cb(UART_HandleTypeDef *uart_inst, uint16_t len);
+	void __uart_error_int_cb(UART_HandleTypeDef *uart_inst);
 };
 
 } /* namespace ateam */

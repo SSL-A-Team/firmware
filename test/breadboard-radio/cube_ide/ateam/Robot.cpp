@@ -31,26 +31,27 @@ void Robot::run_forever() {
 	HAL_GPIO_WritePin(GPIOB, LD3_Pin|LD2_Pin, GPIO_PIN_RESET);
 	HAL_Delay(500);
 
+	printf("Robot initialized!\r\n");
+
 	OdinW2Radio radio(this->radio_uart, USART2_RST_GPIO_Port, USART2_RST_Pin);
 	HAL_GPIO_WritePin(GPIOB, LD2_Pin, GPIO_PIN_SET);
 	radio.hard_reset();
 	HAL_GPIO_WritePin(GPIOB, LD2_Pin, GPIO_PIN_RESET);
 	HAL_Delay(1000);
 
-	printf("stdout == %d\r\n", STDOUT_FILENO);
-	fprintf(stderr, "stdout == %d\r\n", STDERR_FILENO);
-//	fprintf(stdout, "stdout == %d\r\n", STDIN_FILENO);
-	fprintf((FILE*)0xFFFF, "invalid fh\r\n");
+	printf("Starting radio...\r\n");
+	radio.start();
 
-	//while(true);
+	HAL_GPIO_WritePin(GPIOB, LD3_Pin, GPIO_PIN_SET);
+
+	while (true);
 
 	int nLoop=0;
 	while (true) {
 		  HAL_GPIO_TogglePin(GPIOB, LD2_Pin);
 		  HAL_Delay(500);
 		  nLoop++;
-		  //fprintf(stdout, "nLoop == %d\r\n", nLoop);
-		  //fprintf((FILE*) 0xFFFF, "stdout == %d\r\n", stdout);
+		  fprintf(stdout, "nLoop == %d\r\n", nLoop);
 	}
 }
 
@@ -60,9 +61,21 @@ void Robot::__uart_transfer_complete_int_cb(UART_HandleTypeDef *uart_instance) {
 	}
 }
 
-void Robot::__uart_transfer_error_int_cb(UART_HandleTypeDef *uart_instance) {
+void Robot::__uart_receive_complete_int_cb(UART_HandleTypeDef *uart_instance) {
 	if (uart_instance == radio_uart) {
-		radio->__dma_interrupt_tx_error();
+		radio->__dma_interrupt_rx_complete();
+	}
+}
+
+void Robot::__uart_receive_line_idle_int_cb(UART_HandleTypeDef *uart_instance, uint16_t len) {
+	if (uart_instance == radio_uart) {
+		radio->__dma_interrupt_rx_line_idle(len);
+	}
+}
+
+void Robot::__uart_error_int_cb(UART_HandleTypeDef *uart_instance) {
+	if (uart_instance == radio_uart) {
+		radio->__dma_interrupt_error();
 	}
 }
 
