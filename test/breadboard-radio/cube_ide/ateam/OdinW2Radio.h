@@ -12,6 +12,28 @@
 
 namespace ateam {
 
+enum class RadioState {
+	//////////////////////////////////////////////////////////////////
+	//  STARTUP STATES
+	//    bring the radio to a state where firmware can command it
+	//    after startup we only return here due to hard errors
+	//    or a request to reset the radio itself   
+	//////////////////////////////////////////////////////////////////
+	POWERON_COLD,
+	POWERON_WARM,
+	POWERON_WAIT_FOR_STARTUP_URC,
+	POWERON_VERIFY_MANUFACTURER,
+	POWERON_VERIFY_MODEL_NUMBER,
+	POWERON_VERIFY_SOFTWARE_VERSION,
+	POWERON_NEGOTIATE_UART__SETUP_PARITY_AND_BAUD,
+	POWERON_NEGOTIATE_UART__READ_SERIAL_NUMBER_AS_CONFIRMATION,
+	STARTUP_COMPLETE,
+
+	//
+	//
+	//
+};
+
 enum class ConnectionState {
 	DISCONNECTED,
 	CONNECTED_PHY_SLOW,
@@ -65,8 +87,8 @@ public:
 	void start();
 
 	void hard_reset(int hold_time_ms = 1000);
-//	void soft_reset();
-//
+	void soft_reset();
+
 //	void set_ssid(std::string ssid);
 //	std::string get_ssid();
 //

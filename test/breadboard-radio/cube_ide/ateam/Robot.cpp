@@ -33,14 +33,16 @@ void Robot::run_forever() {
 
 	printf("Robot initialized!\r\n");
 
+	while(true);
+
 	OdinW2Radio radio(this->radio_uart, USART2_RST_GPIO_Port, USART2_RST_Pin);
 	HAL_GPIO_WritePin(GPIOB, LD2_Pin, GPIO_PIN_SET);
-	radio.hard_reset();
+	radio.soft_reset();
 	HAL_GPIO_WritePin(GPIOB, LD2_Pin, GPIO_PIN_RESET);
 	HAL_Delay(1000);
 
 	printf("Starting radio...\r\n");
-	radio.start();
+	//radio.start();
 
 	HAL_GPIO_WritePin(GPIOB, LD3_Pin, GPIO_PIN_SET);
 
