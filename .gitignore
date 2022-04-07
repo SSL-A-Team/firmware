@@ -13,3 +13,6 @@ build/
 **/*.mxproject
 **/Debug
 **/.settings
+
+# private binary blobs
+private_binary_blobs
