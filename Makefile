@@ -28,3 +28,7 @@ test-$1-prog: test-$1
 	make test-$1-prog
 endef
 $(foreach element,$(test_directories),$(eval $(call make-test-prog-target,$(element))))
+
+odin-evk-w2-recover-bootloader: setup
+	cd build/ && \
+	make odin-evk-w2-recover-bootloader

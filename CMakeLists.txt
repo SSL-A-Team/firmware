@@ -55,4 +55,10 @@ add_custom_target(test-breadboard-radio-prog
 	openocd -f ${NUCLEO_F429ZI_OPENOCD_CFG} -c "program bin/test-breadboard-radio.bin verify reset exit ${STM32_FLASH_START_ADDR}"
 )
 
+################
+#  Odin Stuff  #
+################
 
+add_custom_target(odin-evk-w2-recover-bootloader
+	openocd -f ${NUCLEO_F429ZI_OPENOCD_CFG} -c "program ${CMAKE_SOURCE_DIR}/private_binary_blobs/odin-w26x/ODIN-W26X-8.2.0_1.0/ODIN-W2-BOOT-v0.8.2.bin verify reset exit ${STM32_FLASH_START_ADDR}"
+)
