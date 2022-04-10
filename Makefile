@@ -28,3 +28,11 @@ test-$1-prog: test-$1
 	make test-$1-prog
 endef
 $(foreach element,$(test_directories),$(eval $(call make-test-prog-target,$(element))))
+
+steval-spin3201-6step: setup
+	cd build/ && \
+	make steval-spin3201-6step
+
+steval-spin3201-6step-prog: steval-spin3201-6step
+	cd build/ && \
+	make steval-spin3201-6step-prog
