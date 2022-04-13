@@ -22,6 +22,7 @@
       in {
         devShell = pkgs.mkShell {
           buildInputs = with pkgs; [
+            git
             gnumake
             cmake
             gcc-arm-embedded-10
