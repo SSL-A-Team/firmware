@@ -8,6 +8,8 @@ set(CMAKE_TOOLCHAIN_FILE ${CMAKE_SOURCE_DIR}/cmake/stm32-toolchain.cmake)
 project(ATeam-Firmware
 	LANGUAGES C CXX ASM)
 
+set(CMAKE_BUILD_TYPE Debug)
+
 #######################################
 #  Standalone Breadbaord Radio Tests  #
 #######################################
@@ -103,4 +105,7 @@ add_custom_target(steval-spin3201-6step-prog
 	openocd -f ${STSPIN32F0x_OPENOCD_CFG} -c "program bin/steval-spin3201-6step.bin verify reset exit ${STM32_FLASH_START_ADDR}"
 )
 
+add_custom_target(steval-spin3201-6step-gdb
+	${CMAKE_CURRENT_SOURCE_DIR}/util/attach_gdb.sh ${STSPIN32F0x_OPENOCD_CFG} ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/steval-spin3201-6step.elf
+)
 

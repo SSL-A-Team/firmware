@@ -15,15 +15,17 @@
 
 #include "setup.h"
 
+__attribute__((optimize("O0")))
 int main() {
     // Setups clocks
     setup();
 
     // toggle J1-1
     while (true) {
-        for (long int i = 0; i < 20000000; i++);
-        GPIOB->ODR = GPIO_ODR_8;
-        for (long int i = 0; i < 20000000; i++);
-        GPIOB->ODR = 0;
+        GPIOB->BSRR |= GPIO_BSRR_BS_8;
+        for (int32_t i = 0; i < 2000000L; i++);
+        //GPIOB->BSRR &= ~(GPIO_BSRR_BS_8);
+        GPIOB->BSRR |= GPIO_BSRR_BR_8;
+        for (int32_t i = 0; i < 2000000L; i++);
     }
 }

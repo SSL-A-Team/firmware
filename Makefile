@@ -36,3 +36,7 @@ steval-spin3201-6step: setup
 steval-spin3201-6step-prog: steval-spin3201-6step
 	cd build/ && \
 	make steval-spin3201-6step-prog
+
+steval-spin3201-6step-gdb: steval-spin3201-6step
+	cd build/ && \
+	make steval-spin3201-6step-gdb

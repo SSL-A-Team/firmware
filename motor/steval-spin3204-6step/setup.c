@@ -28,13 +28,19 @@ __attribute__((optimize("O0")))
 __attribute__((always_inline))
 inline void setup_clocks() {
     // confirm reset values
-    RCC->CFGR = 0;
-    RCC->CFGR2 = 0;
-    RCC->CFGR3 = 0;
-    RCC->CIR = 0;
+    // RCC->CFGR = 0;
+    // RCC->CFGR2 = 0;
+    // RCC->CFGR3 = 0;
+    // RCC->CIR = 0;
 
     // start HSI
     RCC->CR |= RCC_CR_HSION;
+    RCC->CFGR = 0x00000000;
+    RCC->CR &= ~(RCC_CR_PLLON | RCC_CR_CSSON | RCC_CR_HSEBYP | RCC_CR_HSEON);
+	RCC->CFGR2 = 0;
+	RCC->CFGR3 = 0;
+	RCC->CIR = 0;
+
     // wait for HSI to be stable
     while ((RCC->CR & RCC_CR_HSIRDY) == 0) {
         asm volatile("nop");
@@ -47,14 +53,16 @@ inline void setup_clocks() {
     // turn on the PLL
     RCC->CR |= RCC_CR_PLLON;
     // wait for PLL stability (48 MHz)
-    while ((RCC->CR & RCC_CR_PLLRDY) == 0);
+    while ((RCC->CR & RCC_CR_PLLRDY) == 0) {
+        asm volatile("nop");
+    }
 
     // set flash latency for 48MHz sysclk before we switch the source over
     FLASH->ACR |= FLASH_ACR_LATENCY;
     // enable the prefetch buffer
     FLASH->ACR |= FLASH_ACR_PRFTBE;
-    // wait for confirmation
-    while ((FLASH->ACR & FLASH_ACR_PRFTBS) == 0) {
+    // wait for confirmation (they do this in the HAL)
+    while ((FLASH->ACR & FLASH_ACR_LATENCY_Msk) != FLASH_ACR_LATENCY) {
         asm volatile("nop");
     }
 
@@ -112,14 +120,12 @@ inline void setup_io() {
     // turn on CRC clock domain
     RCC->AHBENR |= RCC_AHBENR_CRCEN;
 
-    // reset io banks
-    RCC->AHBRSTR |= (RCC_AHBRSTR_GPIOARST | RCC_AHBRSTR_GPIOBRST | RCC_AHBRSTR_GPIOCRST | RCC_AHBRSTR_GPIOFRST);
-
-    GPIOB->MODER |= GPIO_MODER_MODER8_1;
+    GPIOB->MODER |= GPIO_MODER_MODER8_0;
     //GPIOB->OTYPER &= ~GPIO_OTYPER_OT_8;
 }
 
 __attribute__((optimize("O0")))
+//__attribute__((always_inline))
 void setup() {
     setup_clocks();
 
