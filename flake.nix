@@ -27,7 +27,7 @@
             gcc-arm-embedded-10
             openocd
             (pkgs.${python}.withPackages
-              (ps: with ps; [ numpy matplotlib ]))
+              (ps: with ps; [ numpy matplotlib GitPython ]))
           ];
         };
       }
