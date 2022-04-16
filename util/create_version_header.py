@@ -16,8 +16,11 @@ TAGGED_REGEX="^v((\d+)\.(\d+)\.(\d+))(-(\d+)-g([0-9a-f]{7,40}))(-dirty)?$"
 STDINT_UINT8_CAPACITY = ((2 ** 8) - 1)
 STDINT_UINT16_CAPACITY = ((2 ** 16) - 1)
 
+
+
 def generate_header():
-	pass
+	gen_string = ""
+	gen_string += "#pragma once"
 
 
 def main():
@@ -47,15 +50,15 @@ def main():
 	latest_commit_hash = tag_match_result[6]
 
 	if (major_version > STDINT_UINT8_CAPACITY):
-		print(f"Major Version ({major_version}) is too high!")
+		print(f"Major Version ({major_version}) is too damn high!")
 		exit(1)
 
 	if (minor_version > STDINT_UINT8_CAPACITY):
-		print(f"Minor Version ({minor_version}) is too high!")
+		print(f"Minor Version ({minor_version}) is too damn high!")
 		exit(1)
 
 	if (patch_version > STDINT_UINT16_CAPACITY):
-		print(f"Patch Version ({patch_verison}) is too high!")
+		print(f"Patch Version ({patch_verison}) is too damn high!")
 		exit(1)
 
 	if (len(latest_commit_hash) > 8):
