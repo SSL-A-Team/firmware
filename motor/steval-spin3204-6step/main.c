@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "setup.h"
+#include "time.h"
 
 __attribute__((optimize("O0")))
 int main() {
@@ -23,9 +24,11 @@ int main() {
     // toggle J1-1
     while (true) {
         GPIOB->BSRR |= GPIO_BSRR_BS_8;
-        for (int32_t i = 0; i < 2000000L; i++);
+        //for (int32_t i = 0; i < 2000000L; i++);
+        wait_ms(50);
         //GPIOB->BSRR &= ~(GPIO_BSRR_BS_8);
         GPIOB->BSRR |= GPIO_BSRR_BR_8;
-        for (int32_t i = 0; i < 2000000L; i++);
+        //for (int32_t i = 0; i < 2000000L; i++);
+        wait_ms(50);
     }
 }

@@ -27,12 +27,6 @@
 __attribute__((optimize("O0")))
 __attribute__((always_inline))
 inline void setup_clocks() {
-    // confirm reset values
-    // RCC->CFGR = 0;
-    // RCC->CFGR2 = 0;
-    // RCC->CFGR3 = 0;
-    // RCC->CIR = 0;
-
     // start HSI
     RCC->CR |= RCC_CR_HSION;
     RCC->CFGR = 0x00000000;
@@ -103,6 +97,16 @@ inline void setup_clocks() {
     RCC->CFGR |= RCC_CFGR_MCO_SYSCLK;
     // MCOPRE -> 1
     RCC->CFGR |= RCC_CFGR_MCOPRE_DIV1;
+
+    // https://developer.arm.com/documentation/dui0552/a/cortex-m3-peripherals/system-timer--systick/systick-reload-value-register
+    // set source to sysclk (48MHz) 
+    SysTick->CTRL |= SysTick_CTRL_CLKSOURCE_Msk;
+    // timer counts down to fire approximately every 1ms 
+    SysTick->LOAD = (48000000UL / 1000UL);
+    // current value set to 0, e.g. no trigger event
+    SysTick->VAL = 0x00000000;
+    // enable the counter
+    SysTick->CTRL |= SysTick_CTRL_ENABLE_Msk;
 }
 
 __attribute__((optimize("O0")))
