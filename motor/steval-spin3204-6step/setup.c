@@ -17,6 +17,8 @@
 
 #include <stm32f031x6.h>
 
+#include "setup.h"
+
 /**
  * @brief Setup the clock tree
  * 
@@ -109,8 +111,11 @@ inline void setup_clocks() {
     SysTick->CTRL |= SysTick_CTRL_ENABLE_Msk;
 }
 
+/**
+ * @brief sets up base IO
+ * 
+ */
 __attribute__((optimize("O0")))
-__attribute__((always_inline))
 inline void setup_io() {
     // turn on IO bank clock domains
     RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
@@ -128,10 +133,101 @@ inline void setup_io() {
     //GPIOB->OTYPER &= ~GPIO_OTYPER_OT_8;
 }
 
+/**
+ * @brief setups UART IO, UART, and UART DMA
+ * 
+ */
+__attribute__((optimize("O0")))
+void setup_uart() {
+    /////////////////
+    //  Pin Setup  //
+    /////////////////
+
+    // PA14 USART1_TX
+    // PA15 USART1_RX
+
+    // clear PA13 and PA14 mode which start in AF for SWD
+    GPIOA->MODER &= ~(GPIO_MODER_MODER13_0 | GPIO_MODER_MODER13_1 | GPIO_MODER_MODER14_0 | GPIO_MODER_MODER14_1);
+    // clear PA13 speed mode which starts at 50Mhz (0b11) for SWD
+    GPIOA->OSPEEDR &= ~(GPIO_OSPEEDR_OSPEEDR13_0 | GPIO_OSPEEDR_OSPEEDR13_1);
+    // clear PA13 and PA14 pull up status
+    GPIOA->PUPDR &= !(GPIO_PUPDR_PUPDR13_0 | GPIO_PUPDR_PUPDR13_1 | GPIO_PUPDR_PUPDR14_0 | GPIO_PUPDR_PUPDR14_1);
+
+    // configure PA14 and PA15 AF mode
+    GPIOA->MODER |= (GPIO_MODER_MODER14_1 | GPIO_MODER_MODER15_1);
+    // configure PA14 and PA15 pin speed to 10Mhz
+    GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR14_0 | GPIO_OSPEEDR_OSPEEDR15_0); 
+    // configure PA14 and PA15 pin pullup to UP
+    GPIOA->PUPDR |= (GPIO_PUPDR_PUPDR14_0 | GPIO_PUPDR_PUPDR15_0);
+    // configure PA14 and PA15 alternate function
+    GPIOA->AFR[1] |= (1 << GPIO_AFRH_AFSEL14_Pos);
+    GPIOA->AFR[1] |= (1 << GPIO_AFRH_AFSEL15_Pos);
+
+    // enable bus clock to the UART
+    RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
+
+    /////////////////////////////
+    //  UART Peripheral Setup  //
+    /////////////////////////////
+
+    // make sure USART1 is disabled
+    USART1->CR1 &= ~(USART_CR1_UE);
+    // 9-bits with parity (PCE) inserst parity bit at the 9th bit
+	USART1->CR1 |= (USART_CR1_M | USART_CR1_PCE);
+    // we don't need anything here
+	USART1->CR2 = 0;
+    // enable DMA for transmission
+	USART1->CR3 = USART_CR3_DMAT; // USART_CR3_DMAR;
+    // set baud rate
+	USART1->BRR = 0x18; // => 2 Mbaud/s
+    // enable transmision
+    USART1->CR1 |= (USART_CR1_TE); // USART_CR1_RE
+    // enable the module
+	USART1->CR1 |= USART_CR1_UE;
+
+    //////////////////////////////////////
+    //  Transmission DMA Channel Setup  //
+    //////////////////////////////////////
+
+	// medium priority, memory increment, memory to peripheral
+	DMA1_Channel2->CCR = DMA_CCR_PL_0 | DMA_CCR_MINC | DMA_CCR_DIR;
+    // clear buffer base addr
+	DMA1_Channel2->CMAR = 0; // transmit buffer base addr, set at transmission time
+    // clear transmission length
+    DMA1_Channel2->CNDTR = 0; // transmit length, set at transmission time
+    // set destination address as UART periperal transmission shift register
+	DMA1_Channel2->CPAR = (uint32_t)&USART1->TDR; // USART1 data transmit register address
+
+    /////////////////////////////////
+    //  Receive DMA Channel Setup  //
+    /////////////////////////////////
+
+	// USART1_RX, low priority, memory increment, peripheral to memory
+	// DMA1_Channel3->CCR = DMA_CCR_MINC;
+	// DMA1_Channel3->CMAR = (uint32_t)rxSlots[0].data;
+	// DMA1_Channel3->CPAR = (uint32_t)&USART1->RDR;
+	// DMA1_Channel3->CNDTR = USART1_RX_SIZE;
+
+    /////////////////
+    //  DMA Setup  //
+    /////////////////
+
+    // clear channel 2, global IF, transfer error IF, half-transfer IF, and transfer complete IF
+    DMA1->IFCR = DMA_IFCR_CGIF2;
+
+    NVIC_SetPriority(USART1_IRQn, 10);
+    NVIC_EnableIRQ(USART1_IRQn);
+}
+
+/**
+ * @brief performs startup system configuration
+ * 
+ */
 __attribute__((optimize("O0")))
 //__attribute__((always_inline))
 void setup() {
     setup_clocks();
 
     setup_io();
+    setup_uart();
 }

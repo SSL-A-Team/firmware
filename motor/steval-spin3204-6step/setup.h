@@ -12,3 +12,7 @@
 #pragma once
 
 void setup();
+
+void setup_clocks();
+void setup_io();
+void setup_uart();
