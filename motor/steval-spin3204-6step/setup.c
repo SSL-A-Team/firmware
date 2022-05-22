@@ -216,7 +216,7 @@ void setup_uart() {
     DMA1->IFCR = DMA_IFCR_CGIF2;
 
     NVIC_SetPriority(USART1_IRQn, 10);
-    NVIC_EnableIRQ(USART1_IRQn);
+    NVIC_EnableIRQ(USART1_IRQn);  
 }
 
 /**
