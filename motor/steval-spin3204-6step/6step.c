@@ -7,6 +7,9 @@
  * 
  * @copyright Copyright (c) 2022
  * 
+ * The most readable file ever! Jk. Its not too bad but you'll definitely
+ * need stm32f031c6 and rm0091 in hand (or memorized LOL) before continuing.
+ * 
  * Documents you will need:
  *  Understading of 6step PWM commutation:
  *      https://www.youtube.com/user/jtlee1108
@@ -20,9 +23,12 @@
  *      rm0091
  */
 
+#include <stdint.h>
 #include <stm32f031x6.h>
 
-#include <stdint.h>
+#include "6step.h"
+#include "system.h"
+
 
 /**
  * @brief sets up the pins and timer peripherials associated with the pins 
@@ -136,7 +142,264 @@ void pwm6step_setup_hall_timer() {
     // enable?
 }
 
-void pwm6step_setup_commutation_timer() {
+/**
+ * @brief 
+ * 
+ * @param pwm_freq_hz 
+ */
+void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
+    ////////////////////////////
+    //  TIM1 Setup IO         //
+    //      - PA8  TIM1_CH1   //
+    //      - PA9  TIM1_CH2   //
+    //      - PA10 TIM1_CH3   //
+    //      - PB13 TIM1_CH1N  //
+    //      - PB14 TIM1_CH2N  //
+    //      - PB15 TIM1-CH3N  //
+    ////////////////////////////
+
+    // IO bank clocks initialized in setup.c
+
+    // set pin direction to AF
+    GPIOA->MODER |= (GPIO_MODER_MODER8_1 | GPIO_MODER_MODER9_1 | GPIO_MODER_MODER10_1);
+    GPIOB->MODER |= (GPIO_MODER_MODER13_1 | GPIO_MODER_MODER14_1 | GPIO_MODER_MODER15_1);
+
+    // set pin alterate function numbers to 0x2 (AF for TIM1)
+    GPIOA->AFR[1] |= (0x2 << GPIO_AFRH_AFRH1_Pos); // PA8
+    GPIOA->AFR[1] |= (0x2 << GPIO_AFRH_AFRH2_Pos); // PA9
+    GPIOA->AFR[1] |= (0x2 << GPIO_AFRH_AFRH3_Pos); // PA10
+    GPIOB->AFR[1] |= (0x2 << GPIO_AFRH_AFRH5_Pos); // PB13
+    GPIOB->AFR[1] |= (0x2 << GPIO_AFRH_AFRH6_Pos); // PB14
+    GPIOB->AFR[1] |= (0x2 << GPIO_AFRH_AFRH7_Pos); // PB15
+
+    // set pin spin to high frequency
+    GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR8_0 | GPIO_OSPEEDR_OSPEEDR8_1);
+    GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR9_0 | GPIO_OSPEEDR_OSPEEDR9_1);
+    GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR10_0 | GPIO_OSPEEDR_OSPEEDR10_1);    
+    GPIOB->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR13_0 | GPIO_OSPEEDR_OSPEEDR13_1);
+    GPIOB->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR14_0 | GPIO_OSPEEDR_OSPEEDR14_1);
+    GPIOB->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR15_0 | GPIO_OSPEEDR_OSPEEDR15_1);
+
+    ///////////////////////
+    //  TIM1 Base Setup  //
+    ///////////////////////
+
+    // set counter mode up (clear DIR bit)
+    TIM1->CR1 &= ~(TIM_CR1_DIR | TIM_CR1_CMS);
+
+    // set clock divider to 1
+    TIM1->CR1 &= ~(TIM_CR1_CKD);
+
+    // disable auto load/reload
+    TIM1->CR1 &= ~(TIM_CR1_ARPE_Msk);
+
+    // set the prescaler
+    TIM1->PSC = PWM_TIM_PRESCALER;
+
+    // set PWM period relative to the scaled sysclk
+    TIM1->ARR = (uint16_t) (F_SYS_CLK_HZ / ((uint32_t) pwm_freq_hz * (PWM_TIM_PRESCALER + 1)) - 1);
+
+    // clear/disable rep counter
+    TIM1->RCR = 0;
+
+    // generate an update event to reload the PSC
+    TIM1->EGR = TIM_EGR_UG;
+
+    ///////////////////////////////
+    //  TIM1 Clock Source Setup  //
+    ///////////////////////////////
+
+    // sync clear of SMS, TS, ETF, ETPS, ECE, ETP bits
+    TIM1->SMCR &= ~(TIM_SMCR_SMS | TIM_SMCR_TS | TIM_SMCR_ETF | TIM_SMCR_ETPS | TIM_SMCR_ECE | TIM_SMCR_ETP);
+
+    //////////////////////
+    //  TIM1 PWM Setup  // 
+    //////////////////////
+    // gotta love that ST HAL, seemingly identical to TIM1 Base Setup
+
+    ////////////////////////////////
+    //  TIM1 OC Ref Setup Ch 1-3  //
+    ////////////////////////////////
+
+    TIM1->SMCR &= ~(TIM_SMCR_OCCS);
+
+    // set polarity
+    TIM1->SMCR &= ~(TIM_SMCR_ETP_Msk);
+    // set prescaler
+    TIM1->SMCR &= ~(TIM_SMCR_ETPS_Msk);
+    // set filter
+    TIM1->SMCR |= (0x8 << TIM_SMCR_ETF_Pos);
+
+    TIM1->SMCR |= TIM_SMCR_OCCS;
+
+    // CH1
+    TIM1->CCMR1 |= TIM_CCMR1_OC1CE;
+    // CH2
+    TIM1->CCMR1 |= TIM_CCMR1_OC2CE;
+    // CH3
+    TIM1->CCMR1 |= TIM_CCMR2_OC3CE;
+
+    //////////////////////////////////
+    //  TIM1 Master + Slave Config  //
+    //////////////////////////////////
+
+    // set trigger source ITR1 (TIM2 hall sensors)
+    TIM1->SMCR &= ~(TIM_SMCR_TS_Msk);
+    TIM1->SMCR |= (0x1 << TIM_SMCR_TS_Pos);
+
+    // set slave mode to reset
+    TIM1->SMCR &= ~(TIM_SMCR_SMS_Msk);
+    TIM1->SMCR |= (0x4 << TIM_SMCR_SMS_Pos); // slave mode reset
+
+    // set TRGO
+    TIM1->CR2 &= ~(TIM_CR2_MMS_Msk);
+    TIM1->CR2 |= (0x7 << TIM_CR2_MMS_Pos); // master output trigger is OC4REF 
+
+    // enable master slave sync
+    TIM1->SMCR &= ~(TIM_SMCR_MSM);
+    TIM1->SMCR |= TIM_SMCR_MSM;
+
+    //////////////////////////////////
+    //  TIM1 PWM Channel 1-4 Setup  //
+    //////////////////////////////////
+
+
+    // CH1
+    // disable the channel
+    TIM1->CCER &= ~(TIM_CCER_CC1E);
+
+    // set mode to PWM1
+    TIM1->CCMR1 &= ~(TIM_CCMR1_OC1M | TIM_CCMR1_CC1S);
+    TIM1->CCMR1 |= (TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2);
+
+    // set polarity LOW
+    TIM1->CCER &= ~(TIM_CCER_CC1P);
+    TIM1->CCER |= TIM_CCER_CC1P;
+
+    // set complementary channel polarity LOW
+    TIM1->CCER &= ~(TIM_CCER_CC1NP);
+    TIM1->CCER |= TIM_CCER_CC1NP;
+
+    // reset complementary state
+    TIM1->CCER &= ~(TIM_CCER_CC1NE);
+
+    // reset/clear OC state RESET
+    TIM1->CR2 &= ~(TIM_CR2_OIS1 | TIM_CR2_OIS1N);
+
+    // set the duty cycle for channel 1
+    TIM1->CCR1 = 0;
+
+    // enable?
+    //
+
+    // set the preload enable bit
+    TIM1->CCMR1 |= TIM_CCMR1_OC1PE;
+
+    // clear/diable fast mode
+    TIM1->CCMR1 &= ~(TIM_CCMR1_OC1FE);
+
+
+    // CH2
+    // disable the channel
+    TIM1->CCER &= ~(TIM_CCER_CC2E);
+
+    // set mode to PWM1
+    TIM1->CCMR1 &= ~(TIM_CCMR1_OC2M | TIM_CCMR1_CC2S);
+    TIM1->CCMR1 |= (TIM_CCMR1_OC2M_1 | TIM_CCMR1_OC2M_2);
+
+    // set polarity LOW
+    TIM1->CCER &= ~(TIM_CCER_CC2P);
+    TIM1->CCER |= TIM_CCER_CC2P;
+
+    // set complementary channel polarity LOW
+    TIM1->CCER &= ~(TIM_CCER_CC2NP);
+    TIM1->CCER |= TIM_CCER_CC2NP;
+
+    // reset complementary state
+    TIM1->CCER &= ~(TIM_CCER_CC2NE);
+
+    // reset/clear OC state RESET
+    TIM1->CR2 &= ~(TIM_CR2_OIS2 | TIM_CR2_OIS2N);
+
+    // set the duty cycle for channel 2
+    TIM1->CCR2 = 0;
+
+    // enable?
+    //
+
+    // set the preload enable bit
+    TIM1->CCMR1 |= TIM_CCMR1_OC2PE;
+
+    // clear/diable fast mode
+    TIM1->CCMR1 &= ~(TIM_CCMR1_OC2FE);
+    
+
+    // CH3
+    // disable the channel
+    TIM1->CCER &= ~(TIM_CCER_CC3E);
+
+    // set mode to PWM1
+    TIM1->CCMR1 &= ~(TIM_CCMR2_OC3M | TIM_CCMR2_CC3S);
+    TIM1->CCMR1 |= (TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC3M_2);
+
+    // set polarity LOW
+    TIM1->CCER &= ~(TIM_CCER_CC3P);
+    TIM1->CCER |= TIM_CCER_CC3P;
+
+    // set complementary channel polarity LOW
+    TIM1->CCER &= ~(TIM_CCER_CC3NP);
+    TIM1->CCER |= TIM_CCER_CC3NP;
+
+    // reset complementary state
+    TIM1->CCER &= ~(TIM_CCER_CC3NE);
+
+    // reset/clear OC state RESET
+    TIM1->CR2 &= ~(TIM_CR2_OIS3 | TIM_CR2_OIS3N);
+
+    // set the duty cycle for channel 3
+    TIM1->CCR3 = 0;
+
+    // enable?
+    //
+
+    // set the preload enable bit
+    TIM1->CCMR2 |= TIM_CCMR2_OC3PE;
+
+    // clear/diable fast mode
+    TIM1->CCMR2 &= ~(TIM_CCMR2_OC3FE);
+
+
+    // CH4
+    // disable the channel
+    TIM1->CCER &= ~(TIM_CCER_CC4E);
+
+    // set mode to PWM1
+    TIM1->CCMR1 &= ~(TIM_CCMR2_OC4M | TIM_CCMR2_CC4S);
+    TIM1->CCMR1 |= (TIM_CCMR2_OC4M_1 | TIM_CCMR2_OC4M_2);
+
+    // set polarity HIGH
+    TIM1->CCER &= ~(TIM_CCER_CC4P);
+
+    // reset/clear OC state RESET
+    TIM1->CR2 &= ~(TIM_CR2_OIS4);
+
+    // set the duty cycle for channel 4
+    TIM1->CCR4 = 0;
+
+    // enable?
+    //
+
+    // set the preload enable bit
+    TIM1->CCMR2 |= TIM_CCMR2_OC4PE;
+
+    // clear/diable fast mode
+    TIM1->CCMR2 &= ~(TIM_CCMR2_OC4FE);
+    
+
+    //////////////////////////////
+    //  TIM1 break + dead time  //
+    //////////////////////////////
+
 
 }
 

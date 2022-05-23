@@ -18,6 +18,7 @@
 #include <stm32f031x6.h>
 
 #include "setup.h"
+#include "system.h"
 
 /**
  * @brief Setup the clock tree
@@ -104,7 +105,7 @@ inline void setup_clocks() {
     // set source to sysclk (48MHz) 
     SysTick->CTRL |= SysTick_CTRL_CLKSOURCE_Msk;
     // timer counts down to fire approximately every 1ms 
-    SysTick->LOAD = (48000000UL / 1000UL);
+    SysTick->LOAD = (F_SYS_CLK_HZ / 1000UL);
     // current value set to 0, e.g. no trigger event
     SysTick->VAL = 0x00000000;
     // enable the counter

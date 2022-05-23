@@ -1,5 +1,5 @@
 /**
- * @file 6step.h
+ * @file system.h
  * @author Will Stuckey
  * @brief 
  * @version 0.1
@@ -11,4 +11,4 @@
 
 #pragma once
 
-#define PWM_TIM_PRESCALER 0
+#define F_SYS_CLK_HZ 48000000UL
