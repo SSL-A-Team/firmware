@@ -35,9 +35,9 @@ static uint8_t current_hall_value = 0;
 static uint8_t prev_hall_value = 0;
 
 #ifdef BREAK_ON_HALL_ERROR
-    #define ERROR_COM {true,  false, true,  false, true,  false}  
+    #define HALL_ERROR_COMMUTATION {true,  false, true,  false, true,  false}  
 #else
-    #define ERROR_COM {false, false, false, false, false, false}
+    #define HALL_ERROR_COMMUTATION {false, false, false, false, false, false}
 #endif
 
 /**
@@ -48,7 +48,7 @@ static uint8_t prev_hall_value = 0;
  * pull up resistors so 7 probably means one or more wires is unplugged,
  * and 0 probably means there's a power issue.
  * 
- * Clockwise
+ * Clockwise (human readable order)
  * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H
  * 1   0  0  1    H  G  V      0   0   1   0   0   1
  * 5   1  0  1    V  G  H      0   1   1   0   0   0
@@ -57,16 +57,24 @@ static uint8_t prev_hall_value = 0;
  * 2   0  1  0    G  V  H      1   0   0   1   0   0
  * 3   0  1  1    G  H  V      1   0   0   0   0   1
  * 
+ * Clockwise (direct hall index order)
+ * 1   0  0  1    H  G  V      0   0   1   0   0   1
+ * 2   0  1  0    G  V  H      1   0   0   1   0   0
+ * 3   0  1  1    G  H  V      1   0   0   0   0   1
+ * 4   1  0  0    V  H  G      0   1   0   0   1   0
+ * 5   1  0  1    V  G  H      0   1   1   0   0   0
+ * 6   1  1  0    H  V  G      0   0   0   1   1   0
+ *
  */
 static bool cw_commutation_table[8][6] = {
-    ERROR_COM,
+    HALL_ERROR_COMMUTATION,
     {false, false, true,  false, false, true },
-    {false, true,  true,  false, false, false},
-    {false, true,  false, false, true,  false},
-    {false, false, false, true,  true,  false},
     {true,  false, false, true,  false, false},
     {true,  false, false, false, false, true },
-    ERROR_COM
+    {false, true,  false, false, true,  false},
+    {false, true,  true,  false, false, false},
+    {false, false, false, true,  true,  false},
+    HALL_ERROR_COMMUTATION
 };
 
 /**
@@ -77,7 +85,7 @@ static bool cw_commutation_table[8][6] = {
  * pull up resistors so 7 probably means one or more wires is unplugged,
  * and 0 probably means there's a power issue.
  * 
- * Counter Clockwise
+ * Counter Clockwise (human readable order)
  * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H 
  * 1  0  0  1     V  H  G      0   1   0   0   1   0
  * 3  0  1  1     H  V  G      0   0   0   1   1   0
@@ -86,16 +94,24 @@ static bool cw_commutation_table[8][6] = {
  * 4  1  0  0     H  G  V      0   0   1   0   0   1
  * 5  1  0  1     V  G  H      0   1   1   0   0   0
  * 
+ * Counter Clockwise (direct hall index order)
+ * 1  0  0  1     V  H  G      0   1   0   0   1   0
+ * 2  0  1  0     G  V  H      1   0   0   1   0   0
+ * 3  0  1  1     H  V  G      0   0   0   1   1   0
+ * 4  1  0  0     H  G  V      0   0   1   0   0   1
+ * 5  1  0  1     V  G  H      0   1   1   0   0   0
+ * 6  1  1  0     G  H  V      1   0   0   0   0   1
+ * 
  */
 static bool ccw_commutation_table[8][6] = {
-    ERROR_COM,    
+    HALL_ERROR_COMMUTATION,    
     {false, true,  false, false, true,  false},
-    {false, false, false, true,  true,  false},
     {true,  false, false, true,  false, false},
-    {true,  false, false, false, false, true},
-    {false, false, true,  false, false, true},
+    {false, false, false, true,  true,  false},
+    {false, false, true,  false, false, true },
     {false, true,  true,  false, false, false},
-    ERROR_COM
+    {true,  false, false, false, false, true },
+    HALL_ERROR_COMMUTATION
 };
 
 /**
@@ -240,7 +256,7 @@ void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
     GPIOB->AFR[1] |= (0x2 << GPIO_AFRH_AFRH6_Pos); // PB14
     GPIOB->AFR[1] |= (0x2 << GPIO_AFRH_AFRH7_Pos); // PB15
 
-    // set pin spin to high frequency
+    // set pin speed to high frequency
     GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR8_0 | GPIO_OSPEEDR_OSPEEDR8_1);
     GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR9_0 | GPIO_OSPEEDR_OSPEEDR9_1);
     GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR10_0 | GPIO_OSPEEDR_OSPEEDR10_1);    
@@ -476,19 +492,59 @@ void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
 }
 
 void TIM2_IRQHandler() {
-    // if CC1 (hall updated)
-        // read hall pins, save state (direct read OK in AF mode)
-        // record elapsed time for speed estimate
-            // check for OF
-        // clear int enable flag
+    // if Capture Compare 1 (hall updated)
+    if (TIM2->SR & TIM_SR_CC1IF) {
+        TIM2_IRQHandler_HallTransition();
+    }
+
     // if CC2 (output timer which delays COM event, call *after* COM)
-        // prepare next com step
+    if (TIM2->SR & TIM_SR_CC2IF) {
+        TIM2_IRQHandler_TIM1CommutationComplete();
+    }
+
     // handle errors
 }
+
+void TIM2_IRQHandler_HallTransition() {
+    bool had_multiple_transitions = false;
+    if (TIM2->SR & TIM_SR_CC1OF) {
+        // multiple transitions happened since this interrupt
+        // was serviced. Could be noise that escaped the filter
+        // or a low mechanical speed (e.g. off) and motor settled
+        // on a hall boundary with some env noise
+        had_multiple_transitions = true;
+    }
+
+    // mask off Hall lines PA0-PA2 (already the LSBs)
+    // Input Data Register is before all AF muxing so this should be valid always
+    uint8_t raw_hall_state = (GPIOA->IDR & (GPIO_IDR_2 | GPIO_IDR_1 | GPIO_IDR_0));
+    if (raw_hall_state == 0) {
+        // power error likely
+    }
+
+    if (raw_hall_state == 0x7) {
+        // disconnected snesor likely
+    }
+
+    // read of CCR1 should clear the int enable flag
+    // rm0091, SR, pg 442/1004
+    uint32_t hall_transition_elapsed_ticks = TIM2->CCR1;
+
+}
+
+void TIM2_IRQHandler_TIM1CommutationComplete() {
+    // prepare next com step
+    // TODO
+
+    // clear interrupt pending bit of Capture Compare CH2
+    TIM2->SR &= ~(TIM_SR_CC2IF);
+}
+
 
 void TIM1_BRK_UP_TRG_COM_IRQHandler() {
     // don't think this is actually used
     // hardware does all transitions on the COM event
+    // still need to clear IT pending bit
 }
 
 void pwm6step_set_duty_cycle(int16_t duty_cycle) {
