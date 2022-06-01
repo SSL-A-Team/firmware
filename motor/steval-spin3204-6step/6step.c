@@ -23,12 +23,80 @@
  *      rm0091
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stm32f031x6.h>
 
 #include "6step.h"
 #include "system.h"
 
+static bool hall_speed_estimate_valid = false;
+static uint8_t current_hall_value = 0;
+static uint8_t prev_hall_value = 0;
+
+#ifdef BREAK_ON_HALL_ERROR
+    #define ERROR_COM {true,  false, true,  false, true,  false}  
+#else
+    #define ERROR_COM {false, false, false, false, false, false}
+#endif
+
+/**
+ * @brief clockwise transition table
+ * 
+ * Hall sensors should produce a gray-coded 3-bit value, meaning
+ * 0 (0'b000) and 7 (0'b111) are invalid. The signal wires have
+ * pull up resistors so 7 probably means one or more wires is unplugged,
+ * and 0 probably means there's a power issue.
+ * 
+ * Clockwise
+ * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H
+ * 1   0  0  1    H  G  V      0   0   1   0   0   1
+ * 5   1  0  1    V  G  H      0   1   1   0   0   0
+ * 4   1  0  0    V  H  G      0   1   0   0   1   0
+ * 6   1  1  0    H  V  G      0   0   0   1   1   0
+ * 2   0  1  0    G  V  H      1   0   0   1   0   0
+ * 3   0  1  1    G  H  V      1   0   0   0   0   1
+ * 
+ */
+static bool cw_commutation_table[8][6] = {
+    ERROR_COM,
+    {false, false, true,  false, false, true },
+    {false, true,  true,  false, false, false},
+    {false, true,  false, false, true,  false},
+    {false, false, false, true,  true,  false},
+    {true,  false, false, true,  false, false},
+    {true,  false, false, false, false, true },
+    ERROR_COM
+};
+
+/**
+ * @brief counter clockwise transition table
+ * 
+ * Hall sensors should produce a gray-coded 3-bit value, meaning
+ * 0 (0'b000) and 7 (0'b111) are invalid. The signal wires have
+ * pull up resistors so 7 probably means one or more wires is unplugged,
+ * and 0 probably means there's a power issue.
+ * 
+ * Counter Clockwise
+ * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H 
+ * 1  0  0  1     V  H  G      0   1   0   0   1   0
+ * 3  0  1  1     H  V  G      0   0   0   1   1   0
+ * 2  0  1  0     G  V  H      1   0   0   1   0   0
+ * 6  1  1  0     G  H  V      1   0   0   0   0   1
+ * 4  1  0  0     H  G  V      0   0   1   0   0   1
+ * 5  1  0  1     V  G  H      0   1   1   0   0   0
+ * 
+ */
+static bool ccw_commutation_table[8][6] = {
+    ERROR_COM,    
+    {false, true,  false, false, true,  false},
+    {false, false, false, true,  true,  false},
+    {true,  false, false, true,  false, false},
+    {true,  false, false, false, false, true},
+    {false, false, true,  false, false, true},
+    {false, true,  true,  false, false, false},
+    ERROR_COM
+};
 
 /**
  * @brief sets up the pins and timer peripherials associated with the pins 
@@ -400,15 +468,27 @@ void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
     //  TIM1 break + dead time  //
     //////////////////////////////
 
+    // break on failure
+    TIM1->BDTR |= TIM_BDTR_BKE;
 
+    // set dead time
+    TIM1->BDTR |= DEAD_TIME;
 }
 
 void TIM2_IRQHandler() {
-
+    // if CC1 (hall updated)
+        // read hall pins, save state (direct read OK in AF mode)
+        // record elapsed time for speed estimate
+            // check for OF
+        // clear int enable flag
+    // if CC2 (output timer which delays COM event, call *after* COM)
+        // prepare next com step
+    // handle errors
 }
 
 void TIM1_BRK_UP_TRG_COM_IRQHandler() {
-
+    // don't think this is actually used
+    // hardware does all transitions on the COM event
 }
 
 void pwm6step_set_duty_cycle(int16_t duty_cycle) {
