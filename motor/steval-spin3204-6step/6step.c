@@ -30,9 +30,29 @@
 #include "6step.h"
 #include "system.h"
 
+typedef enum MotorDirection {
+    CLOCKWISE,
+    COUNTER_CLOCKWISE
+} MotorDirection_t;
+
+static bool invert_direction = false;
+
 static bool hall_speed_estimate_valid = false;
 static uint8_t current_hall_value = 0;
 static uint8_t prev_hall_value = 0;
+
+
+static MotorDirection_t current_motor_direction = CLOCKWISE;
+static uint16_t current_duty_cycle = 0;
+
+//////////////////////
+//  error handling  //
+//////////////////////
+
+static int power_error_count = 0;
+static int hall_error_count = 0;
+static bool power_error = false;
+static bool hall_dc_error = false;
 
 #ifdef BREAK_ON_HALL_ERROR
     #define HALL_ERROR_COMMUTATION {true,  false, true,  false, true,  false}  
@@ -77,6 +97,17 @@ static bool cw_commutation_table[8][6] = {
     HALL_ERROR_COMMUTATION
 };
 
+static uint8_t cw_expected_hall_transition_table[8] = {
+    0x0, // 0 -> 0, error state
+    0x5, // 1 -> 5
+    0x3, // 2 -> 3
+    0x1, // 3 -> 1
+    0x6, // 4 -> 6
+    0x4, // 5 -> 4
+    0x2, // 6 -> 2
+    0x7, // 7 -> 4, error state
+};
+
 /**
  * @brief counter clockwise transition table
  * 
@@ -112,6 +143,17 @@ static bool ccw_commutation_table[8][6] = {
     {false, true,  true,  false, false, false},
     {true,  false, false, false, false, true },
     HALL_ERROR_COMMUTATION
+};
+
+static uint8_t ccw_expected_hall_transition_table[8] = {
+    0x0, // 0 -> 0, error state
+    0x3, // 1 -> 3
+    0x6, // 2 -> 6
+    0x2, // 3 -> 2
+    0x5, // 4 -> 5
+    0x1, // 5 -> 1
+    0x4, // 6 -> 4
+    0x7, // 7 -> 7, error state
 };
 
 /**
@@ -547,8 +589,42 @@ void TIM1_BRK_UP_TRG_COM_IRQHandler() {
     // still need to clear IT pending bit
 }
 
-void pwm6step_set_duty_cycle(int16_t duty_cycle) {
+////////////////////////
+//  Public Functions  //
+////////////////////////
 
+void pwm6step_set_direct(uint16_t duty_cycle, MotorDirection_t motor_direction) {
+    current_motor_direction = motor_direction;
+    current_duty_cycle = duty_cycle;
+}
+
+void pwm6step_invert_direction(bool invert) {
+    invert_direction = invert;
+}
+
+bool pwm6step_is_direction_inverted() {
+    return invert_direction;
+}
+
+void pwm6step_set_duty_cycle(int32_t duty_cycle) {
+    MotorDirection_t motor_direction;
+    if (duty_cycle < 0) {
+        motor_direction = COUNTER_CLOCKWISE;
+    } else {
+        motor_direction = CLOCKWISE;
+    }
+
+    if (invert_direction) {
+        if (motor_direction == COUNTER_CLOCKWISE) {
+            motor_direction = CLOCKWISE;
+        } else {
+            motor_direction = COUNTER_CLOCKWISE;
+        }
+    }
+
+    uint16_t duty_cycle_abs = abs(duty_cycle);
+
+    pwm6step_set_direct(duty_cycle_abs, motor_direction);
 }
 
 void pwm6step_stop() {

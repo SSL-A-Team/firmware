@@ -11,6 +11,17 @@
 
 #pragma once
 
+//////////////////////
+//  ERROR HANDLING  //
+//////////////////////
+
+#define NUM_HALL_DISCONNECT_COUNTS_TO_ERROR 5
+#define NUM_HALL_POWER_ANOMALY_COUNTS_TO_ERROR 5
+
+////////////////////////////////
+//  LOW LEVEL CONTROL PARAMS  //
+////////////////////////////////
+
 #define PWM_TIM_PRESCALER 0
 
 // period 20000ns
