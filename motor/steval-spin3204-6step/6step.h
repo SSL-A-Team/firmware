@@ -11,12 +11,17 @@
 
 #pragma once
 
+#define MAX_DUTYCYCLE_COMMAND 65535
+#define MIN_DUTYCYCLE_COMMAND -(MAX_DUTYCYCLE_COMMAND)
+
 //////////////////////
 //  ERROR HANDLING  //
 //////////////////////
 
-#define NUM_HALL_DISCONNECT_COUNTS_TO_ERROR 5
-#define NUM_HALL_POWER_ANOMALY_COUNTS_TO_ERROR 5
+#define HALL_DISCONNECT_ERROR_THRESHOLD 5
+#define HALL_POWER_ERROR_THRESHOLD 5
+
+#define HALL_TRANSITION_ERROR_THRESHOLD 3
 
 ////////////////////////////////
 //  LOW LEVEL CONTROL PARAMS  //

@@ -35,24 +35,49 @@ typedef enum MotorDirection {
     COUNTER_CLOCKWISE
 } MotorDirection_t;
 
+typedef enum CommutationValuesType {
+    NORMAL,
+    MOMENTUM_DETECTED,
+    ERROR_DETECTED
+} CommutationValuesType_t;
+
+//////////////////////
+//  motor commands  //
+//////////////////////
+
 static bool invert_direction = false;
+
+static MotorDirection_t commanded_motor_direction = CLOCKWISE;
+static bool direction_change_commanded = false;
+static uint16_t current_duty_cycle = 0;
+
+static uint8_t hall_recorded_state_on_transition = 0;
+
+/////////////////////
+//  hall velocity  //
+/////////////////////
 
 static bool hall_speed_estimate_valid = false;
 static uint8_t current_hall_value = 0;
 static uint8_t prev_hall_value = 0;
 
-
-static MotorDirection_t current_motor_direction = CLOCKWISE;
-static uint16_t current_duty_cycle = 0;
-
 //////////////////////
 //  error handling  //
 //////////////////////
 
-static int power_error_count = 0;
-static int hall_error_count = 0;
-static bool power_error = false;
-static bool hall_dc_error = false;
+static bool has_error_latched = false;
+
+static bool has_hall_power_error = false;
+static bool has_hall_disconnect_error = false;
+static int hall_power_error_count = 0;
+static int hall_disconnect_error_count = 0;
+
+static bool has_hall_transition_error = false;
+static int hall_transition_error_count = 0;
+
+////////////////////////////////
+//  local data and functions  //
+////////////////////////////////
 
 #ifdef BREAK_ON_HALL_ERROR
     #define HALL_ERROR_COMMUTATION {true,  false, true,  false, true,  false}  
@@ -157,21 +182,12 @@ static uint8_t ccw_expected_hall_transition_table[8] = {
 };
 
 /**
- * @brief sets up the pins and timer peripherials associated with the pins 
- * 
- */
-void pwm6step_setup() {
-    pwm6step_setup_hall_timer();
-    pwm6step_setup_commutation_timer();
-}
-
-/**
  * @brief sets up the hall sensor timer
  * 
  * The hall sensor timer is TIM2. The hall timer can be used to
  * trigger a TIM1 COM event which will call back it's interrupt handler
  */
-void pwm6step_setup_hall_timer() {
+static void pwm6step_setup_hall_timer() {
     ////////////////
     //  IO setup  //
     ////////////////
@@ -273,7 +289,7 @@ void pwm6step_setup_hall_timer() {
  * 
  * @param pwm_freq_hz 
  */
-void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
+static void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
     ////////////////////////////
     //  TIM1 Setup IO         //
     //      - PA8  TIM1_CH1   //
@@ -547,7 +563,17 @@ void TIM2_IRQHandler() {
     // handle errors
 }
 
-void TIM2_IRQHandler_HallTransition() {
+/**
+ * @brief 
+ * 
+ * keep this interrupt short so we can minimize the delay between the CC1
+ * transition event and delayed required on CC2 to fire the COM event automatically
+ * 
+ * handle most functionality on the interrupt callback for CC2 which fires *after*
+ * the COM event
+ * 
+ */
+static void TIM2_IRQHandler_HallTransition() {
     bool had_multiple_transitions = false;
     if (TIM2->SR & TIM_SR_CC1OF) {
         // multiple transitions happened since this interrupt
@@ -559,51 +585,162 @@ void TIM2_IRQHandler_HallTransition() {
 
     // mask off Hall lines PA0-PA2 (already the LSBs)
     // Input Data Register is before all AF muxing so this should be valid always
-    uint8_t raw_hall_state = (GPIOA->IDR & (GPIO_IDR_2 | GPIO_IDR_1 | GPIO_IDR_0));
-    if (raw_hall_state == 0) {
-        // power error likely
-    }
-
-    if (raw_hall_state == 0x7) {
-        // disconnected snesor likely
-    }
+    hall_recorded_state_on_transition = (GPIOA->IDR & (GPIO_IDR_2 | GPIO_IDR_1 | GPIO_IDR_0));
 
     // read of CCR1 should clear the int enable flag
     // rm0091, SR, pg 442/1004
     uint32_t hall_transition_elapsed_ticks = TIM2->CCR1;
-
 }
 
-void TIM2_IRQHandler_TIM1CommutationComplete() {
-    // prepare next com step
-    // TODO
+static void TIM2_IRQHandler_TIM1CommutationComplete() {
+    if (hall_recorded_state_on_transition == 0) {
+        hall_power_error_count++;
+    }
+
+    if (hall_recorded_state_on_transition == 0x7) {
+        hall_disconnect_error_count++;
+    }
+
+    if (hall_power_error_count > HALL_POWER_ERROR_THRESHOLD) {
+        has_hall_power_error = true;
+    }
+
+    if (hall_disconnect_error_count > HALL_DISCONNECT_ERROR_THRESHOLD) {
+        has_hall_disconnect_error = true;
+    }
+
+    uint8_t expected_transition = 0;
+    if (commanded_motor_direction == CLOCKWISE) {
+        expected_transition = cw_expected_hall_transition_table[prev_hall_value];
+    } else {
+        expected_transition = ccw_expected_hall_transition_table[prev_hall_value];
+    }
+
+    bool carry_forward_momentum_detected = false;
+    if (hall_recorded_state_on_transition != expected_transition) {
+        // the mechanical system has momentum
+        // just because the system was commanded to change
+        // direction doesn't mean the next transition will
+        // be in the correct direction. We'll accept transitions
+        // as long as they are valid in any direction, until
+        // a transition is recorded in the correct direction
+        if (direction_change_commanded) {
+            uint8_t reverse_direction_transition = 0x0;
+            if (commanded_motor_direction == CLOCKWISE) {
+                reverse_direction_transition = ccw_expected_hall_transition_table[prev_hall_value];
+            } else {
+                reverse_direction_transition = cw_expected_hall_transition_table[prev_hall_value];
+            }
+
+            if (hall_recorded_state_on_transition == reverse_direction_transition) {
+                carry_forward_momentum_detected = true;
+            } else {
+                hall_transition_error_count++;
+            }
+        } else {
+            hall_transition_error_count++;
+        }
+    } else {
+        // we got the expected transition in the commanded direction so
+        // we should clear the direction_change_commanded flag
+        if (direction_change_commanded) {
+            direction_change_commanded = false;
+        }
+    }
+
+    if (hall_transition_error_count >= HALL_POWER_ERROR_THRESHOLD) {
+        has_hall_transition_error = true;
+    }
+
+    if (hall_power_error_count || hall_disconnect_error_count || has_hall_transition_error) {
+        has_error_latched = true;
+
+        // the hardware already performed a COM via TRGO but we'd like to COM the error state
+        // manually flag a COM event by setting the bit
+
+        load_commutation_values(ERROR_DETECTED);
+
+        // fire com
+
+        return;
+    }
+
+    if (carry_forward_momentum_detected) {
+        // the hardware already performed a COM via TRGO
+        // but the motor continued spinning in the un-commanded direction
+        // this means the commutation is off by one step, which
+        // produces a weaker reverse effect
+        //
+        // there's probably a nasty edge case here if we 
+        //
+        // restage commutation and manually flag a COM
+
+        load_commutation_values(MOMENTUM_DETECTED);
+
+        // fire COM
+
+        // still load next values under the assumption that direction will change and
+        // we can fix it again next step if necessary
+    }
+
+    load_commutation_values(NORMAL);
 
     // clear interrupt pending bit of Capture Compare CH2
     TIM2->SR &= ~(TIM_SR_CC2IF);
 }
 
+static void load_commutation_values(CommutationValuesType_t commutation_type) {
+    bool *commutation_values;
+    if (commutation_type == ERROR_DETECTED) {
+        // use whatever error mode was selected for the tables
+        commutation_values = cw_commutation_table[0x0];
+    } else if (commutation_type == MOMENTUM_DETECTED) {
+        if (commanded_motor_direction == CLOCKWISE) {
+            commutation_values = cw_commutation_table[hall_recorded_state_on_transition];
+        } else {
+            commutation_values = ccw_commutation_table[hall_recorded_state_on_transition];
+        }
+    } else {
+        // normal commutation
+        uint8_t expected_next_hall_step = 0x0;
+        if (commanded_motor_direction == CLOCKWISE) {
+            expected_next_hall_step = cw_expected_hall_transition_table[hall_recorded_state_on_transition];
+        } else {
+            expected_next_hall_step = ccw_expected_hall_transition_table[hall_recorded_state_on_transition];
+        }
 
-void TIM1_BRK_UP_TRG_COM_IRQHandler() {
+        if (commanded_motor_direction == CLOCKWISE) {
+            commutation_values = cw_commutation_table[expected_next_hall_step];
+        } else {
+            commutation_values = ccw_commutation_table[expected_next_hall_step];
+        }
+    }
+
+    // extract phase values
+}
+
+static void TIM1_BRK_UP_TRG_COM_IRQHandler() {
     // don't think this is actually used
     // hardware does all transitions on the COM event
     // still need to clear IT pending bit
+}
+
+static void pwm6step_set_direct(uint16_t duty_cycle, MotorDirection_t motor_direction) {
+    commanded_motor_direction = motor_direction;
+    current_duty_cycle = duty_cycle;
 }
 
 ////////////////////////
 //  Public Functions  //
 ////////////////////////
 
-void pwm6step_set_direct(uint16_t duty_cycle, MotorDirection_t motor_direction) {
-    current_motor_direction = motor_direction;
-    current_duty_cycle = duty_cycle;
-}
-
-void pwm6step_invert_direction(bool invert) {
-    invert_direction = invert;
-}
-
-bool pwm6step_is_direction_inverted() {
-    return invert_direction;
+/**
+ * @brief sets up the pins and timer peripherials associated with the pins 
+ * 
+ */
+void pwm6step_setup() {
+    pwm6step_setup_hall_timer();
+    pwm6step_setup_commutation_timer();
 }
 
 void pwm6step_set_duty_cycle(int32_t duty_cycle) {
@@ -622,11 +759,34 @@ void pwm6step_set_duty_cycle(int32_t duty_cycle) {
         }
     }
 
-    uint16_t duty_cycle_abs = abs(duty_cycle);
+    uint32_t duty_cycle_abs = abs(duty_cycle);
+    if (duty_cycle_abs > UINT16_MAX) {
+        duty_cycle_abs = UINT16_MAX;
+    }
 
-    pwm6step_set_direct(duty_cycle_abs, motor_direction);
+    uint16_t timer_duty_cycle = (uint16_t) duty_cycle_abs;
+
+    pwm6step_set_direct(timer_duty_cycle, motor_direction);
 }
 
 void pwm6step_stop() {
     pwm6step_set_duty_cycle(0);
 }
+
+void pwm6step_invert_direction(bool invert) {
+    invert_direction = invert;
+}
+
+bool pwm6step_is_direction_inverted() {
+    return invert_direction;
+}
+
+bool pwm6step_hall_rps_estimate_valid() {
+
+}
+
+int pwm6step_hall_rotations_per_second() {
+
+}
+
+
