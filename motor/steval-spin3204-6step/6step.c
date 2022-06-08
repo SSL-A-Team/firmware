@@ -79,9 +79,26 @@ static int hall_transition_error_count = 0;
 //  local data and functions  //
 ////////////////////////////////
 
+#define CH1_FULL (TIM_CCER_CC1E | TIM_CCER_CC1NE)
+#define CH2_FULL (TIM_CCER_CC2E | TIM_CCER_CC2NE)
+#define CH3_FULL (TIM_CCER_CC3E | TIM_CCER_CC3NE)
+
+#define CH1_AND_CH2 (CH1_FULL | CH2_FULL)
+#define CH2_AND_CH3 (CH2_FULL | CH3_FULL)
+#define CH1_AND_CH3 (CH1_FULL | CH3_FULL)
+
+#define COAST_CHANNEL_EN_MAP  (0)
+#define COAST_CHANNEL_DIS_MAP (CH1_FULL | CH2_FULL | CH3_FULL)
+#define BREAK_CHANNEL_EN_MAP  (TIM_CCER_CC1NE | TIM_CCER_CC2NE | TIM_CCER_CC3NE)
+#define BREAK_CHANNEL_DIS_MAP (TIM_CCER_CC1E  | TIM_CCER_CC2E  | TIM_CCER_CC3E )
+
 #ifdef BREAK_ON_HALL_ERROR
+    #define HALL_ERROR_CH_EN_MAP   BREAK_CHANNEL_EN_MAP
+    #define HALL_ERROR_CH_DIS_MAP  BREAK_CHANNEL_DIS_MAP
     #define HALL_ERROR_COMMUTATION {true,  false, true,  false, true,  false}  
 #else
+    #define HALL_ERROR_CH_EN_MAP   COAST_CHANNEL_EN_MAP
+    #define HALL_ERROR_CH_DIS_MAP  COAST_CHANNEL_DIS_MAP
     #define HALL_ERROR_COMMUTATION {false, false, false, false, false, false}
 #endif
 
@@ -133,6 +150,29 @@ static uint8_t cw_expected_hall_transition_table[8] = {
     0x7, // 7 -> 4, error state
 };
 
+static uint32_t cw_commutation_ch_enable_map[8] = {
+    HALL_ERROR_CH_EN_MAP,
+    CH2_AND_CH3,
+    CH1_AND_CH2,
+    CH1_AND_CH3,
+    CH1_AND_CH3,
+    CH1_AND_CH2,
+    CH2_AND_CH3,
+    HALL_ERROR_CH_EN_MAP,
+};
+
+static uint32_t cw_commutation_ch_disable_map[8] = {
+    HALL_ERROR_CH_DIS_MAP,
+    CH1_FULL,
+    CH3_FULL,
+    CH2_FULL,
+    CH2_FULL,
+    CH3_FULL,
+    CH1_FULL,
+    HALL_ERROR_CH_DIS_MAP,
+};
+
+
 /**
  * @brief counter clockwise transition table
  * 
@@ -179,6 +219,28 @@ static uint8_t ccw_expected_hall_transition_table[8] = {
     0x1, // 5 -> 1
     0x4, // 6 -> 4
     0x7, // 7 -> 7, error state
+};
+
+static uint32_t ccw_commutation_ch_enable_map[8] = {
+    HALL_ERROR_CH_EN_MAP,
+    CH1_AND_CH3,
+    CH1_AND_CH2,
+    CH2_AND_CH3,
+    CH2_AND_CH3,
+    CH1_AND_CH2,
+    CH1_AND_CH3,
+    HALL_ERROR_CH_EN_MAP,
+};
+
+static uint32_t ccw_commutation_ch_disable_map[8] = {
+    HALL_ERROR_CH_DIS_MAP,
+    CH2_FULL,
+    CH3_FULL,
+    CH1_FULL,
+    CH1_FULL,
+    CH3_FULL,
+    CH2_FULL,
+    HALL_ERROR_CH_DIS_MAP,
 };
 
 /**
@@ -611,7 +673,7 @@ static void TIM2_IRQHandler_TIM1CommutationComplete() {
 
     uint8_t expected_transition = 0;
     if (commanded_motor_direction == CLOCKWISE) {
-        expected_transition = cw_expected_hall_transition_table[prev_hall_value];
+        expected_transition = cw_expected_hall_transition_table[prev_hall_value];  // TODO bad state
     } else {
         expected_transition = ccw_expected_hall_transition_table[prev_hall_value];
     }
@@ -648,11 +710,13 @@ static void TIM2_IRQHandler_TIM1CommutationComplete() {
         }
     }
 
-    if (hall_transition_error_count >= HALL_POWER_ERROR_THRESHOLD) {
+    prev_hall_value = hall_recorded_state_on_transition;
+
+    if (hall_transition_error_count >= HALL_TRANSITION_ERROR_THRESHOLD) {
         has_hall_transition_error = true;
     }
 
-    if (hall_power_error_count || hall_disconnect_error_count || has_hall_transition_error) {
+    if (has_hall_power_error || has_hall_disconnect_error || has_hall_transition_error) {
         has_error_latched = true;
 
         // the hardware already performed a COM via TRGO but we'd like to COM the error state
@@ -660,7 +724,7 @@ static void TIM2_IRQHandler_TIM1CommutationComplete() {
 
         load_commutation_values(ERROR_DETECTED);
 
-        // fire com
+        TIM1->EGR |= TIM_EGR_COMG;
 
         return;
     }
@@ -677,7 +741,7 @@ static void TIM2_IRQHandler_TIM1CommutationComplete() {
 
         load_commutation_values(MOMENTUM_DETECTED);
 
-        // fire COM
+        TIM1->EGR |= TIM_EGR_COMG;
 
         // still load next values under the assumption that direction will change and
         // we can fix it again next step if necessary
@@ -691,14 +755,22 @@ static void TIM2_IRQHandler_TIM1CommutationComplete() {
 
 static void load_commutation_values(CommutationValuesType_t commutation_type) {
     bool *commutation_values;
+    uint32_t enable_mask;
+    uint32_t disable_mask;
     if (commutation_type == ERROR_DETECTED) {
         // use whatever error mode was selected for the tables
         commutation_values = cw_commutation_table[0x0];
+        enable_mask = cw_commutation_ch_enable_map[0x0];
+        disable_mask = ccw_commutation_ch_disable_map[0x0];
     } else if (commutation_type == MOMENTUM_DETECTED) {
         if (commanded_motor_direction == CLOCKWISE) {
             commutation_values = cw_commutation_table[hall_recorded_state_on_transition];
+            enable_mask = cw_commutation_ch_enable_map[hall_recorded_state_on_transition];
+            disable_mask = cw_commutation_ch_disable_map[hall_recorded_state_on_transition];
         } else {
             commutation_values = ccw_commutation_table[hall_recorded_state_on_transition];
+            enable_mask = ccw_commutation_ch_enable_map[hall_recorded_state_on_transition];
+            disable_mask = ccw_commutation_ch_disable_map[hall_recorded_state_on_transition];
         }
     } else {
         // normal commutation
@@ -711,12 +783,42 @@ static void load_commutation_values(CommutationValuesType_t commutation_type) {
 
         if (commanded_motor_direction == CLOCKWISE) {
             commutation_values = cw_commutation_table[expected_next_hall_step];
+            enable_mask = cw_commutation_ch_enable_map[expected_next_hall_step];
+            disable_mask = cw_commutation_ch_disable_map[expected_next_hall_step];
         } else {
             commutation_values = ccw_commutation_table[expected_next_hall_step];
+            enable_mask = ccw_commutation_ch_enable_map[expected_next_hall_step];
+            disable_mask = ccw_commutation_ch_disable_map[expected_next_hall_step];
         }
     }
 
-    // extract phase values
+    bool phase1_high = commutation_values[0];
+    bool phase1_low  = commutation_values[1];
+    bool phase2_high = commutation_values[2];
+    bool phase2_low  = commutation_values[3];
+    bool phase3_high = commutation_values[4];
+    bool phase3_low  = commutation_values[5];
+
+    if (phase1_low) {
+        TIM1->CCR1 = 0;
+    } else if (phase1_high) {
+        TIM1->CCR1 = current_duty_cycle;
+    }
+
+    if (phase2_low) {
+        TIM1->CCR2 = 0;
+    } else if (phase2_high) {
+        TIM2->CCR2 = current_duty_cycle;
+    }
+
+    if (phase3_low) {
+        TIM1->CCR3 = 0;
+    } else if (phase3_high) {
+        TIM2->CCR3 = current_duty_cycle;
+    }
+
+    TIM1->CCER &= !(disable_mask);
+    TIM1->CCER |= (enable_mask);
 }
 
 static void TIM1_BRK_UP_TRG_COM_IRQHandler() {
@@ -740,7 +842,7 @@ static void pwm6step_set_direct(uint16_t duty_cycle, MotorDirection_t motor_dire
  */
 void pwm6step_setup() {
     pwm6step_setup_hall_timer();
-    pwm6step_setup_commutation_timer();
+    pwm6step_setup_commutation_timer(PWM_FREQ_HZ);
 }
 
 void pwm6step_set_duty_cycle(int32_t duty_cycle) {
