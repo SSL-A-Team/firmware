@@ -11,6 +11,9 @@
 
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #define MAX_DUTYCYCLE_COMMAND 65535
 #define MIN_DUTYCYCLE_COMMAND -(MAX_DUTYCYCLE_COMMAND)
 
@@ -40,3 +43,15 @@
 // yyyyy = 11110 = 30
 // DEAD_TIME = 20.8 * 30 = 624ns
 #define DEAD_TIME 0x1E
+
+////////////////////////
+//  PUBLIC FUNCTIONS  //
+////////////////////////
+
+void pwm6step_setup();
+void pwm6step_set_duty_cycle(int32_t duty_cycle);
+void pwm6step_stop();
+void pwm6step_invert_direction(bool invert);
+bool pwm6step_is_direction_inverted();
+bool pwm6step_hall_rps_estimate_valid();
+int pwm6step_hall_get_rps_estimate();

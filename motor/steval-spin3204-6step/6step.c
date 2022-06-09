@@ -25,6 +25,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <stm32f031x6.h>
 
 #include "6step.h"
@@ -242,6 +243,19 @@ static uint32_t ccw_commutation_ch_disable_map[8] = {
     CH2_FULL,
     HALL_ERROR_CH_DIS_MAP,
 };
+
+//////////////////////////////////////////////
+//  internal function forward declarations  //
+//////////////////////////////////////////////
+
+static void pwm6step_setup_hall_timer();
+static void pwm6step_setup_commutation_timer(uint16_t duty_cycle);
+//TIM2_IRQHandler();
+static void TIM2_IRQHandler_HallTransition();
+static void TIM2_IRQHandler_TIM1CommutationComplete();
+static void load_commutation_values(CommutationValuesType_t);
+//TM1_BRK_UP_TRG_COM_IRQHandler();
+static void pwm6step_set_direct(uint16_t, MotorDirection_t);
 
 /**
  * @brief sets up the hall sensor timer
@@ -634,7 +648,12 @@ void TIM2_IRQHandler() {
  * handle most functionality on the interrupt callback for CC2 which fires *after*
  * the COM event
  * 
+ * force apply O0 as we'll need to count the instructions here + ctxswitch to make
+ * sure this function completes before the other interrupt fires. Maybe that happens
+ * anyway since read of CCR1 clear the IF
+ * 
  */
+__attribute__((optimize("O0")))
 static void TIM2_IRQHandler_HallTransition() {
     bool had_multiple_transitions = false;
     if (TIM2->SR & TIM_SR_CC1OF) {
@@ -753,6 +772,11 @@ static void TIM2_IRQHandler_TIM1CommutationComplete() {
     TIM2->SR &= ~(TIM_SR_CC2IF);
 }
 
+/**
+ * @brief 
+ * 
+ * @param commutation_type 
+ */
 static void load_commutation_values(CommutationValuesType_t commutation_type) {
     bool *commutation_values;
     uint32_t enable_mask;
@@ -821,12 +845,22 @@ static void load_commutation_values(CommutationValuesType_t commutation_type) {
     TIM1->CCER |= (enable_mask);
 }
 
+/**
+ * @brief 
+ * 
+ */
 static void TIM1_BRK_UP_TRG_COM_IRQHandler() {
     // don't think this is actually used
     // hardware does all transitions on the COM event
     // still need to clear IT pending bit
 }
 
+/**
+ * @brief 
+ * 
+ * @param duty_cycle 
+ * @param motor_direction 
+ */
 static void pwm6step_set_direct(uint16_t duty_cycle, MotorDirection_t motor_direction) {
     commanded_motor_direction = motor_direction;
     current_duty_cycle = duty_cycle;
@@ -887,7 +921,7 @@ bool pwm6step_hall_rps_estimate_valid() {
 
 }
 
-int pwm6step_hall_rotations_per_second() {
+int pwm6step_hall_get_rps_estimate() {
 
 }
 
