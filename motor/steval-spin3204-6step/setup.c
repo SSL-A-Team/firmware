@@ -130,7 +130,17 @@ inline void setup_io() {
     // turn on CRC clock domain
     RCC->AHBENR |= RCC_AHBENR_CRCEN;
 
+    // enable timer 3 source on the peripheral bus
+    RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
+
+    // enable timer 2 source on the peripherial bus
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+
+    // enable timer 1 source on the peripherial bus
+    RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;
+
     GPIOB->MODER |= GPIO_MODER_MODER8_0;
+    GPIOB->MODER |= GPIO_MODER_MODER9_0;
     //GPIOB->OTYPER &= ~GPIO_OTYPER_OT_8;
 }
 

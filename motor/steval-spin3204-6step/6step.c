@@ -264,9 +264,12 @@ static void pwm6step_set_direct(uint16_t, MotorDirection_t);
  * trigger a TIM1 COM event which will call back it's interrupt handler
  */
 static void pwm6step_setup_hall_timer() {
-    ////////////////
-    //  IO setup  //
-    ////////////////
+    //////////////////////////
+    //  IO setup            //
+    //   - PA0 <- HALL1/A+  //
+    //   - PA1 <- HALL2/B+  //
+    //   - PA2 <- HALL3/C+  //
+    //////////////////////////
 
     // config as alternate function
     GPIOA->MODER |= (GPIO_MODER_MODER0_1 | GPIO_MODER_MODER1_1 | GPIO_MODER_MODER2_1);
@@ -285,7 +288,7 @@ static void pwm6step_setup_hall_timer() {
     // htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
     TIM2->CR1 &= ~(TIM_CR1_DIR);
     // htim2.Init.Period = LF_TIMX_ARR; // 24000
-    TIM2->ARR = 24000;
+    TIM2->ARR = 24000; // probs wrong, but unused rn
     // htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
     TIM2->CR1 &= ~(TIM_CR1_CKD_0 | TIM_CR1_CKD_1);
     // htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -294,20 +297,25 @@ static void pwm6step_setup_hall_timer() {
     // enable hall sense interface be selecting the XOR function of input 1-3
     TIM2->CR2 |= TIM_CR2_TI1S;
     // sSlaveConfig.SlaveMode = TIM_SLAVEMODE_RESET;
+    // clear SMS (required to set TS)
     TIM2->SMCR &= ~(TIM_SMCR_SMS_Msk);
-    TIM2->SMCR |= (0x4 << TIM_SMCR_SMS_Pos); // b100 reset mode
     //sSlaveConfig.InputTrigger = TIM_TS_TI1F_ED;
     TIM2->SMCR &= ~(TIM_SMCR_TS_Msk);
     TIM2->SMCR |= (0x4 << TIM_SMCR_TS_Pos); // b100 TI1F_ED mode (Timer Input 1 Edge Detect)
+    // now that TS is set, set SMS
+    TIM2->SMCR |= (0x4 << TIM_SMCR_SMS_Pos); // b100 reset mode
     //sSlaveConfig.TriggerFilter = 8;
     TIM2->CCER &= ~(TIM_CCER_CC1E);
     TIM2->CCMR1 &= ~(TIM_CCMR1_IC1F_Msk);
     TIM2->CCMR1 |= (0x8 << TIM_CCMR1_IC1F_Pos);
 
-    //sMasterConfig.MasterOutputTrigger = TIM_TRGO_OC2REF;
+    // set the master mode output trigger to OC2REF
+    // TIM2 is a master to TIM1, so an event will trigget COM in TIM1
+    // the source of outbound trigger will be Output Compare Channel 2 REF (count down to 0)
+    // this allows us to delay COM until the hall edge detection interrupt finishes
     TIM2->CR2 &= ~TIM_CR2_MMS;
     TIM2->CR2 |= (TIM_CR2_MMS_0 | TIM_CR2_MMS_2); // 0b101 OC2REF for TRGO
-    //sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_ENABLE;
+    // enable master slave mode 
     TIM2->SMCR &= ~TIM_SMCR_MSM;
     TIM2->SMCR |= (TIM_SMCR_MSM);
 
@@ -318,23 +326,31 @@ static void pwm6step_setup_hall_timer() {
     /* Disable the Channel 1: Reset the CC1E Bit */
     TIM2->CCER &= ~TIM_CCER_CC1E;
 
+    // only writeable when channel is off
+    // CC1S = 2'b11 -> sets input capture on TRC (internal trigger set by TS bits)
+    // this is done in general config above, TRC source is edge detect
     TIM2->CCMR1 &= ~TIM_CCMR1_CC1S;
-    TIM2->CCMR1 |= 0x3 << TIM_CCMR1_CC1S_Pos;
+    TIM2->CCMR1 |= (0x3 << TIM_CCMR1_CC1S_Pos);
 
-    /* Set the filter */
+    // disable filter, not used when edge detect TRC is selected
     TIM2->CCMR1 &= ~TIM_CCMR1_IC1F;
     TIM2->CCMR1 |= ((0x0 << 4U) & TIM_CCMR1_IC1F);
 
-    /* Select the Polarity and set the CC1E Bit */
+    // set edge detection mode to non-inverted/rising edge.
+    // it is forbidden to use dual edge detect for hall sensing mode
     TIM2->CCER &= ~(TIM_CCER_CC1P | TIM_CCER_CC1NP);
     TIM2->CCER |= (0x0U & (TIM_CCER_CC1P | TIM_CCER_CC1NP));
 
-    /* Reset the IC1PSC Bits */
+    // set the channel prescaler to 0
     TIM2->CCMR1 &= ~TIM_CCMR1_IC1PSC;
-    //TIM2->CCMR1 |= TIM_CCMR1_IC1PSC;
     TIM2->CCMR1 |= (0 << TIM_CCMR1_IC1PSC_Pos);
 
-    // enable?
+    // enable the interrupt
+    TIM2->DIER |= (TIM_DIER_CC1IE);
+    TIM2->SR &= ~(TIM_SR_CC1IF);
+
+    // enable channel 1
+    TIM2->CCER |= TIM_CCER_CC1E;
 
     /////////////////////////////
     //  TIM2 CH2 setup as XXX  //
@@ -358,6 +374,13 @@ static void pwm6step_setup_hall_timer() {
     TIM2->CCR2 = 0;
 
     // enable?
+
+    //////////////////////
+    //  Enable in NVIC  //
+    //////////////////////
+
+    NVIC_SetPriority(TIM2_IRQn, 5);
+    NVIC_EnableIRQ(TIM2_IRQn);
 }
 
 /**
@@ -626,6 +649,13 @@ static void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
 }
 
 void TIM2_IRQHandler() {
+    while (true) {
+        GPIOB->BSRR |= GPIO_BSRR_BS_9;
+        wait_ms(1000);
+        GPIOB->BSRR |= GPIO_BSRR_BR_9;
+        wait_ms(1000);
+    }
+
     // if Capture Compare 1 (hall updated)
     if (TIM2->SR & TIM_SR_CC1IF) {
         TIM2_IRQHandler_HallTransition();
@@ -876,7 +906,7 @@ static void pwm6step_set_direct(uint16_t duty_cycle, MotorDirection_t motor_dire
  */
 void pwm6step_setup() {
     pwm6step_setup_hall_timer();
-    pwm6step_setup_commutation_timer(PWM_FREQ_HZ);
+    //pwm6step_setup_commutation_timer(PWM_FREQ_HZ);
 }
 
 void pwm6step_set_duty_cycle(int32_t duty_cycle) {

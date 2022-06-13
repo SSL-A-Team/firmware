@@ -22,4 +22,5 @@ set(STSPIN32F0x_CXX_OPTIONS ${STSPIN32F0x_MACHINE_OPTIONS} -Wno-register -fno-ex
 set(STSPIN32F0x_LINKER_OPTIONS ${STSPIN32F0x_MACHINE_OPTIONS} --specs=nosys.specs --specs=nano.specs CACHE STRING "")
 set(STSPIN32F0x_DEFINITIONS -DSTM32F031xx)
 set(STSPIN32F0x_CHIP STM32F031C6 CACHE STRING "Full STM32 Chip Model")
-set(STSPIN32F0x_OPENOCD_CFG "board/stm32f0discovery.cfg")
+# set(STSPIN32F0x_OPENOCD_CFG "board/stm32f0discovery.cfg")
+set(STSPIN32F0x_OPENOCD_CFG "${CMAKE_SOURCE_DIR}/openocd/steval-spin320x.cfg")
