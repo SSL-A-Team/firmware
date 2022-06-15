@@ -14,3 +14,4 @@
 bool uart_transmit_dma_pending();
 bool uart_wait_for_transmission();
 bool uart_transmit_dma(uint8_t *data_buf, uint16_t len);
+uint8_t* uart_recv_dma();

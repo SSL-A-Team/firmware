@@ -16,6 +16,7 @@
 #include <stm32f031x6.h>
 
 volatile bool uart_dma_tx_active = false;
+volatile bool uart_dma_rx_active = false;
 
 /**
  * @brief check if a UART DMA transmission is pending
@@ -75,6 +76,39 @@ bool uart_transmit_dma(uint8_t *data_buf, uint16_t len) {
 }
 
 /**
+ * @brief receive a buffer via UART DMA
+ * 
+ * @param data_buf the buffer to recv
+ * @param len the length to recv
+ * @return bool true on success, false on failure
+ */
+bool uart_recv_dma(uint8_t *data_buf, uint16_t len) {
+    // check if dma is already receiving another set of data
+    if (uart_dma_rx_active) {
+        return false;
+    }
+
+    uart_dma_rx_active = true;
+
+    // Set USART RDR register address to source of transfer
+    DMA1_Channel2->CMAR = USART_RDR_RDR;
+
+    // Write mem addr in DMA control register as dest of transfer
+    DMA1_Channel2->CMAR = (uint32_t) data_buf;
+
+    // Set number of bytes to transfer to DMA control register
+    DMA1_Channel2->CNDTR = len;
+
+    // Set priority
+    DMA1_Channel2->CCR |= (0x3U << DMA_CCR_PL_Pos);
+
+    // Activate channel
+    DMA1_Channel2->CCR |= DMA_CCR_EN;
+
+    return true;
+}
+
+/**
  * @brief callback handler for uart
  * 
  */
@@ -82,7 +116,17 @@ __attribute((__optimize__("O0")))
 void USART1_IRQHandler() {
     uint32_t uart_status_register = USART1->ISR;
 
-    // TODO handle rx
+    ////////////////////
+    //   Reception    //
+    ////////////////////
+    if (uart_status_register & USART_ISR_RXNE) {
+        // disable DMA channel
+        DMA1_Channel2->CCR &= ~(DMA_CCR_EN);
+
+        // restore the ready flag
+        uart_dma_rx_active = false;
+    }
+
 
     ////////////////////
     //  Transmission  //

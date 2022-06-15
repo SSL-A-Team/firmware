@@ -17,6 +17,7 @@
 #include "uart.h"
 #include "time.h"
 #include "6step.h"
+#include "quadrature_encoder.h"
 
 __attribute__((optimize("O0")))
 int main() {
