@@ -13,3 +13,6 @@
 ///////////////////////////////////
 
 void quadenc_setup();
+uint16_t quadenc_get_counter();
+void quadenc_reset_encoder_delta();
+int32_t quadenc_get_encoder_delta();
