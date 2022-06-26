@@ -17,6 +17,7 @@
 
 volatile bool uart_dma_tx_active = false;
 volatile bool uart_dma_rx_active = false;
+uint8_t uart_rx_dma_buffer[64];
 
 /**
  * @brief check if a UART DMA transmission is pending
@@ -102,10 +103,69 @@ bool uart_recv_dma(uint8_t *data_buf, uint16_t len) {
     // Set priority
     DMA1_Channel2->CCR |= (0x3U << DMA_CCR_PL_Pos);
 
+    // Enable 
+
     // Activate channel
     DMA1_Channel2->CCR |= DMA_CCR_EN;
 
     return true;
+}
+
+/**
+ * @brief Process data once it's received on UART
+ * 
+ * @param data 
+ * @param len 
+ */
+void usart_process_data(const void *data, size_t len) {
+    const uint8_t *d = data;
+
+    // TODO something
+}
+
+/**
+ * @brief Check for new data from DMA
+ * 
+ */
+void usart_rx_check() {
+    static size_t old_pos;
+    size_t pos;
+
+    // Calculate position in buffer
+    pos = ARRAY_LEN(uart_rx_dma_buffer) - (DMA1_Channel2->CNDTR);
+    if (pos != old_pos) {
+        if (pos < old_pos) {
+            usart_process_data(&uart_rx_dma_buffer[old_pos], pos - old_pos);
+        }
+        else {
+            usart_process_data(&uart_rx_dma_buffer[old_pos], ARRAY_LEN(uart_rx_dma_buffer) - old_pos);
+            if (pos > 0) {
+                usart_process_data(&uart_rx_dma_buffer[0], pos);
+            }
+        }
+    }
+
+    old_pos = pos;
+}
+
+/**
+ * @brief callback handler for DMA RX
+ * 
+ */
+void DMA1_Channel2_3_IRQHandler(void) {
+
+    // Check half-transfer complete interrupt
+    if (DMA1->ISR & DMA_ISR_HTIF2_Msk) {
+        DMA1->ISR &= DMA_ISR_HTIF2_Msk;         // Clear half-transfer complete flag
+        usart_rx_check();                       // Check for data to process
+    }
+
+    // Check transfer-complete interrupt
+    if (DMA1->ISR & DMA_ISR_TCIF2_Msk) {
+        DMA1->ISR &= DMA_ISR_TCIF2_Msk;         // Clear transfer complete flag
+        usart_rx_check();                       // Check for data to process
+    }
+
 }
 
 /**
@@ -115,6 +175,7 @@ bool uart_recv_dma(uint8_t *data_buf, uint16_t len) {
 __attribute((__optimize__("O0")))
 void USART1_IRQHandler() {
     uint32_t uart_status_register = USART1->ISR;
+
 
     ////////////////////
     //   Reception    //
