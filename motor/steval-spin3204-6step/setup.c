@@ -147,6 +147,7 @@ inline void setup_io() {
 /**
  * @brief setups UART IO, UART, and UART DMA
  * 
+ * TODO move to uart.c
  */
 __attribute__((optimize("O0")))
 void setup_uart() {

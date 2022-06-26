@@ -649,12 +649,12 @@ static void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
 }
 
 void TIM2_IRQHandler() {
-    while (true) {
-        GPIOB->BSRR |= GPIO_BSRR_BS_9;
-        wait_ms(1000);
-        GPIOB->BSRR |= GPIO_BSRR_BR_9;
-        wait_ms(1000);
-    }
+    // while (true) {
+    //     GPIOB->BSRR |= GPIO_BSRR_BS_9;
+    //     wait_ms(1000);
+    //     GPIOB->BSRR |= GPIO_BSRR_BR_9;
+    //     wait_ms(1000);
+    // }
 
     // if Capture Compare 1 (hall updated)
     if (TIM2->SR & TIM_SR_CC1IF) {
@@ -871,7 +871,7 @@ static void load_commutation_values(CommutationValuesType_t commutation_type) {
         TIM2->CCR3 = current_duty_cycle;
     }
 
-    TIM1->CCER &= !(disable_mask);
+    TIM1->CCER &= ~(disable_mask);
     TIM1->CCER |= (enable_mask);
 }
 
@@ -892,8 +892,20 @@ static void TIM1_BRK_UP_TRG_COM_IRQHandler() {
  * @param motor_direction 
  */
 static void pwm6step_set_direct(uint16_t duty_cycle, MotorDirection_t motor_direction) {
+    uint16_t old_dc = current_duty_cycle;
+
     commanded_motor_direction = motor_direction;
     current_duty_cycle = duty_cycle;
+
+    // motor was stopped or commanded to stop
+    // jump start
+    if (old_dc == 0) {
+        hall_recorded_state_on_transition = (GPIOA->IDR & (GPIO_IDR_2 | GPIO_IDR_1 | GPIO_IDR_0));
+
+        load_commutation_values(MOMENTUM_DETECTED);
+        TIM1->EGR |= TIM_EGR_COMG;
+        load_commutation_values(NORMAL);
+    }
 }
 
 ////////////////////////
