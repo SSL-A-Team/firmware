@@ -157,29 +157,6 @@ static uint8_t cw_expected_hall_transition_table[8] = {
     0x7, // 7 -> 7, error state
 };
 
-static uint32_t cw_commutation_ch_enable_map[8] = {
-    HALL_ERROR_CH_EN_MAP,
-    CH2_AND_CH3,
-    CH1_AND_CH2,
-    CH1_AND_CH3,
-    CH1_AND_CH3,
-    CH1_AND_CH2,
-    CH2_AND_CH3,
-    HALL_ERROR_CH_EN_MAP,
-};
-
-static uint32_t cw_commutation_ch_disable_map[8] = {
-    HALL_ERROR_CH_DIS_MAP,
-    CH1_FULL,
-    CH3_FULL,
-    CH2_FULL,
-    CH2_FULL,
-    CH3_FULL,
-    CH1_FULL,
-    HALL_ERROR_CH_DIS_MAP,
-};
-
-
 /**
  * @brief counter clockwise transition table
  * 
@@ -226,28 +203,6 @@ static uint8_t ccw_expected_hall_transition_table[8] = {
     0x1, // 5 -> 1
     0x4, // 6 -> 4
     0x7, // 7 -> 7, error state
-};
-
-static uint32_t ccw_commutation_ch_enable_map[8] = {
-    HALL_ERROR_CH_EN_MAP,
-    CH1_AND_CH3,
-    CH1_AND_CH2,
-    CH2_AND_CH3,
-    CH2_AND_CH3,
-    CH1_AND_CH2,
-    CH1_AND_CH3,
-    HALL_ERROR_CH_EN_MAP,
-};
-
-static uint32_t ccw_commutation_ch_disable_map[8] = {
-    HALL_ERROR_CH_DIS_MAP,
-    CH2_FULL,
-    CH3_FULL,
-    CH1_FULL,
-    CH1_FULL,
-    CH3_FULL,
-    CH2_FULL,
-    HALL_ERROR_CH_DIS_MAP,
 };
 
 //////////////////////////////////////////////
@@ -465,21 +420,6 @@ static void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
     GPIOB->AFR[1] |= (0x2 << GPIO_AFRH_AFSEL14_Pos); // PB14
     GPIOB->AFR[1] |= (0x2 << GPIO_AFRH_AFSEL15_Pos); // PB15
 
-    // set pin speed to high frequency
-    // GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR8_0 | GPIO_OSPEEDR_OSPEEDR8_1);
-    // GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR9_0 | GPIO_OSPEEDR_OSPEEDR9_1);
-    // GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR10_0 | GPIO_OSPEEDR_OSPEEDR10_1);    
-    // GPIOB->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR13_0 | GPIO_OSPEEDR_OSPEEDR13_1);
-    // GPIOB->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR14_0 | GPIO_OSPEEDR_OSPEEDR14_1);
-    // GPIOB->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR15_0 | GPIO_OSPEEDR_OSPEEDR15_1);
-
-    //GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR8_0);
-    //GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR9_0);
-    //GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR10_0);    
-    //GPIOB->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR13_0);
-    //GPIOB->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR14_0);
-    //GPIOB->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR15_0);
-
     ///////////////////////
     //  TIM1 Base Setup  //
     ///////////////////////
@@ -490,33 +430,17 @@ static void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
     // set PWM period relative to the scaled sysclk
     TIM1->ARR = (uint16_t) (F_SYS_CLK_HZ / ((uint32_t) pwm_freq_hz * (PWM_TIM_PRESCALER + 1)) - 1);
 
-    // set the duty cycle for channel 1
-    //TIM1->CCR1 = 1000U;
-
-    //TIM1->PSC = 0;
-    //TIM1->ARR = 1199;
-    //TIM1->CCR1 = 4;
     TIM1->CR1 = (TIM_CR1_ARPE | TIM_CR1_CMS);
     TIM1->CR2 = (TIM_CR2_CCPC);
-	//TIM1->SMCR = TIM_SMCR_OCCS | TIM_SMCR_ETF_3;
 
     TIM1->CCMR1 = CCMR1_PHASE1_OFF | CCMR1_PHASE2_OFF;
     TIM1->CCMR2 = CCMR2_PHASE3_OFF;
-    //TIM1->CCER = CCER_PHASE1_LOW | CCER_PHASE2_LOW | CCER_PHASE3_LOW;
 
     // generate an update event to reload the PSC
     TIM1->EGR |= (TIM_EGR_UG | TIM_EGR_COMG);
 
     TIM1->CR1 |= TIM_CR1_CEN;
     TIM1->BDTR |= TIM_BDTR_MOE;
-
-
-    // TIM1->CCMR1 = CCMR1_PHASE1_PWM | CCMR1_PHASE2_OFF;
-    // TIM1->CCMR2 = CCMR2_PHASE3_OFF;
-    // TIM1->CCER = CCER_PHASE1_PWM | CCER_PHASE2_OFF | CCER_PHASE3_OFF;
-    // TIM1->EGR = TIM_EGR_COMG;
-
-    //while (true);
 }
 
 void TIM2_IRQHandler() {
@@ -569,18 +493,6 @@ static void perform_commutation_cycle() {
     // Input Data Register is before all AF muxing so this should be valid always
     //hall_recorded_state_on_transition = (GPIOA->IDR & (GPIO_IDR_2 | GPIO_IDR_1 | GPIO_IDR_0));
     hall_recorded_state_on_transition = read_hall();
-
-    // for (int i = 7; i >= 0; i--) {
-    //     GPIOB->BSRR |= GPIO_BSRR_BS_9;
-    //     wait_ms(1);
-    //     bool bitval = (((((int16_t) hall_recorded_state_on_transition) >> i) & 0x1) != 0);
-    //     if (!bitval) {
-    //         GPIOB->BSRR |= GPIO_BSRR_BR_9;
-    //     }
-    //     wait_ms(1);
-    //     GPIOB->BSRR |= GPIO_BSRR_BR_9;
-    //     wait_ms(1);
-    // }
 
     if (hall_recorded_state_on_transition == 0x7) {
         hall_disconnect_error_count++;
@@ -687,22 +599,14 @@ static void set_commutation_estop() {
  */
 static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     bool *commutation_values;
-    uint32_t enable_mask;
-    uint32_t disable_mask;
     if (estop) {
         // use whatever error mode was selected for the tables
         commutation_values = cw_commutation_table[0x0];
-        enable_mask = cw_commutation_ch_enable_map[0x0];
-        disable_mask = ccw_commutation_ch_disable_map[0x0];
     } else {
         if (commanded_motor_direction == CLOCKWISE) {
             commutation_values = cw_commutation_table[hall_state];
-            enable_mask = cw_commutation_ch_enable_map[hall_state];
-            disable_mask = cw_commutation_ch_disable_map[hall_state];
         } else {
             commutation_values = ccw_commutation_table[hall_state];
-            enable_mask = ccw_commutation_ch_enable_map[hall_state];
-            disable_mask = ccw_commutation_ch_disable_map[hall_state];
         }
     }
 
@@ -760,9 +664,6 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
 
     TIM1->CCMR1 = ccmr1;
     TIM1->CCMR2 = ccmr2;
-
-    //TIM1->CCER &= ~(disable_mask);
-    //TIM1->CCER |= (enable_mask);
     TIM1->CCER = ccer;
 }
 
