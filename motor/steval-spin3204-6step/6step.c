@@ -558,16 +558,16 @@ static void perform_commutation_cycle() {
     }
 
     // check for errors
-    // if (manual_estop || has_hall_power_error || has_hall_disconnect_error || has_hall_transition_error) {
-    //     has_error_latched = true;
+    if (manual_estop || has_hall_power_error || has_hall_disconnect_error) { //} || has_hall_transition_error) {
+        has_error_latched = true;
 
-    //     // the hardware already performed a COM via TRGO but we'd like to COM the error state
-    //     // manually flag a COM event by setting the bit
-    //     set_commutation_estop();
-    //     trigger_commutation();
+        // the hardware already performed a COM via TRGO but we'd like to COM the error state
+        // manually flag a COM event by setting the bit
+        set_commutation_estop();
+        trigger_commutation();
 
-    //     return;
-    // } 
+        return;
+    } 
     
     set_commutation_for_hall(hall_recorded_state_on_transition, false);
     trigger_commutation();
@@ -753,6 +753,11 @@ void pwm6step_set_duty_cycle(int32_t duty_cycle) {
 
 void pwm6step_stop() {
     pwm6step_set_duty_cycle(0);
+}
+
+void pwm6step_estop() {
+    pwm6step_set_duty_cycle(0);
+    manual_estop = true;
 }
 
 void pwm6step_invert_direction(bool invert) {

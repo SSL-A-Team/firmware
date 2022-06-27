@@ -32,7 +32,11 @@ int main() {
     quadenc_setup();
     quadenc_reset_encoder_delta();
 
-    pwm6step_set_duty_cycle(50);
+    pwm6step_set_duty_cycle(100);
+
+    //wait_ms(10000);
+    
+    //pwm6step_estop();
 
     // const char* hello = "hello";
     // int len = 6;
