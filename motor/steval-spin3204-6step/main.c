@@ -50,7 +50,7 @@ int main() {
     //quadenc_setup();
     //quadenc_reset_encoder_delta();
 
-    pwm6step_set_duty_cycle(250);
+    pwm6step_set_duty_cycle(100);
 
     // const char* hello = "hello";
     // int len = 6;

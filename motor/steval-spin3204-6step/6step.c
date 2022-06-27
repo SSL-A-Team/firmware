@@ -106,8 +106,10 @@ static int hall_transition_error_count = 0;
     #define HALL_ERROR_COMMUTATION {false, false, false, false, false, false}
 #endif
 
+
+
 /**
- * @brief clockwise transition table
+ * @brief counter clockwise transition table
  * 
  * Hall sensors should produce a gray-coded 3-bit value, meaning
  * 0 (0'b000) and 7 (0'b111) are invalid. The signal wires have
@@ -116,30 +118,31 @@ static int hall_transition_error_count = 0;
  * 
  * Clockwise (human readable order)
  * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H
- * 1   0  0  1    H  G  V      0   0   1   0   0   1
- * 5   1  0  1    V  G  H      0   1   1   0   0   0
- * 4   1  0  0    V  H  G      0   1   0   0   1   0
- * 6   1  1  0    H  V  G      0   0   0   1   1   0
- * 2   0  1  0    G  V  H      1   0   0   1   0   0
- * 3   0  1  1    G  H  V      1   0   0   0   0   1
+ * 1   0  0  1    V  H  G      1   0   0   0   0   1
+ * 5   1  0  1    V  G  H      1   0   0   1   0   0
+ * 4   1  0  0    H  G  V      0   0   0   1   1   0
+ * 6   1  1  0    G  H  V      0   1   0   0   1   0
+ * 2   0  1  0    G  V  H      0   1   1   0   0   0
+ * 3   0  1  1    H  V  G      0   0   1   0   0   1
  * 
  * Clockwise (direct hall index order)
- * 1   0  0  1    H  G  V      0   0   1   0   0   1
- * 2   0  1  0    G  V  H      1   0   0   1   0   0
- * 3   0  1  1    G  H  V      1   0   0   0   0   1
- * 4   1  0  0    V  H  G      0   1   0   0   1   0
- * 5   1  0  1    V  G  H      0   1   1   0   0   0
- * 6   1  1  0    H  V  G      0   0   0   1   1   0
+ * 1   0  0  1    V  H  G      1   0   0   0   0   1
+ * 2   0  1  0    G  V  H      0   1   1   0   0   0
+ * 3   0  1  1    H  V  G      0   0   1   0   0   1
+ * 4   1  0  0    H  G  V      0   0   0   1   1   0
+ * 5   1  0  1    V  G  H      1   0   0   1   0   0
+ * 6   1  1  0    G  H  V      0   1   0   0   1   0
  *
  */
-static bool ccw_commutation_table[8][6] = {
+
+static bool cw_commutation_table[8][6] = {
     HALL_ERROR_COMMUTATION,
-    {false, false, true,  false, false, true },
-    {true,  false, false, true,  false, false},
     {true,  false, false, false, false, true },
-    {false, true,  false, false, true,  false},
     {false, true,  true,  false, false, false},
+    {false, false, true,  false, false, true},
     {false, false, false, true,  true,  false},
+    {true,  false, false, true,  false, false},
+    {false, true,  false, false, true,  false},
     HALL_ERROR_COMMUTATION
 };
 
@@ -151,7 +154,7 @@ static uint8_t cw_expected_hall_transition_table[8] = {
     0x6, // 4 -> 6
     0x4, // 5 -> 4
     0x2, // 6 -> 2
-    0x7, // 7 -> 4, error state
+    0x7, // 7 -> 7, error state
 };
 
 static uint32_t cw_commutation_ch_enable_map[8] = {
@@ -203,7 +206,7 @@ static uint32_t cw_commutation_ch_disable_map[8] = {
  * 6  1  1  0     G  H  V      1   0   0   0   0   1
  * 
  */
-static bool cw_commutation_table[8][6] = {
+static bool ccw_commutation_table[8][6] = {
     HALL_ERROR_COMMUTATION,    
     {false, true,  false, false, true,  false},
     {true,  false, false, true,  false, false},
