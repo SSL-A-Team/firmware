@@ -34,7 +34,7 @@
 
 // period 20000ns
 // be conscious of dead time ratio
-#define PWM_FREQ_HZ 50000 
+#define PWM_FREQ_HZ 48000
 
 // no div on CK_INT = 48MHz
 // Tdts = CK_INT = 48MHz

@@ -241,5 +241,5 @@ void setup() {
     setup_clocks();
 
     setup_io();
-    setup_uart();
+    //setup_uart();
 }

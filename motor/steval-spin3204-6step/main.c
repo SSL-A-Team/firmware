@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "quadrature_encoder.h"
 #include "setup.h"
 #include "uart.h"
 #include "time.h"
@@ -26,9 +27,30 @@ int main() {
     GPIOB->BSRR |= GPIO_BSRR_BR_8;
     GPIOB->BSRR |= GPIO_BSRR_BR_9;
 
-    //pwm6step_setup();
-    quadenc_setup();
-    quadenc_reset_encoder_delta();
+    GPIOB->BSRR |= GPIO_BSRR_BS_8;
+
+    // set PA3 for testing
+    GPIOA->MODER |= (GPIO_MODER_MODER3_0);
+    GPIOA->BSRR |= (GPIO_BSRR_BS_3);
+
+    // GPIOA->MODER |= (GPIO_MODER_MODER8_0 | GPIO_MODER_MODER9_0 | GPIO_MODER_MODER10_0);
+    // GPIOB->MODER |= (GPIO_MODER_MODER13_0 | GPIO_MODER_MODER14_0 | GPIO_MODER_MODER15_0);
+
+    // GPIOA->PUPDR |= (GPIO_PUPDR_PUPDR8_1 | GPIO_PUPDR_PUPDR9_1 | GPIO_PUPDR_PUPDR10_1);
+    // GPIOB->PUPDR |= (GPIO_PUPDR_PUPDR13_1 | GPIO_PUPDR_PUPDR14_1 | GPIO_PUPDR_PUPDR15_1);
+
+    // GPIOA->BSRR |= (GPIO_BSRR_BR_8 | GPIO_BSRR_BR_9 | GPIO_BSRR_BR_10);
+    // GPIOB->BSRR |= (GPIO_BSRR_BS_13 | GPIO_BSRR_BS_14 | GPIO_BSRR_BS_15);
+
+    //GPIOA->BSRR |= (GPIO_BSRR_BS_8);
+    // GPIOB->BSRR |= (GPIO_BSRR_BS_13);
+
+    pwm6step_setup();
+
+    //quadenc_setup();
+    //quadenc_reset_encoder_delta();
+
+    pwm6step_set_duty_cycle(250);
 
     // const char* hello = "hello";
     // int len = 6;
@@ -63,23 +85,23 @@ int main() {
         // uart_transmit_dma(data, (uint16_t)5);
         // uart_wait_for_transmission();
 
-        // GPIOB->BSRR |= GPIO_BSRR_BS_8;
-        // wait_ms(1);
-        // GPIOB->BSRR |= GPIO_BSRR_BR_8;
-        // wait_ms(1);
+        GPIOB->BSRR |= GPIO_BSRR_BS_8;
+        wait_ms(1);
+        GPIOB->BSRR |= GPIO_BSRR_BR_8;
+        wait_ms(1);
 
-        int32_t delta = quadenc_get_encoder_delta();
-        for (int i = 15; i >= 0; i--) {
-            GPIOB->BSRR |= GPIO_BSRR_BS_8;
-            wait_ms(1);
-            bool bitval = (((((int16_t) delta) >> i) & 0x1) != 0);
-            if (!bitval) {
-                GPIOB->BSRR |= GPIO_BSRR_BR_8;
-            }
-            wait_ms(1);
-            GPIOB->BSRR |= GPIO_BSRR_BR_8;
-            wait_ms(1);
-        }
+        // int32_t delta = quadenc_get_encoder_delta();
+        // for (int i = 15; i >= 0; i--) {
+        //     GPIOB->BSRR |= GPIO_BSRR_BS_8;
+        //     wait_ms(1);
+        //     bool bitval = (((((int16_t) delta) >> i) & 0x1) != 0);
+        //     if (!bitval) {
+        //         GPIOB->BSRR |= GPIO_BSRR_BR_8;
+        //     }
+        //     wait_ms(1);
+        //     GPIOB->BSRR |= GPIO_BSRR_BR_8;
+        //     wait_ms(1);
+        // }
 
         // GPIOB->BSRR |= GPIO_BSRR_BS_8;
         // uart_transmit_dma((uint8_t *) hello, len);
@@ -88,7 +110,7 @@ int main() {
         // uart_wait_for_transmission();
         // 35us transmission time for 6 bytes
 
-        wait_ms(200);
+        // wait_ms(200);
         //sync_ms();
     }
 }
