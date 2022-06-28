@@ -14,8 +14,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define MAX_DUTYCYCLE_COMMAND 65535
+#define MAX_DUTYCYCLE_COMMAND 65535U
 #define MIN_DUTYCYCLE_COMMAND -(MAX_DUTYCYCLE_COMMAND)
+
+#define NUM_RAW_DC_STEPS 1000U
+#define MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW 10U
+#define SCALING_FACTOR ((MAX_DUTYCYCLE_COMMAND / (NUM_RAW_DC_STEPS - MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW)) + 1U)
+#define MAP_UINT16_TO_RAW_DC(dc) (dc > 0 ? ((dc / SCALING_FACTOR) + MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW) : 0U)
 
 //////////////////////
 //  ERROR HANDLING  //
@@ -40,9 +45,10 @@
 // Tdts = CK_INT = 48MHz
 // xxx yyyyy -> 0xx selects no multiplier
 // Tdts = 20.8 ns
-// yyyyy = 11110 = 30
-// DEAD_TIME = 20.8 * 30 = 624ns
-#define DEAD_TIME 0x1E
+// yyyyy = 00111 = 7
+// DEAD_TIME = 20.8 * 7 = 145.6ns
+// 0000 0111 = 0x07
+#define DEAD_TIME 0x07
 
 ////////////////////////
 //  PUBLIC FUNCTIONS  //

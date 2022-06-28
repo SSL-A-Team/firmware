@@ -558,7 +558,7 @@ static void perform_commutation_cycle() {
     }
 
     // check for errors
-    if (manual_estop || has_hall_power_error || has_hall_disconnect_error) { //} || has_hall_transition_error) {
+    if (has_hall_power_error || has_hall_disconnect_error) { //} || has_hall_transition_error) {
         has_error_latched = true;
 
         // the hardware already performed a COM via TRGO but we'd like to COM the error state
@@ -701,8 +701,14 @@ static void TIM1_BRK_UP_TRG_COM_IRQHandler() {
  * @param motor_direction 
  */
 static void pwm6step_set_direct(uint16_t duty_cycle, MotorDirection_t motor_direction) {
+    uint16_t scaled_dc = MAP_UINT16_TO_RAW_DC(duty_cycle);
+    if (scaled_dc >= MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW 
+            && motor_direction != commanded_motor_direction) {
+        direction_change_commanded = true;
+    }
+
     commanded_motor_direction = motor_direction;
-    current_duty_cycle = duty_cycle;
+    current_duty_cycle = scaled_dc;
 
     perform_commutation_cycle();
 }
