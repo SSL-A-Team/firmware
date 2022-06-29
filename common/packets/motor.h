@@ -1,6 +1,6 @@
 /**
  * @file motor.h
- * @author your name (you@domain.com)
+ * @author Will Stuckey
  * @brief 
  * @version 0.1
  * @date 2022-06-27
@@ -10,6 +10,8 @@
  */
 
 #pragma once
+
+#include <stdint.h>
 
 typedef enum MotorCommandPacketType {
     PARAMS,
@@ -43,18 +45,19 @@ typedef enum MotorCommand_MotionType {
     OPEN_LOOP = 0,
     VELOCITY = 1,
     TORQUE = 2,
-    BOTH= 3;
+    BOTH= 3
 } MotorCommand_MotionType_t;
 
 typedef struct MotorCommand_Motion_Packet {
-    uint16_t reset : 1:
-    uint16_t type : 2;
+    uint16_t reset : 1;
+    MotorCommand_MotionType_t motion_control_type : 2;
 
     int16_t setpoint;
 } MotorCommand_Motion_Packet_t;
 
 typedef struct MotorCommandPacket {
     MotorCommandPacketType_t type;
+    uint32_t crc32;
     union {
         MotorCommand_Params_Packet_t params;
         MotorCommand_Motion_Packet_t motion;
@@ -84,21 +87,21 @@ typedef struct MotorResponse_Params_Packet {
     uint16_t cur_clamp;
 
     uint32_t crc;
-} MotorReponse_Params_Packet_t;
+} MotorResponse_Params_Packet_t;
 
 typedef struct MotorResponse_Motion_Packet {
     uint16_t master_error : 1;
     uint16_t hall_power_error : 1;
     uint16_t hall_disconnected_error : 1;
-    uint16_t hall_commutation_error : 1;
+    uint16_t bldc_commutation_error : 1;
     uint16_t bldc_commutation_watchdog_error : 1;
     uint16_t enc_decoding_error : 1;
+    uint16_t hall_enc_vel_disagreement_error: 1;
     uint16_t overcurrent_error : 1;
-    uint16_t undervoltage_error : 1:
+    uint16_t undervoltage_error : 1;
     uint16_t overvoltage_error : 1;
-
     uint16_t torque_limited : 1;
-    uint16_t reserved : 6;
+    uint16_t reserved : 5;
 
     uint32_t timestamp;
     uint16_t encoder_deltas;
@@ -109,7 +112,9 @@ typedef struct MotorResponse_Motion_Packet {
 
 typedef struct MotorResponsePacket {
     MotorResponsePacket_t type;
+    uint32_t crc32;
     union {
-
-    }
+        MotorResponse_Params_Packet_t params;
+        MotorResponse_Motion_Packet_t motion;
+    };
 } MotorResponsePacket_t;
