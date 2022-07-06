@@ -81,3 +81,7 @@ struct ADC_Result_t {
     uint16_t    vref;
     uint16_t    vbatt;
 };
+
+ADC_Result_t currsen_read();
+CS_Status_t currsen_setup();
+
