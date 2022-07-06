@@ -1,0 +1,35 @@
+[package]
+name = "motor"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+stspin_program = []
+
+[dependencies]
+cortex-m = "0.7.4"
+cortex-m-rt = "0.7.1"
+cortex-m-semihosting = "0.5.0"
+panic-halt = "0.2.0"
+static_assertions = "1.1.0"
+derive_more = "0.99.17"
+nalgebra = { version = "0.31.0", default-features = false }
+embedded-sdmmc = "0.3.0"
+usbd-serial = "0.1.1"
+usb-device = "0.2.8"
+
+[dependencies.stm32h7]
+version = "0.14.0"
+features = ["rt", "stm32h743v"]
+
+[dependencies.stm32h7xx-hal]
+path = "../../../git/stm32h7xx-hal"
+version = "0.12.1"
+features = ["rt", "stm32h743v", "sdmmc", "sdmmc-fatfs", "usb_hs"]
+
+[dependencies.embedded-dma]
+version = "0.2.0"
+
+[dependencies.embedded-hal]
+version = "0.2.6"
+features = ["unproven"]
