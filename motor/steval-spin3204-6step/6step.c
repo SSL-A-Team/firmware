@@ -115,7 +115,7 @@ static const int BRAKE_COMMUTATION_INDEX = 8;
 static const int COAST_COMMUTATION_INDEX = 9;
 
 /**
- * @brief counter clockwise transition table
+ * @brief clockwise transition table
  * 
  * Hall sensors should produce a gray-coded 3-bit value, meaning
  * 0 (0'b000) and 7 (0'b111) are invalid. The signal wires have
@@ -123,36 +123,37 @@ static const int COAST_COMMUTATION_INDEX = 9;
  * and 0 probably means there's a power issue.
  * 
  * Clockwise (human readable order)
- * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H
- * 1   0  0  1    V  H  G      1   0   0   0   0   1
- * 5   1  0  1    V  G  H      1   0   0   1   0   0
- * 4   1  0  0    H  G  V      0   0   0   1   1   0
- * 6   1  1  0    G  H  V      0   1   0   0   1   0
- * 2   0  1  0    G  V  H      0   1   1   0   0   0
- * 3   0  1  1    H  V  G      0   0   1   0   0   1
+ * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H 
+ * 1  0  0  1     V  H  G      0   1   0   0   1   0
+ * 3  0  1  1     H  V  G      0   0   0   1   1   0
+ * 2  0  1  0     G  V  H      1   0   0   1   0   0
+ * 6  1  1  0     G  H  V      1   0   0   0   0   1
+ * 4  1  0  0     H  G  V      0   0   1   0   0   1
+ * 5  1  0  1     V  G  H      0   1   1   0   0   0
  * 
  * Clockwise (direct hall index order)
- * 1   0  0  1    V  H  G      1   0   0   0   0   1
- * 2   0  1  0    G  V  H      0   1   1   0   0   0
- * 3   0  1  1    H  V  G      0   0   1   0   0   1
- * 4   1  0  0    H  G  V      0   0   0   1   1   0
- * 5   1  0  1    V  G  H      1   0   0   1   0   0
- * 6   1  1  0    G  H  V      0   1   0   0   1   0
- *
+ * 1  0  0  1     V  H  G      0   1   0   0   1   0
+ * 2  0  1  0     G  V  H      1   0   0   1   0   0
+ * 3  0  1  1     H  V  G      0   0   0   1   1   0
+ * 4  1  0  0     H  G  V      0   0   1   0   0   1
+ * 5  1  0  1     V  G  H      0   1   1   0   0   0
+ * 6  1  1  0     G  H  V      1   0   0   0   0   1
+ * 
  */
-
-static bool ccw_commutation_table[10][6] = {
-    HALL_ERROR_COMMUTATION,
-    {true,  false, false, false, false, true },
-    {false, true,  true,  false, false, false},
-    {false, false, true,  false, false, true},
-    {false, false, false, true,  true,  false},
-    {true,  false, false, true,  false, false},
+static bool cw_commutation_table[10][6] = {
+    HALL_ERROR_COMMUTATION,    
     {false, true,  false, false, true,  false},
+    {true,  false, false, true,  false, false},
+    {false, false, false, true,  true,  false},
+    {false, false, true,  false, false, true },
+    {false, true,  true,  false, false, false},
+    {true,  false, false, false, false, true },
     HALL_ERROR_COMMUTATION,
     BRAKE_COMMUTATION,
     COAST_COMMUTATION
 };
+
+
 
 static uint8_t cw_expected_hall_transition_table[8] = {
     0x0, // 0 -> 0, error state
@@ -174,31 +175,32 @@ static uint8_t cw_expected_hall_transition_table[8] = {
  * and 0 probably means there's a power issue.
  * 
  * Counter Clockwise (human readable order)
- * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H 
- * 1  0  0  1     V  H  G      0   1   0   0   1   0
- * 3  0  1  1     H  V  G      0   0   0   1   1   0
- * 2  0  1  0     G  V  H      1   0   0   1   0   0
- * 6  1  1  0     G  H  V      1   0   0   0   0   1
- * 4  1  0  0     H  G  V      0   0   1   0   0   1
- * 5  1  0  1     V  G  H      0   1   1   0   0   0
+ * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H
+ * 1   0  0  1    V  H  G      1   0   0   0   0   1
+ * 5   1  0  1    V  G  H      1   0   0   1   0   0
+ * 4   1  0  0    H  G  V      0   0   0   1   1   0
+ * 6   1  1  0    G  H  V      0   1   0   0   1   0
+ * 2   0  1  0    G  V  H      0   1   1   0   0   0
+ * 3   0  1  1    H  V  G      0   0   1   0   0   1
  * 
  * Counter Clockwise (direct hall index order)
- * 1  0  0  1     V  H  G      0   1   0   0   1   0
- * 2  0  1  0     G  V  H      1   0   0   1   0   0
- * 3  0  1  1     H  V  G      0   0   0   1   1   0
- * 4  1  0  0     H  G  V      0   0   1   0   0   1
- * 5  1  0  1     V  G  H      0   1   1   0   0   0
- * 6  1  1  0     G  H  V      1   0   0   0   0   1
- * 
+ * 1   0  0  1    V  H  G      1   0   0   0   0   1
+ * 2   0  1  0    G  V  H      0   1   1   0   0   0
+ * 3   0  1  1    H  V  G      0   0   1   0   0   1
+ * 4   1  0  0    H  G  V      0   0   0   1   1   0
+ * 5   1  0  1    V  G  H      1   0   0   1   0   0
+ * 6   1  1  0    G  H  V      0   1   0   0   1   0
+ *
  */
-static bool cw_commutation_table[10][6] = {
-    HALL_ERROR_COMMUTATION,    
-    {false, true,  false, false, true,  false},
-    {true,  false, false, true,  false, false},
-    {false, false, false, true,  true,  false},
-    {false, false, true,  false, false, true },
-    {false, true,  true,  false, false, false},
+
+static bool ccw_commutation_table[10][6] = {
+    HALL_ERROR_COMMUTATION,
     {true,  false, false, false, false, true },
+    {false, true,  true,  false, false, false},
+    {false, false, true,  false, false, true},
+    {false, false, false, true,  true,  false},
+    {true,  false, false, true,  false, false},
+    {false, true,  false, false, true,  false},
     HALL_ERROR_COMMUTATION,
     BRAKE_COMMUTATION,
     COAST_COMMUTATION
