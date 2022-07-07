@@ -48,14 +48,14 @@ typedef enum CommutationValuesType {
 //////////////////////
 
 static bool manual_estop = false;
-
 static bool invert_direction = false;
+static bool brake_on_dc_0 = false;
 
 static MotorDirection_t commanded_motor_direction = CLOCKWISE;
 static bool direction_change_commanded = false;
 static uint16_t current_duty_cycle = 0;
-
 static uint8_t hall_recorded_state_on_transition = 0;
+static bool command_brake = false;
 
 /////////////////////
 //  hall velocity  //
@@ -96,17 +96,23 @@ static int hall_transition_error_count = 0;
 #define BREAK_CHANNEL_EN_MAP  (TIM_CCER_CC1NE | TIM_CCER_CC2NE | TIM_CCER_CC3NE)
 #define BREAK_CHANNEL_DIS_MAP (TIM_CCER_CC1E  | TIM_CCER_CC2E  | TIM_CCER_CC3E )
 
-#ifdef BREAK_ON_HALL_ERROR
-    #define HALL_ERROR_CH_EN_MAP   BREAK_CHANNEL_EN_MAP
-    #define HALL_ERROR_CH_DIS_MAP  BREAK_CHANNEL_DIS_MAP
-    #define HALL_ERROR_COMMUTATION {true,  false, true,  false, true,  false}  
+#define COAST_COMMUTATION {false, false, false, false, false, false}
+
+#ifdef BRAKE_HIGH_SIDE
+    #define BRAKE_COMMUTATION {false, true,  false, true,  false, true }
 #else
-    #define HALL_ERROR_CH_EN_MAP   COAST_CHANNEL_EN_MAP
-    #define HALL_ERROR_CH_DIS_MAP  COAST_CHANNEL_DIS_MAP
-    #define HALL_ERROR_COMMUTATION {false, false, false, false, false, false}
+    #define BRAKE_COMMUTATION {true,  false, true,  false, true,  false}
 #endif
 
+#ifdef BRAKE_ON_HALL_ERROR
+    #define HALL_ERROR_COMMUTATION BRAKE_COMMUTATION 
+#else
+    #define HALL_ERROR_COMMUTATION COAST_COMMUTATION
+#endif
 
+static const int ESTOP_COMMUTATION_INDEX = 0;
+static const int BRAKE_COMMUTATION_INDEX = 8;
+static const int COAST_COMMUTATION_INDEX = 9;
 
 /**
  * @brief counter clockwise transition table
@@ -135,7 +141,7 @@ static int hall_transition_error_count = 0;
  *
  */
 
-static bool cw_commutation_table[8][6] = {
+static bool ccw_commutation_table[10][6] = {
     HALL_ERROR_COMMUTATION,
     {true,  false, false, false, false, true },
     {false, true,  true,  false, false, false},
@@ -143,7 +149,9 @@ static bool cw_commutation_table[8][6] = {
     {false, false, false, true,  true,  false},
     {true,  false, false, true,  false, false},
     {false, true,  false, false, true,  false},
-    HALL_ERROR_COMMUTATION
+    HALL_ERROR_COMMUTATION,
+    BRAKE_COMMUTATION,
+    COAST_COMMUTATION
 };
 
 static uint8_t cw_expected_hall_transition_table[8] = {
@@ -183,7 +191,7 @@ static uint8_t cw_expected_hall_transition_table[8] = {
  * 6  1  1  0     G  H  V      1   0   0   0   0   1
  * 
  */
-static bool ccw_commutation_table[8][6] = {
+static bool cw_commutation_table[10][6] = {
     HALL_ERROR_COMMUTATION,    
     {false, true,  false, false, true,  false},
     {true,  false, false, true,  false, false},
@@ -191,7 +199,9 @@ static bool ccw_commutation_table[8][6] = {
     {false, false, true,  false, false, true },
     {false, true,  true,  false, false, false},
     {true,  false, false, false, false, true },
-    HALL_ERROR_COMMUTATION
+    HALL_ERROR_COMMUTATION,
+    BRAKE_COMMUTATION,
+    COAST_COMMUTATION
 };
 
 static uint8_t ccw_expected_hall_transition_table[8] = {
@@ -354,8 +364,8 @@ static void pwm6step_setup_hall_timer() {
 #define  CCER_PHASE1_HIGH (TIM_CCER_CC1E)
 #define CCMR1_PHASE1_PWM (TIM_CCMR1_OC1PE | TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1CE)
 #define  CCER_PHASE1_PWM (TIM_CCER_CC1E | TIM_CCER_CC1NE)
-#define CCMR1_PHASE1_PWM2 (TIM_CCMR1_OC1PE | TIM_CCMR1_OC1M_0 | TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1CE)
-#define  CCER_PHASE1_PWM2 (TIM_CCER_CC1E | TIM_CCER_CC1NE)
+#define CCMR1_PHASE1_PWM_BRAKE (TIM_CCMR1_OC1PE | TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1CE)
+#define  CCER_PHASE1_PWM_BRAKE (TIM_CCER_CC1NE)
 
 #define CCMR1_PHASE2_OFF (TIM_CCMR1_OC2PE | TIM_CCMR1_OC2M_2)
 #define  CCER_PHASE2_OFF (TIM_CCER_CC2E)
@@ -365,8 +375,8 @@ static void pwm6step_setup_hall_timer() {
 #define  CCER_PHASE2_HIGH (TIM_CCER_CC2E)
 #define CCMR1_PHASE2_PWM (TIM_CCMR1_OC2PE | TIM_CCMR1_OC2M_1 | TIM_CCMR1_OC2M_2 | TIM_CCMR1_OC2CE)
 #define  CCER_PHASE2_PWM (TIM_CCER_CC2E | TIM_CCER_CC2NE)
-#define CCMR1_PHASE2_PWM2 (TIM_CCMR1_OC2PE | TIM_CCMR1_OC2M_0 | TIM_CCMR1_OC2M_1 | TIM_CCMR1_OC2M_2 | TIM_CCMR1_OC2CE)
-#define  CCER_PHASE2_PWM2 (TIM_CCER_CC2E | TIM_CCER_CC2NE)
+#define CCMR1_PHASE2_PWM_BRAKE (TIM_CCMR1_OC2PE | TIM_CCMR1_OC2M_1 | TIM_CCMR1_OC2M_2 | TIM_CCMR1_OC2CE)
+#define  CCER_PHASE2_PWM_BRAKE (TIM_CCER_CC2NE)
 
 #define CCMR2_PHASE3_OFF (TIM_CCMR2_OC3PE | TIM_CCMR2_OC3M_2)
 #define  CCER_PHASE3_OFF (TIM_CCER_CC3E)
@@ -376,8 +386,8 @@ static void pwm6step_setup_hall_timer() {
 #define  CCER_PHASE3_HIGH (TIM_CCER_CC3E)
 #define CCMR2_PHASE3_PWM (TIM_CCMR2_OC3PE | TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC3M_2 | TIM_CCMR2_OC3CE)
 #define  CCER_PHASE3_PWM (TIM_CCER_CC3E | TIM_CCER_CC3NE)
-#define CCMR2_PHASE3_PWM2 (TIM_CCMR2_OC3PE | TIM_CCMR2_OC3M_0 | TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC3M_2 | TIM_CCMR2_OC3CE)
-#define  CCER_PHASE3_PWM2 (TIM_CCER_CC3E | TIM_CCER_CC3NE)
+#define CCMR2_PHASE3_PWM_BRAKE (TIM_CCMR2_OC3PE | TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC3M_2 | TIM_CCMR2_OC3CE)
+#define  CCER_PHASE3_PWM_BRAKE (TIM_CCER_CC3NE)
 
 /**
  * @brief 
@@ -601,7 +611,11 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     bool *commutation_values;
     if (estop) {
         // use whatever error mode was selected for the tables
-        commutation_values = cw_commutation_table[0x0];
+        commutation_values = cw_commutation_table[ESTOP_COMMUTATION_INDEX];
+    } else if (command_brake) {
+        commutation_values = cw_commutation_table[BRAKE_COMMUTATION_INDEX];
+    } else if (current_duty_cycle == 0) {
+        commutation_values = cw_commutation_table[COAST_COMMUTATION_INDEX];
     } else {
         if (commanded_motor_direction == CLOCKWISE) {
             commutation_values = cw_commutation_table[hall_state];
@@ -610,20 +624,26 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
         }
     }
 
-    bool phase1_high = commutation_values[0];
-    bool phase1_low  = commutation_values[1];
-    bool phase2_high = commutation_values[2];
-    bool phase2_low  = commutation_values[3];
-    bool phase3_high = commutation_values[4];
-    bool phase3_low  = commutation_values[5];
+    bool phase1_low  = commutation_values[0];
+    bool phase1_high = commutation_values[1];
+    bool phase2_low  = commutation_values[2];
+    bool phase2_high = commutation_values[3];
+    bool phase3_low  = commutation_values[4];
+    bool phase3_high = commutation_values[5];
 
     uint16_t ccer = 0;
     uint16_t ccmr1 = 0;
     uint16_t ccmr2 = 0;
     if (phase1_low) {
-        TIM1->CCR1 = 0;
-        ccmr1 |= CCMR1_PHASE1_LOW;
-        ccer |= CCER_PHASE1_LOW;
+        if (command_brake) {
+            TIM1->CCR1 = current_duty_cycle;
+            ccmr1 |= CCMR1_PHASE1_PWM_BRAKE;
+            ccer |= CCER_PHASE1_PWM_BRAKE;
+        } else {
+            TIM1->CCR1 = 0;
+            ccmr1 |= CCMR1_PHASE1_LOW;
+            ccer |= CCER_PHASE1_LOW;
+        }
     } else if (phase1_high) {
         TIM1->CCR1 = current_duty_cycle;
         ccmr1 |= CCMR1_PHASE1_PWM;
@@ -635,9 +655,15 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     }
 
     if (phase2_low) {
-        TIM1->CCR2 = 0;
-        ccmr1 |= CCMR1_PHASE2_LOW;
-        ccer |= CCER_PHASE2_LOW;
+        if (command_brake) {
+            TIM1->CCR2 = current_duty_cycle;
+            ccmr1 |= CCMR1_PHASE2_PWM_BRAKE;
+            ccer |= CCER_PHASE2_PWM_BRAKE;            
+        } else {
+            TIM1->CCR2 = 0;
+            ccmr1 |= CCMR1_PHASE2_LOW;
+            ccer |= CCER_PHASE2_LOW;
+        }
     } else if (phase2_high) {
         TIM1->CCR2 = current_duty_cycle;
         ccmr1 |= CCMR1_PHASE2_PWM;
@@ -649,9 +675,15 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     }
 
     if (phase3_low) {
-        TIM1->CCR3 = 0;
-        ccmr2 |= CCMR2_PHASE3_LOW;
-        ccer |= CCER_PHASE3_LOW;
+        if (command_brake) {
+            TIM1->CCR3 = current_duty_cycle;
+            ccmr2 |= CCMR2_PHASE3_PWM_BRAKE;
+            ccer |= CCER_PHASE3_PWM_BRAKE;
+        } else {
+            TIM1->CCR3 = 0;
+            ccmr2 |= CCMR2_PHASE3_LOW;
+            ccer |= CCER_PHASE3_LOW;
+        }
     } else if (phase3_high) {
         TIM1->CCR3 = current_duty_cycle;
         ccmr2 |= CCMR2_PHASE3_PWM;
@@ -754,7 +786,13 @@ void pwm6step_set_duty_cycle(int32_t duty_cycle) {
 
     uint16_t timer_duty_cycle = (uint16_t) duty_cycle_abs;
 
+    command_brake = false;
     pwm6step_set_direct(timer_duty_cycle, motor_direction);
+}
+
+void pwm6step_brake(uint16_t braking_force) {
+    command_brake = true;
+    pwm6step_set_direct(braking_force, commanded_motor_direction);
 }
 
 void pwm6step_stop() {

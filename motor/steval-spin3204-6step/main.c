@@ -34,9 +34,45 @@ int main() {
 
     pwm6step_set_duty_cycle(16384);
 
-    wait_ms(10000);
+    wait_ms(2000);
     
-    pwm6step_estop();
+    pwm6step_set_duty_cycle(0);
+
+    wait_ms(2000);
+
+    pwm6step_set_duty_cycle(16384);
+
+    wait_ms(2000);
+    
+    pwm6step_brake(65535);
+
+    wait_ms(2000);
+
+    pwm6step_set_duty_cycle(16384);
+
+    wait_ms(2000);
+    
+    pwm6step_brake(32768);
+
+    wait_ms(2000);
+
+    pwm6step_set_duty_cycle(16384);
+
+    wait_ms(2000);
+    
+    pwm6step_brake(60000);
+
+    wait_ms(2000);
+
+    // pwm6step_brake(65565);
+
+    // wait_ms(10000);
+    
+    // pwm6step_set_duty_cycle(0);
+
+    // wait_ms(10000);
+
+    //pwm6step_estop();
 
     // const char* hello = "hello";
     // int len = 6;

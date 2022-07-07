@@ -56,6 +56,7 @@
 
 void pwm6step_setup();
 void pwm6step_set_duty_cycle(int32_t duty_cycle);
+void pwm6step_brake(uint16_t braking_force);
 void pwm6step_stop();
 void pwm6step_estop();
 void pwm6step_invert_direction(bool invert);
