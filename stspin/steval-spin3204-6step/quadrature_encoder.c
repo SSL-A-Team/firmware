@@ -1,7 +1,16 @@
 /**
- * @brief 
+ * @file quadrature_encoder.c
+ * @author Will Stuckey & Austin Jones
+ * @brief functions for the STSPIN32 encoder interface counter
+ * @version 0.1
+ * @date 2022-06-12
  * 
- * @param timer 
+ * @copyright Copyright (c) 2022
+ * 
+ * Relevant Documents:
+ * stm32f0x1/stm32f0x2/stm32f0x8 reference "m0 reference"
+ *      pp. 422-424
+ * 
  */
 
 #include <stm32f031x6.h>
