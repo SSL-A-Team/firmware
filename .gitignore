@@ -4,6 +4,7 @@ result/
 
 # build files
 build/
+/bin/
 .o
 .d
 
@@ -13,3 +14,6 @@ build/
 **/*.mxproject
 **/Debug
 **/.settings
+
+# Odin Firmware
+private_binary_blobs/

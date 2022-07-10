@@ -1,7 +1,9 @@
 .PHONY: all
 
-.PHONY: setup
-setup:
+.DEFAULT_GOAL := all
+
+.PHONY: .setup
+.setup:
 	mkdir -p build/ && \
 	cd build && \
 	cmake .. \
@@ -10,21 +12,16 @@ setup:
 clean:
 	rm -rf build/
 
-test_directories := ${shell cd test && ls -d * && cd ..} 
 
-define make-test-target
-.PHONY: test-$1
-test-$1: setup
+steval-spin3201-6step: .setup
 	cd build/ && \
-	make test-$1
-all:: test-$1
-endef
-$(foreach element,$(test_directories),$(eval $(call make-test-target,$(element))))
+	make steval-spin3201-6step
 
-define make-test-prog-target
-.PHONY: test-$1-prog
-test-$1-prog: test-$1
+steval-spin3201-6step-prog: steval-spin3201-6step
 	cd build/ && \
-	make test-$1-prog
-endef
-$(foreach element,$(test_directories),$(eval $(call make-test-prog-target,$(element))))
+	make steval-spin3201-6step-prog
+
+steval-spin3201-6step-gdb: steval-spin3201-6step
+	cd build/ && \
+	make steval-spin3201-6step-gdb
+
