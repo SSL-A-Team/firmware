@@ -376,6 +376,7 @@ dependencies = [
 [[package]]
 name = "stm32h7xx-hal"
 version = "0.12.1"
+source = "git+https://github.com/petersonev/stm32h7xx-hal.git?branch=peripheral-macro-rework#9188f06530c52198f162d7fac5aa44a02633c199"
 dependencies = [
  "bare-metal 1.0.0",
  "cast",

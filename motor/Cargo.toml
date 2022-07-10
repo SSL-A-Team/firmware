@@ -23,7 +23,8 @@ version = "0.14.0"
 features = ["rt", "stm32h743v"]
 
 [dependencies.stm32h7xx-hal]
-path = "../../../git/stm32h7xx-hal"
+git = "https://github.com/petersonev/stm32h7xx-hal.git"
+branch = "peripheral-macro-rework"
 version = "0.12.1"
 features = ["rt", "stm32h743v", "sdmmc", "sdmmc-fatfs", "usb_hs"]
 
