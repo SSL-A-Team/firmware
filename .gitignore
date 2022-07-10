@@ -4,6 +4,7 @@ result/
 
 # build files
 build/
+/bin/
 .o
 .d
 

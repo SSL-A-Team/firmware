@@ -7,9 +7,15 @@ This is the unified firmware repository for the A-Team.
 We use the [Nix package manager](https://nixos.org/) to handle dependencies. Install options are below:
 - Linux Auto-Setup: `./util/linux_setup.sh`.
 - Linux Manual: `sh <(curl -L https://nixos.org/nix/install) --daemon`
+- Windows Subsystem for Linux (WSL) Manual: `sh <(curl -L https://nixos.org/nix/install) --no-daemon`
 - OSX Manual: `sh <(curl -L https://nixos.org/nix/install)`
 
 ### Enter the Development Environment
+
+For `nix` to work properly on WSL, you may need to add the following to `/etc/nix/nix.conf`:
+```
+experimental-features = nix-command flakes
+```
 
 Run `nix develop` to enter a shell with all required dependencies on the path.
 
