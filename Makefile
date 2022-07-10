@@ -13,7 +13,7 @@ clean:
 	rm -rf build/
 
 
-steval-spin3201-6step: setup
+steval-spin3201-6step: .setup
 	cd build/ && \
 	make steval-spin3201-6step
 
