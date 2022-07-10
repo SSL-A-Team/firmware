@@ -22,6 +22,9 @@
       in {
         devShell = pkgs.mkShell {
           buildInputs = with pkgs; [
+            cargo
+            rustc
+            rustfmt
             gnumake
             cmake
             gcc-arm-embedded-10
