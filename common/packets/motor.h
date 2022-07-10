@@ -13,6 +13,8 @@
 
 #include <stdint.h>
 
+typedef float PidValue_t;
+
 typedef enum MotorCommandPacketType {
     PARAMS,
     MOTION
@@ -31,12 +33,12 @@ typedef struct MotorCommand_Params_Packet {
     uint16_t reserved : 8;
 
     uint32_t timestamp;
-    int16_t vel_p;
-    int16_t vel_i;
-    int16_t vel_d;
-    int16_t cur_p;
-    int16_t cur_i;
-    int16_t cur_d;
+    PidValue_t vel_p;
+    PidValue_t vel_i;
+    PidValue_t vel_d;
+    PidValue_t cur_p;
+    PidValue_t cur_i;
+    PidValue_t cur_d;
     uint16_t cur_clamp;
     // add future params here
 } MotorCommand_Params_Packet_t;
@@ -78,12 +80,12 @@ typedef struct MotorResponse_Params_Packet {
     uint8_t version_minor;
     uint16_t version_patch;
     uint32_t timestamp;
-    int16_t vel_p;
-    int16_t vel_i;
-    int16_t vel_d;
-    int16_t cur_p;
-    int16_t cur_i;
-    int16_t cur_d;
+    PidValue_t vel_p;
+    PidValue_t vel_i;
+    PidValue_t vel_d;
+    PidValue_t cur_p;
+    PidValue_t cur_i;
+    PidValue_t cur_d;
     uint16_t cur_clamp;
 
     uint32_t crc;
