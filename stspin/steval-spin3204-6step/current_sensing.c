@@ -23,37 +23,41 @@
  * 
  * @return ADC_Result result of the ADC operation
  */
-ADC_Result_t currsen_read()
+void currsen_read(ADC_Result_t *res)
 {
-    // Select ch 4 (motor pin), ch 17 (Vref), ch 18 (Vbat) 
-    ADC1->CHSELR = ADC_CHSELR_CHSEL4 | ADC_CHSELR_CHSEL17 | ADC_CHSELR_CHSEL18;
+    const int NUM_CHANNELS = 1;
+
+    // Select ch 3 (pot), ch 4 (motor pin), ch 17 (Vref), ch 18 (Vbat) 
+    ADC1->CHSELR = ADC_CHSELR_CHSEL3; // | ADC_CHSELR_CHSEL4 | ADC_CHSELR_CHSEL17 | ADC_CHSELR_CHSEL18;
     // Select a sampling mode of 111 i.e. 239.5 ADC clk to be greater than 17.1us
     // TODO Need to configure timing based on rise resistance
     ADC1->SMPR |= ADC_SMPR_SMP_0 | ADC_SMPR_SMP_1 | ADC_SMPR_SMP_2;
 
     // Wake-up the VREFINT (only for VBAT, Temp sensor and VRefInt) 
     ADC->CCR |= ADC_CCR_VREFEN;
-    ADC_Result_t res;
-    res.status = CS_OK;
+    //ADC_Result_t res;
+    res->status = CS_OK;
     while (1)
     {
-        // Start ADC conversion
-        ADC1->CR |= ADC_CR_ADSTART;
-        for (i=0; i < 3; i++)
+
+        for (int i = 0; i < NUM_CHANNELS; i++)
         {
+            // Start ADC conversion
+            ADC1->CR |= ADC_CR_ADSTART;
+
             // Wait until end of conversion
             uint32_t timeout_count = 0;
             while ((ADC1->ISR & ADC_ISR_EOC) == 0)
             {
                 if (timeout_count < ADC_DIS_TIMEOUT)
                 {
-                    wait_ms(1);
-                    timeout_count += 1;
+                    //wait_ms(1);
+                    //timeout_count += 1;
                 }
                 else
                 {
-                    res.status = CS_TIMEOUT;
-                    return res;
+                    res->status = CS_TIMEOUT;
+                    //return res;
                 }
             }
             // Store the ADC conversion
@@ -61,14 +65,19 @@ ADC_Result_t currsen_read()
             switch (i)
             {
                 case 0:
-                    res.motor0 = currADC;
-                    break;
+                    res->pot = currADC;
+                    return;
+                    //break;
                 case 1:
-                    res.vref = currADC;
+                    res->motor0 = currADC;
                     break;
                 case 2:
-                    res.vbatt = currADC;
-                    return res;
+                    res->vref = currADC;
+                    break;
+                case 3:
+                    res->vbatt = currADC;
+                    return;
+                    //return res;
             }
         }
     }
@@ -154,7 +163,7 @@ CS_Status_t currsen_adc_conf()
     // 10 bit, 11.5 t_SAR, 1.5 t_SMPL, 13 t_CONV clock cycles
     // Set ADC conversion data alignment - right align
     // Set ADC low power mode - None
-    MODIFY_REG(ADCx->CFGR1,
+    MODIFY_REG(ADC1->CFGR1,
                 ADC_CFGR1_RES
                | ADC_CFGR1_ALIGN
                | ADC_CFGR1_WAIT
@@ -168,7 +177,7 @@ CS_Status_t currsen_adc_conf()
     // Set ADC clock
     // PCLK DIV 2, Latency is deterministic (no jitter) and equal to
     // 2.75 ADC clock cycles
-    MODIFY_REG(ADCx->CFGR2,
+    MODIFY_REG(ADC1->CFGR2,
                ADC_CFGR2_CKMODE
               ,
                ADC_CFGR2_CKMODE_0
@@ -212,7 +221,7 @@ CS_Status_t currsen_adc_cal()
     ADC1->CR |= ADC_CR_ADCAL; 
 
     // Waiting for calibration to finish, timeout if too long
-    timeout = 0;
+    timeout_count = 0;
     while ((ADC1->CR & ADC_CR_ADCAL) != 0)
     {
         if (timeout_count < ADC_CAL_TIMEOUT)
@@ -226,7 +235,7 @@ CS_Status_t currsen_adc_cal()
         }
     }
 
-    return CS_OK:
+    return CS_OK;
 }
 
 
@@ -241,7 +250,7 @@ CS_Status_t currsen_adc_en()
     if ((ADC1->ISR & ADC_ISR_ADRDY) != 0)
     {
         // Clear ADRDY 
-        ADC1->ISR |= ADC_CR_ADRDY;
+        ADC1->ISR |= ADC_ISR_ADRDY;
     }
 
     // Enable the ADC

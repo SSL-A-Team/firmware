@@ -12,12 +12,17 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <stm32f031x6.h>
 
+#include "uart.h"
+
 volatile bool uart_dma_tx_active = false;
+uint8_t uart_tx_dma_buffer[DMA_TX_BUFFER_CAPACITY];
+
 volatile bool uart_dma_rx_active = false;
-uint8_t uart_rx_dma_buffer[64];
+uint8_t uart_rx_dma_buffer[DMA_RX_BUFFER_DEPTH][DMA_RX_BUFFER_CAPACITY];
 
 /**
  * @brief check if a UART DMA transmission is pending
@@ -55,6 +60,8 @@ bool uart_transmit_dma(uint8_t *data_buf, uint16_t len) {
         return false;
     }
 
+    memcpy(uart_tx_dma_buffer, data_buf, len);
+
     // prevent nested/concurrent transfers
     uart_dma_tx_active = true;
 
@@ -62,7 +69,7 @@ bool uart_transmit_dma(uint8_t *data_buf, uint16_t len) {
     DMA1->IFCR = DMA_IFCR_CGIF2;
 
     // set the transmit buffer and length
-    DMA1_Channel2->CMAR = (uint32_t) data_buf;
+    DMA1_Channel2->CMAR = (uint32_t) uart_rx_dma_buffer;
     DMA1_Channel2->CNDTR = len;
 
     // clear the transfer complete flag

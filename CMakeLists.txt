@@ -27,8 +27,10 @@ add_executable(steval-spin3201-6step.elf
 )
 
 header_directories(STEVAL_SPIN3201_INCLUDE_DIRS ${STEVAL_SPIN3201_DIR})
+header_directories(COMMON_INCLUDE_DIRS "common")
 target_include_directories(steval-spin3201-6step.elf PRIVATE
 	${STEVAL_SPIN3201_INCLUDE_DIRS}
+	${COMMON_INCLUDE_DIRS}
 )
 
 target_compile_definitions(steval-spin3201-6step.elf PRIVATE

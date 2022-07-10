@@ -75,13 +75,20 @@ typedef enum
 // TODO tune timing
 #define ADC_STP_TIMEOUT 5 //ms
 
-struct ADC_Result_t {
+typedef struct ADC_Result {
     CS_Status_t status;
+    uint16_t    pot;
     uint16_t    motor0;
     uint16_t    vref;
     uint16_t    vbatt;
-};
+} ADC_Result_t;
 
-ADC_Result_t currsen_read();
+void currsen_read(ADC_Result_t *res);
 CS_Status_t currsen_setup();
+CS_Status_t currsen_adc_group_config();
+CS_Status_t currsen_adc_conf();
+CS_Status_t currsen_adc_cal();
+CS_Status_t currsen_adc_en();
+CS_Status_t currsen_adc_dis();
+
 

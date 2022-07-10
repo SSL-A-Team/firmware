@@ -13,12 +13,35 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "stspin_packets.h"
+
+#include "6step.h"
+#include "current_sensing.h"
 #include "quadrature_encoder.h"
 #include "setup.h"
-#include "uart.h"
 #include "time.h"
-#include "6step.h"
-#include "quadrature_encoder.h"
+#include "uart.h"
+
+static int slipped_control_frame_count = 0;
+
+void _debug_value_manchester(uint16_t val) {
+    GPIOB->BSRR |= GPIO_BSRR_BR_8;
+    wait_ms(1);
+
+    for (int i = 15; i >= 0; i--) {
+        GPIOB->BSRR |= GPIO_BSRR_BS_8;
+        wait_ms(1);
+        if ((val >> i) & 0x1 != 0) {
+            wait_ms(1);
+            GPIOB->BSRR |= GPIO_BSRR_BR_8;
+        } else {
+            GPIOB->BSRR |= GPIO_BSRR_BR_8;
+            wait_ms(1);
+        }
+
+        wait_ms(1);
+    }
+}
 
 __attribute__((optimize("O0")))
 int main() {
@@ -33,62 +56,93 @@ int main() {
     quadenc_setup();
     quadenc_reset_encoder_delta();
 
+    ADC_Result_t res;
+    currsen_setup();
+
+    // while (true) {
+    //     wait_ms(100);
+    //     GPIOB->BSRR |= GPIO_BSRR_BS_8;
+    //     currsen_read(&res);
+    //     GPIOB->BSRR |= GPIO_BSRR_BR_8;
+
+    //     wait_ms(1);
+
+    //     _debug_value_manchester(res.pot);
+
+    //     wait_ms(1);
+    // }
+
+    while(true) {
+        currsen_read(&res);
+        int32_t raw_set_point = ((int32_t) res.pot) - 511;
+        int32_t scaled_set_point = raw_set_point * 127;
+        pwm6step_set_duty_cycle(scaled_set_point);
+        wait_ms(10);
+    }
+
+
+
     // toggle J1-1
     while (true) {
-        // GPIOB->BSRR |= GPIO_BSRR_BS_8;
-        // //for (int32_t i = 0; i < 2000000L; i++);
-        // wait_ms(50);
-        // //GPIOB->BSRR &= ~(GPIO_BSRR_BS_8);
-        // GPIOB->BSRR |= GPIO_BSRR_BR_8;
-        // //for (int32_t i = 0; i < 2000000L; i++);
-        // wait_ms(50);
+        // read control state
+        //  - encoders
+        //  - hall
+        //  - current
 
-        //GPIOB->BSRR |= GPIO_BSRR_BS_8;
-        //wait_ms(1000);
-        //GPIOB->BSRR |= GPIO_BSRR_BR_8;
-        //wait_ms(1000);
+        // execute control loops
+        //  - vel
+        //  - toruqe
 
-        // Send counter to UART
-        // uint16_t count = quadenc_get_counter();
-        // uint8_t lower_counter = (uint8_t)(count & 0xFFU);
-        // uint8_t upper_counter = (uint8_t)((count & 0xFF00U) >> 0x8U);
-        // uint8_t dir = 0x00;
-        // if (TIM3->CR1 & TIM_CR1_DIR_Msk) {
-        //     dir = 0xFF;
-        // } else {
-        //     dir = 0x00;
-        // }
-        //uint8_t data[2] = {lower_counter, upper_counter};
-        // uint8_t data[5] = {0x3C, lower_counter, upper_counter, 0x3C, dir};
-        // uart_transmit_dma(data, (uint16_t)5);
-        // uart_wait_for_transmission();
+        //////////////////////////////////
+        //  Transmit Motion Data Frame  //
+        //////////////////////////////////
 
-        GPIOB->BSRR |= GPIO_BSRR_BS_8;
-        wait_ms(1);
-        GPIOB->BSRR |= GPIO_BSRR_BR_8;
-        wait_ms(1);
+        // read error states
+        const MotorErrors_t reported_motor_errors = pwm6step_get_motor_errors();
 
-        // int32_t delta = quadenc_get_encoder_delta();
-        // for (int i = 15; i >= 0; i--) {
-        //     GPIOB->BSRR |= GPIO_BSRR_BS_8;
-        //     wait_ms(1);
-        //     bool bitval = (((((int16_t) delta) >> i) & 0x1) != 0);
-        //     if (!bitval) {
-        //         GPIOB->BSRR |= GPIO_BSRR_BR_8;
-        //     }
-        //     wait_ms(1);
-        //     GPIOB->BSRR |= GPIO_BSRR_BR_8;
-        //     wait_ms(1);
-        // }
+        // transmit data frame
 
-        // GPIOB->BSRR |= GPIO_BSRR_BS_8;
-        // uart_transmit_dma((uint8_t *) hello, len);
-        // GPIOB->BSRR |= GPIO_BSRR_BR_8;
+        MotorResponsePacket_t response_packet;
+        response_packet.type = MCP_MOTION;
+        response_packet.motion.master_error = false; // TODO update any error
 
-        // uart_wait_for_transmission();
-        // 35us transmission time for 6 bytes
+        // bldc errors
+        response_packet.motion.hall_power_error = reported_motor_errors.hall_power;
+        response_packet.motion.hall_disconnected_error = reported_motor_errors.hall_disconnected;
+        response_packet.motion.bldc_transition_error = reported_motor_errors.invalid_transitions;
+        response_packet.motion.bldc_commutation_watchdog_error = reported_motor_errors.commutation_watchdog_timeout;
 
-        // wait_ms(200);
-        //sync_ms();
+        // encoder errors
+        response_packet.motion.enc_disconnected = false;
+        response_packet.motion.enc_decoding_error = false;
+
+        // velocity checks
+        response_packet.motion.hall_enc_vel_disagreement_error = false;
+
+        // ADC errors
+        response_packet.motion.overcurrent_error = false;
+        response_packet.motion.undervoltage_error = false;
+        response_packet.motion.overvoltage_error = false;
+
+        // torque limiting
+        response_packet.motion.torque_limited = false;
+
+        // loop time
+        response_packet.motion.control_loop_time_error = false;
+
+        // timestamp
+        response_packet.motion.timestamp = 0U;
+
+        // motion data
+        response_packet.motion.encoder_deltas = 0U;
+        response_packet.motion.enc_vel_estimate = 0U;
+        response_packet.motion.hall_vel_estimate = 0U;
+        response_packet.motion.current_estimate = 0U;
+
+        //uart_transmit_dma((uint8_t *) &response_packet, sizeof(MotorResponsePacket_t));
+
+        if (sync_ms()) {
+            slipped_control_frame_count++;
+        }
     }
 }

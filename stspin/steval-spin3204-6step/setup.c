@@ -139,6 +139,9 @@ inline void setup_io() {
     // enable timer 1 source on the peripherial bus
     RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;
 
+    // enable ADC clock
+    RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
+
     GPIOB->MODER |= GPIO_MODER_MODER8_0;
     GPIOB->MODER |= GPIO_MODER_MODER9_0;
     //GPIOB->OTYPER &= ~GPIO_OTYPER_OT_8;

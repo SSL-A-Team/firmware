@@ -16,8 +16,8 @@
 typedef float PidValue_t;
 
 typedef enum MotorCommandPacketType {
-    PARAMS,
-    MOTION
+    MCP_PARAMS,
+    MCP_MOTION
 } MotorCommandPacketType_t;
 
 typedef struct MotorCommand_Params_Packet {
@@ -71,8 +71,8 @@ typedef struct MotorCommandPacket {
 /////////////////
 
 typedef enum MotorResponsePacketType {
-    PARAMS,
-    MOTION
+    MRP_PARAMS,
+    MRP_MOTION
 } MotorResponsePacketType_t;
 
 typedef struct MotorResponse_Params_Packet {
@@ -95,15 +95,17 @@ typedef struct MotorResponse_Motion_Packet {
     uint16_t master_error : 1;
     uint16_t hall_power_error : 1;
     uint16_t hall_disconnected_error : 1;
-    uint16_t bldc_commutation_error : 1;
+    uint16_t bldc_transition_error : 1;
     uint16_t bldc_commutation_watchdog_error : 1;
+    uint16_t enc_disconnected: 1;
     uint16_t enc_decoding_error : 1;
     uint16_t hall_enc_vel_disagreement_error: 1;
     uint16_t overcurrent_error : 1;
     uint16_t undervoltage_error : 1;
     uint16_t overvoltage_error : 1;
     uint16_t torque_limited : 1;
-    uint16_t reserved : 5;
+    uint16_t control_loop_time_error: 1;
+    uint16_t reserved : 3;
 
     uint32_t timestamp;
     uint16_t encoder_deltas;
@@ -113,7 +115,7 @@ typedef struct MotorResponse_Motion_Packet {
 } MotorResponse_Motion_Packet_t;
 
 typedef struct MotorResponsePacket {
-    MotorResponsePacket_t type;
+    MotorResponsePacketType_t type;
     uint32_t crc32;
     union {
         MotorResponse_Params_Packet_t params;

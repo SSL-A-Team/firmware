@@ -31,6 +31,13 @@
 
 #define HALL_TRANSITION_ERROR_THRESHOLD 3
 
+typedef struct MotorErrors {
+    bool hall_power;
+    bool hall_disconnected;
+    bool invalid_transitions;
+    bool commutation_watchdog_timeout;
+} MotorErrors_t;
+
 ////////////////////////////////
 //  LOW LEVEL CONTROL PARAMS  //
 ////////////////////////////////
@@ -61,5 +68,6 @@ void pwm6step_stop();
 void pwm6step_estop();
 void pwm6step_invert_direction(bool invert);
 bool pwm6step_is_direction_inverted();
+const MotorErrors_t pwm6step_get_motor_errors();
 bool pwm6step_hall_rps_estimate_valid();
 int pwm6step_hall_get_rps_estimate();
