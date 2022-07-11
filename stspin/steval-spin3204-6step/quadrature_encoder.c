@@ -15,6 +15,8 @@
 
 #include <stm32f031x6.h>
 
+#include "main.h"
+
 /////////////////////////
 //  private variables  //
 /////////////////////////
@@ -100,4 +102,9 @@ int32_t quadenc_get_encoder_delta() {
 
     int32_t enc_delta = (int32_t) cur_val - 0x8000;
     return enc_delta;
+}
+
+float quadenc_get_w(float deltat_s) {
+    int32_t deltas = quadenc_get_encoder_delta();
+    return (((float) deltas / (float) (ENC_TICKS_PER_REV)) / deltat_s);
 }

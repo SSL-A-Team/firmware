@@ -9,9 +9,9 @@
  * 
  */
 
-#include <stm32f031x6.h>
-
 #include <stdbool.h>
+
+#include <stm32f031x6.h>
 
 #include "time.h"
 

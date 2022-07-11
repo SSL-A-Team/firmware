@@ -484,6 +484,8 @@ static void TIM2_IRQHandler_HallTransition() {
         had_multiple_transitions = true;
     }
 
+    
+
     perform_commutation_cycle();
 
     // read of CCR1 should clear the int enable (PENDING?) flag

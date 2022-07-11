@@ -17,6 +17,7 @@
 
 #include "6step.h"
 #include "current_sensing.h"
+#include "main.h"
 #include "quadrature_encoder.h"
 #include "setup.h"
 #include "time.h"
@@ -29,6 +30,25 @@ void _debug_value_manchester(uint16_t val) {
     wait_ms(1);
 
     for (int i = 15; i >= 0; i--) {
+        GPIOB->BSRR |= GPIO_BSRR_BS_8;
+        wait_ms(1);
+        if ((val >> i) & 0x1 != 0) {
+            wait_ms(1);
+            GPIOB->BSRR |= GPIO_BSRR_BR_8;
+        } else {
+            GPIOB->BSRR |= GPIO_BSRR_BR_8;
+            wait_ms(1);
+        }
+
+        wait_ms(1);
+    }
+}
+
+void _debug_value_manchester_32(int32_t val) {
+    GPIOB->BSRR |= GPIO_BSRR_BR_8;
+    wait_ms(1);
+
+    for (int i = 31; i >= 0; i--) {
         GPIOB->BSRR |= GPIO_BSRR_BS_8;
         wait_ms(1);
         if ((val >> i) & 0x1 != 0) {
@@ -72,26 +92,47 @@ int main() {
     //     wait_ms(1);
     // }
 
-    while(true) {
-        currsen_read(&res);
-        int32_t raw_set_point = ((int32_t) res.pot) - 511;
-        int32_t scaled_set_point = raw_set_point * 127;
-        pwm6step_set_duty_cycle(scaled_set_point);
-        wait_ms(10);
-    }
+    // pwm6step_set_duty_cycle(16384);
 
+    // while(true) {
+    //     currsen_read(&res);
+    //     _debug_value_manchester(res.pot);
+    //     wait_ms(10);
+    // }
 
+    const float u = 10.0f;
+    float last_speed = 0.0f;
+    float last_speed_2 = 0.0f;
 
     // toggle J1-1
     while (true) {
+        GPIOB->BSRR |= GPIO_BSRR_BS_9;
+
         // read control state
         //  - encoders
         //  - hall
         //  - current
+        int32_t enc_count = quadenc_get_encoder_delta();
+        _debug_value_manchester_32(enc_count);
+        wait_ms(5);
+        //float enc_vel_rev_per_s = quadenc_get_w(0.001);
 
-        // execute control loops
-        //  - vel
-        //  - toruqe
+
+        //float filt_speed = (enc_vel_rev_per_s + last_speed + last_speed_2)/3.0f;
+        //last_speed_2 = last_speed;
+        //last_speed = enc_vel_rev_per_s;
+        //
+        //// execute control loops
+        ////  - vel
+        ////  - toruqe
+        //
+        //const float kP = 45000.0f;
+        //float err = (u - filt_speed) / MAX_MOTOR_REV_PER_S;
+        //float setpoint = kP * err;
+        float setpoint = u / MAX_MOTOR_REV_PER_S * 65535.0f;
+        GPIOB->BSRR |= GPIO_BSRR_BR_9;
+
+        pwm6step_set_duty_cycle((int32_t) setpoint);
 
         //////////////////////////////////
         //  Transmit Motion Data Frame  //
