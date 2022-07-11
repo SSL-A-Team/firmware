@@ -10,10 +10,6 @@ We use the [Nix package manager](https://nixos.org/) to handle dependencies. Ins
 - Windows Subsystem for Linux (WSL) Manual: `sh <(curl -L https://nixos.org/nix/install) --no-daemon`
 - OSX Manual: `sh <(curl -L https://nixos.org/nix/install)`
 
-NOTE: still working on rust support. Run:
-- install rust
-- run `rustup target add thumbv7em-none-eabihf`
-
 ### Enter the Development Environment
 
 For `nix` to work properly on WSL, you may need to add the following to `/etc/nix/nix.conf`:
