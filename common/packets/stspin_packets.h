@@ -87,8 +87,6 @@ typedef struct MotorResponse_Params_Packet {
     PidValue_t cur_i;
     PidValue_t cur_d;
     uint16_t cur_clamp;
-
-    uint32_t crc;
 } MotorResponse_Params_Packet_t;
 
 typedef struct MotorResponse_Motion_Packet {
@@ -97,7 +95,7 @@ typedef struct MotorResponse_Motion_Packet {
     uint16_t hall_disconnected_error : 1;
     uint16_t bldc_transition_error : 1;
     uint16_t bldc_commutation_watchdog_error : 1;
-    uint16_t enc_disconnected: 1;
+    uint16_t enc_disconnected_error: 1;
     uint16_t enc_decoding_error : 1;
     uint16_t hall_enc_vel_disagreement_error: 1;
     uint16_t overcurrent_error : 1;
@@ -108,10 +106,14 @@ typedef struct MotorResponse_Motion_Packet {
     uint16_t reserved : 3;
 
     uint32_t timestamp;
-    uint16_t encoder_deltas;
-    uint16_t enc_vel_estimate;
-    uint16_t hall_vel_estimate;
-    uint16_t current_estimate;
+    uint16_t encoder_delta;
+    float vel_enc_estimate;
+    float vel_hall_estimate;
+    float vel_computed_error;
+    float vel_computed_setpoint;
+    float current_estimate;
+    float current_computed_error;
+    float current_computed_setpoint;
 } MotorResponse_Motion_Packet_t;
 
 typedef struct MotorResponsePacket {

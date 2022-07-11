@@ -104,7 +104,6 @@ int32_t quadenc_get_encoder_delta() {
     return enc_delta;
 }
 
-float quadenc_get_w(float deltat_s) {
-    int32_t deltas = quadenc_get_encoder_delta();
-    return (((float) deltas / (float) (ENC_TICKS_PER_REV)) / deltat_s);
+float quadenc_delta_to_w(float encoder_delta, float deltat_s) {
+    return ((encoder_delta / (float) (ENC_TICKS_PER_REV)) / deltat_s);
 }

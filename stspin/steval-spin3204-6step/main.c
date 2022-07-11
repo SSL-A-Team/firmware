@@ -12,6 +12,7 @@
 #include <stm32f031x6.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "stspin_packets.h"
 
@@ -79,6 +80,9 @@ int main() {
     ADC_Result_t res;
     currsen_setup();
 
+    MotorResponsePacket_t response_packet;
+    memset(&response_packet, 0, sizeof(MotorResponsePacket_t));
+
     // while (true) {
     //     wait_ms(100);
     //     GPIOB->BSRR |= GPIO_BSRR_BS_8;
@@ -112,27 +116,27 @@ int main() {
         //  - encoders
         //  - hall
         //  - current
-        int32_t enc_count = quadenc_get_encoder_delta();
-        _debug_value_manchester_32(enc_count);
-        wait_ms(5);
-        //float enc_vel_rev_per_s = quadenc_get_w(0.001);
+        // int32_t enc_count = quadenc_get_encoder_delta();
+        // _debug_value_manchester_32(enc_count);
+        // wait_ms(5);
+        int32_t enc_delta = quadenc_get_encoder_delta();
+        float enc_vel_rev_per_s = quadenc_delta_to_w(enc_delta, 0.001);
 
 
-        //float filt_speed = (enc_vel_rev_per_s + last_speed + last_speed_2)/3.0f;
-        //last_speed_2 = last_speed;
-        //last_speed = enc_vel_rev_per_s;
-        //
-        //// execute control loops
-        ////  - vel
-        ////  - toruqe
-        //
-        //const float kP = 45000.0f;
-        //float err = (u - filt_speed) / MAX_MOTOR_REV_PER_S;
-        //float setpoint = kP * err;
-        float setpoint = u / MAX_MOTOR_REV_PER_S * 65535.0f;
-        GPIOB->BSRR |= GPIO_BSRR_BR_9;
+        float filt_speed = (enc_vel_rev_per_s + last_speed + last_speed_2)/3.0f;
+        last_speed_2 = last_speed;
+        last_speed = enc_vel_rev_per_s;
+        
+        // execute control loops
+        //  - vel
+        //  - toruqe
+        
+        const float kP = 0.8f;
+        float vel_err = (u - filt_speed) / MAX_MOTOR_REV_PER_S * 65535.0f;
+        float vel_setpoint = kP * vel_err;
+        // float setpoint = u / MAX_MOTOR_REV_PER_S * 65535.0f;
 
-        pwm6step_set_duty_cycle((int32_t) setpoint);
+        pwm6step_set_duty_cycle((int32_t) vel_setpoint);
 
         //////////////////////////////////
         //  Transmit Motion Data Frame  //
@@ -143,7 +147,6 @@ int main() {
 
         // transmit data frame
 
-        MotorResponsePacket_t response_packet;
         response_packet.type = MCP_MOTION;
         response_packet.motion.master_error = false; // TODO update any error
 
@@ -154,7 +157,7 @@ int main() {
         response_packet.motion.bldc_commutation_watchdog_error = reported_motor_errors.commutation_watchdog_timeout;
 
         // encoder errors
-        response_packet.motion.enc_disconnected = false;
+        response_packet.motion.enc_disconnected_error = false;
         response_packet.motion.enc_decoding_error = false;
 
         // velocity checks
@@ -175,12 +178,20 @@ int main() {
         response_packet.motion.timestamp = 0U;
 
         // motion data
-        response_packet.motion.encoder_deltas = 0U;
-        response_packet.motion.enc_vel_estimate = 0U;
-        response_packet.motion.hall_vel_estimate = 0U;
-        response_packet.motion.current_estimate = 0U;
+        response_packet.motion.encoder_delta = enc_delta;
+        response_packet.motion.vel_enc_estimate = enc_vel_rev_per_s;
+        response_packet.motion.vel_hall_estimate = 0U;
+        response_packet.motion.vel_computed_error = vel_err;
+        response_packet.motion.vel_computed_setpoint = vel_setpoint;
 
-        //uart_transmit_dma((uint8_t *) &response_packet, sizeof(MotorResponsePacket_t));
+        response_packet.motion.current_estimate = 0.0f;
+        response_packet.motion.current_computed_error = 0.0f;
+        response_packet.motion.current_computed_setpoint = 0.0f;
+
+        uart_transmit_dma((uint8_t *) &response_packet, sizeof(MotorResponsePacket_t));
+        uart_wait_for_transmission();
+
+        GPIOB->BSRR |= GPIO_BSRR_BR_9;
 
         if (sync_ms()) {
             slipped_control_frame_count++;

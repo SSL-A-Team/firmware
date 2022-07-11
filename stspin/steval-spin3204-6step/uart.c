@@ -69,7 +69,7 @@ bool uart_transmit_dma(uint8_t *data_buf, uint16_t len) {
     DMA1->IFCR = DMA_IFCR_CGIF2;
 
     // set the transmit buffer and length
-    DMA1_Channel2->CMAR = (uint32_t) uart_rx_dma_buffer;
+    DMA1_Channel2->CMAR = (uint32_t) uart_tx_dma_buffer;
     DMA1_Channel2->CNDTR = len;
 
     // clear the transfer complete flag
