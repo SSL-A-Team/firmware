@@ -14,7 +14,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "stspin_packets.h"
+#include "ateam-common-packets/include/stspin_packets.h"
 
 #include "6step.h"
 #include "current_sensing.h"
