@@ -17,15 +17,22 @@
     (system: 
       let 
         overlays = [ (import rust-overlay) ];
-        # pkgs = nixpkgs.legacyPackages.${system};
+
         pkgs = import nixpkgs {
-          inherit system overlays;
+          inherit system overlays; 
         };
+
         python = "python39";
+
         packageName = "ateam-firmware";
 
       in {
         devShell = pkgs.mkShell {
+          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang}/lib/libclang.so";
+
+          shellHook = ''
+          export LIBCLANG_PATH="${pkgs.libclang.lib}/lib"
+          '';
 
           buildInputs = with pkgs; [
             # C/C++ build utils
@@ -34,12 +41,14 @@
             gcc-arm-embedded-10
             openocd
 
+            # userpsace clang and link vars for bindgen subtargets
+            clang
+
             # Rust Embedded
-            rust-bin.stable.latest.default
-            #rust-bin.stable.latest.default.override {
-            #  extensions = [ "rust-src" ];
-            #  targets = [ "thumbv7em-none-eabihf" ];
-            #}
+            (rust-bin.stable.latest.default.override {
+              extensions = [ "rust-src" ];
+              targets = [ "thumbv7em-none-eabihf" "thumbv6m-none-eabi" ];
+            })
 
             # Python
             (pkgs.${python}.withPackages

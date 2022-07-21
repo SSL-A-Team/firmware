@@ -1,10 +1,21 @@
 /**
- * @brief 
+ * @file quadrature_encoder.c
+ * @author Will Stuckey & Austin Jones
+ * @brief functions for the STSPIN32 encoder interface counter
+ * @version 0.1
+ * @date 2022-06-12
  * 
- * @param timer 
+ * @copyright Copyright (c) 2022
+ * 
+ * Relevant Documents:
+ * stm32f0x1/stm32f0x2/stm32f0x8 reference "m0 reference"
+ *      pp. 422-424
+ * 
  */
 
 #include <stm32f031x6.h>
+
+#include "main.h"
 
 /////////////////////////
 //  private variables  //
@@ -91,4 +102,8 @@ int32_t quadenc_get_encoder_delta() {
 
     int32_t enc_delta = (int32_t) cur_val - 0x8000;
     return enc_delta;
+}
+
+float quadenc_delta_to_w(float encoder_delta, float deltat_s) {
+    return ((encoder_delta / (float) (ENC_TICKS_PER_REV)) / deltat_s);
 }

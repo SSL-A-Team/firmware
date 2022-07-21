@@ -40,6 +40,9 @@ Run `make <target>` to build an ELF and flat bin of each target. Available targe
 - all
 - clean
 - test-breadboard-radio
+- steval-spin3201-6step
+- steval-spin3201-6step-prog
+- steval-spin3201-6steb-gdb
 
 ## Programming Targets
 

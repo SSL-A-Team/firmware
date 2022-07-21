@@ -139,6 +139,9 @@ inline void setup_io() {
     // enable timer 1 source on the peripherial bus
     RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;
 
+    // enable ADC clock
+    RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
+
     GPIOB->MODER |= GPIO_MODER_MODER8_0;
     GPIOB->MODER |= GPIO_MODER_MODER9_0;
     //GPIOB->OTYPER &= ~GPIO_OTYPER_OT_8;
@@ -192,6 +195,8 @@ void setup_uart() {
 	USART1->CR3 = USART_CR3_DMAT; // USART_CR3_DMAR;
     // set baud rate
 	USART1->BRR = 0x18; // => 2 Mbaud/s
+    // Enable idle line interrupt
+    USART1->CR1 |= USART_CR1_IDLEIE;
     // enable transmision
     USART1->CR1 |= (USART_CR1_TE); // USART_CR1_RE
     // enable the module
@@ -215,7 +220,7 @@ void setup_uart() {
     /////////////////////////////////
 
 	// USART1_RX, low priority, memory increment, peripheral to memory
-	// DMA1_Channel3->CCR = DMA_CCR_MINC;
+	// DMA1_Channel3->CCR = DMA_CCR_MINC | DMA_CCR_CIRC;
 	// DMA1_Channel3->CMAR = (uint32_t)rxSlots[0].data;
 	// DMA1_Channel3->CPAR = (uint32_t)&USART1->RDR;
 	// DMA1_Channel3->CNDTR = USART1_RX_SIZE;
@@ -241,5 +246,5 @@ void setup() {
     setup_clocks();
 
     setup_io();
-    //setup_uart();
+    setup_uart();
 }

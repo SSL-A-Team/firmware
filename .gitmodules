@@ -1,0 +1,3 @@
+[submodule "software-communication"]
+	path = software-communication
+	url = git@github.com:SSL-A-Team/software-communication.git
