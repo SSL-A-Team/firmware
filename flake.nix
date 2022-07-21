@@ -28,6 +28,11 @@
 
       in {
         devShell = pkgs.mkShell {
+          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang}/lib/libclang.so";
+
+          shellHook = ''
+          export LIBCLANG_PATH="${pkgs.libclang.lib}/lib"
+          '';
 
           buildInputs = with pkgs; [
             # C/C++ build utils
@@ -35,6 +40,9 @@
             cmake
             gcc-arm-embedded-10
             openocd
+
+            # userpsace clang and link vars for bindgen subtargets
+            clang
 
             # Rust Embedded
             (rust-bin.stable.latest.default.override {
