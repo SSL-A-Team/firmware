@@ -18,7 +18,7 @@ motor_openocd_cfg_file := board/st_nucleo_h743zi.cfg
 motor_binaries := ${shell cd motor/src/bin && ls -d * && cd ../../..}
 
 define create-rust-targets
-$1-$2:
+$1-$2: steval-spin3201-6step
 	cd $1/ && \
 	cargo build --release --bin $2
 all:: $1-$2
@@ -26,7 +26,7 @@ all:: $1-$2
 $1-$2-prog: $1-$2
 	./util/program.sh $3 $1/target/thumbv7em-none-eabihf/release/$2
 
-$1-$2-debug:
+$1-$2-debug: steval-spin3201-6step
 	cd $1/ && \
 	cargo build --bin $2
 all:: $1-$2-debug
