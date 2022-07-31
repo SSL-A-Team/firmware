@@ -11,6 +11,15 @@
 
 #pragma once
 
+#define DMA_TX_BUFFER_CAPACITY 48
+#define DMA_TX_BUFFER_DEPTH 4
+
+#define DMA_RX_BUFFER_CAPACITY 48
+#define DMA_RX_BUFFER_DEPTH 4
+
+#define ARRAY_LEN(x)            (sizeof(x) / sizeof((x)[0]))
+
 bool uart_transmit_dma_pending();
 bool uart_wait_for_transmission();
 bool uart_transmit_dma(uint8_t *data_buf, uint16_t len);
+bool uart_recv_dma(uint8_t *data_buf, uint16_t len);

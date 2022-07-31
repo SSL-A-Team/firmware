@@ -69,15 +69,12 @@ static uint8_t prev_hall_value = 0;
 //  error handling  //
 //////////////////////
 
-static bool has_error_latched = false;
+static MotorErrors_t motor_errors;
 
-static bool has_hall_power_error = false;
-static bool has_hall_disconnect_error = false;
 static int hall_power_error_count = 0;
 static int hall_disconnect_error_count = 0;
-
-static bool has_hall_transition_error = false;
 static int hall_transition_error_count = 0;
+
 
 ////////////////////////////////
 //  local data and functions  //
@@ -152,8 +149,6 @@ static bool cw_commutation_table[10][6] = {
     BRAKE_COMMUTATION,
     COAST_COMMUTATION
 };
-
-
 
 static uint8_t cw_expected_hall_transition_table[8] = {
     0x0, // 0 -> 0, error state
@@ -489,6 +484,8 @@ static void TIM2_IRQHandler_HallTransition() {
         had_multiple_transitions = true;
     }
 
+
+
     perform_commutation_cycle();
 
     // read of CCR1 should clear the int enable (PENDING?) flag
@@ -515,11 +512,11 @@ static void perform_commutation_cycle() {
     }
 
     if (hall_power_error_count > HALL_POWER_ERROR_THRESHOLD) {
-        has_hall_power_error = true;
+        motor_errors.hall_power = true;
     }
 
     if (hall_disconnect_error_count > HALL_DISCONNECT_ERROR_THRESHOLD) {
-        has_hall_disconnect_error = true;
+        motor_errors.hall_disconnected = true;
     }
 
     uint8_t expected_transition = 0;
@@ -566,13 +563,11 @@ static void perform_commutation_cycle() {
 
     // check for transition error
     if (hall_transition_error_count >= HALL_TRANSITION_ERROR_THRESHOLD) {
-        has_hall_transition_error = true;
+        motor_errors.invalid_transitions = true;
     }
 
     // check for errors
-    if (has_hall_power_error || has_hall_disconnect_error) { //} || has_hall_transition_error) {
-        has_error_latched = true;
-
+    if (motor_errors.hall_power || motor_errors.hall_disconnected) { // || motor_errors.invalid_transitions) {
         // the hardware already performed a COM via TRGO but we'd like to COM the error state
         // manually flag a COM event by setting the bit
         set_commutation_estop();
@@ -792,9 +787,17 @@ void pwm6step_set_duty_cycle(int32_t duty_cycle) {
     pwm6step_set_direct(timer_duty_cycle, motor_direction);
 }
 
+void pwm6step_set_duty_cycle_f(float duty_cycle_pct) {
+    pwm6step_set_duty_cycle((uint16_t) (duty_cycle_pct * (float) UINT16_MAX));
+}
+
 void pwm6step_brake(uint16_t braking_force) {
     command_brake = true;
     pwm6step_set_direct(braking_force, commanded_motor_direction);
+}
+
+void pwm6step_brake_f(float braking_force_pct) {
+    pwm6step_brake((uint16_t) (braking_force_pct * (float) UINT16_MAX));   
 }
 
 void pwm6step_stop() {
@@ -813,6 +816,10 @@ void pwm6step_invert_direction(bool invert) {
 bool pwm6step_is_direction_inverted() {
     return invert_direction;
 }
+
+const MotorErrors_t pwm6step_get_motor_errors() {
+    return motor_errors;
+} 
 
 bool pwm6step_hall_rps_estimate_valid() {
 

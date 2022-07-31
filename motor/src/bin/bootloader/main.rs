@@ -5,14 +5,14 @@ use cortex_m_rt::entry;
 
 use cortex_m_semihosting::hprintln;
 use panic_halt as _;
-use motor::{peripherals::{stm32_bootloader, timeout::delay_us}, peripherals::timeout, include_bin};
+use motor::{peripherals::{stm32_bootloader, timeout::delay_us}, peripherals::timeout, include_external_bin};
 use stm32h7xx_hal::{
     block, pac,
     prelude::*,
     serial::{self, config},
 };
 
-include_bin!{STSPIN_BINARY, "stspin.bin"}
+include_external_bin!{STSPIN_BINARY, "build/bin/steval-spin3201-6step.bin"}
 
 #[entry]
 fn main() -> ! {

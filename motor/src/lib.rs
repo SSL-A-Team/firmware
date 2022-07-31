@@ -13,6 +13,14 @@ macro_rules! include_bin {
     }
 }
 
+#[macro_export]
+macro_rules! include_external_bin {
+    ($var_name:ident, $bin_file:literal) => {
+        static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../", $bin_file)).len()] 
+            = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../", $bin_file));
+    }
+}
+
 /*
 DIP:
     0 - PE0
