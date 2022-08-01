@@ -49,6 +49,7 @@
               extensions = [ "rust-src" ];
               targets = [ "thumbv7em-none-eabihf" "thumbv6m-none-eabi" ];
             })
+            rust-analyzer
 
             # Python
             (pkgs.${python}.withPackages

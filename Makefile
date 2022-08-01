@@ -31,13 +31,13 @@ $1-$2-debug: steval-spin3201-6step
 	cargo build --bin $2
 all:: $1-$2-debug
 
-$1-$2-debug-prog:
+$1-$2-debug-prog: $1-$2-debug
 	./util/program.sh $3 $1/target/thumbv7em-none-eabihf/debug/$2
 
-$1-$2-debug-mon:
+$1-$2-debug-mon: $1-$2-debug
 	./util/program.sh $3 $1/target/thumbv7em-none-eabihf/debug/$2 monitor
 
-$1-$2-debug-gdb:
+$1-$2-debug-gdb: $1-$2-debug
 	./util/attach_gdb.sh $3 $1/target/thumbv7em-none-eabihf/debug/$2
 
 endef
