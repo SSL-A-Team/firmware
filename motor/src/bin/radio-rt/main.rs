@@ -62,9 +62,7 @@ static mut led_y: Option<Pin<'E', 1, Output>> = None;
 
 static mut radio_dma_transfer_pending: bool = false;
 static mut radio_dma_transfer: Option<RadioDmaTxTrs> = None;
-static mut radio_dma_tx_stream: Option<Stream0<pac::DMA1>> = None;
 static mut radio_dma_tx_config: Option<DmaConfig> = None;
-static mut radio_uart_tx_ch: Option<Tx<pac::USART2>> = None;
 #[link_section = ".axisram.buffers"]
 static mut radio_uart_tx_buf: [u8; TX_BUFFER_LEN] = [0; TX_BUFFER_LEN];
 
@@ -122,46 +120,28 @@ fn main() -> ! {
         )
         .unwrap();
 
-    let (serial_tx, _) = serial.split();
-    unsafe { radio_uart_tx_ch = Some(serial_tx) };
-
-    // let tx_buffer: &'static mut [u8; TX_BUFFER_LEN] = {
-    //     let buf: &mut [MaybeUninit<u8>; TX_BUFFER_LEN] =
-    //         unsafe { mem::transmute(&mut TX_BUFFER) };
-
-    //     for (i, value) in buf.iter_mut().enumerate() {
-    //         unsafe { value.as_mut_ptr().write(0xAA); }
-    //     }
-
-    //     unsafe { mem::transmute(buf) }
-    // };
+    let (radio_uart_tx_ch, _) = serial.split();
 
     //////////////////////////
     //  setup dma transfer  //
     //////////////////////////
 
-    // Setup the DMA transfer on stream 0
-    //
-    // We need to specify the direction with a type annotation, since DMA
-    // transfers both to and from the UART are possible
     let streams = StreamsTuple::new(dp.DMA1, ccdr.peripheral.DMA1);
 
-
-    let dma_config = DmaConfig::default()
+    let dma_tx_config = DmaConfig::default()
             .memory_increment(true)
             .transfer_complete_interrupt(true)
             .transfer_error_interrupt(true);
-    unsafe { radio_dma_tx_config = Some(dma_config); };
+    unsafe { radio_dma_tx_config = Some(dma_tx_config) }
 
-    let mut tx_dma_stream = streams.0;
-    tx_dma_stream.set_transfer_complete_interrupt_enable(true);
-    unsafe { radio_dma_tx_stream = Some(tx_dma_stream) };
+    let mut radio_dma_tx_stream = streams.0;
+    radio_dma_tx_stream.set_transfer_complete_interrupt_enable(true);
 
     unsafe {
-    let mut transfer: RadioDmaTxTrs = 
+    let transfer: RadioDmaTxTrs = 
         Transfer::init(
-            radio_dma_tx_stream.take().unwrap(), 
-            radio_uart_tx_ch.take().unwrap(), 
+            radio_dma_tx_stream, 
+            radio_uart_tx_ch, 
             &mut radio_uart_tx_buf, 
             None, 
             radio_dma_tx_config.as_ref().unwrap().clone());
@@ -175,10 +155,15 @@ fn main() -> ! {
     }
 
     let mut delay = cp.SYST.delay(ccdr.clocks);
+    let mut p = gpiod.pd7.into_push_pull_output();
+    p.set_low();
+    delay.delay_us(10u16);
 
     unsafe {
     loop {
+        p.set_high();
         uart_dma_transfer(&[0xFFu8, 0x00, 0xFF, 0x00]);
+        p.set_low();
         //led_r.unwrap().set_high();
         wait_for_transmission();
 
@@ -202,83 +187,148 @@ fn main() -> ! {
     // (tx_dma_ch, serial_tx, dma_tx_buf, _) = transfer.free();
 }
 
-unsafe fn uart_dma_transfer(buf: &[u8]) {
-    for (i, value) in buf.into_iter().enumerate() {
-        if i < radio_uart_tx_buf.len() {
-            radio_uart_tx_buf[i] = *value;
-        }
+enum UartDmaError {
+    INSUFFICIENT_TX_BUF_SIZE,
+    DMA_BUSY,
+    INTERNAL_STATE_ERR,
+}
+
+/**
+ * 
+ */
+unsafe fn uart_dma_transfer(tx_buf: &[u8]) -> Result<(), UartDmaError> {
+    // check if a transmission is already pending, we don't allow queueing
+    if dma_transfer_pending() {
+        return Err(UartDmaError::DMA_BUSY);
     }
 
-    // todo len bounds check
+    // check if the user is trying to send more than the buffer allows
+    // TODO: write a function to call this multiple times for longer items
+    if tx_buf.len() > radio_uart_tx_buf.len() {
+        return Err(UartDmaError::INSUFFICIENT_TX_BUF_SIZE)
+    }
 
-    // move back stuff
+    // for (i, value) in buf.into_iter().enumerate() {
+    //     if i < radio_uart_tx_buf.len() {
+    //         radio_uart_tx_buf[i] = *value;
+    //     }
+    // }
+    radio_uart_tx_buf[..tx_buf.len()].clone_from_slice(tx_buf);
+
+    // this global transfer holds the stream and peripherial references
+    // it should only be taken and then restored by this function
+    // if it's None, something's gone horribly wrong
+    if radio_dma_transfer.is_none() {
+        hprintln!("dma transfer state was none when state is strictly managed internal to this function");
+        hprintln!("\twas initialization invalid or was the internal state management changed?");
+        return Err(UartDmaError::INTERNAL_STATE_ERR)
+    }
+
+    // take the old transfer, reclaim ownership of hardware in preparation for the next transfer
     let dma_transfer = radio_dma_transfer.take().unwrap();
     let (stream, serial, _, opt_buf) = dma_transfer.free();
-        
-    let buf = &mut radio_uart_tx_buf[0..buf.len()];
 
+    // create the next transfer
     let dma_transfer: RadioDmaTxTrs = 
         Transfer::init(
             stream, 
             serial, 
-            buf, 
+            &mut radio_uart_tx_buf[..tx_buf.len()], 
             opt_buf, 
             radio_dma_tx_config.as_ref().unwrap().clone());
 
+    // restore the global state
     radio_dma_transfer = Some(dma_transfer);
 
-    //let mut dma_transfer = radio_dma_transfer.take().unwrap();
+    // start the transfer by setting the flag and enabling DMA
     radio_dma_transfer.as_mut().unwrap().start(|serial| {
-         radio_dma_transfer_pending = true;
-         serial.enable_dma_tx();
+        radio_dma_transfer_pending = true;
+        serial.enable_dma_tx();
     });
 
+    return Ok(());
 }
 
+/**
+ * 
+ */
 fn dma_transfer_pending() -> bool {
     return unsafe { radio_dma_transfer_pending };
 }
 
+/**
+ * 
+ */
 fn wait_for_transmission() {
     while dma_transfer_pending() {
         cortex_m::asm::nop();
     }
 }
 
+/**
+ * 
+ */
 #[interrupt]
-unsafe fn USART2() {
-    let cr1 = &(*pac::USART2::ptr()).cr1;
-    let isr = &(*pac::USART2::ptr()).isr;
-    let icr = &(*pac::USART2::ptr()).icr;
-    // this interrupt fired on frame transfer complete
-    if isr.read().tc().bit_is_set() {
-        // disable transfer complete interrupts on USART2
-        cr1.modify(|_, w| w.tcie().clear_bit());
-        // clear USART2 transfer compliete interrupt pending bit
-        icr.write(|w| w.tccf().set_bit());
+fn USART2() {
+    // most of this function dereferences global static or needs
+    // direct register/raw ptr access so were just put in a big block
+    unsafe {
+        // cr1 contains the bit enabling/disabling USART interrupts
+        let cr1 = &(*pac::USART2::ptr()).cr1;
+        // isr tells us which interrupt flag was set (success/err etc)
+        let isr = &(*pac::USART2::ptr()).isr;
+        // icr allows us to clear the set flag with a write 
+        let icr = &(*pac::USART2::ptr()).icr;
 
-        // flag transfer complete
-        radio_dma_transfer_pending = false;
+        // check which flag caused the interrupt
+        if isr.read().tc().bit_is_set() {
+            // cause: successful transmission of tx frame
+
+            // disable transfer complete interrupts on USART2
+            cr1.modify(|_, w| w.tcie().clear_bit());
+
+            // clear USART2 transfer compliete interrupt pending bit
+            icr.write(|w| w.tccf().set_bit());
+
+            // flag transfer complete
+            radio_dma_transfer_pending = false;
+        }
+
+        // TODO hand other errors
     }
-
-    // TODO hand other errors
 }
 
+/**
+ * 
+ */
 #[interrupt]
 fn DMA1_STR0() {
+    // most of this function dereferences global static or needs
+    // direct register/raw ptr access so were just put in a big block
     unsafe {
-        if let Some(tx) = &mut radio_dma_transfer {
-            if let Some(lr) = &mut led_r {
-                lr.set_high();
-            }
+        // this should be 
+        if let Some(tx) = radio_dma_transfer.as_mut() {
+            // if let Some(lr) = &mut led_r {
+            //     lr.set_high();
+            // }
 
-            //let mut tx = radio_dma_transfer.take().unwrap();
+            // check which flag caused the end of DMA
             if tx.get_transfer_complete_flag() {
+                // tx complete flag (aka success) ended the transfer
+
+                // the DMA write is done, but the USART peripherial may still have
+                // data in the internal FIFO or output shift register
+                // we need to enable to frame transfer complete flag 
+                // which will fire an interrupt on USART handler once the last byte
+                // in the FIFO has been loaded into the output shift register 
+
                 // enable USART2 transfer complete interrupt (will fire when SR is empty)
                 (*pac::USART2::ptr()).cr1.modify(|_, w| w.tcie().set_bit());
+
                 // disable DMA interrupts on UART tx
                 tx.get_stream().set_transfer_complete_interrupt_enable(false);
-                // clear flag for this transaction
+
+                // clear flag for this DMA transaction
                 tx.clear_transfer_complete_interrupt();
             }
 
