@@ -20,7 +20,7 @@ use stm32h7xx_hal::dma::dma::{
 use stm32h7xx_hal::dma::traits::Stream;
 use stm32h7xx_hal::gpio::{Pin, Output};
 use stm32h7xx_hal::interrupt;
-use stm32h7xx_hal::serial::{Tx, Event};
+use stm32h7xx_hal::serial::{Rx, Tx, Event};
 use stm32h7xx_hal::{
     block, 
     pac,
@@ -40,11 +40,11 @@ use stm32h7xx_hal::dma::{
 // The runtime does not initialise these SRAM banks
 const TX_BUFFER_LEN: usize = 16;
 const RX_BUFFER_LEN: usize = 16;
+const RX_BUFFER_DEPTH: usize = 2;
 
 
 
-#[link_section = ".axisram.buffers"]
-static mut RX_BUFFER: [u8; TX_BUFFER_LEN] = [0; TX_BUFFER_LEN];
+
 
 type RadioDmaTxTrs<'a> = Transfer<
     Stream0<pac::DMA1>,
@@ -53,6 +53,14 @@ type RadioDmaTxTrs<'a> = Transfer<
     //&'static mut [u8; TX_BUFFER_LEN],
     &'static mut [u8],
     DBTransfer,
+>;
+
+type RadioDmaRxTrs = Transfer<
+    Stream1<pac::DMA1>,
+    Rx<pac::USART2>,
+    PeripheralToMemory,
+    &'static mut [u8],
+    DBTransfer
 >;
 
 static mut led_g: Option<Pin<'B', 0, Output>> = None;
@@ -65,6 +73,15 @@ static mut radio_dma_transfer: Option<RadioDmaTxTrs> = None;
 static mut radio_dma_tx_config: Option<DmaConfig> = None;
 #[link_section = ".axisram.buffers"]
 static mut radio_uart_tx_buf: [u8; TX_BUFFER_LEN] = [0; TX_BUFFER_LEN];
+
+static mut radio_dma_rx_transfer: Option<RadioDmaRxTrs> = None;
+static mut radio_dma_rx_config: Option<DmaConfig> = None;
+// TODO probs make a simple queue struct so we can control the placement of backing memory in axisram
+// use existing if able
+static mut radio_dma_rx_read_ptr: usize = 0;
+static mut radio_dma_rx_write_ptr: usize = 0;
+#[link_section = ".axisram.buffers"]
+static mut radio_uart_rx_buf: [[u8; RX_BUFFER_LEN]; RX_BUFFER_DEPTH] = [[0; RX_BUFFER_LEN]; RX_BUFFER_DEPTH];
 
 #[entry]
 fn main() -> ! {
@@ -120,7 +137,7 @@ fn main() -> ! {
         )
         .unwrap();
 
-    let (radio_uart_tx_ch, _) = serial.split();
+    let (radio_uart_tx_ch, radio_uart_rx_ch) = serial.split();
 
     //////////////////////////
     //  setup dma transfer  //
@@ -147,6 +164,27 @@ fn main() -> ! {
             radio_dma_tx_config.as_ref().unwrap().clone());
 
             radio_dma_transfer = Some(transfer);
+    }
+
+    let dma_rx_config = DmaConfig::default()
+            .memory_increment(false)
+            .transfer_complete_interrupt(true)
+            .transfer_error_interrupt(true);
+    unsafe { radio_dma_rx_config = Some(dma_rx_config); }
+
+    let mut radio_dma_rx_stream = streams.1;
+    radio_dma_rx_stream.set_transfer_complete_interrupt_enable(true);
+
+    unsafe {
+    let transfer: RadioDmaRxTrs = 
+        Transfer::init(
+            radio_dma_rx_stream,
+            radio_uart_rx_ch,
+            &mut radio_uart_rx_buf[0],
+            None,
+            radio_dma_rx_config.as_ref().unwrap().clone());
+
+    radio_dma_rx_transfer = Some(transfer);
     }
 
     unsafe {
@@ -188,9 +226,9 @@ fn main() -> ! {
 }
 
 enum UartDmaError {
-    INSUFFICIENT_TX_BUF_SIZE,
-    DMA_BUSY,
-    INTERNAL_STATE_ERR,
+    InsufficientTxBufSize,
+    DmaBusy,
+    InternalStateErr,
 }
 
 /**
@@ -199,13 +237,13 @@ enum UartDmaError {
 unsafe fn uart_dma_transfer(tx_buf: &[u8]) -> Result<(), UartDmaError> {
     // check if a transmission is already pending, we don't allow queueing
     if dma_transfer_pending() {
-        return Err(UartDmaError::DMA_BUSY);
+        return Err(UartDmaError::DmaBusy);
     }
 
     // check if the user is trying to send more than the buffer allows
     // TODO: write a function to call this multiple times for longer items
     if tx_buf.len() > radio_uart_tx_buf.len() {
-        return Err(UartDmaError::INSUFFICIENT_TX_BUF_SIZE)
+        return Err(UartDmaError::InsufficientTxBufSize)
     }
 
     // for (i, value) in buf.into_iter().enumerate() {
@@ -221,7 +259,7 @@ unsafe fn uart_dma_transfer(tx_buf: &[u8]) -> Result<(), UartDmaError> {
     if radio_dma_transfer.is_none() {
         hprintln!("dma transfer state was none when state is strictly managed internal to this function");
         hprintln!("\twas initialization invalid or was the internal state management changed?");
-        return Err(UartDmaError::INTERNAL_STATE_ERR)
+        return Err(UartDmaError::InternalStateErr)
     }
 
     // take the old transfer, reclaim ownership of hardware in preparation for the next transfer
@@ -333,6 +371,30 @@ fn DMA1_STR0() {
             }
 
             // TODO handle other errors
+        }
+    }
+}
+
+fn enable_dma_rx() {
+
+}
+
+fn disable_dma_rx() {
+
+}
+
+fn set_dma_rx_callback() {
+
+}
+
+/**
+ * 
+ */
+#[interrupt]
+fn DMA1_STR1() {
+    unsafe {
+        if let Some(rx) = radio_dma_rx_transfer.as_mut() {
+            
         }
     }
 }
