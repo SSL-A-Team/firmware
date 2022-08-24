@@ -34,3 +34,6 @@ version = "0.2.0"
 [dependencies.embedded-hal]
 version = "0.2.6"
 features = ["unproven"]
+
+[dependencies.ateam-common-rs]
+path = "../common-rs"

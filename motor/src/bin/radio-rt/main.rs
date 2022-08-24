@@ -1,5 +1,7 @@
 #![no_std]
 #![no_main]
+// #![feature(custom_test_frameworks)]
+// #![test_runner(test_runner)]
 
 use core::borrow::{Borrow, BorrowMut};
 use core::{mem, mem::MaybeUninit};
@@ -38,8 +40,8 @@ use stm32h7xx_hal::dma::{
 // AXI SRAM.
 //
 // The runtime does not initialise these SRAM banks
-const TX_BUFFER_LEN: usize = 16;
-const RX_BUFFER_LEN: usize = 32;
+const TX_BUFFER_LEN: usize = 256;
+const RX_BUFFER_LEN: usize = 256;
 const RX_BUFFER_DEPTH: usize = 5;
 
 
@@ -147,8 +149,8 @@ fn main() -> ! {
         )
         .unwrap();
 
-    serial.unlisten(Event::Rxne);
-    serial.unlisten(Event::Rxftie);
+    //serial.unlisten(Event::Rxne);
+    //serial.unlisten(Event::Rxftie);
     serial.listen(Event::Idle);
     serial.clear_idle();
 
@@ -209,11 +211,8 @@ fn main() -> ! {
 
 
     unsafe {
-        (*pac::USART2::ptr()).cr1.modify(|_, w| w.rxneie().clear_bit());
-        (*pac::USART2::ptr()).rqr.write(|w| w.rxfrq().set_bit());
-        //(*pac::USART2::ptr()).icr.write(|w| w.rx.set_bit());
         pac::NVIC::unmask(pac::Interrupt::DMA1_STR0);
-        //pac::NVIC::unmask(pac::Interrupt::DMA1_STR1);
+        pac::NVIC::unmask(pac::Interrupt::DMA1_STR1);
         pac::NVIC::unmask(pac::Interrupt::USART2);
     }
 
@@ -411,20 +410,10 @@ fn USART2() {
                 return;
             }
 
-
-
-            //loop {}
-
             // func(current_buffer, internal_cur_buf, remaining_bytes)
             let _result = radio_dma_rx_transfer.as_mut().unwrap().next_transfer_with(|_, _, remaining_bytes| {
                 let rx_size = RX_BUFFER_LEN - remaining_bytes;
                 radio_uart_rx_buf[radio_dma_rx_write_ptr].1 = rx_size;
-
-                // if let Some(ly) = led_y.as_mut() {
-                //     if rx_size == 16 && radio_uart_rx_buf[radio_dma_rx_write_ptr].0[0] == 0xAAu8 && radio_uart_rx_buf[radio_dma_rx_write_ptr].0[1] == 0x00u8 {
-                //         ly.set_high();
-                //     }
-                // }
 
                 // check if ring buffer is full
                 if (radio_dma_rx_write_ptr + 1) % radio_uart_rx_buf.len() == radio_dma_rx_read_ptr {
@@ -445,40 +434,15 @@ fn USART2() {
                 (&mut (radio_uart_rx_buf[radio_dma_rx_write_ptr].0), 0)
             });
 
-            // TODO callback? 
-
-            // // take the old transfer, reclaim ownership of hardware in preparation for the next transfer
-            // let dma_transfer = radio_dma_rx_transfer.take().unwrap();
-            // let (stream, serial, _, opt_buf) = dma_transfer.free();
-
-            // // increment the write ptr
-            // radio_dma_rx_write_ptr += 1;
-
-            // // create the next rx transfer
-            // let dma_transfer: RadioDmaRxTrs = 
-            //     Transfer::init(
-            //         stream, 
-            //         serial, 
-            //         &mut radio_uart_rx_buf[radio_dma_rx_write_ptr], 
-            //         opt_buf, 
-            //         radio_dma_rx_config.as_ref().unwrap().clone());
-
-            // // restore the global state
-            // radio_dma_rx_transfer = Some(dma_transfer);
-
-            // // start the transfer by setting the flag and enabling DMA
-            // radio_dma_rx_transfer.as_mut().unwrap().start(|serial| {
-            //     serial.enable_dma_rx();
-            // });
+            // if the user set a rx callback, call it
+            if let Some(f) = radio_uart_rx_callback {
+                f(radio_dma_rx_count);
+            }
 
             icr.write(|w| w.idlecf().set_bit());
 
             if let Some(lr) = led_r.as_mut() {
                 lr.set_low();
-            }
-
-            if let Some(ly) = led_y.as_mut() {
-                ly.set_low();
             }
 
             if let Some(lg) = led_g.as_mut() {

@@ -45,7 +45,7 @@
             clang
 
             # Rust Embedded
-            (rust-bin.stable.latest.default.override {
+            (rust-bin.nightly.latest.default.override {
               extensions = [ "rust-src" ];
               targets = [ "thumbv7em-none-eabihf" "thumbv6m-none-eabi" ];
             })
