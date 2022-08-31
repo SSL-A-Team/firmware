@@ -1,3 +1,44 @@
+#[allow(unused)]
+use arr_macro::arr;
+
+#[derive(PartialEq, Eq, Debug)]
+pub struct IoBuffer<'buf_lt> {
+    len: usize,
+    io_buf: &'buf_lt mut [u8],
+}
+
+#[allow(dead_code)]
+impl<'buf_lt> IoBuffer<'buf_lt> {
+    fn init(buf: &'buf_lt mut [u8]) -> IoBuffer<'buf_lt> {
+        IoBuffer { len: 0, io_buf: buf }
+    }
+
+    fn backing_len(&self) -> usize {
+        return self.io_buf.len();
+    }
+}
+
+#[macro_export]
+macro_rules! iobuf {
+    ($len:expr) => {
+        IoBuffer { len: 0, io_buf: & mut[0u8; $len] }
+    }
+}
+
+#[macro_export]
+macro_rules! ioqueue_storage {
+    ($len:expr, $depth:expr) => {
+        arr![iobuf!($len); $depth]
+    };
+}
+
+#[macro_export]
+macro_rules! axisram_ioqueue_storage {
+    ($len:expr, $depth:expr) => {
+        #[link_section = ".axisram.buffers"]
+        ioqueue_storage($len, $depth)
+    };
+}
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -10,39 +51,46 @@ pub enum IoQueueError {
 }
 
 #[allow(dead_code)]
-pub struct IoQueue<'buf_lt, const LENGTH: usize, const DEPTH: usize> {
+pub struct IoQueue<'buf_lt> {
     size: usize,
     read_ind: usize,
     write_ind: usize,
     // depricate, ask user to pass in static lifetime buffer linked correctly
     // #[link_section = ".axisram.buffers"]
-    buf: &'buf_lt mut [[u8; LENGTH]; DEPTH],
-    buf_size_record: [usize; DEPTH],
+    backing_store: &'buf_lt mut [IoBuffer<'buf_lt>],
 }
 
 #[allow(dead_code)]
-impl<'buf_lt, const LENGTH: usize, const DEPTH: usize> IoQueue<'buf_lt, LENGTH, DEPTH> {
-    fn init(buf: &mut [[u8; LENGTH]; DEPTH]) -> IoQueue<LENGTH, DEPTH> {
+impl<'buf_lt> IoQueue<'buf_lt> {
+    fn init(backing_store: &'buf_lt mut [IoBuffer<'buf_lt>]) -> IoQueue<'buf_lt> {
+        assert!(backing_store.len() > 0);
+        for iob in backing_store.iter() {
+            assert!(iob.io_buf.len() > 0);
+        }
+
         IoQueue {
             size: 0,
             read_ind: 0,
             write_ind: 0,
-            buf: buf,
-            buf_size_record: [0; DEPTH],
+            backing_store: backing_store,
         }
     }
 
+    fn backing_store_capacity(&self) -> usize {
+        return self.backing_store.len();
+    }
+
     fn increment_read_ptr(&mut self) {
-        self.read_ind = (self.read_ind + 1) % DEPTH;
+        self.read_ind = (self.read_ind + 1) % self.backing_store_capacity();
 
     }
 
     fn increment_write_ind(&mut self) {
-        self.write_ind = (self.write_ind + 1) % DEPTH;
+        self.write_ind = (self.write_ind + 1) % self.backing_store_capacity();
     }
 
     pub fn capcaity(&self) -> usize {
-        DEPTH
+        self.backing_store_capacity()
     }
 
     pub fn size(&self) -> usize {
@@ -50,7 +98,7 @@ impl<'buf_lt, const LENGTH: usize, const DEPTH: usize> IoQueue<'buf_lt, LENGTH, 
     }
 
     pub fn size_remaining(&self) -> usize {
-        return DEPTH - self.size();
+        return self.backing_store_capacity() - self.size();
     }
 
     pub fn full(&self) -> bool {
@@ -66,12 +114,12 @@ impl<'buf_lt, const LENGTH: usize, const DEPTH: usize> IoQueue<'buf_lt, LENGTH, 
             return Err(IoQueueError::WriteWhenFull);
         }
 
-        if dat.len() > LENGTH {
+        if dat.len() > self.backing_store[self.write_ind].io_buf.len() {
             return Err(IoQueueError::WriteBackingBufferTooSmall);
         }
 
-        self.buf[self.write_ind][..dat.len()].copy_from_slice(dat);
-        self.buf_size_record[self.write_ind] = dat.len();
+        self.backing_store[self.write_ind].io_buf[..dat.len()].copy_from_slice(dat);
+        self.backing_store[self.write_ind].len = dat.len();
 
         self.increment_write_ind();
         self.size += 1;
@@ -84,8 +132,8 @@ impl<'buf_lt, const LENGTH: usize, const DEPTH: usize> IoQueue<'buf_lt, LENGTH, 
             return Err(IoQueueError::ReadWhenEmpty);
         }
 
-        let data_valid_index = self.buf_size_record[self.read_ind];
-        let ret = &self.buf[self.read_ind][..data_valid_index];
+        let data_valid_index = self.backing_store[self.read_ind].len;
+        let ret = &self.backing_store[self.read_ind].io_buf[..data_valid_index];
         return Ok(ret)
     }
 
@@ -105,12 +153,12 @@ impl<'buf_lt, const LENGTH: usize, const DEPTH: usize> IoQueue<'buf_lt, LENGTH, 
             return Err(IoQueueError::ReadWhenEmpty);
         }
 
-        if dest.len() < self.buf_size_record[self.read_ind] {
+        if dest.len() < self.backing_store[self.read_ind].len {
             return Err(IoQueueError::ReadDestBufferTooSmall);
         }
 
-        let data_valid_index = self.buf_size_record[self.read_ind];
-        dest[..data_valid_index].copy_from_slice(&self.buf[self.read_ind][..data_valid_index]);
+        let data_valid_index = self.backing_store[self.read_ind].len;
+        dest[..data_valid_index].copy_from_slice(&self.backing_store[self.read_ind].io_buf[..data_valid_index]);
         let ret = &dest[..data_valid_index];
 
         self.increment_read_ptr();
@@ -130,28 +178,28 @@ impl<'buf_lt, const LENGTH: usize, const DEPTH: usize> IoQueue<'buf_lt, LENGTH, 
 
 #[test]
 fn check_capacity_1() {
-    let mut buf = [[0u8; 16]; 1];
+    let mut buf = ioqueue_storage!(16, 1);
     let q = IoQueue::init(&mut buf);
     assert_eq!(1, q.capcaity());
 }
 
 #[test]
 fn check_capacity_2() {
-    let mut buf = [[0u8; 16]; 2];
+    let mut buf = ioqueue_storage!(16, 2);
     let q = IoQueue::init(&mut buf);
     assert_eq!(2, q.capcaity());
 }
 
 #[test]
 fn check_capacity_3() {
-    let mut buf = [[0u8; 16]; 3];
+    let mut buf = ioqueue_storage!(16, 3);
     let q = IoQueue::init(&mut buf);
     assert_eq!(3, q.capcaity());
 }
 
 #[test]
 fn check_capacity_10() {
-    let mut buf = [[0u8; 16]; 10];
+    let mut buf = ioqueue_storage!(16, 10);
     let q = IoQueue::init(&mut buf);
     assert_eq!(10, q.capcaity());
 }
@@ -160,7 +208,7 @@ fn check_capacity_10() {
 
 #[test]
 fn write_capacity_1() {
-    let mut buf = [[0u8; 16]; 1];
+    let mut buf = ioqueue_storage!(16, 1);
     let mut q = IoQueue::init(&mut buf);
     assert_eq!(1, q.capcaity());
     assert_eq!(true, q.empty());
@@ -187,7 +235,7 @@ fn write_capacity_1() {
 
 #[test]
 fn write_capacity_2() {
-    let mut buf = [[0u8; 16]; 2];
+    let mut buf = ioqueue_storage!(16, 2);
     let mut q = IoQueue::init(&mut buf);
     assert_eq!(2, q.capcaity());
     assert_eq!(true, q.empty());
@@ -252,7 +300,7 @@ fn write_capacity_2() {
 
 #[test]
 fn write_capacity_3() {
-    let mut buf = [[0u8; 16]; 3];
+    let mut buf = ioqueue_storage!(16, 3);
     let mut q = IoQueue::init(&mut buf);
     assert_eq!(3, q.capcaity());
     assert_eq!(true, q.empty());
