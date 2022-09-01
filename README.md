@@ -10,12 +10,12 @@ We use the [Nix package manager](https://nixos.org/) to handle dependencies. Ins
 - Windows Subsystem for Linux (WSL) Manual: `sh <(curl -L https://nixos.org/nix/install) --no-daemon`
 - OSX Manual: `sh <(curl -L https://nixos.org/nix/install)`
 
-### Enter the Development Environment
-
-For `nix` to work properly on WSL, you may need to add the following to `/etc/nix/nix.conf`:
+Enable flakes by adding the following to `/etc/nix/nix.conf`:
 ```
 experimental-features = nix-command flakes
 ```
+
+### Enter the Development Environment
 
 Run `nix develop` to enter a shell with all required dependencies on the path.
 
@@ -35,17 +35,14 @@ We support the following platforms that have a valid Nix install:
 
 ## Building Firmware
 
-Run `make <target>` to build an ELF and flat bin of each target. Available targets:
+Run `make <target>` to build an ELF and flat bin of each target. This wraps both CMake C/C++ targets and Rust targets. Suggest tab autocomplete to enumerate all targets.
 
-- all
-- clean
-- test-breadboard-radio
-- steval-spin3201-6step
-- steval-spin3201-6step-prog
-- steval-spin3201-6steb-gdb
-
-## Programming Targets
-
-- test-breadboard-radio-prog
+Most targets have several variants:
+ - `<name>` build the target in release mode
+ - `<name>-prog` build the target in release mode, write to flash
+ - `<name>-debug` build the target in debug mode
+ - `<name>-debug-gdb` build the target in debug mode, write to flash, attach gdb under phy target reset
+ - `<name>-debug-mon` build the target in debug mode, attach a monitor to the output of `hprintln!` macros
+ - `<name>-debug-prog` build the target in debug mode, write to flash
 
 
