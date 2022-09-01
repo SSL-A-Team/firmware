@@ -13,8 +13,16 @@ impl<'buf_lt> IoBuffer<'buf_lt> {
         IoBuffer { len: 0, io_buf: buf }
     }
 
-    fn backing_len(&self) -> usize {
+    pub fn backing_len(&self) -> usize {
         return self.io_buf.len();
+    }
+
+    pub fn len(&self) -> usize {
+        return self.len;
+    }
+
+    pub fn get_io_buf(&mut self) -> &mut [u8] {
+        return self.io_buf;
     }
 }
 
@@ -89,8 +97,12 @@ impl<'buf_lt> IoQueue<'buf_lt> {
         self.write_ind = (self.write_ind + 1) % self.backing_store_capacity();
     }
 
-    pub fn capcaity(&self) -> usize {
+    pub fn depth(&self) -> usize {
         self.backing_store_capacity()
+    }
+
+    pub fn length(&self) -> usize {
+        return self.backing_store[0].io_buf.len();
     }
 
     pub fn size(&self) -> usize {
@@ -137,6 +149,12 @@ impl<'buf_lt> IoQueue<'buf_lt> {
         return Ok(ret)
     }
 
+    // this seems to invitably face lifetime issues 
+    pub fn peek_top_buf(&mut self) -> &IoBuffer {
+        let ret = &self.backing_store[self.read_ind];
+        return ret
+    }
+
     pub fn drop(&mut self) -> Result<(), IoQueueError> {
         if self.empty() {
             return Err(IoQueueError::DropWhenEmpty);
@@ -166,6 +184,24 @@ impl<'buf_lt> IoQueue<'buf_lt> {
 
         return Ok(ret);
     }
+
+    // pub fn read_into(&mut self, dest: &mut [u8]) -> Result<usize, IoQueueError> {
+    //     if self.empty() {
+    //         return Err(IoQueueError::ReadWhenEmpty);
+    //     }
+
+    //     if dest.len() < self.backing_store[self.read_ind].len {
+    //         return Err(IoQueueError::ReadDestBufferTooSmall);
+    //     }
+
+    //     let data_valid_index = self.backing_store[self.read_ind].len;
+    //     dest[..data_valid_index].copy_from_slice(&self.backing_store[self.read_ind].io_buf[..data_valid_index]);
+
+    //     self.increment_read_ptr();
+    //     self.size -= 1;
+
+    //     return Ok(data_valid_index);
+    // }
 }
 
 /////////////
@@ -180,28 +216,28 @@ impl<'buf_lt> IoQueue<'buf_lt> {
 fn check_capacity_1() {
     let mut buf = ioqueue_storage!(16, 1);
     let q = IoQueue::init(&mut buf);
-    assert_eq!(1, q.capcaity());
+    assert_eq!(1, q.depth());
 }
 
 #[test]
 fn check_capacity_2() {
     let mut buf = ioqueue_storage!(16, 2);
     let q = IoQueue::init(&mut buf);
-    assert_eq!(2, q.capcaity());
+    assert_eq!(2, q.depth());
 }
 
 #[test]
 fn check_capacity_3() {
     let mut buf = ioqueue_storage!(16, 3);
     let q = IoQueue::init(&mut buf);
-    assert_eq!(3, q.capcaity());
+    assert_eq!(3, q.depth());
 }
 
 #[test]
 fn check_capacity_10() {
     let mut buf = ioqueue_storage!(16, 10);
     let q = IoQueue::init(&mut buf);
-    assert_eq!(10, q.capcaity());
+    assert_eq!(10, q.depth());
 }
 
 // write tests
@@ -210,7 +246,7 @@ fn check_capacity_10() {
 fn write_capacity_1() {
     let mut buf = ioqueue_storage!(16, 1);
     let mut q = IoQueue::init(&mut buf);
-    assert_eq!(1, q.capcaity());
+    assert_eq!(1, q.depth());
     assert_eq!(true, q.empty());
     assert_eq!(false, q.full());
     assert_eq!(0, q.size());
@@ -237,7 +273,7 @@ fn write_capacity_1() {
 fn write_capacity_2() {
     let mut buf = ioqueue_storage!(16, 2);
     let mut q = IoQueue::init(&mut buf);
-    assert_eq!(2, q.capcaity());
+    assert_eq!(2, q.depth());
     assert_eq!(true, q.empty());
     assert_eq!(false, q.full());
     assert_eq!(0, q.size());
@@ -302,7 +338,7 @@ fn write_capacity_2() {
 fn write_capacity_3() {
     let mut buf = ioqueue_storage!(16, 3);
     let mut q = IoQueue::init(&mut buf);
-    assert_eq!(3, q.capcaity());
+    assert_eq!(3, q.depth());
     assert_eq!(true, q.empty());
     assert_eq!(false, q.full());
     assert_eq!(0, q.size());

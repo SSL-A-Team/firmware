@@ -11,7 +11,7 @@ mod stspin;
 // mod trait_ext;
 pub mod stm32_bootloader;
 pub mod timeout;
-//pub mod uart;
+pub mod uart;
 
 pub struct Peripherals {
     pub stspin_fl: STSpin<pac::USART1, Pin<'A', 11, Output>, Pin<'A', 12, Output>>,
