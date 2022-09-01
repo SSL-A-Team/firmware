@@ -33,6 +33,23 @@ We support the following platforms that have a valid Nix install:
 - "x86\_64-darwin"
 - "x86\_64-linux"
 
+### Configuring VS Code Rust Analyzer 
+
+By default the rust-analyzer targets the host system, which is wrong since our targets are cross compiled. The following snippet
+correctly sets the target. You'll need to run vscode from the `nix develop` shell so it can find the correct cross target
+analyser.
+
+```
+{
+    "rust-analyzer.cargo.target": "thumbv7em-none-eabihf",
+    "rust-analyzer.checkOnSave.allTargets": false,
+    "rust-analyzer.server.path": "/nix/store/gghbkcpaqzrs0hysswi88s1l4slc8cbd-rust-analyzer-2022-06-13/bin/rust-analyzer",
+    "rust-analyzer.procMacro.server": null,
+}
+```
+
+This should probably somehow be included in the repo directly in a settings.json file but I'm haven't looked up how to do it.
+
 ## Building Firmware
 
 Run `make <target>` to build an ELF and flat bin of each target. This wraps both CMake C/C++ targets and Rust targets. Suggest tab autocomplete to enumerate all targets.
