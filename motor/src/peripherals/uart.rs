@@ -66,7 +66,7 @@ pub struct UartDma<'rx_sto, 'tx_sto, USART, RxDmaStream, TxDmaStream>
     // dma record keeping
     tx_dma_config: Option<DmaConfig>,
     tx_dma_stream: Option<TxDmaStream>,
-    tx_dma_transfer: Option<Transfer<TxDmaStream, Tx<USART>, MemoryToPeripheral, &'tx_sto mut[u8], DBTransfer>>,
+    tx_dma_transfer: Option<Transfer<TxDmaStream, Tx<USART>, MemoryToPeripheral, &'tx_sto [u8], DBTransfer>>,
     tx_dma_active: bool,
 }
 
@@ -162,7 +162,7 @@ impl<'rx_sto, 'tx_sto, USART: serial::SerialExt, RxDmaStream, TxDmaStream> UartD
         let (stream, serial, _, _) = old_dma_transfer.free();
 
         let tx_io_buf = self.tx_queue.peek_top_buf();
-        let tx_buf = &mut tx_io_buf.get_io_buf()[..tx_io_buf.len()];
+        let tx_buf = &tx_io_buf.get_io_buf()[..tx_io_buf.len()];
 
         // create the next transfer
         let dma_transfer = 
