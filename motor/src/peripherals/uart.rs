@@ -40,14 +40,16 @@ enum UartTransmitError {
 }
 
 pub struct UartDma<'rx_sto, 'tx_sto, USART, RxDmaStream, TxDmaStream> 
-    where RxDmaStream: dma::traits::Stream<Config = DmaConfig> + dma::traits::DoubleBufferedStream,
+    where 'rx_sto: 'static,
+          'tx_sto: 'static,
+          RxDmaStream: dma::traits::Stream<Config = DmaConfig> + dma::traits::DoubleBufferedStream,
           TxDmaStream: dma::traits::Stream<Config = DmaConfig> + dma::traits::DoubleBufferedStream,
           serial::Tx<USART>: dma::traits::TargetAddress<dma::MemoryToPeripheral>,
           serial::Rx<USART>: dma::traits::TargetAddress<dma::PeripheralToMemory> {
 
     // INBOUND / RX 
 
-    rx_queue: IoQueue<'rx_sto>,
+    rx_queue: IoQueue<'static>,
     rx_transmission_mode: SerialTransmissionMode,
 
     // dma record keeping
@@ -58,7 +60,7 @@ pub struct UartDma<'rx_sto, 'tx_sto, USART, RxDmaStream, TxDmaStream>
     // dma_tx_config: DmaConfig,
     tx_serial: Tx<USART>,
 
-    tx_queue: IoQueue<'tx_sto>,
+    tx_queue: IoQueue<'static>,
     tx_transmission_mode: SerialTransmissionMode,
 
     // dma record keeping
@@ -141,7 +143,7 @@ impl<'rx_sto, 'tx_sto, USART: serial::SerialExt, RxDmaStream, TxDmaStream> UartD
 
     fn _transmit_polling(&self) -> Result<(), UartTransmitError> { unimplemented!(); }
     fn _transmit_interrupts(&self) -> Result<(), UartTransmitError> { unimplemented!(); }
-    fn _transmit_dma (&mut self) -> Result<(), UartTransmitError> {
+    fn _transmit_dma<'tx_buf> (&mut self) -> Result<(), UartTransmitError> {
         if self.tx_transmission_mode != SerialTransmissionMode::DmaInterrupts {
             return Err(UartTransmitError::InitializationStateInvalid);
         }
