@@ -39,6 +39,10 @@ impl<const SIZE: usize> IoBuffer<SIZE> {
     pub fn get_backing_buf_mut(&mut self) -> RefMut<[u8; SIZE]> {
         return self.io_buf.borrow_mut();
     }
+
+    pub fn get_backing_buf_refcell(&self) -> &RefCell<[u8; SIZE]> {
+        return &self.io_buf;
+    }
 }
 
 // impl<const SIZE: usize> Index<usize> for IoBuffer<SIZE> {
