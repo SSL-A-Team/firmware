@@ -1,42 +1,68 @@
+use core::cell::{
+    RefCell, 
+    Ref,
+    RefMut,
+    BorrowError,
+    BorrowMutError};
+
 #[allow(unused)]
 use arr_macro::arr;
 
 #[derive(PartialEq, Eq, Debug)]
-pub struct IoBuffer<'buf_lt> {
-    len: usize,
-    io_buf: &'buf_lt mut [u8],
+pub struct IoBuffer<const SIZE: usize> {
+    len: RefCell<usize>,
+    io_buf: RefCell<[u8; SIZE]>,
 }
 
 #[allow(dead_code)]
-impl<'buf_lt> IoBuffer<'buf_lt> {
-    fn init(buf: &'buf_lt mut [u8]) -> IoBuffer<'buf_lt> {
-        IoBuffer { len: 0, io_buf: buf }
-    }
-
+impl<const SIZE: usize> IoBuffer<SIZE> {
     pub fn backing_len(&self) -> usize {
-        return self.io_buf.len();
+        return self.io_buf.borrow().len();
     }
 
     pub fn len(&self) -> usize {
-        return self.len;
+        return *self.len.borrow();
     }
 
-    pub fn get_io_buf(&mut self) -> &mut [u8] {
-        return self.io_buf;
+    pub fn try_backing_buf(&self) -> Result<Ref<[u8; SIZE]>, BorrowError> {
+        return self.io_buf.try_borrow();
+    }
+
+    pub fn try_backing_buf_mut(&mut self) -> Result<RefMut<[u8; SIZE]>, BorrowMutError> {
+        return self.io_buf.try_borrow_mut();
+    }
+
+    pub fn get_backing_buf(&self) -> Ref<[u8; SIZE]> {
+        return self.io_buf.borrow();
+    }
+
+    pub fn get_backing_buf_mut(&mut self) -> RefMut<[u8; SIZE]> {
+        return self.io_buf.borrow_mut();
     }
 }
+
+// impl<const SIZE: usize> Index<usize> for IoBuffer<SIZE> {
+//     type Output = u8;
+//     fn index<'a>(&'a self, i: usize) -> &'a u8 {
+//         if i < 0 || i > self.len() {
+//             panic!("index out of range!")
+//         }
+
+//         self.io_buf.borrow()[i..i]
+//     }
+// }
 
 #[macro_export]
 macro_rules! iobuf {
     ($len:expr) => {
-        IoBuffer { len: 0, io_buf: & mut[0u8; $len] }
+        IoBuffer { len: RefCell::new(0), io_buf: RefCell::new([0u8; $len]) }
     }
 }
 
 #[macro_export]
 macro_rules! ioqueue_storage {
     ($len:expr, $depth:expr) => {
-        arr![iobuf!($len); $depth]
+        arr![&iobuf!($len); $depth]
     };
 }
 
@@ -53,27 +79,31 @@ macro_rules! axisram_ioqueue_storage {
 pub enum IoQueueError {
     WriteBackingBufferTooSmall,
     WriteWhenFull,
+    WriteBorrowError,
+    RewriteWhenNotFull,
     ReadDestBufferTooSmall,
     DropWhenEmpty,
     ReadWhenEmpty,
+    PeekBorrowError,
+    ReadBorrowError,
 }
 
 #[allow(dead_code)]
-pub struct IoQueue<'buf_lt> {
+pub struct IoQueue<'iobuf_lt, const BUF_SIZE: usize> {
     size: usize,
     read_ind: usize,
     write_ind: usize,
     // depricate, ask user to pass in static lifetime buffer linked correctly
     // #[link_section = ".axisram.buffers"]
-    backing_store: &'buf_lt mut [IoBuffer<'buf_lt>],
+    backing_store: &'iobuf_lt mut [&'iobuf_lt IoBuffer<BUF_SIZE>],
 }
 
 #[allow(dead_code)]
-impl<'buf_lt> IoQueue<'buf_lt> {
-    fn init(backing_store: &'buf_lt mut [IoBuffer<'buf_lt>]) -> IoQueue<'buf_lt> {
+impl<'iobuf_lt, const BUF_SIZE: usize> IoQueue<'iobuf_lt, BUF_SIZE> {
+    fn init(backing_store: &'iobuf_lt mut [&'iobuf_lt IoBuffer<BUF_SIZE>]) -> IoQueue<'iobuf_lt, BUF_SIZE> {
         assert!(backing_store.len() > 0);
         for iob in backing_store.iter() {
-            assert!(iob.io_buf.len() > 0);
+            assert!(iob.io_buf.borrow().len() > 0);
         }
 
         IoQueue {
@@ -97,12 +127,20 @@ impl<'buf_lt> IoQueue<'buf_lt> {
         self.write_ind = (self.write_ind + 1) % self.backing_store_capacity();
     }
 
+    fn decrement_write_ind(&mut self) {
+        if self.write_ind == 0 {
+            self.write_ind = self.backing_store_capacity() -1;
+        } else {
+            self.write_ind -= 1;
+        }
+    }
+
     pub fn depth(&self) -> usize {
         self.backing_store_capacity()
     }
 
     pub fn length(&self) -> usize {
-        return self.backing_store[0].io_buf.len();
+        return self.backing_store[0].io_buf.borrow().len();
     }
 
     pub fn size(&self) -> usize {
@@ -126,33 +164,76 @@ impl<'buf_lt> IoQueue<'buf_lt> {
             return Err(IoQueueError::WriteWhenFull);
         }
 
-        if dat.len() > self.backing_store[self.write_ind].io_buf.len() {
-            return Err(IoQueueError::WriteBackingBufferTooSmall);
+        let write_to_backing_store = self.backing_store[self.write_ind];
+        if let (Ok(mut io_buf), Ok(mut io_buf_len)) 
+                = (write_to_backing_store.io_buf.try_borrow_mut(), write_to_backing_store.len.try_borrow_mut()) {
+            if dat.len() > io_buf.len() {
+                return Err(IoQueueError::WriteBackingBufferTooSmall);
+            }
+
+            io_buf[..dat.len()].copy_from_slice(dat);
+            *io_buf_len = dat.len();
+    
+            self.increment_write_ind();
+            self.size += 1;
+    
+            return Ok(());
+        } else {
+            return Err(IoQueueError::WriteBorrowError);
         }
-
-        self.backing_store[self.write_ind].io_buf[..dat.len()].copy_from_slice(dat);
-        self.backing_store[self.write_ind].len = dat.len();
-
-        self.increment_write_ind();
-        self.size += 1;
-
-        return Ok(());
     }
 
-    pub fn peek(&self) -> Result<&[u8], IoQueueError> {
+    pub fn peek_write(&self) -> Result<&IoBuffer<BUF_SIZE>, IoQueueError> {
+        if self.full() {
+            return Err(IoQueueError::WriteWhenFull);
+        }
+
+        return Ok(&self.backing_store[self.write_ind]);
+    }
+
+    pub fn peek_rewrite(&mut self) -> Result<&IoBuffer<BUF_SIZE>, IoQueueError> {
+        if !self.full() {
+            return Err(IoQueueError::RewriteWhenNotFull);
+        }
+
+        // reclaim the back buffer
+        self.decrement_write_ind();
+        self.size -= 1;
+
+        return Ok(&self.backing_store[self.write_ind]);
+    }
+
+    pub fn read<'a>(&mut self, dest: &'a mut [u8]) -> Result<&'a [u8], IoQueueError> {
         if self.empty() {
             return Err(IoQueueError::ReadWhenEmpty);
         }
 
-        let data_valid_index = self.backing_store[self.read_ind].len;
-        let ret = &self.backing_store[self.read_ind].io_buf[..data_valid_index];
-        return Ok(ret)
+        let read_from_backing_store = self.backing_store[self.write_ind];
+        if let (Ok(io_buf), Ok(io_buf_len)) 
+                = (read_from_backing_store.io_buf.try_borrow(), read_from_backing_store.len.try_borrow_mut()) {
+            if dest.len() < *io_buf_len {
+                return Err(IoQueueError::ReadDestBufferTooSmall);
+            }
+
+            let data_valid_index = *io_buf_len;
+            dest[..data_valid_index].copy_from_slice(&io_buf[..data_valid_index]);
+            let ret = &dest[..data_valid_index];
+
+            self.increment_read_ptr();
+            self.size -= 1;
+
+            return Ok(ret);
+        } else {
+            return Err(IoQueueError::ReadBorrowError);
+        }
     }
 
-    // this seems to invitably face lifetime issues 
-    pub fn peek_top_buf(&mut self) -> &IoBuffer {
-        let ret = &self.backing_store[self.read_ind];
-        return ret
+    pub fn peek(&self) -> Result<&IoBuffer<BUF_SIZE>, IoQueueError> {
+        if self.empty() {
+            return Err(IoQueueError::ReadWhenEmpty);
+        }
+
+        return Ok(&self.backing_store[self.read_ind]);
     }
 
     pub fn drop(&mut self) -> Result<(), IoQueueError> {
@@ -165,43 +246,6 @@ impl<'buf_lt> IoQueue<'buf_lt> {
 
         return Ok(());
     }
-
-    pub fn read<'a>(&mut self, dest: &'a mut [u8]) -> Result<&'a [u8], IoQueueError> {
-        if self.empty() {
-            return Err(IoQueueError::ReadWhenEmpty);
-        }
-
-        if dest.len() < self.backing_store[self.read_ind].len {
-            return Err(IoQueueError::ReadDestBufferTooSmall);
-        }
-
-        let data_valid_index = self.backing_store[self.read_ind].len;
-        dest[..data_valid_index].copy_from_slice(&self.backing_store[self.read_ind].io_buf[..data_valid_index]);
-        let ret = &dest[..data_valid_index];
-
-        self.increment_read_ptr();
-        self.size -= 1;
-
-        return Ok(ret);
-    }
-
-    // pub fn read_into(&mut self, dest: &mut [u8]) -> Result<usize, IoQueueError> {
-    //     if self.empty() {
-    //         return Err(IoQueueError::ReadWhenEmpty);
-    //     }
-
-    //     if dest.len() < self.backing_store[self.read_ind].len {
-    //         return Err(IoQueueError::ReadDestBufferTooSmall);
-    //     }
-
-    //     let data_valid_index = self.backing_store[self.read_ind].len;
-    //     dest[..data_valid_index].copy_from_slice(&self.backing_store[self.read_ind].io_buf[..data_valid_index]);
-
-    //     self.increment_read_ptr();
-    //     self.size -= 1;
-
-    //     return Ok(data_valid_index);
-    // }
 }
 
 /////////////
@@ -289,7 +333,7 @@ fn write_capacity_2() {
 
     let p1 = q.peek();
     assert!(p1.is_ok());
-    let p1 = p1.unwrap();
+    let p1 = p1.unwrap().get_backing_buf();
     assert_eq!(0xAA, p1[0]);
     assert_eq!(false, q.empty());
     assert_eq!(false, q.full());
@@ -307,7 +351,7 @@ fn write_capacity_2() {
 
     let p2 = q.peek();
     assert!(p2.is_ok());
-    let p2 = p2.unwrap();
+    let p2 = p2.unwrap().get_backing_buf();
     assert_eq!(0xAA, p2[0]);
     assert_eq!(false, q.empty());
     assert_eq!(true, q.full());
@@ -325,7 +369,7 @@ fn write_capacity_2() {
 
     let p3 = q.peek();
     assert!(p3.is_ok());
-    let p3 = p3.unwrap();
+    let p3 = p3.unwrap().get_backing_buf();
     assert_eq!(0xAA, p3[0]);
     assert_eq!(false, q.empty());
     assert_eq!(true, q.full());
@@ -417,6 +461,6 @@ fn write_capacity_3() {
 
     assert_eq!(2, q.size());
 
-    assert_eq!(0x01, q.peek().unwrap()[0]);
+    assert_eq!(0x01, q.peek().unwrap().get_backing_buf()[0]);
 }
 
