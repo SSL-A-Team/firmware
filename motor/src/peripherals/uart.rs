@@ -1,7 +1,7 @@
 
-use core::{u8, cell::RefMut};
+use core::{u8, cell::{RefMut, RefCell}};
 
-use ateam_common_rs::io_queue::IoQueue;
+use ateam_common_rs::io_queue::{IoQueue, IoBuffer};
 
 use stm32h7xx_hal::{
     dma::{
@@ -12,7 +12,6 @@ use stm32h7xx_hal::{
         DBTransfer, 
         dma::DmaConfig},
     pac,
-    prelude::*,
     serial::{
         self,
         Rx,
@@ -27,7 +26,7 @@ enum SerialTransmissionMode {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum UartTransmitError {
+pub enum UartTransmitError {
     // things that are the "user's fault"
     ModeInvalid,
     BufferFull,
@@ -51,21 +50,18 @@ pub struct UartDma<USART, RxDmaStream, TxDmaStream, const BUF_SIZE: usize>
     rx_transmission_mode: SerialTransmissionMode,
 
     // dma record keeping
-    rx_dma_transfer: Option<Transfer<RxDmaStream, Rx<USART>, PeripheralToMemory, RefMut<'static, [u8; BUF_SIZE]>, DBTransfer>>,
+    rx_dma_transfer: Option<Transfer<RxDmaStream, Rx<USART>, PeripheralToMemory, RefMut<'static, IoBuffer<BUF_SIZE>>, DBTransfer>>,
 
     // OUTBOUND / TX
-    // dma_tx_transfer: RadioDmaTxTrs,
-    // dma_tx_config: DmaConfig,
-    tx_serial: Tx<USART>,
-
+    tx_serial: Option<Tx<USART>>,
     tx_queue: IoQueue<'static, BUF_SIZE>,
     tx_transmission_mode: SerialTransmissionMode,
+    tx_enabled: bool,
 
     // dma record keeping
     tx_dma_config: Option<DmaConfig>,
     tx_dma_stream: Option<TxDmaStream>,
-    tx_dma_transfer: Option<Transfer<TxDmaStream, Tx<USART>, MemoryToPeripheral, RefMut<'static, [u8; BUF_SIZE]>, DBTransfer>>,
-    tx_dma_active: bool,
+    tx_dma_transfer: Option<Transfer<TxDmaStream, Tx<USART>, MemoryToPeripheral, RefMut<'static, IoBuffer<BUF_SIZE>>, DBTransfer>>,
 }
 
 impl<USART: serial::SerialExt, RxDmaStream, TxDmaStream, const BUF_SIZE: usize> UartDma<USART, RxDmaStream, TxDmaStream, BUF_SIZE> 
@@ -88,12 +84,66 @@ impl<USART: serial::SerialExt, RxDmaStream, TxDmaStream, const BUF_SIZE: usize> 
     //  interrupt callbacks  //
     ///////////////////////////
 
-    fn uart_interrupt_cb() {
-
+    fn get_uart_register_block(&self) -> &'static stm32h7xx_hal::stm32::usart1::RegisterBlock {
+        return unsafe { &*USART::ptr() };
     }
 
-    fn transmit_dma_stream_cb() {
+    fn uart_interrupt_cb(&mut self) {
+        // most of this function dereferences global static or needs
+        // direct register/raw ptr access so were just put in a big block
 
+        // cr1 contains the bit enabling/disabling USART interrupts
+        let cr1 = &self.get_uart_register_block().cr1;
+        // isr tells us which interrupt flag was set (success/err etc)
+        let isr = &self.get_uart_register_block().isr;
+        // icr allows us to clear the set flag with a write 
+        let icr = &self.get_uart_register_block().icr;
+
+        // check which flag caused the interrupt
+        if isr.read().tc().bit_is_set() {
+            // cause: successful transmission of tx frame
+
+            // disable transfer complete interrupts on USART2
+            cr1.modify(|_, w| w.tcie().clear_bit());
+
+            // clear USART2 transfer compliete interrupt pending bit
+            icr.write(|w| w.tccf().set_bit());
+
+            self._transmit_dma();
+        }
+    }
+
+    fn transmit_dma_stream_cb(&mut self) {
+        // this should always be Some... how can transfer interrupt complete event fire with no transfer
+        if let Some(tx) = self.tx_dma_transfer.as_mut() {
+            // if let Some(lr) = &mut led_r {
+            //     lr.set_high();
+            // }
+
+            // check which flag caused the end of DMA
+            if tx.get_transfer_complete_flag() {
+                // tx complete flag (aka success) ended the transfer
+
+                // the DMA write is done, but the USART peripherial may still have
+                // data in the internal FIFO or output shift register
+                // we need to enable to frame transfer complete flag 
+                // which will fire an interrupt on USART handler once the last byte
+                // in the FIFO has been loaded into the output shift register 
+
+                unsafe {
+                    // enable USART2 transfer complete interrupt (will fire when SR is empty)
+                    (*pac::USART2::ptr()).cr1.modify(|_, w| w.tcie().set_bit());
+
+                    // disable DMA interrupts on UART tx
+                    tx.get_stream().set_transfer_complete_interrupt_enable(false);
+                }
+
+                // clear flag for this DMA transaction
+                tx.clear_transfer_complete_interrupt();
+            }
+
+            // TODO handle other errors
+        }
     }
 
     fn receive_dma_stream_cb() {
@@ -133,7 +183,7 @@ impl<USART: serial::SerialExt, RxDmaStream, TxDmaStream, const BUF_SIZE: usize> 
         let result = match self.tx_transmission_mode {
             SerialTransmissionMode::Polling => self._transmit_polling(),
             SerialTransmissionMode::Interrupts => self._transmit_interrupts(),
-            SerialTransmissionMode::DmaInterrupts => self._transmit_dma(),
+            SerialTransmissionMode::DmaInterrupts => self.start_transmit_dma(),
         };
 
         return Ok(());
@@ -141,51 +191,62 @@ impl<USART: serial::SerialExt, RxDmaStream, TxDmaStream, const BUF_SIZE: usize> 
 
     fn _transmit_polling(&self) -> Result<(), UartTransmitError> { unimplemented!(); }
     fn _transmit_interrupts(&self) -> Result<(), UartTransmitError> { unimplemented!(); }
+
+    fn start_transmit_dma(&mut self) -> Result<(), UartTransmitError> {
+        if self.tx_transmission_mode != SerialTransmissionMode::DmaInterrupts {
+            return Err(UartTransmitError::InitializationStateInvalid);
+        }
+
+        // there's already a pending transfer, no need to start transmission again
+        if self.tx_dma_transfer.is_some() {
+            return Ok(())
+        }
+
+        return self._transmit_dma();
+    }
+
+    // NOTE: this function may be called from an interrupt
     fn _transmit_dma (&mut self) -> Result<(), UartTransmitError> {
         if self.tx_transmission_mode != SerialTransmissionMode::DmaInterrupts {
             return Err(UartTransmitError::InitializationStateInvalid);
         }
 
-        // this global transfer holds the stream and peripherial references
-        // it should only be taken and then restored by this function
-        // if it's None, something's gone horribly wrong
-        // if self.tx_dma_transfer.is_none() {
-        //     //hprintln!("dma transfer state was none when state is strictly managed internal to this function");
-        //     //hprintln!("\twas initialization invalid or was the internal state management changed?");
-        //     return Err(UartTransmitError::InternalStateInvalid)
-        // }
+        // check if there was a previous transfer, if so free it and reclaim the resources
+        if let Some(old_dma_transfer) = self.tx_dma_transfer.take() {
+            let (stream, serial, dma_buf, _) = old_dma_transfer.free();
 
-        // take the old transfer, reclaim ownership of hardware in preparation for the next transfer
-        let old_dma_transfer = self.tx_dma_transfer.take().unwrap();
-        let (stream, serial, _, _) = old_dma_transfer.free();
+            // we mutably borrowed from the read element to pass to the dma engine
+            // its done, so we update the queue bookkeeping and free the MutRef with this function call
+            let result = self.tx_queue.finalize_rpeek(dma_buf);
 
-        // TODO handle some errors..., full buffer / buffer OF would occur here
-        let tx_io_buf = self.tx_queue.peek_write().unwrap();
+            self.tx_dma_stream = Some(stream);
+            self.tx_serial = Some(serial);
+        }
 
-        //let tx_buf = &tx_io_buf.get_io_buf()[..tx_io_buf.len()];
-        //let tx_buf_refcell = tx_io_buf.get_backing_buf_refcell();
-        //let tx_buf = tx_buf_refcell.borrow_mut();
-        let tx_buf = tx_io_buf.get_backing_buf_mut();
+        // there's something to send, lets send it
+        if self.tx_enabled && !self.tx_queue.empty() {
+            if let Ok(dma_buf) = self.tx_queue.peek_mut() {
+                // create the next transfer
+                let dma_transfer = 
+                    Transfer::init(
+                        self.tx_dma_stream.take().unwrap(), 
+                        self.tx_serial.take().unwrap(), 
+                        dma_buf, 
+                        None, 
+                        self.tx_dma_config.unwrap());
 
-        //drop(tx_buf_refcell);
+                // restore the global state
+                self.tx_dma_transfer = Some(dma_transfer);
 
-        // create the next transfer
-        let dma_transfer = 
-            Transfer::init(
-                stream, 
-                serial, 
-                tx_buf, 
-                None, 
-                self.tx_dma_config.unwrap());
+                // start the transfer by setting the flag and enabling DMA
+                self.tx_dma_transfer.as_mut().unwrap().start(|serial| {
+                    serial.enable_dma_tx();
+                });
 
-        // restore the global state
-        self.tx_dma_transfer = Some(dma_transfer);
-
-        // start the transfer by setting the flag and enabling DMA
-        self.tx_dma_transfer.as_mut().unwrap().start(|serial| {
-            self.tx_dma_active = true;
-            serial.enable_dma_tx();
-        });
+            } else {
+                // TODO handle peek error (try borrow mut failed)
+            }
+        }
 
         return Ok(());
     }
@@ -194,8 +255,8 @@ impl<USART: serial::SerialExt, RxDmaStream, TxDmaStream, const BUF_SIZE: usize> 
         unimplemented!();
     }
 
-    fn transmit_pending() -> bool {
-        unimplemented!();
+    fn transmit_pending(&self) -> bool {
+        return self.tx_dma_transfer.is_some();
     }
 
     ////////////////////

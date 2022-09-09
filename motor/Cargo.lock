@@ -37,6 +37,7 @@ name = "ateam-common-rs"
 version = "0.1.0"
 dependencies = [
  "arr_macro",
+ "embedded-dma",
 ]
 
 [[package]]
