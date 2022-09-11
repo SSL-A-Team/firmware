@@ -1,0 +1,8 @@
+[build]
+target = "thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+runner = 'probe-run --chip STM32H743ZITx --connect-under-reset'
+
+[env]
+DEFMT_LOG = "trace"
