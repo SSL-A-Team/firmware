@@ -1,7 +1,10 @@
 #![no_std]
 
+#![feature(trait_alias)]
+
 pub mod peripherals;
 pub mod bodge_pinout;
+pub mod drivers;
 
 // TODO: put this in better place
 // TODO: static file size check

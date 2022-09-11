@@ -3,6 +3,7 @@ use core::{u8, cell::{RefMut, RefCell}};
 
 use ateam_common_rs::io_queue::{IoQueue, IoBuffer};
 
+use stm32h7::stm32h743v::USART1;
 use stm32h7xx_hal::{
     dma::{
         self,
@@ -10,13 +11,80 @@ use stm32h7xx_hal::{
         MemoryToPeripheral,
         PeripheralToMemory,
         DBTransfer, 
-        dma::DmaConfig},
+        dma::{DmaConfig, DmaInterrupts}},
     pac,
     serial::{
         self,
         Rx,
         Tx}, 
 };
+
+#[allow(unused)]
+use arr_macro::arr;
+use paste::paste;
+
+/////////////////////////////
+//  UartDmaBackingStorage  //
+/////////////////////////////
+
+pub struct UartDmaBackingStorage<const RX_LENGTH: usize = 0, const RX_DEPTH: usize = 0, const TX_LENGTH: usize = 0, const TX_DEPTH: usize = 0> {
+    rx_sto: &'static [RefCell<IoBuffer<RX_LENGTH>>; RX_DEPTH],
+    tx_sto: &'static [RefCell<IoBuffer<TX_LENGTH>>; TX_DEPTH],
+}
+
+impl<const RX_LENGTH: usize, const RX_DEPTH: usize, const TX_LENGTH: usize, const TX_DEPTH: usize> 
+UartDmaBackingStorage<RX_LENGTH, RX_DEPTH, TX_LENGTH, TX_DEPTH> {
+    pub const fn new(
+        rx_sto: &'static [RefCell<IoBuffer<RX_LENGTH>>; RX_DEPTH],
+        tx_sto: &'static [RefCell<IoBuffer<TX_LENGTH>>; TX_DEPTH]
+    ) -> UartDmaBackingStorage<RX_LENGTH, RX_DEPTH, TX_LENGTH, TX_DEPTH> {
+            UartDmaBackingStorage {
+                rx_sto: rx_sto,
+                tx_sto: tx_sto
+            }
+    }
+
+    pub const fn get_rx_sto(&self) -> &[RefCell<IoBuffer<RX_LENGTH>>; RX_DEPTH] {
+        &self.rx_sto
+    }
+
+    pub const fn get_tx_sto(&self) -> &[RefCell<IoBuffer<TX_LENGTH>>; TX_DEPTH] {
+        &self.tx_sto
+    }
+}
+
+unsafe impl<const RX_LENGTH: usize, const RX_DEPTH: usize, const TX_LENGTH: usize, const TX_DEPTH: usize> 
+    Send for UartDmaBackingStorage<RX_LENGTH, RX_DEPTH, TX_LENGTH, TX_DEPTH> {}
+unsafe impl<const RX_LENGTH: usize, const RX_DEPTH: usize, const TX_LENGTH: usize, const TX_DEPTH: usize> 
+    Sync for UartDmaBackingStorage<RX_LENGTH, RX_DEPTH, TX_LENGTH, TX_DEPTH> {}
+
+#[macro_export]
+macro_rules! uart_dma_backing_storage_var {
+    ($name: ident, $rx_len:expr, $rx_depth:expr, $tx_len:expr, $tx_depth:expr) => {
+        paste::item! {
+            const [<$name:upper _RX_STO_LEN>]: usize = $rx_len;
+            const [<$name:upper _RX_STO_DEPTH>]: usize = $rx_depth;
+            const [<$name:upper _TX_STO_LEN>]: usize = $tx_len;
+            const [<$name:upper _TX_STO_DEPTH>]: usize = $tx_depth;
+
+            #[link_section = ".axisram.buffers"]
+            static [<$name _sto>]: UartDmaBackingStorage<$rx_len, $rx_depth, $tx_len, $tx_depth> = UartDmaBackingStorage {
+                    rx_sto: &arr![RefCell::new(IoBuffer { data_len: 0, backing_buf: [0u8; $rx_len]} ); $rx_depth],
+                    tx_sto: &arr![RefCell::new(IoBuffer { data_len: 0, backing_buf: [0u8; $rx_len]} ); $tx_depth]
+                };
+        }
+    };
+}
+
+//////////////////////////
+//  Dma Stream Support  //
+//////////////////////////
+
+pub trait UartDmaStreamType = dma::traits::Stream<Config = DmaConfig, Interrupts = DmaInterrupts> + dma::traits::DoubleBufferedStream;
+
+///////////////
+//  UartDma  //
+///////////////
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum SerialTransmissionMode {
@@ -38,35 +106,40 @@ pub enum UartTransmitError {
     InternalStateInvalid,
 }
 
-pub struct UartDma<USART, RxDmaStream, TxDmaStream, const BUF_SIZE: usize> 
-    where RxDmaStream: dma::traits::Stream<Config = DmaConfig> + dma::traits::DoubleBufferedStream,
-          TxDmaStream: dma::traits::Stream<Config = DmaConfig> + dma::traits::DoubleBufferedStream,
+pub struct UartDma<USART, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usize, const TX_BUF_SIZE: usize> 
+    where //RxDmaStream: Into<Option<dyn UartDmaStream>>,
+          //RxDmaStream: dma::traits::Stream<Config = DmaConfig> + dma::traits::DoubleBufferedStream,
+          //TxDmaStream: dma::traits::Stream<Config = DmaConfig> + dma::traits::DoubleBufferedStream,
+          RxDmaStream: UartDmaStreamType,
+          TxDmaStream: UartDmaStreamType,
           serial::Tx<USART>: dma::traits::TargetAddress<dma::MemoryToPeripheral>,
           serial::Rx<USART>: dma::traits::TargetAddress<dma::PeripheralToMemory> {
 
     // INBOUND / RX 
 
-    rx_queue: IoQueue<'static, BUF_SIZE>,
+    rx_queue: IoQueue<'static, RX_BUF_SIZE>,
     rx_transmission_mode: SerialTransmissionMode,
 
     // dma record keeping
-    rx_dma_transfer: Option<Transfer<RxDmaStream, Rx<USART>, PeripheralToMemory, RefMut<'static, IoBuffer<BUF_SIZE>>, DBTransfer>>,
+    rx_dma_transfer: Option<Transfer<RxDmaStream, Rx<USART>, PeripheralToMemory, RefMut<'static, IoBuffer<TX_BUF_SIZE>>, DBTransfer>>,
 
     // OUTBOUND / TX
     tx_serial: Option<Tx<USART>>,
-    tx_queue: IoQueue<'static, BUF_SIZE>,
+    tx_queue: IoQueue<'static, TX_BUF_SIZE>,
     tx_transmission_mode: SerialTransmissionMode,
     tx_enabled: bool,
 
     // dma record keeping
     tx_dma_config: Option<DmaConfig>,
     tx_dma_stream: Option<TxDmaStream>,
-    tx_dma_transfer: Option<Transfer<TxDmaStream, Tx<USART>, MemoryToPeripheral, RefMut<'static, IoBuffer<BUF_SIZE>>, DBTransfer>>,
+    tx_dma_transfer: Option<Transfer<TxDmaStream, Tx<USART>, MemoryToPeripheral, RefMut<'static, IoBuffer<TX_BUF_SIZE>>, DBTransfer>>,
 }
 
-impl<USART: serial::SerialExt, RxDmaStream, TxDmaStream, const BUF_SIZE: usize> UartDma<USART, RxDmaStream, TxDmaStream, BUF_SIZE> 
-    where RxDmaStream: dma::traits::Stream<Config = DmaConfig> + dma::traits::DoubleBufferedStream,
-          TxDmaStream: dma::traits::Stream<Config = DmaConfig> + dma::traits::DoubleBufferedStream,
+impl<USART: serial::SerialExt, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usize, const TX_BUF_SIZE: usize> UartDma<USART, RxDmaStream, TxDmaStream, RX_BUF_SIZE, TX_BUF_SIZE> 
+    where //RxDmaStream: dma::traits::Stream<Config = DmaConfig> + dma::traits::DoubleBufferedStream,
+          //TxDmaStream: dma::traits::Stream<Config = DmaConfig> + dma::traits::DoubleBufferedStream,
+          RxDmaStream: UartDmaStreamType,
+          TxDmaStream: UartDmaStreamType,
           // type mismatch resolving `<[u8] as embedded_dma::WriteTarget>::Word == <stm32h7xx_hal::serial::Tx<USART> as TargetAddress<stm32h7xx_hal::dma::MemoryToPeripheral>>::MemSize`
           // expected associated type `<stm32h7xx_hal::serial::Tx<USART> as TargetAddress<stm32h7xx_hal::dma::MemoryToPeripheral>>::MemSize`
           // found type `u8`
@@ -75,9 +148,41 @@ impl<USART: serial::SerialExt, RxDmaStream, TxDmaStream, const BUF_SIZE: usize> 
           serial::Tx<USART>: dma::traits::TargetAddress<dma::MemoryToPeripheral, MemSize = u8>,
           serial::Rx<USART>: dma::traits::TargetAddress<dma::PeripheralToMemory> {
 
+    pub const fn new_from_sto<const RX_DEPTH: usize, const TX_DEPTH: usize>(sto: &'static UartDmaBackingStorage<RX_BUF_SIZE, RX_DEPTH, TX_BUF_SIZE, TX_DEPTH>) -> UartDma<USART, RxDmaStream, TxDmaStream, RX_BUF_SIZE, TX_BUF_SIZE> {        
+        let rx_q = IoQueue::new(sto.get_rx_sto());
+        let tx_q = IoQueue::new(sto.get_tx_sto());
 
-    fn init() {
-        
+        UartDma::new(rx_q, tx_q)
+    }
+
+    pub const fn new(rx_queue: IoQueue<'static, RX_BUF_SIZE>, tx_queue: IoQueue<'static, TX_BUF_SIZE>) -> UartDma<USART, RxDmaStream, TxDmaStream, RX_BUF_SIZE, TX_BUF_SIZE> {
+        UartDma { 
+            rx_queue: rx_queue,
+            rx_transmission_mode: SerialTransmissionMode::DmaInterrupts,
+
+            rx_dma_transfer: None, 
+
+            tx_serial: None,
+            tx_queue: tx_queue, 
+            tx_transmission_mode: SerialTransmissionMode::DmaInterrupts,
+            tx_enabled: false, 
+
+            tx_dma_config: None, 
+            tx_dma_stream: None, 
+            tx_dma_transfer: None 
+        }
+    }
+
+    /////////////
+    //  stuff  //
+    /////////////
+    
+    pub fn attach_rx_dma_stream() {
+
+    }
+
+    pub fn attach_tx_dma_stream() {
+
     }
 
     ///////////////////////////
@@ -113,7 +218,7 @@ impl<USART: serial::SerialExt, RxDmaStream, TxDmaStream, const BUF_SIZE: usize> 
         }
     }
 
-    fn transmit_dma_stream_cb(&mut self) {
+    pub fn transmit_dma_stream_cb(&mut self) {
         // this should always be Some... how can transfer interrupt complete event fire with no transfer
         if let Some(tx) = self.tx_dma_transfer.as_mut() {
             // if let Some(lr) = &mut led_r {
@@ -263,3 +368,21 @@ impl<USART: serial::SerialExt, RxDmaStream, TxDmaStream, const BUF_SIZE: usize> 
     //  rx functions  //
     ////////////////////
 }
+
+unsafe impl<USART, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usize, const TX_BUF_SIZE: usize> 
+Sync for UartDma<USART, RxDmaStream, TxDmaStream, RX_BUF_SIZE, TX_BUF_SIZE> 
+    where USART: serial::SerialExt,
+            RxDmaStream: UartDmaStreamType,
+            TxDmaStream: UartDmaStreamType,
+            serial::Tx<USART>: dma::traits::TargetAddress<dma::MemoryToPeripheral>,
+            serial::Rx<USART>: dma::traits::TargetAddress<dma::PeripheralToMemory> 
+    {}
+
+unsafe impl<USART, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usize, const TX_BUF_SIZE: usize> 
+Send for UartDma<USART, RxDmaStream, TxDmaStream, RX_BUF_SIZE, TX_BUF_SIZE> 
+    where USART: serial::SerialExt,
+            RxDmaStream: UartDmaStreamType,
+            TxDmaStream: UartDmaStreamType,
+            serial::Tx<USART>: dma::traits::TargetAddress<dma::MemoryToPeripheral>,
+            serial::Rx<USART>: dma::traits::TargetAddress<dma::PeripheralToMemory> 
+    {}

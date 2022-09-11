@@ -37,6 +37,7 @@ name = "ateam-common-rs"
 version = "0.1.0"
 dependencies = [
  "arr_macro",
+ "cortex-m",
  "embedded-dma",
 ]
 
@@ -207,6 +208,7 @@ dependencies = [
 name = "motor"
 version = "0.1.0"
 dependencies = [
+ "arr_macro",
  "ateam-common-rs",
  "cortex-m",
  "cortex-m-rt",
@@ -217,6 +219,7 @@ dependencies = [
  "embedded-sdmmc",
  "nalgebra",
  "panic-halt",
+ "paste",
  "static_assertions",
  "stm32h7",
  "stm32h7xx-hal",
@@ -300,9 +303,9 @@ checksum = "de96540e0ebde571dc55c73d60ef407c653844e6f9a1e2fdbd40c07b9252d812"
 
 [[package]]
 name = "paste"
-version = "1.0.7"
+version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c520e05135d6e763148b6426a837e239041653ba7becd2e538c076c738025fc"
+checksum = "b1de2e551fb905ac83f73f7aedf2f0cb4a0da7e35efa24a202a936269f1f18e1"
 
 [[package]]
 name = "proc-macro-hack"

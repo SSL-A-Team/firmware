@@ -3,9 +3,10 @@ use core::{
     cell::{
         RefCell, 
         Ref,
-        RefMut}};
+        RefMut, BorrowError, BorrowMutError}, ops::{Deref, DerefMut}};
 
 use embedded_dma;
+use cortex_m::interrupt::Mutex;
 
 #[allow(unused)]
 use arr_macro::arr;
@@ -16,8 +17,19 @@ pub struct IoBuffer<const SIZE: usize> {
     backing_buf: [u8; SIZE],
 }
 
+////////////////
+//  IoBuffer  //
+////////////////
+
 #[allow(dead_code)]
 impl<const SIZE: usize> IoBuffer<SIZE> {
+    pub const fn init() -> IoBuffer<SIZE> {
+        IoBuffer { 
+            data_len: 0,
+            backing_buf: [0u8; SIZE]
+        }
+    }
+
     pub fn max_data_len(&self) -> usize {
         return self.backing_buf.len();
     }
@@ -58,10 +70,13 @@ impl<const SIZE: usize> core::ops::IndexMut<usize> for IoBuffer<SIZE> {
     }
 }
 
+unsafe impl<const SIZE: usize> Sync for IoBuffer<SIZE> {}
+unsafe impl<const SIZE: usize> Send for IoBuffer<SIZE> {}
+
 #[macro_export]
 macro_rules! iobuf {
     ($len:expr) => {
-        IoBuffer { data_len: 0, backing_buf: [0u8; $len] }
+        IoBuffer::init()
     }
 }
 
@@ -73,12 +88,33 @@ macro_rules! ioqueue_storage {
 }
 
 #[macro_export]
-macro_rules! axisram_ioqueue_storage {
-    ($len:expr, $depth:expr) => {
-        #[link_section = ".axisram.buffers"]
-        ioqueue_storage($len, $depth)
+macro_rules! ioqueue_storage_var {
+    ($name: ident, $len:expr, $depth:expr) => {
+        let mut $name: [RefCell<IoBuffer<$len>>; $depth] = arr![RefCell::new(iobuf!($len)); $depth];
     };
 }
+
+#[macro_export]
+macro_rules! axisram_ioqueue_storage_var {
+    ($name: ident, $len:expr, $depth:expr) => {
+        #[link_section = ".axisram.buffers"]
+        static mut $name: [RefCell<IoBuffer<$len>>; $depth] = arr![RefCell::new(iobuf!($len)); $depth];
+    };
+}
+
+#[macro_export]
+macro_rules! axisram_bidirec_storage_vars {
+    ($name: ident, $len:expr, $depth:expr) => {
+        #[link_section = ".axisram.buffers"]
+        static mut [<$name _rx_sto>]: [RefCell<IoBuffer<$len>>; $depth] = ioqueue_storage!($len, $depth);
+        #[link_section = ".axisram.buffers"]
+        static mut [<$name _tx_sto>]: [RefCell<IoBuffer<$len>>; $depth] = ioqueue_storage!($len, $depth);
+    };
+}
+
+///////////////
+//  IoQueue  //
+///////////////
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -106,11 +142,11 @@ pub struct IoQueue<'iobuf_lt, const TRANSACTION_SIZE: usize> {
 
 #[allow(dead_code)]
 impl<'iobuf_lt, const TRANSACTION_SIZE: usize> IoQueue<'iobuf_lt, TRANSACTION_SIZE> {
-    fn init(backing_store: &'iobuf_lt [RefCell<IoBuffer<TRANSACTION_SIZE>>]) -> IoQueue<'iobuf_lt, TRANSACTION_SIZE> {
-        assert!(backing_store.len() > 0);
-        for iob in backing_store.iter() {
-            assert!(iob.borrow().max_data_len() > 0);
-        }
+    pub const fn new(backing_store: &'iobuf_lt [RefCell<IoBuffer<TRANSACTION_SIZE>>]) -> IoQueue<'iobuf_lt, TRANSACTION_SIZE> {
+        // assert!(backing_store.len() > 0);
+        // for iob in backing_store.iter() {
+        //     assert!(iob.borrow().max_data_len() > 0);
+        // }
 
         IoQueue {
             size: 0,
@@ -305,6 +341,9 @@ impl<'iobuf_lt, const TRANSACTION_SIZE: usize> IoQueue<'iobuf_lt, TRANSACTION_SI
     }
 }
 
+unsafe impl<'iobuf_lt, const TRANSACTION_SIZE: usize> Sync for IoQueue<'iobuf_lt, TRANSACTION_SIZE> {}
+unsafe impl<'iobuf_lt, const TRANSACTION_SIZE: usize> Send for IoQueue<'iobuf_lt, TRANSACTION_SIZE> {}
+
 /////////////
 //  TESTS  //
 /////////////
@@ -315,29 +354,29 @@ impl<'iobuf_lt, const TRANSACTION_SIZE: usize> IoQueue<'iobuf_lt, TRANSACTION_SI
 
 #[test]
 fn check_capacity_1() {
-    let mut buf = ioqueue_storage!(16, 1);
-    let q = IoQueue::init(&buf);
+    ioqueue_storage_var!(buf, 16, 1);
+    let q = IoQueue::new(&buf);
     assert_eq!(1, q.depth());
 }
 
 #[test]
 fn check_capacity_2() {
-    let mut buf = ioqueue_storage!(16, 2);
-    let q = IoQueue::init(&buf);
+    ioqueue_storage_var!(buf, 16, 2);
+    let q = IoQueue::new(&buf);
     assert_eq!(2, q.depth());
 }
 
 #[test]
 fn check_capacity_3() {
-    let mut buf = ioqueue_storage!(16, 3);
-    let q = IoQueue::init(&buf);
+    ioqueue_storage_var!(buf, 16, 3);
+    let q = IoQueue::new(&buf);
     assert_eq!(3, q.depth());
 }
 
 #[test]
 fn check_capacity_10() {
-    let mut buf = ioqueue_storage!(16, 10);
-    let q = IoQueue::init(&buf);
+    ioqueue_storage_var!(buf, 16, 10);
+    let q = IoQueue::new(&buf);
     assert_eq!(10, q.depth());
 }
 
@@ -345,8 +384,8 @@ fn check_capacity_10() {
 
 #[test]
 fn write_capacity_1() {
-    let mut buf = ioqueue_storage!(16, 1);
-    let mut q = IoQueue::init(&mut buf);
+    ioqueue_storage_var!(buf, 16, 1);
+    let mut q = IoQueue::new(&mut buf);
     assert_eq!(1, q.depth());
     assert_eq!(true, q.empty());
     assert_eq!(false, q.full());
@@ -372,8 +411,8 @@ fn write_capacity_1() {
 
 #[test]
 fn write_capacity_2() {
-    let mut buf = ioqueue_storage!(16, 2);
-    let mut q = IoQueue::init(&mut buf);
+    ioqueue_storage_var!(buf, 16, 2);
+    let mut q = IoQueue::new(&mut buf);
     assert_eq!(2, q.depth());
     assert_eq!(true, q.empty());
     assert_eq!(false, q.full());
@@ -437,8 +476,8 @@ fn write_capacity_2() {
 
 #[test]
 fn write_capacity_3() {
-    let mut buf = ioqueue_storage!(16, 3);
-    let mut q = IoQueue::init(&mut buf);
+    ioqueue_storage_var!(buf, 16, 3);
+    let mut q = IoQueue::new(&mut buf);
     assert_eq!(3, q.depth());
     assert_eq!(true, q.empty());
     assert_eq!(false, q.full());
