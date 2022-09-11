@@ -27,39 +27,36 @@ use paste::paste;
 //  UartDmaBackingStorage  //
 /////////////////////////////
 
-pub struct UartDmaBackingStorage<const RX_LENGTH: usize = 0, const RX_DEPTH: usize = 0, const TX_LENGTH: usize = 0, const TX_DEPTH: usize = 0> {
-    rx_sto: &'static [RefCell<IoBuffer<RX_LENGTH>>; RX_DEPTH],
-    tx_sto: &'static [RefCell<IoBuffer<TX_LENGTH>>; TX_DEPTH],
+pub struct UartDmaAsyncStorage<const RX_LENGTH: usize = 0, const RX_DEPTH: usize = 0, const TX_LENGTH: usize = 0, const TX_DEPTH: usize = 0> {
+    rx_sto: IoQueue<RX_LENGTH, RX_DEPTH>,
+    tx_sto: IoQueue<TX_LENGTH, TX_DEPTH>,
 }
 
 impl<const RX_LENGTH: usize, const RX_DEPTH: usize, const TX_LENGTH: usize, const TX_DEPTH: usize> 
-UartDmaBackingStorage<RX_LENGTH, RX_DEPTH, TX_LENGTH, TX_DEPTH> {
-    pub const fn new(
-        rx_sto: &'static [RefCell<IoBuffer<RX_LENGTH>>; RX_DEPTH],
-        tx_sto: &'static [RefCell<IoBuffer<TX_LENGTH>>; TX_DEPTH]
-    ) -> UartDmaBackingStorage<RX_LENGTH, RX_DEPTH, TX_LENGTH, TX_DEPTH> {
-            UartDmaBackingStorage {
-                rx_sto: rx_sto,
-                tx_sto: tx_sto
+UartDmaAsyncStorage<RX_LENGTH, RX_DEPTH, TX_LENGTH, TX_DEPTH> {
+    pub const fn new() -> UartDmaAsyncStorage<RX_LENGTH, RX_DEPTH, TX_LENGTH, TX_DEPTH> {
+        UartDmaAsyncStorage {
+                rx_sto: IoQueue::new(),
+                tx_sto: IoQueue::new()
             }
     }
 
-    pub const fn get_rx_sto(&self) -> &[RefCell<IoBuffer<RX_LENGTH>>; RX_DEPTH] {
-        &self.rx_sto
+    pub fn get_rx_sto(&mut self) -> &mut IoQueue<RX_LENGTH, RX_DEPTH> {
+        &mut self.rx_sto
     }
 
-    pub const fn get_tx_sto(&self) -> &[RefCell<IoBuffer<TX_LENGTH>>; TX_DEPTH] {
-        &self.tx_sto
+    pub fn get_tx_sto(&mut self) -> &mut IoQueue<TX_LENGTH, TX_DEPTH> {
+        &mut self.tx_sto
     }
 }
 
 unsafe impl<const RX_LENGTH: usize, const RX_DEPTH: usize, const TX_LENGTH: usize, const TX_DEPTH: usize> 
-    Send for UartDmaBackingStorage<RX_LENGTH, RX_DEPTH, TX_LENGTH, TX_DEPTH> {}
+    Send for UartDmaAsyncStorage<RX_LENGTH, RX_DEPTH, TX_LENGTH, TX_DEPTH> {}
 unsafe impl<const RX_LENGTH: usize, const RX_DEPTH: usize, const TX_LENGTH: usize, const TX_DEPTH: usize> 
-    Sync for UartDmaBackingStorage<RX_LENGTH, RX_DEPTH, TX_LENGTH, TX_DEPTH> {}
+    Sync for UartDmaAsyncStorage<RX_LENGTH, RX_DEPTH, TX_LENGTH, TX_DEPTH> {}
 
 #[macro_export]
-macro_rules! uart_dma_backing_storage_var {
+macro_rules! uart_dma_async_storage {
     ($name: ident, $rx_len:expr, $rx_depth:expr, $tx_len:expr, $tx_depth:expr) => {
         paste::item! {
             const [<$name:upper _RX_STO_LEN>]: usize = $rx_len;
@@ -68,13 +65,45 @@ macro_rules! uart_dma_backing_storage_var {
             const [<$name:upper _TX_STO_DEPTH>]: usize = $tx_depth;
 
             #[link_section = ".axisram.buffers"]
-            static [<$name _sto>]: UartDmaBackingStorage<$rx_len, $rx_depth, $tx_len, $tx_depth> = UartDmaBackingStorage {
-                    rx_sto: &arr![RefCell::new(IoBuffer { data_len: 0, backing_buf: [0u8; $rx_len]} ); $rx_depth],
-                    tx_sto: &arr![RefCell::new(IoBuffer { data_len: 0, backing_buf: [0u8; $rx_len]} ); $tx_depth]
-                };
+            static [<$name _rx_sto>]: IoQueue<$rx_len, $rx_depth> = IoQueue::new();
+            #[link_section = ".axisram.buffers"]
+            static [<$name _tx_sto>]: IoQueue<$tx_len, $tx_depth> = IoQueue::new();
         }
     };
 }
+
+// #[macro_export]
+// macro_rules! uart_dma_async_storage {
+//     ($name: ident, $rx_len:expr, $rx_depth:expr, $tx_len:expr, $tx_depth:expr) => {
+//         paste::item! {
+//             const [<$name:upper _RX_STO_LEN>]: usize = $rx_len;
+//             const [<$name:upper _RX_STO_DEPTH>]: usize = $rx_depth;
+//             const [<$name:upper _TX_STO_LEN>]: usize = $tx_len;
+//             const [<$name:upper _TX_STO_DEPTH>]: usize = $tx_depth;
+
+//             #[link_section = ".axisram.buffers"]
+//             static [<$name _sto>]: UartDmaAsyncStorage<$rx_len, $rx_depth, $tx_len, $tx_depth> = UartDmaAsyncStorage::new();
+//         }
+//     };
+// }
+
+// #[macro_export]
+// macro_rules! uart_dma_backing_storage_var {
+//     ($name: ident, $rx_len:expr, $rx_depth:expr, $tx_len:expr, $tx_depth:expr) => {
+//         paste::item! {
+//             const [<$name:upper _RX_STO_LEN>]: usize = $rx_len;
+//             const [<$name:upper _RX_STO_DEPTH>]: usize = $rx_depth;
+//             const [<$name:upper _TX_STO_LEN>]: usize = $tx_len;
+//             const [<$name:upper _TX_STO_DEPTH>]: usize = $tx_depth;
+
+//             #[link_section = ".axisram.buffers"]
+//             static [<$name _sto>]: UartDmaBackingStorage<$rx_len, $rx_depth, $tx_len, $tx_depth> = UartDmaBackingStorage {
+//                     rx_sto: &arr![RefCell::new(IoBuffer { data_len: 0, backing_buf: [0u8; $rx_len]} ); $rx_depth],
+//                     tx_sto: &arr![RefCell::new(IoBuffer { data_len: 0, backing_buf: [0u8; $rx_len]} ); $tx_depth]
+//                 };
+//         }
+//     };
+// }
 
 //////////////////////////
 //  Dma Stream Support  //
@@ -106,10 +135,11 @@ pub enum UartTransmitError {
     InternalStateInvalid,
 }
 
-pub struct UartDma<USART, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usize, const TX_BUF_SIZE: usize> 
+pub struct UartDma<USART, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usize, const RX_BUF_DEPTH: usize, const TX_BUF_SIZE: usize, const TX_BUF_DEPTH: usize> 
     where //RxDmaStream: Into<Option<dyn UartDmaStream>>,
           //RxDmaStream: dma::traits::Stream<Config = DmaConfig> + dma::traits::DoubleBufferedStream,
           //TxDmaStream: dma::traits::Stream<Config = DmaConfig> + dma::traits::DoubleBufferedStream,
+          USART: serial::SerialExt,
           RxDmaStream: UartDmaStreamType,
           TxDmaStream: UartDmaStreamType,
           serial::Tx<USART>: dma::traits::TargetAddress<dma::MemoryToPeripheral>,
@@ -117,27 +147,28 @@ pub struct UartDma<USART, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usize, co
 
     // INBOUND / RX 
 
-    rx_queue: IoQueue<'static, RX_BUF_SIZE>,
+    rx_queue: &'static mut IoQueue<RX_BUF_SIZE, RX_BUF_DEPTH>,
     rx_transmission_mode: SerialTransmissionMode,
 
     // dma record keeping
-    rx_dma_transfer: Option<Transfer<RxDmaStream, Rx<USART>, PeripheralToMemory, RefMut<'static, IoBuffer<TX_BUF_SIZE>>, DBTransfer>>,
+    rx_dma_transfer: Option<Transfer<RxDmaStream, Rx<USART>, PeripheralToMemory, &'static mut IoBuffer<TX_BUF_SIZE>, DBTransfer>>,
 
     // OUTBOUND / TX
     tx_serial: Option<Tx<USART>>,
-    tx_queue: IoQueue<'static, TX_BUF_SIZE>,
+    tx_queue: &'static mut IoQueue<TX_BUF_SIZE, TX_BUF_DEPTH>,
     tx_transmission_mode: SerialTransmissionMode,
     tx_enabled: bool,
 
     // dma record keeping
     tx_dma_config: Option<DmaConfig>,
     tx_dma_stream: Option<TxDmaStream>,
-    tx_dma_transfer: Option<Transfer<TxDmaStream, Tx<USART>, MemoryToPeripheral, RefMut<'static, IoBuffer<TX_BUF_SIZE>>, DBTransfer>>,
+    tx_dma_transfer: Option<Transfer<TxDmaStream, Tx<USART>, MemoryToPeripheral, &'static mut IoBuffer<TX_BUF_SIZE>, DBTransfer>>,
 }
 
-impl<USART: serial::SerialExt, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usize, const TX_BUF_SIZE: usize> UartDma<USART, RxDmaStream, TxDmaStream, RX_BUF_SIZE, TX_BUF_SIZE> 
+impl<USART, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usize, const RX_BUF_DEPTH: usize, const TX_BUF_SIZE: usize, const TX_BUF_DEPTH: usize> UartDma<USART, RxDmaStream, TxDmaStream, RX_BUF_SIZE, RX_BUF_DEPTH, TX_BUF_SIZE, TX_BUF_DEPTH> 
     where //RxDmaStream: dma::traits::Stream<Config = DmaConfig> + dma::traits::DoubleBufferedStream,
           //TxDmaStream: dma::traits::Stream<Config = DmaConfig> + dma::traits::DoubleBufferedStream,
+          USART: serial::SerialExt,
           RxDmaStream: UartDmaStreamType,
           TxDmaStream: UartDmaStreamType,
           // type mismatch resolving `<[u8] as embedded_dma::WriteTarget>::Word == <stm32h7xx_hal::serial::Tx<USART> as TargetAddress<stm32h7xx_hal::dma::MemoryToPeripheral>>::MemSize`
@@ -148,14 +179,7 @@ impl<USART: serial::SerialExt, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usiz
           serial::Tx<USART>: dma::traits::TargetAddress<dma::MemoryToPeripheral, MemSize = u8>,
           serial::Rx<USART>: dma::traits::TargetAddress<dma::PeripheralToMemory> {
 
-    pub const fn new_from_sto<const RX_DEPTH: usize, const TX_DEPTH: usize>(sto: &'static UartDmaBackingStorage<RX_BUF_SIZE, RX_DEPTH, TX_BUF_SIZE, TX_DEPTH>) -> UartDma<USART, RxDmaStream, TxDmaStream, RX_BUF_SIZE, TX_BUF_SIZE> {        
-        let rx_q = IoQueue::new(sto.get_rx_sto());
-        let tx_q = IoQueue::new(sto.get_tx_sto());
-
-        UartDma::new(rx_q, tx_q)
-    }
-
-    pub const fn new(rx_queue: IoQueue<'static, RX_BUF_SIZE>, tx_queue: IoQueue<'static, TX_BUF_SIZE>) -> UartDma<USART, RxDmaStream, TxDmaStream, RX_BUF_SIZE, TX_BUF_SIZE> {
+    pub fn new(rx_queue: &'static mut IoQueue<RX_BUF_SIZE, RX_BUF_DEPTH>, tx_queue: &'static mut IoQueue<TX_BUF_SIZE, TX_BUF_DEPTH>) -> UartDma<USART, RxDmaStream, TxDmaStream, RX_BUF_SIZE, RX_BUF_DEPTH, TX_BUF_SIZE, TX_BUF_DEPTH> {
         UartDma { 
             rx_queue: rx_queue,
             rx_transmission_mode: SerialTransmissionMode::DmaInterrupts,
@@ -330,7 +354,7 @@ impl<USART: serial::SerialExt, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usiz
 
         // there's something to send, lets send it
         if self.tx_enabled && !self.tx_queue.empty() {
-            if let Ok(dma_buf) = self.tx_queue.peek_mut() {
+            if let Ok(dma_buf) = self.tx_queue.peek() {
                 // create the next transfer
                 let dma_transfer = 
                     Transfer::init(
@@ -369,8 +393,8 @@ impl<USART: serial::SerialExt, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usiz
     ////////////////////
 }
 
-unsafe impl<USART, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usize, const TX_BUF_SIZE: usize> 
-Sync for UartDma<USART, RxDmaStream, TxDmaStream, RX_BUF_SIZE, TX_BUF_SIZE> 
+unsafe impl<USART, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usize, const RX_BUF_DEPTH: usize, const TX_BUF_SIZE: usize, const TX_BUF_DEPTH: usize> 
+Sync for UartDma<USART, RxDmaStream, TxDmaStream, RX_BUF_SIZE, RX_BUF_DEPTH, TX_BUF_SIZE, TX_BUF_DEPTH> 
     where USART: serial::SerialExt,
             RxDmaStream: UartDmaStreamType,
             TxDmaStream: UartDmaStreamType,
@@ -378,8 +402,8 @@ Sync for UartDma<USART, RxDmaStream, TxDmaStream, RX_BUF_SIZE, TX_BUF_SIZE>
             serial::Rx<USART>: dma::traits::TargetAddress<dma::PeripheralToMemory> 
     {}
 
-unsafe impl<USART, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usize, const TX_BUF_SIZE: usize> 
-Send for UartDma<USART, RxDmaStream, TxDmaStream, RX_BUF_SIZE, TX_BUF_SIZE> 
+unsafe impl<USART, RxDmaStream, TxDmaStream, const RX_BUF_SIZE: usize, const RX_BUF_DEPTH: usize, const TX_BUF_SIZE: usize, const TX_BUF_DEPTH: usize> 
+Send for UartDma<USART, RxDmaStream, TxDmaStream, RX_BUF_SIZE, RX_BUF_DEPTH, TX_BUF_SIZE, TX_BUF_DEPTH> 
     where USART: serial::SerialExt,
             RxDmaStream: UartDmaStreamType,
             TxDmaStream: UartDmaStreamType,

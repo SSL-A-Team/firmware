@@ -25,7 +25,7 @@ static cortex_peripherals: Mutex<RefCell<Option<cortex_m::peripheral::Peripheral
 
 type UnusedDmaType = Stream0<DMA1>;
 
-uart_dma_backing_storage_var!(radio, 512, 4, 512, 2);
+uart_dma_async_storage!(radio, 512, 4, 512, 2);
 type RadioDmaType = UartDma<USART2, UnusedDmaType, Stream0<DMA1>, RADIO_RX_STO_LEN, RADIO_TX_STO_LEN>;
 
 
