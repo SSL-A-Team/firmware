@@ -107,7 +107,9 @@ inline void setup_clocks() {
     // timer counts down to fire approximately every 1ms 
     SysTick->LOAD = (F_SYS_CLK_HZ / 1000UL);
     // current value set to 0, e.g. no trigger event
-    SysTick->VAL = 0x00000000;
+    SysTick->VAL = (F_SYS_CLK_HZ / 1000UL) - 1;
+    // enable the interrupt
+    SysTick->CTRL |= SysTick_CTRL_TICKINT_Msk;
     // enable the counter
     SysTick->CTRL |= SysTick_CTRL_ENABLE_Msk;
 }
@@ -246,5 +248,7 @@ void setup() {
     setup_clocks();
 
     setup_io();
+#ifdef UART_ENABLED
     setup_uart();
+#endif
 }

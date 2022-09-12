@@ -13,6 +13,7 @@
  * 
  */
 
+#include <math.h>
 #include <stm32f031x6.h>
 
 #include "main.h"
@@ -105,5 +106,9 @@ int32_t quadenc_get_encoder_delta() {
 }
 
 float quadenc_delta_to_w(float encoder_delta, float deltat_s) {
-    return ((encoder_delta / (float) (ENC_TICKS_PER_REV)) / deltat_s);
+    return ((encoder_delta / (float) (ENC_TICKS_PER_REV)) * 2.0f * (float) M_PI) / deltat_s;
+}
+
+float rpm_to_rad_s(float rpm) {
+    return ((rpm / 60.0f) * 2.0f * (float) M_PI);
 }

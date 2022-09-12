@@ -8,7 +8,7 @@ set(CMAKE_TOOLCHAIN_FILE ${CMAKE_SOURCE_DIR}/cmake/stm32-toolchain.cmake)
 project(ATeam-Firmware
 	LANGUAGES C CXX ASM)
 
-set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_BUILD_TYPE Release)
 
 #####################
 #  STEVAL-SPIN3201  #
@@ -40,6 +40,8 @@ target_compile_definitions(steval-spin3201-6step.elf PRIVATE
 target_compile_options(steval-spin3201-6step.elf PRIVATE
 	$<$<COMPILE_LANGUAGE:C>:${STSPIN32F0x_C_OPTIONS}>
 	$<$<COMPILE_LANGUAGE:CXX>:${STSPIN32F0x_CXX_OPTIONS}>
+	-Wdouble-promotion
+	-Werror=double-promotion
 ) 
 
 set(stspin_eval3201_linker_file "${CMAKE_CURRENT_SOURCE_DIR}/${STEVAL_SPIN3201_DIR}/common/stm32f031xx.ld")

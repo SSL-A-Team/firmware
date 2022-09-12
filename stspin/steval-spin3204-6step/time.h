@@ -24,4 +24,60 @@ void wait_ms(uint32_t time_ms);
  * @brief 
  * 
  */
-bool sync_ms();
+bool sync_systick();
+
+typedef struct SyncTimer {
+    uint32_t sync_time_ticks;
+    uint32_t prev_time_ticks;
+} SyncTimer_t;
+
+/**
+ * @brief 
+ * 
+ * @param time_sync 
+ * @param ticks 
+ */
+void time_sync_init(SyncTimer_t *time_sync, uint32_t ticks);
+
+/**
+ * @brief 
+ * 
+ * @param time_sync 
+ */
+void time_sync_reset(SyncTimer_t *time_sync);
+
+/**
+ * @brief 
+ * 
+ * @param time_sync 
+ * @return true 
+ * @return false 
+ */
+bool time_sync_ready(SyncTimer_t *time_sync);
+
+/**
+ * @brief 
+ * 
+ * @param time_sync 
+ * @return true 
+ * @return false 
+ */
+bool time_sync_ready_rst(SyncTimer_t *time_sync);
+
+/**
+ * @brief 
+ * 
+ * @param time_sync 
+ * @return true 
+ * @return false 
+ */
+bool time_sync_block(SyncTimer_t *time_sync);
+
+/**
+ * @brief 
+ * 
+ * @param time_sync 
+ * @return true 
+ * @return false 
+ */
+bool time_sync_block_rst(SyncTimer_t *time_sync);

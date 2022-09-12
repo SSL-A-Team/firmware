@@ -13,6 +13,7 @@
 
 #include <stm32f031x6.h>
 
+#include "system.h"
 #include "time.h"
 
 /**
@@ -35,7 +36,7 @@ void wait_ms(uint32_t time_ms) {
  *          can be used to determine if a core process is not meeting timing slack requirements
  */
 __attribute__((optimize("O0")))
-bool sync_ms() {
+bool sync_systick() {
     if ((SysTick->CTRL & SysTick_CTRL_COUNTFLAG_Msk) != 0) {
         return true;
     }
@@ -43,3 +44,59 @@ bool sync_ms() {
     while ((SysTick->CTRL & SysTick_CTRL_COUNTFLAG_Msk) == 0);
     return false;
 }
+
+
+
+volatile uint32_t uptime_ticks = 0;
+
+void SysTick_Handler() {
+    uptime_ticks++;
+}
+
+void time_get_uptime_ms() {
+    return (uptime_ticks * 1000) / SYSTICK_PER_S;
+}
+
+/**
+ * @brief 
+ * 
+ * @param time_sync 
+ * @param ticks 
+ */
+void time_sync_init(SyncTimer_t *time_sync, uint32_t ticks) {
+    time_sync->sync_time_ticks = ticks;
+    time_sync->prev_time_ticks = uptime_ticks;
+}
+
+void time_sync_reset(SyncTimer_t *time_sync) {
+    time_sync->prev_time_ticks = uptime_ticks;
+}
+
+bool time_sync_ready(SyncTimer_t *time_sync) {
+    return (uptime_ticks - time_sync->prev_time_ticks >= time_sync->sync_time_ticks);
+}
+
+bool time_sync_ready_rst(SyncTimer_t *time_sync) {
+    if (time_sync_ready(time_sync)) {
+        time_sync_reset(time_sync);
+        return true;
+    }
+
+    return false;
+}
+
+bool time_sync_block(SyncTimer_t *time_sync) {
+    while (!time_sync_ready(time_sync)) {
+        asm volatile("nop");
+    }
+
+    return (uptime_ticks - time_sync->prev_time_ticks > time_sync->sync_time_ticks);
+}
+
+bool time_sync_block_rst(SyncTimer_t *time_sync) {
+    bool res = time_sync_block(time_sync);
+    time_sync_reset(time_sync);
+    return res;
+}
+
+
