@@ -135,8 +135,8 @@ int main() {
 
     // toggle J1-1
     while (true) {
-        GPIOB->BSRR |= GPIO_BSRR_BR_8;
-        GPIOB->BSRR |= GPIO_BSRR_BR_9;
+        //GPIOB->BSRR |= GPIO_BSRR_BR_8;
+        //GPIOB->BSRR |= GPIO_BSRR_BR_9;
 
 #ifdef UART_ENABLED
         // TODO: receive commands
@@ -146,11 +146,11 @@ int main() {
         bool run_vel_loop = time_sync_ready_rst(&vel_loop_timer);
 
         if (run_torque_loop) {
-            GPIOB->BSRR |= GPIO_BSRR_BS_8;
+            //GPIOB->BSRR |= GPIO_BSRR_BS_8;
         }
 
         if (run_vel_loop) {
-            GPIOB->BSRR |= GPIO_BSRR_BS_9;
+            //GPIOB->BSRR |= GPIO_BSRR_BS_9;
 
             // read control state
             //  - encoders
@@ -173,8 +173,8 @@ int main() {
 
             float dc_pct_filt = iir_filter_update(&dc_filter, dc_pct);
             //pwm6step_set_duty_cycle_f(dc_pct_filt);
-            //pwm6step_set_duty_cycle_f(0.2f);
-            pwm6step_set_duty_cycle(-16000);
+            pwm6step_set_duty_cycle_f(0.25f);
+            //pwm6step_set_duty_cycle(-16000);
 
 
             //////////////////////////////////
@@ -233,8 +233,8 @@ int main() {
 #endif
         }
 
-        GPIOB->BSRR |= GPIO_BSRR_BR_8;
-        GPIOB->BSRR |= GPIO_BSRR_BR_9;
+        //GPIOB->BSRR |= GPIO_BSRR_BR_8;
+        //GPIOB->BSRR |= GPIO_BSRR_BR_9;
 
         if (sync_systick()) {
             slipped_control_frame_count++;

@@ -254,7 +254,7 @@ static void pwm6step_setup_hall_timer() {
     ///////////////////////
 
     // htim2.Init.Prescaler = LF_TIMX_PSC; // 11
-    TIM2->PSC = 11;
+    TIM2->PSC = 11; //div by 11 - 1 = 10, 4.8MHz. Period 208ns 
     // htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
     TIM2->CR1 &= ~(TIM_CR1_DIR);
     // htim2.Init.Period = LF_TIMX_ARR; // 24000
@@ -277,10 +277,10 @@ static void pwm6step_setup_hall_timer() {
     //sSlaveConfig.TriggerFilter = 8;
     TIM2->CCER &= ~(TIM_CCER_CC1E);
     TIM2->CCMR1 &= ~(TIM_CCMR1_IC1F_Msk);
-    TIM2->CCMR1 |= (0x8 << TIM_CCMR1_IC1F_Pos);
+    TIM2->CCMR1 |= (0xF << TIM_CCMR1_IC1F_Pos);
 
     // set the master mode output trigger to OC2REF
-    // TIM2 is a master to TIM1, so an event will trigget COM in TIM1
+    // TIM2 is a master to TIM1, so an event will trigger COM in TIM1
     // the source of outbound trigger will be Output Compare Channel 2 REF (count down to 0)
     // this allows us to delay COM until the hall edge detection interrupt finishes
     TIM2->CR2 &= ~TIM_CR2_MMS;
@@ -322,35 +322,34 @@ static void pwm6step_setup_hall_timer() {
     // enable channel 1
     TIM2->CCER |= TIM_CCER_CC1E;
 
-    /////////////////////////////
-    //  TIM2 CH2 setup as XXX  //
-    /////////////////////////////
-
-    // /* Disable the Channel 2: Reset the CC2E Bit */
-    // TIM2->CCER &= ~TIM_CCER_CC2E;
-
-    // /* Reset the Output Compare mode and Capture/Compare selection Bits */
-    // TIM2->CCMR1 &= ~TIM_CCMR1_OC2M;
-    // TIM2->CCMR1 &= ~TIM_CCMR1_CC2S;
-
-    // /* Select the Output Compare Mode */
-    // TIM2->CCMR1 |= (0x7 << TIM_CCMR1_OC2M_Pos);
-
-    // /* Set the Output Compare Polarity */
-    // TIM2->CCER &= ~TIM_CCER_CC2P;
-    // TIM2->CCER |= (0x0 << TIM_CCER_CC2P_Pos);
-
-    // /* Set the Capture Compare Register value */
-    // TIM2->CCR2 = 0;
-
-    // enable?
-
-    //////////////////////
-    //  Enable in NVIC  //
-    //////////////////////
+    //  Enable in NVIC
 
     NVIC_SetPriority(TIM2_IRQn, 5);
     NVIC_EnableIRQ(TIM2_IRQn);
+
+    ////////////////////////////////////////
+    //  setup timer for delay triggering  //
+    ////////////////////////////////////////
+
+    // // htim2.Init.Prescaler = LF_TIMX_PSC; // 11
+    // TIM14->PSC = 1; //div by 49 - 1 = 48, 1MHz. Period 1us
+    // // htim2.Init.Period = LF_TIMX_ARR; // 24000
+    // //TIM14->ARR = 20; // count to 20us
+    // TIM14->CCR1 = 20;
+    // // htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    // TIM14->CR1 &= ~(TIM_CR1_CKD_0 | TIM_CR1_CKD_1);
+    // enable auto reload
+    // TIM14->CR1 |= TIM_CR1_ARPE;
+
+    TIM16->SR = 0;
+    TIM16->PSC = 49;
+    TIM16->EGR |= (TIM_EGR_UG);
+    TIM16->CCR1 = 20;
+
+    TIM16->DIER |= TIM_DIER_CC1IE;
+
+    NVIC_SetPriority(TIM16_IRQn, 5);
+    NVIC_EnableIRQ(TIM16_IRQn);
 }
 
 #define CCMR1_PHASE1_OFF (TIM_CCMR1_OC1PE | TIM_CCMR1_OC1M_2)
@@ -453,10 +452,35 @@ static void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
 void TIM2_IRQHandler() {
     // if Capture Compare 1 (hall updated)
     if (TIM2->SR & TIM_SR_CC1IF) {
-        TIM2_IRQHandler_HallTransition();
+        // enable timer ch 2 delay
+        TIM16->CNT = 0;
+        TIM16->CR1 |= (TIM_CR1_CEN);
+        TIM16->CCER |= (TIM_CCER_CC1E);
+
+        // read of CCR1 should clear the int enable (PENDING?) flag
+        // rm0091, SR, pg 442/1004
+        uint32_t hall_transition_elapsed_ticks = TIM2->CCR1;
+
+        // clear interrupt
+        TIM2->SR &= ~(TIM_SR_CC1IF);
     }
 
     // handle errors
+}
+
+void TIM16_IRQHandler() {
+    if (TIM16->SR & TIM_SR_CC1IF) {
+        // disable timer
+        TIM16->CCER &= ~(TIM_CCER_CC1E);
+        TIM16->CR1 &= ~(TIM_CR1_CEN);
+        TIM16->CNT = 0;
+
+        // stage and fire commutation
+        TIM2_IRQHandler_HallTransition();
+
+        // clear interrupt
+        TIM16->SR &= ~(TIM_SR_CC1IF);
+    }
 }
 
 /**
@@ -475,6 +499,8 @@ void TIM2_IRQHandler() {
  */
 __attribute__((optimize("O0")))
 static void TIM2_IRQHandler_HallTransition() {
+    // this logic is untested and might be wrong
+    // unclear how CC1OF interacts with XOR trigger
     bool had_multiple_transitions = false;
     if (TIM2->SR & TIM_SR_CC1OF) {
         // multiple transitions happened since this interrupt
@@ -487,10 +513,6 @@ static void TIM2_IRQHandler_HallTransition() {
 
 
     perform_commutation_cycle();
-
-    // read of CCR1 should clear the int enable (PENDING?) flag
-    // rm0091, SR, pg 442/1004
-    uint32_t hall_transition_elapsed_ticks = TIM2->CCR1;
 }
 
 /**
@@ -587,6 +609,13 @@ static void perform_commutation_cycle() {
  */
 static uint8_t read_hall() {
     uint8_t hall_value = (GPIOA->IDR & (GPIO_IDR_2 | GPIO_IDR_1 | GPIO_IDR_0));
+
+    // for (int i = 0; i < 50; i++) {
+    //     uint8_t new_hall_value = (GPIOA->IDR & (GPIO_IDR_2 | GPIO_IDR_1 | GPIO_IDR_0));
+    //     if (new_hall_value != hall_value) {
+    //         for (;;) {}
+    //     }
+    // }
 
     return hall_value;
 }

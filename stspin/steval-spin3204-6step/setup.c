@@ -141,6 +141,9 @@ inline void setup_io() {
     // enable timer 1 source on the peripherial bus
     RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;
 
+    // enable timer 16
+    RCC->APB2ENR |= RCC_APB2ENR_TIM16EN;
+
     // enable ADC clock
     RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
 
