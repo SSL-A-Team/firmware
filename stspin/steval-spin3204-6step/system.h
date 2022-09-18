@@ -11,7 +11,17 @@
 
 #pragma once
 
-//#define UART_ENABLED
+///////////////////
+//  UART PARAMS  //
+///////////////////
+
+#define UART_ENABLED
+#define IOQ_BUF_LENGTH 64
+#define IOQ_BUF_DEPTH 4
+
+////////////////////
+//  TIME KEEPING  //
+////////////////////
 
 #define MS_PER_S 1000
 
@@ -22,6 +32,10 @@
 #define VELOCITY_LOOP_RATE_S ((float) VELOCITY_LOOP_RATE_MS / (float) MS_PER_S)
 #define TORQUE_LOOP_RATE_MS 1
 #define TORQUE_LOOP_RATE_S ((float) TORQUE_LOOP_RATE_MS / (float) MS_PER_S)
+
+////////////////////////
+//  FILTERING/TUNING  //
+////////////////////////
 
 #define ENCODER_IIR_TF_MS 0.20f
 #define DC_IIR_TF_MS 0.20f

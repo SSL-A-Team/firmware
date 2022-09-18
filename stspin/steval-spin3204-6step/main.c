@@ -19,6 +19,7 @@
 #include "6step.h"
 #include "current_sensing.h"
 #include "iir.h"
+#include "io_queue.h"
 #include "main.h"
 #include "quadrature_encoder.h"
 #include "pid.h"
@@ -107,6 +108,44 @@ int main() {
     //     wait_ms(10);
     // }
 
+    // GPIOB->BSRR |= GPIO_BSRR_BR_8;
+    // GPIOB->BSRR |= GPIO_BSRR_BR_9;
+
+    // uart_initialize();
+    // uint8_t arr[4] = { 0xAA, 0xAA, 0xAA, 0xAA };
+    // uint8_t arr2[2] = { 0x33, 0x33 };
+    // uart_transmit(arr, 4);
+    // uart_transmit(arr2, 2);
+    // // uart_transmit(arr, 4);
+
+    // //uart_transmit(arr2, 2);
+    // uart_wait_for_transmission();
+
+    // uint8_t buf[64];
+    // uint8_t rx_byte_count = uart_read(buf, 64);
+
+    // _debug_value_manchester(rx_byte_count);
+
+    // while (true);
+
+    //sync_systick();
+
+    // while (true) {
+    //     while (uart_can_read()) {
+    //         GPIOB->BSRR |= GPIO_BSRR_BS_9;
+
+    //         uint8_t buf[64];
+    //         uint8_t rx_byte_count = uart_read(buf, 64);
+
+    //         _debug_value_manchester(rx_byte_count);
+
+    //         uart_transmit(buf, rx_byte_count);
+    //         GPIOB->BSRR |= GPIO_BSRR_BR_9;
+    //     }
+
+    //     sync_systick();
+    // }
+
 
     SyncTimer_t vel_loop_timer;
     SyncTimer_t torque_loop_timer;
@@ -173,7 +212,7 @@ int main() {
 
             float dc_pct_filt = iir_filter_update(&dc_filter, dc_pct);
             //pwm6step_set_duty_cycle_f(dc_pct_filt);
-            pwm6step_set_duty_cycle_f(0.25f);
+            pwm6step_set_duty_cycle_f(1.00f);
             //pwm6step_set_duty_cycle(-16000);
 
 

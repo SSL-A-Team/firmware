@@ -194,18 +194,21 @@ void setup_uart() {
     USART1->CR1 &= ~(USART_CR1_UE);
     // 9-bits with parity (PCE) inserst parity bit at the 9th bit
 	USART1->CR1 |= (USART_CR1_M | USART_CR1_PCE);
+    // enable transmision
+    USART1->CR1 |= (USART_CR1_TE | USART_CR1_RE);
     // we don't need anything here
 	USART1->CR2 = 0;
-    // enable DMA for transmission
-	USART1->CR3 = USART_CR3_DMAT; // USART_CR3_DMAR;
+    // enable DMA for transmission and receive
+	USART1->CR3 = USART_CR3_DMAT | USART_CR3_DMAR;
     // set baud rate
 	USART1->BRR = 0x18; // => 2 Mbaud/s
-    // Enable idle line interrupt
-    USART1->CR1 |= USART_CR1_IDLEIE;
-    // enable transmision
-    USART1->CR1 |= (USART_CR1_TE); // USART_CR1_RE
+
     // enable the module
 	USART1->CR1 |= USART_CR1_UE;
+
+    // Enable idle line interrupt
+    USART1->ICR |= USART_ICR_IDLECF;
+    // USART1->CR1 |= USART_CR1_IDLEIE;
 
     //////////////////////////////////////
     //  Transmission DMA Channel Setup  //
@@ -218,7 +221,11 @@ void setup_uart() {
     // clear transmission length
     DMA1_Channel2->CNDTR = 0; // transmit length, set at transmission time
     // set destination address as UART periperal transmission shift register
-	DMA1_Channel2->CPAR = (uint32_t)&USART1->TDR; // USART1 data transmit register address
+	DMA1_Channel2->CPAR = (uint32_t) &USART1->TDR; // USART1 data transmit register address
+    // enable the transfer complete (TCIE) and transfer error (TEIE) interrupts
+    DMA1_Channel2->CCR |= (DMA_CCR_TEIE | DMA_CCR_TCIE);
+    // clear channel 2, global IF, transfer error IF, half-transfer IF, and transfer complete IF
+    DMA1->IFCR |= DMA_IFCR_CGIF2;
 
     /////////////////////////////////
     //  Receive DMA Channel Setup  //
@@ -226,19 +233,23 @@ void setup_uart() {
 
 	// USART1_RX, low priority, memory increment, peripheral to memory
 	// DMA1_Channel3->CCR = DMA_CCR_MINC | DMA_CCR_CIRC;
-	// DMA1_Channel3->CMAR = (uint32_t)rxSlots[0].data;
-	// DMA1_Channel3->CPAR = (uint32_t)&USART1->RDR;
-	// DMA1_Channel3->CNDTR = USART1_RX_SIZE;
+	DMA1_Channel3->CCR = DMA_CCR_MINC;
+    DMA1_Channel3->CCR |= (0x3U << DMA_CCR_PL_Pos);
+	DMA1_Channel3->CMAR = (uint32_t) 0 ;
+	DMA1_Channel3->CPAR = (uint32_t) &USART1->RDR;
+	DMA1_Channel3->CNDTR = 0;
+    // DMA1_Channel3->CCR |= (DMA_CCR_TEIE | DMA_CCR_TCIE);
+    DMA1->IFCR |= DMA_IFCR_CGIF3;
 
     /////////////////
     //  DMA Setup  //
     /////////////////
 
-    // clear channel 2, global IF, transfer error IF, half-transfer IF, and transfer complete IF
-    DMA1->IFCR = DMA_IFCR_CGIF2;
-
     NVIC_SetPriority(USART1_IRQn, 10);
-    NVIC_EnableIRQ(USART1_IRQn);  
+    NVIC_EnableIRQ(USART1_IRQn);
+
+    NVIC_SetPriority(DMA1_Channel2_3_IRQn, 10);
+    NVIC_EnableIRQ(DMA1_Channel2_3_IRQn);
 }
 
 /**

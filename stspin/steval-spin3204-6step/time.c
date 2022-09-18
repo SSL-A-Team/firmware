@@ -53,7 +53,7 @@ void SysTick_Handler() {
     uptime_ticks++;
 }
 
-void time_get_uptime_ms() {
+uint32_t time_get_uptime_ms() {
     return (uptime_ticks * 1000) / SYSTICK_PER_S;
 }
 

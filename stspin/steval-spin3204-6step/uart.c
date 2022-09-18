@@ -16,66 +16,80 @@
 
 #include <stm32f031x6.h>
 
+#include "io_queue.h"
 #include "uart.h"
 
 volatile bool uart_dma_tx_active = false;
-uint8_t uart_tx_dma_buffer[DMA_TX_BUFFER_CAPACITY];
+IoQueue_t uart_tx_queue;
 
 volatile bool uart_dma_rx_active = false;
-uint8_t uart_rx_dma_buffer[DMA_RX_BUFFER_DEPTH][DMA_RX_BUFFER_CAPACITY];
+volatile int uart_dma_rx_num_bytes = 0;
+IoQueue_t uart_rx_queue;
+volatile IoBuf_t backing_sto[2];
 
-/**
- * @brief check if a UART DMA transmission is pending
- * 
- * @return true if a tranmission is pending
- * @return false if the engine is free for transmission
- */
-__attribute((__optimize__("O0")))
+/////////////////////////
+//  PRIVATE FUNCTIONS  //
+/////////////////////////
+
+bool _uart_start_transmit_dma();
+void _uart_start_rx_dma();
+void _uart_rx_dma();
+
+////////////////////////
+//  PUBLIC FUNCTIONS  //
+////////////////////////
+
+void uart_initialize() {
+    ioq_initialize(&uart_tx_queue);
+    ioq_initialize(&uart_rx_queue);
+
+    _uart_start_rx_dma();
+}
+
+//////////
+//  TX  //
+//////////
+
+bool uart_can_transmit() {
+    return false;
+}
+
 bool uart_transmit_dma_pending() {
     return uart_dma_tx_active;
 }
 
-/**
- * @brief waits for a DMA transmission to complete
- * 
- */
-__attribute__((optimize("O0")))
 bool uart_wait_for_transmission() {
     while (uart_transmit_dma_pending());
 }
 
-/**
- * @brief transmit a buffer via UART DMA
- * 
- * @param data_buf the buffer to transmit
- * @param len the length to transmit
- */
-bool uart_transmit_dma(uint8_t *data_buf, uint16_t len) {
-    // check if dma is already sending another set of data
-    if (uart_dma_tx_active) {
-        return false;
-    }
+bool uart_transmit(uint8_t *data_buf, uint16_t len) {
+    ioq_write(&uart_tx_queue, data_buf, len);
 
-    if (data_buf == NULL) {
-        return false;
+    // dma transmission isn't in progress to keep scheduling dma writes
+    // manually start the first/only transfer
+    if (!uart_dma_tx_active) {
+        _uart_start_transmit_dma();
     }
+}
 
-    memcpy(uart_tx_dma_buffer, data_buf, len);
+bool _uart_start_transmit_dma() {
+    // get the next data to read and send down the line
+    IoBuf_t *tx_buf;
+    ioq_peek_read(&uart_tx_queue, &tx_buf);
 
     // prevent nested/concurrent transfers
     uart_dma_tx_active = true;
 
+    // TODO this should be done by the interrupt callback,
+    // maybe remove this
+    // clear the transfer complete flag
+    USART1->ICR = USART_ICR_TCCF;
     // clear all interrupt flags on the tx dma channel
     DMA1->IFCR = DMA_IFCR_CGIF2;
 
     // set the transmit buffer and length
-    DMA1_Channel2->CMAR = (uint32_t) uart_tx_dma_buffer;
-    DMA1_Channel2->CNDTR = len;
-
-    // clear the transfer complete flag
-    USART1->ICR = USART_ICR_TCCF;
-    // enable transmission complete interrupt flag
-    USART1->CR1 |= USART_CR1_TCIE;
+    DMA1_Channel2->CMAR = (uint32_t) tx_buf->buf;
+    DMA1_Channel2->CNDTR = tx_buf->len;
 
     // enable DMA
     DMA1_Channel2->CCR |= DMA_CCR_EN;
@@ -83,96 +97,100 @@ bool uart_transmit_dma(uint8_t *data_buf, uint16_t len) {
     return true;
 }
 
-/**
- * @brief receive a buffer via UART DMA
- * 
- * @param data_buf the buffer to recv
- * @param len the length to recv
- * @return bool true on success, false on failure
- */
-bool uart_recv_dma(uint8_t *data_buf, uint16_t len) {
-    // check if dma is already receiving another set of data
-    if (uart_dma_rx_active) {
-        return false;
-    }
+//////////
+//  RX  //
+//////////
 
-    uart_dma_rx_active = true;
-
-    // Set USART RDR register address to source of transfer
-    DMA1_Channel2->CMAR = USART_RDR_RDR;
-
-    // Write mem addr in DMA control register as dest of transfer
-    DMA1_Channel2->CMAR = (uint32_t) data_buf;
-
-    // Set number of bytes to transfer to DMA control register
-    DMA1_Channel2->CNDTR = len;
-
-    // Set priority
-    DMA1_Channel2->CCR |= (0x3U << DMA_CCR_PL_Pos);
-
-    // Enable 
-
-    // Activate channel
-    DMA1_Channel2->CCR |= DMA_CCR_EN;
-
-    return true;
+bool uart_can_read() {
+    return (!ioq_empty(&uart_rx_queue));
 }
 
-/**
- * @brief Process data once it's received on UART
- * 
- * @param data 
- * @param len 
- */
-void usart_process_data(const void *data, size_t len) {
-    const uint8_t *d = data;
-
-    // TODO something
+uint8_t uart_read(void *dest, uint8_t len) {
+    return ioq_read(&uart_rx_queue, dest, len);
 }
 
-/**
- * @brief Check for new data from DMA
- * 
- */
-void usart_rx_check() {
-    static size_t old_pos;
-    size_t pos;
+void _uart_start_rx_dma() {
+    // get the next data to read and send down the line
+    IoBuf_t *rx_buf;
+    ioq_peek_write(&uart_rx_queue, &rx_buf);
 
-    // Calculate position in buffer
-    pos = ARRAY_LEN(uart_rx_dma_buffer) - (DMA1_Channel2->CNDTR);
-    if (pos != old_pos) {
-        if (pos < old_pos) {
-            usart_process_data(&uart_rx_dma_buffer[old_pos], pos - old_pos);
-        }
-        else {
-            usart_process_data(&uart_rx_dma_buffer[old_pos], ARRAY_LEN(uart_rx_dma_buffer) - old_pos);
-            if (pos > 0) {
-                usart_process_data(&uart_rx_dma_buffer[0], pos);
-            }
-        }
-    }
+    DMA1_Channel3->CMAR = (uint32_t) rx_buf->buf;
+    DMA1_Channel3->CNDTR = IOQ_BUF_LENGTH;
 
-    old_pos = pos;
+    // DMA1_Channel3->CMAR = ( uint32_t) backing_sto[0].buf;
+    // DMA1_Channel3->CNDTR = IOQ_BUF_LENGTH;
+
+    // enable DMA
+    DMA1_Channel3->CCR |= DMA_CCR_EN; 
+
+    USART1->ICR |= USART_ICR_IDLECF;
+    USART1->CR1 |= USART_CR1_IDLEIE;
 }
+
+void _uart_rx_dma() {
+    // get the next data to read and send down the line
+    IoBuf_t *rx_buf;
+    ioq_peek_write(&uart_rx_queue, &rx_buf);
+
+    // check if were filling the last slot
+    // if (ioq_cur_size(&uart_rx_queue) < (IOQ_BUF_DEPTH - 1)) {
+        uint8_t transmitted_bytes = (IOQ_BUF_LENGTH - DMA1_Channel3->CNDTR);
+        rx_buf->len = transmitted_bytes;
+
+        // data and len now correct, finalize write
+        ioq_finalize_peek_write(&uart_rx_queue, NULL);
+
+        // re-peek after potential finalization
+        ioq_peek_write(&uart_rx_queue, &rx_buf);
+    // }
+
+    DMA1_Channel3->CMAR = (uint32_t) rx_buf->buf;
+    DMA1_Channel3->CNDTR = IOQ_BUF_LENGTH;
+}
+
+//////////////////////////
+//  INTERRUPT HANDLERS  //
+//////////////////////////
 
 /**
  * @brief callback handler for DMA RX
  * 
  */
-void DMA1_Channel2_3_IRQHandler(void) {
+void DMA1_Channel2_3_IRQHandler() {
+    // check if DMA1 CH2 has any interrupt, this is for transmit
+    if (DMA1->ISR & DMA_ISR_GIF2) {
+        // transmit had a DMA error
+        if (DMA1->ISR & DMA_ISR_TEIF2) {
+            // TODO log error
+        }
 
-    // Check half-transfer complete interrupt
-    if (DMA1->ISR & DMA_ISR_HTIF2_Msk) {
-        DMA1->ISR &= DMA_ISR_HTIF2_Msk;         // Clear half-transfer complete flag
-        usart_rx_check();                       // Check for data to process
+        // DMA finished transfer to USART
+        if (DMA1->ISR & DMA_ISR_TCIF2) {
+            // expect the USART1 TC interrupt to fire once last byte is out of the FIFO/TR
+            // make sure tx complete inerrupts are on
+            USART1->CR1 |= USART_CR1_TCIE;
+        }
+
+        DMA1->IFCR |= DMA_IFCR_CGIF2;
     }
 
-    // Check transfer-complete interrupt
-    if (DMA1->ISR & DMA_ISR_TCIF2_Msk) {
-        DMA1->ISR &= DMA_ISR_TCIF2_Msk;         // Clear transfer complete flag
-        usart_rx_check();                       // Check for data to process
-    }
+    // check if DMA1 CH3 has any interrupt, this is for receive
+    if (DMA1->ISR & DMA_ISR_GIF3) {
+        // receive had a dma error
+        if (DMA1->ISR & DMA_ISR_TEIF3) {
+            // TODO: log error
+        }
 
+        // receive, got a full buffer
+        // this is sort of unexpected, we generally expect a packet less than
+        // max buffer length, which fires USART line idle. We probably got 
+        // two packets back to back and need to sort that out
+        if (DMA1->ISR & DMA_ISR_TCIF3) {
+            // _uart_rx_dma();
+        }
+
+        DMA1->IFCR |= DMA_IFCR_CGIF3;
+    }
 }
 
 /**
@@ -183,30 +201,50 @@ __attribute((__optimize__("O0")))
 void USART1_IRQHandler() {
     uint32_t uart_status_register = USART1->ISR;
 
-
-    ////////////////////
-    //   Reception    //
-    ////////////////////
-    if (uart_status_register & USART_ISR_RXNE) {
-        // disable DMA channel
-        DMA1_Channel2->CCR &= ~(DMA_CCR_EN);
-
-        // restore the ready flag
-        uart_dma_rx_active = false;
-    }
-
-
     ////////////////////
     //  Transmission  //
     ////////////////////
 
     if (uart_status_register & USART_ISR_TC) {
-        // disable transfer complete interrupts 
-        USART1->CR1 &= ~(USART_CR1_TCIE);
         // disable DMA channel
         DMA1_Channel2->CCR &= ~(DMA_CCR_EN);
+        // disable transfer complete interrupts 
+        USART1->CR1 &= ~(USART_CR1_TCIE);
 
-        // restore the ready flag
-        uart_dma_tx_active = false;
+        USART1->ICR |= USART_ICR_TCCF;
+
+        // finalize tx queue read
+        // check if queue is empty
+        // conditionally recall transmit
+        ioq_finalize_peek_read(&uart_tx_queue, NULL);
+        if (!ioq_empty(&uart_tx_queue)) {
+            _uart_start_transmit_dma();
+        } else {
+            // restore the ready flag
+            uart_dma_tx_active = false;
+        }
+    }
+
+    ////////////////////
+    //   Reception    //
+    ////////////////////
+
+    // detected idle line before full buf
+    if (uart_status_register & USART_ISR_IDLE) {
+        // disable DMA
+        DMA1_Channel3->CCR &= ~(DMA_CCR_EN);
+        // disable idle interrupts
+        // USART1->CR1 &= ~(USART_CR1_IDLEIE);
+
+        // clear idle line int flag
+        USART1->ICR |= USART_ICR_IDLECF;
+
+        _uart_rx_dma();
+
+        // enable idle interrupts
+        // USART1->CR1 |= USART_CR1_IDLEIE;
+
+        // enable DMA
+        DMA1_Channel3->CCR |= DMA_CCR_EN;
     }
 }
