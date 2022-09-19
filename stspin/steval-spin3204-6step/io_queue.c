@@ -136,3 +136,10 @@ bool ioq_finalize_peek_read(IoQueue_t *q, IoBuf_t *dest) {
 
     return true;
 }
+
+void ioq_discard(IoQueue_t *q) {
+    while (q->size != 0) {
+        _increment_read_ind(q);
+        q->size--;
+    }
+}

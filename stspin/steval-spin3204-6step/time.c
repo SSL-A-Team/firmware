@@ -46,15 +46,26 @@ bool sync_systick() {
 }
 
 
-
+volatile uint32_t epoch_seconds = 0;
+volatile uint32_t uptime_ticks_since_epoch = 0;
 volatile uint32_t uptime_ticks = 0;
 
 void SysTick_Handler() {
     uptime_ticks++;
+    uptime_ticks_since_epoch++;
 }
 
 uint32_t time_get_uptime_ms() {
     return (uptime_ticks * 1000) / SYSTICK_PER_S;
+}
+
+void time_set_epoch_seconds(uint32_t epoch_sec) {
+    epoch_seconds = epoch_sec;
+    uptime_ticks_since_epoch = 0;
+}
+
+uint32_t time_local_epoch_s() {
+    return epoch_seconds + (uptime_ticks_since_epoch / SYSTICK_PER_S);
 }
 
 /**

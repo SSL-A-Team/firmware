@@ -42,3 +42,4 @@ bool ioq_finalize_peek_write(IoQueue_t *q, IoBuf_t *buf);
 uint8_t ioq_read(IoQueue_t *q, void *dest, uint8_t len);
 bool ioq_peek_read(IoQueue_t *q, IoBuf_t **dest);
 bool ioq_finalize_peek_read(IoQueue_t *q, IoBuf_t *dest);
+void ioq_discard(IoQueue_t *q);

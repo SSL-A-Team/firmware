@@ -86,66 +86,7 @@ int main() {
 
     MotorResponsePacket_t response_packet;
     memset(&response_packet, 0, sizeof(MotorResponsePacket_t));
-
-    // while (true) {
-    //     wait_ms(100);
-    //     GPIOB->BSRR |= GPIO_BSRR_BS_8;
-    //     currsen_read(&res);
-    //     GPIOB->BSRR |= GPIO_BSRR_BR_8;
-
-    //     wait_ms(1);
-
-    //     _debug_value_manchester(res.pot);
-
-    //     wait_ms(1);
-    // }
-
-    // pwm6step_set_duty_cycle(16384);
-
-    // while(true) {
-    //     currsen_read(&res);
-    //     _debug_value_manchester(res.pot);
-    //     wait_ms(10);
-    // }
-
-    // GPIOB->BSRR |= GPIO_BSRR_BR_8;
-    // GPIOB->BSRR |= GPIO_BSRR_BR_9;
-
-    // uart_initialize();
-    // uint8_t arr[4] = { 0xAA, 0xAA, 0xAA, 0xAA };
-    // uint8_t arr2[2] = { 0x33, 0x33 };
-    // uart_transmit(arr, 4);
-    // uart_transmit(arr2, 2);
-    // // uart_transmit(arr, 4);
-
-    // //uart_transmit(arr2, 2);
-    // uart_wait_for_transmission();
-
-    // uint8_t buf[64];
-    // uint8_t rx_byte_count = uart_read(buf, 64);
-
-    // _debug_value_manchester(rx_byte_count);
-
-    // while (true);
-
-    //sync_systick();
-
-    // while (true) {
-    //     while (uart_can_read()) {
-    //         GPIOB->BSRR |= GPIO_BSRR_BS_9;
-
-    //         uint8_t buf[64];
-    //         uint8_t rx_byte_count = uart_read(buf, 64);
-
-    //         _debug_value_manchester(rx_byte_count);
-
-    //         uart_transmit(buf, rx_byte_count);
-    //         GPIOB->BSRR |= GPIO_BSRR_BR_9;
-    //     }
-
-    //     sync_systick();
-    // }
-
+    bool params_return_packet_requested = false;
 
     SyncTimer_t vel_loop_timer;
     SyncTimer_t torque_loop_timer;
@@ -155,22 +96,31 @@ int main() {
     IIRFilter_t encoder_filter;
     iir_filter_init(&encoder_filter, iir_filter_alpha_from_Tf(ENCODER_IIR_TF_MS, VELOCITY_LOOP_RATE_MS));
 
-    IIRFilter_t dc_filter;
-    iir_filter_init(&dc_filter, iir_filter_alpha_from_Tf(DC_IIR_TF_MS, VELOCITY_LOOP_RATE_MS));
+    MotorCommand_MotionType_t motion_control_type = VELOCITY;
+    
+    float r_motor_board = 0.0f;
+    float u_vel_loop;
+    float u_torque_loop;
+    float cur_limit = 0.0f;
 
     const float r_rpm = 500.0f;
-    const float r_rad_s = rpm_to_rad_s(r_rpm);
+    r_motor_board = rpm_to_rad_s(r_rpm);
 
     PidConstants_t vel_pid_constants;
     pid_constants_initialize(&vel_pid_constants);
     Pid_t vel_pid;
     pid_initialize(&vel_pid, &vel_pid_constants);
 
-    vel_pid_constants.kP = 0.74;
+    vel_pid_constants.kP = 1.0;
     // vel_pid_constants.kI = 0.0001;
     // vel_pid_constants.kD = 0.1;
     // vel_pid_constants.kI_max = 550.0;
     // vel_pid_constants.kI_min = -550.0;
+
+    PidConstants_t torque_pid_constants;
+    pid_constants_initialize(&torque_pid_constants);
+    Pid_t torque_pid;
+    pid_initialize(&torque_pid, &torque_pid_constants);
 
     // toggle J1-1
     while (true) {
@@ -178,52 +128,133 @@ int main() {
         //GPIOB->BSRR |= GPIO_BSRR_BR_9;
 
 #ifdef UART_ENABLED
-        // TODO: receive commands
+        while (uart_can_read()) {
+            MotorCommandPacket_t motor_command_packet;
+            uint8_t bytes_moved = uart_read(&motor_command_packet, sizeof(MotorCommandPacket_t));
+            if (bytes_moved != sizeof(MotorCommandPacket_t)) {
+                // something went wrong, just purge all of the data
+                uart_discard();
+            }
+
+            if (motor_command_packet.type == MCP_MOTION) {
+                // we got a motion packet!
+
+                if (motor_command_packet.motion.reset) {
+                    // TODO handle hardware reset
+
+                    while (true); // block, hardware reset flagged
+                }
+
+                r_motor_board = motor_command_packet.motion.setpoint;
+            } else if (motor_command_packet.type == MCP_PARAMS) {
+                // we got some params
+                params_return_packet_requested = true;
+
+                if (motor_command_packet.params.update_timestamp) {
+                    time_set_epoch_seconds(motor_command_packet.params.update_timestamp);
+                }
+
+                if (motor_command_packet.params.update_vel_p) {
+                    vel_pid_constants.kP = motor_command_packet.params.vel_p;
+                }
+
+                if (motor_command_packet.params.update_vel_i) {
+                    vel_pid_constants.kI = motor_command_packet.params.vel_i;
+                }
+
+                if (motor_command_packet.params.update_vel_d) {
+                    vel_pid_constants.kD = motor_command_packet.params.vel_d;
+                }
+
+                if (motor_command_packet.params.update_vel_i_max) {
+                    vel_pid_constants.kI_max = motor_command_packet.params.vel_i_max;
+                    vel_pid_constants.kI_min = -motor_command_packet.params.vel_i_max;
+                }
+
+                if (motor_command_packet.params.update_cur_p) {
+                    torque_pid_constants.kP = motor_command_packet.params.cur_p;
+                }
+
+                if (motor_command_packet.params.update_cur_i) {
+                    torque_pid_constants.kI = motor_command_packet.params.cur_i;
+                }
+
+                if (motor_command_packet.params.update_cur_d) {
+                    torque_pid_constants.kD = motor_command_packet.params.cur_d;
+                }
+
+                if (motor_command_packet.params.update_cur_i_max) {
+                    torque_pid_constants.kI_max = motor_command_packet.params.cur_i_max;
+                    torque_pid_constants.kI_min = -motor_command_packet.params.cur_i_max;
+                }
+
+                if (motor_command_packet.params.update_cur_clamp) {
+                    cur_limit = motor_command_packet.params.cur_clamp;
+                }
+            }
+        }
 #endif
 
         bool run_torque_loop = time_sync_ready_rst(&torque_loop_timer);
         bool run_vel_loop = time_sync_ready_rst(&vel_loop_timer);
 
         if (run_torque_loop) {
-            //GPIOB->BSRR |= GPIO_BSRR_BS_8;
+            float cur_measurement = 0.0f; // TODO: get current from dma
+            // TODO: estimate torque from current
+            // TODO: filter?
+
+            float r;
+            if (motion_control_type == TORQUE) {
+                r = r_motor_board;
+            } else {
+                r = u_vel_loop;
+            }
+
+            float torque_setpoint = pid_calculate(&torque_pid, r, cur_measurement);
+            // TODO: transform desired torque to current
+            u_torque_loop = torque_setpoint;
+
+            // torque control data
+            response_packet.motion.current_setpoint = 0.0f;
+            response_packet.motion.current_estimate = 0.0f;
+            response_packet.motion.current_computed_error = 0.0f;
+            response_packet.motion.current_computed_setpoint = 0.0f;
         }
 
         if (run_vel_loop) {
-            //GPIOB->BSRR |= GPIO_BSRR_BS_9;
-
-            // read control state
-            //  - encoders
-            //  - hall
-            //  - current
-            // int32_t enc_count = quadenc_get_encoder_delta();
-            // _debug_value_manchester_32(enc_count);
-            // wait_ms(5);
             int32_t enc_delta = quadenc_get_encoder_delta();
             float enc_vel_rad_s = quadenc_delta_to_w(enc_delta, VELOCITY_LOOP_RATE_MS);
-
             float enc_rad_s_filt = iir_filter_update(&encoder_filter, enc_vel_rad_s);
-            
-            // float vel_err = (r_rad_s - enc_rad_s_filt);
-            // float vel_setpoint = vel_kP * vel_err;
+        
+            float vel_setpoint = pid_calculate(&vel_pid, r_motor_board, enc_rad_s_filt);
+            u_vel_loop = vel_setpoint / MOTOR_MAXIMUM_RAD_S;
 
-            float vel_setpoint = pid_calculate(&vel_pid, r_rad_s, enc_rad_s_filt);
-            
-            float dc_pct = vel_setpoint / MOTOR_MAXIMUM_RAD_S;
+            // velocity control data
+            response_packet.motion.vel_setpoint = 0.0f;
+            response_packet.motion.encoder_delta = enc_delta;
+            response_packet.motion.vel_enc_estimate = enc_rad_s_filt;
+            response_packet.motion.vel_hall_estimate = 0U;
+            response_packet.motion.vel_computed_error = vel_pid.prev_err;
+            response_packet.motion.vel_computed_setpoint = vel_setpoint;
+        }
 
-            float dc_pct_filt = iir_filter_update(&dc_filter, dc_pct);
-            //pwm6step_set_duty_cycle_f(dc_pct_filt);
-            pwm6step_set_duty_cycle_f(1.00f);
-            //pwm6step_set_duty_cycle(-16000);
+
+        if (run_torque_loop || run_vel_loop) {
+            // set the motor duty cycle
+            if (motion_control_type == OPEN_LOOP) {
+                pwm6step_set_duty_cycle_f(r_motor_board);
+            } else if (motion_control_type == VELOCITY) {
+                pwm6step_set_duty_cycle_f(u_vel_loop);
+            } else {
+                pwm6step_set_duty_cycle_f(u_torque_loop);
+            }
 
 
-            //////////////////////////////////
-            //  Transmit Motion Data Frame  //
-            //////////////////////////////////
+
+            // load system state for transmit
 
             // read error states
             const MotorErrors_t reported_motor_errors = pwm6step_get_motor_errors();
-
-            // transmit data frame
 
             response_packet.type = MCP_MOTION;
             response_packet.motion.master_error = false; // TODO update any error
@@ -253,28 +284,41 @@ int main() {
             response_packet.motion.control_loop_time_error = false;
 
             // timestamp
-            response_packet.motion.timestamp = 0U;
+            response_packet.motion.timestamp = time_local_epoch_s();
 
-            // motion data
-            response_packet.motion.encoder_delta = enc_delta;
-            response_packet.motion.vel_enc_estimate = enc_rad_s_filt;
-            response_packet.motion.vel_hall_estimate = 0U;
-            response_packet.motion.vel_computed_error = vel_pid.prev_err;
-            response_packet.motion.vel_computed_setpoint = vel_setpoint;
 
-            response_packet.motion.current_estimate = 0.0f;
-            response_packet.motion.current_computed_error = 0.0f;
-            response_packet.motion.current_computed_setpoint = 0.0f;
+
+            // transmit packets
+#ifdef UART_ENABLED
+            // GPIOB->BSRR |= GPIO_BSRR_BS_8;
+            uart_wait_for_transmission();
+            // takes ~270uS, mostly hardware DMA
+            uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket_t));
+            // GPIOB->BSRR |= GPIO_BSRR_BR_8;
+#endif
+
+            if (params_return_packet_requested) {
+                params_return_packet_requested = false;
+
+                response_packet.type = MCP_PARAMS;
+
+                response_packet.params.vel_p = vel_pid_constants.kP;
+                response_packet.params.vel_i = vel_pid_constants.kI;
+                response_packet.params.vel_d = vel_pid_constants.kD;
+                response_packet.params.vel_i_max = vel_pid_constants.kI_max;
+                response_packet.params.cur_p = torque_pid_constants.kP;
+                response_packet.params.cur_i = torque_pid_constants.kI;
+                response_packet.params.cur_d = torque_pid_constants.kD;
+                response_packet.params.torque_i_max = torque_pid_constants.kI_max;
+                response_packet.params.cur_clamp = (uint16_t) cur_limit;
 
 #ifdef UART_ENABLED
-            uart_transmit_dma((uint8_t *) &response_packet, sizeof(MotorResponsePacket_t));
-            uart_wait_for_transmission();
+                uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket_t));
 #endif
+            }
         }
 
-        //GPIOB->BSRR |= GPIO_BSRR_BR_8;
-        //GPIOB->BSRR |= GPIO_BSRR_BR_9;
-
+        // limit loop rate to smallest time step
         if (sync_systick()) {
             slipped_control_frame_count++;
         }

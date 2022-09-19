@@ -20,6 +20,10 @@
  */
 void wait_ms(uint32_t time_ms);
 
+uint32_t time_get_uptime_ms();
+void time_set_epoch_seconds(uint32_t epoch_sec);
+uint32_t time_local_epoch_s();
+
 /**
  * @brief 
  * 

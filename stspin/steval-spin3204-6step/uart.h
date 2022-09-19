@@ -24,4 +24,4 @@ bool uart_transmit(uint8_t *data_buf, uint16_t len);
 
 bool uart_can_read();
 uint8_t uart_read(void *dest, uint8_t len);
-
+void uart_discard();

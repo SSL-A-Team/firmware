@@ -105,6 +105,10 @@ bool uart_can_read() {
     return (!ioq_empty(&uart_rx_queue));
 }
 
+void uart_discard() {
+    ioq_discard(&uart_rx_queue);
+}
+
 uint8_t uart_read(void *dest, uint8_t len) {
     return ioq_read(&uart_rx_queue, dest, len);
 }
@@ -133,7 +137,7 @@ void _uart_rx_dma() {
     ioq_peek_write(&uart_rx_queue, &rx_buf);
 
     // check if were filling the last slot
-    // if (ioq_cur_size(&uart_rx_queue) < (IOQ_BUF_DEPTH - 1)) {
+    if (ioq_cur_size(&uart_rx_queue) < (IOQ_BUF_DEPTH - 1)) {
         uint8_t transmitted_bytes = (IOQ_BUF_LENGTH - DMA1_Channel3->CNDTR);
         rx_buf->len = transmitted_bytes;
 
@@ -142,7 +146,7 @@ void _uart_rx_dma() {
 
         // re-peek after potential finalization
         ioq_peek_write(&uart_rx_queue, &rx_buf);
-    // }
+    }
 
     DMA1_Channel3->CMAR = (uint32_t) rx_buf->buf;
     DMA1_Channel3->CNDTR = IOQ_BUF_LENGTH;

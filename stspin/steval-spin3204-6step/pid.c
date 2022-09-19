@@ -21,6 +21,8 @@ void pid_initialize(Pid_t *pid, PidConstants_t *pid_constants) {
     pid->prev_err = 0.0f;
 }
 
+// this graphic might be helpful
+// https://upload.wikimedia.org/wikipedia/commons/4/43/PID_en.svg
 float pid_calculate(Pid_t *pid, float r, float y) {
     float err = r - y;
     
@@ -37,7 +39,7 @@ float pid_calculate(Pid_t *pid, float r, float y) {
     float termD = (err - pid->prev_err) * pid->pid_constants->kD; // flip err and prev_err???
     pid->prev_err = err;
 
-    float u = termP + termI + termD;
+    float u = r + (termP + termI + termD);
     //pid->prev_u = u;
     return u;
 }
