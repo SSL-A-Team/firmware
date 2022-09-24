@@ -12,7 +12,7 @@ use stm32h7xx_hal::{
     serial::{self, config},
 };
 
-include_external_bin!{STSPIN_BINARY, "build/bin/steval-spin3201-6step.bin"}
+include_external_bin!{STSPIN_BINARY, "build/bin/dev3204-wheel.bin"}
 
 #[entry]
 fn main() -> ! {

@@ -8,6 +8,8 @@
 
 #include <stm32f031x6.h>
 
+#include "system.h"
+
 ///////////////////////////////////
 //  public function definitions  //
 ///////////////////////////////////

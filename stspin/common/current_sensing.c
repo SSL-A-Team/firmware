@@ -29,7 +29,7 @@ void currsen_read(ADC_Result_t *res)
 
     // Select ch 3 (pot), ch 4 (motor pin), ch 17 (Vref), ch 18 (Vbat) 
     // ADC1->CHSELR = ADC_CHSELR_CHSEL3; // | ADC_CHSELR_CHSEL4 | ADC_CHSELR_CHSEL17 | ADC_CHSELR_CHSEL18;
-    ADC1->CHSELR = ADC_CHSELR_CHSEL4;
+    ADC1->CHSELR = ADC_CHSELR_CHSEL3;
     // Select a sampling mode of 111 i.e. 239.5 ADC clk to be greater than 17.1us
     // TODO Need to configure timing based on rise resistance
     ADC1->SMPR |= ADC_SMPR_SMP_0 | ADC_SMPR_SMP_1 | ADC_SMPR_SMP_2;
@@ -171,7 +171,7 @@ CS_Status_t currsen_adc_conf()
                | ADC_CFGR1_AUTOFF
               ,
                 ADC_RESOLUTION_10B
-               | ADC_DATA_ALIGN_RIGHT
+               | ADC_DATA_ALIGN_LEFT
                | ADC_LP_MODE_NONE
               );
 
