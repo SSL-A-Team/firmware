@@ -26,7 +26,7 @@ all:: $1-$2
 $1-$2-prog: $1-$2
 	./util/program.sh $3 $1/target/thumbv7em-none-eabihf/release/$2
 
-$1-$2-debug: steval-spin3201-6step
+$1-$2-debug: dev3204-wheel
 	cd $1/ && \
 	cargo build --bin $2
 all:: $1-$2-debug
