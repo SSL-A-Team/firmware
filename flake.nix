@@ -9,10 +9,10 @@
 
   outputs = { self, nixpkgs, rust-overlay, flake-utils }:
     flake-utils.lib.eachSystem [
-        "aarch64-linux"
-        "aarch64-darwin"
+        # "aarch64-linux" # TODO unsupported for clang_multi, find pkgsCross package
+        # "aarch64-darwin" # TODO same as above ^^^
         # "i686-linux" # gcc10 doesn't seem to have support in the Nix repos
-        "x86_64-darwin"
+        # "x86_64-darwin"
         "x86_64-linux" ]
     (system: 
       let 
@@ -39,10 +39,13 @@
             gnumake
             cmake
             gcc-arm-embedded-10
+
+            # programmers
             openocd
+            probe-run
 
             # userpsace clang and link vars for bindgen subtargets
-            clang
+            clang_multi
 
             # Rust Embedded
             (rust-bin.nightly.latest.default.override {
