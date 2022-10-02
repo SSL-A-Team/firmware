@@ -62,13 +62,8 @@ name = "uart-queue"
 harness = false
 
 [patch.crates-io]
-# embassy-executor = { git = "https://github.com/SSL-A-Team/embassy", branch = "uart-read-idle" }
-# embassy-sync = { git = "https://github.com/SSL-A-Team/embassy", branch = "uart-read-idle" }
-# embassy-time = { git = "https://github.com/SSL-A-Team/embassy", branch = "uart-read-idle" }
-# embassy-stm32 = { git = "https://github.com/SSL-A-Team/embassy", branch = "uart-read-idle" }
-# embassy-futures = { git = "https://github.com/SSL-A-Team/embassy", branch = "uart-read-idle" }
-embassy-executor = { path = "/Users/petersonev/Documents/Projects/git/embassy/embassy-executor" }
-embassy-sync = { path = "/Users/petersonev/Documents/Projects/git/embassy/embassy-sync" }
-embassy-time = { path = "/Users/petersonev/Documents/Projects/git/embassy/embassy-time" }
-embassy-stm32 = { path = "/Users/petersonev/Documents/Projects/git/embassy/embassy-stm32" }
-embassy-futures = { path = "/Users/petersonev/Documents/Projects/git/embassy/embassy-futures" }
+embassy-executor = { git = "https://github.com/SSL-A-Team/embassy", branch = "uart-read-idle" }
+embassy-sync = { git = "https://github.com/SSL-A-Team/embassy", branch = "uart-read-idle" }
+embassy-time = { git = "https://github.com/SSL-A-Team/embassy", branch = "uart-read-idle" }
+embassy-stm32 = { git = "https://github.com/SSL-A-Team/embassy", branch = "uart-read-idle" }
+embassy-futures = { git = "https://github.com/SSL-A-Team/embassy", branch = "uart-read-idle" }
