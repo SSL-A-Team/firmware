@@ -19,6 +19,15 @@
 #define IOQ_BUF_LENGTH 64
 #define IOQ_BUF_DEPTH 4
 
+//////////////////
+//  ADC Config  //
+//////////////////
+
+#define ADC_MODE CS_MODE_DMA
+#define ADC_NUM_CHANNELS 5
+#define ADC_CH_MASK (ADC_CHSELR_CHSEL3 | ADC_CHSELR_CHSEL4 | ADC_CHSELR_CHSEL5 | ADC_CHSELR_CHSEL16 | ADC_CHSELR_CHSEL17)
+#define ADC_SR_MASK (ADC_SMPR_SMP_1 | ADC_SMPR_SMP_2)
+
 ////////////////////
 //  TIME KEEPING  //
 ////////////////////

@@ -32,7 +32,7 @@ int main() {
     pwm6step_setup();
 
     ADC_Result_t res;
-    currsen_setup();
+    currsen_setup(ADC_MODE, &res, ADC_NUM_CHANNELS, ADC_CH_MASK, ADC_SR_MASK);
 
     MotorResponsePacket_t response_packet;
     memset(&response_packet, 0, sizeof(MotorResponsePacket_t));
