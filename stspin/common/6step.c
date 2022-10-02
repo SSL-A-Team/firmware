@@ -331,23 +331,18 @@ static void pwm6step_setup_hall_timer() {
     //  setup timer for delay triggering  //
     ////////////////////////////////////////
 
-    // // htim2.Init.Prescaler = LF_TIMX_PSC; // 11
-    // TIM14->PSC = 1; //div by 49 - 1 = 48, 1MHz. Period 1us
-    // // htim2.Init.Period = LF_TIMX_ARR; // 24000
-    // //TIM14->ARR = 20; // count to 20us
-    // TIM14->CCR1 = 20;
-    // // htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-    // TIM14->CR1 &= ~(TIM_CR1_CKD_0 | TIM_CR1_CKD_1);
-    // enable auto reload
-    // TIM14->CR1 |= TIM_CR1_ARPE;
+    // there seems to be chatter when TIM1 COM is triggered
+    // immediated on a hall transition, so we use TIM16 to
+    // create a congiruable delay
 
     TIM16->SR = 0;
+    // prescaler of 48 -> 1MHz input cleck -> each cycle is 1us
     TIM16->PSC = 49;
     TIM16->EGR |= (TIM_EGR_UG);
-    TIM16->CCR1 = 20;
+    TIM16->CCR1 = 20; // commutation delay of 20us
 
+    // enable timer delay for commutation
     TIM16->DIER |= TIM_DIER_CC1IE;
-
     NVIC_SetPriority(TIM16_IRQn, 5);
     NVIC_EnableIRQ(TIM16_IRQn);
 }
@@ -358,7 +353,7 @@ static void pwm6step_setup_hall_timer() {
 #define  CCER_PHASE1_LOW (TIM_CCER_CC1NE)
 #define CCMR1_PHASE1_HIGH (TIM_CCMR1_OC1PE | TIM_CCMR1_OC1M_0 | TIM_CCMR1_OC1M_2)
 #define  CCER_PHASE1_HIGH (TIM_CCER_CC1E)
-#define CCMR1_PHASE1_PWM (TIM_CCMR1_OC1PE | TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1CE)
+#define CCMR1_PHASE1_PWM (TIM_CCMR1_OC1PE | TIM_CCMR1_OC1M_0 | TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1CE)
 #define  CCER_PHASE1_PWM (TIM_CCER_CC1E | TIM_CCER_CC1NE)
 #define CCMR1_PHASE1_PWM_BRAKE (TIM_CCMR1_OC1PE | TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1CE)
 #define  CCER_PHASE1_PWM_BRAKE (TIM_CCER_CC1NE)
@@ -369,7 +364,7 @@ static void pwm6step_setup_hall_timer() {
 #define  CCER_PHASE2_LOW (TIM_CCER_CC2NE)
 #define CCMR1_PHASE2_HIGH (TIM_CCMR1_OC2PE | TIM_CCMR1_OC2M_0 | TIM_CCMR1_OC2M_2)
 #define  CCER_PHASE2_HIGH (TIM_CCER_CC2E)
-#define CCMR1_PHASE2_PWM (TIM_CCMR1_OC2PE | TIM_CCMR1_OC2M_1 | TIM_CCMR1_OC2M_2 | TIM_CCMR1_OC2CE)
+#define CCMR1_PHASE2_PWM (TIM_CCMR1_OC2PE | TIM_CCMR1_OC2M_0 | TIM_CCMR1_OC2M_1 | TIM_CCMR1_OC2M_2 | TIM_CCMR1_OC2CE)
 #define  CCER_PHASE2_PWM (TIM_CCER_CC2E | TIM_CCER_CC2NE)
 #define CCMR1_PHASE2_PWM_BRAKE (TIM_CCMR1_OC2PE | TIM_CCMR1_OC2M_1 | TIM_CCMR1_OC2M_2 | TIM_CCMR1_OC2CE)
 #define  CCER_PHASE2_PWM_BRAKE (TIM_CCER_CC2NE)
@@ -380,10 +375,13 @@ static void pwm6step_setup_hall_timer() {
 #define  CCER_PHASE3_LOW (TIM_CCER_CC3NE)
 #define CCMR2_PHASE3_HIGH (TIM_CCMR2_OC3PE | TIM_CCMR2_OC3M_0 | TIM_CCMR2_OC3M_2)
 #define  CCER_PHASE3_HIGH (TIM_CCER_CC3E)
-#define CCMR2_PHASE3_PWM (TIM_CCMR2_OC3PE | TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC3M_2 | TIM_CCMR2_OC3CE)
+#define CCMR2_PHASE3_PWM (TIM_CCMR2_OC3PE | TIM_CCMR2_OC3M_0 | TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC3M_2 | TIM_CCMR2_OC3CE)
 #define  CCER_PHASE3_PWM (TIM_CCER_CC3E | TIM_CCER_CC3NE)
 #define CCMR2_PHASE3_PWM_BRAKE (TIM_CCMR2_OC3PE | TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC3M_2 | TIM_CCMR2_OC3CE)
 #define  CCER_PHASE3_PWM_BRAKE (TIM_CCER_CC3NE)
+
+#define CCMR2_TIM4_ADC_TRIG (TIM_CCMR2_OC4PE | TIM_CCMR2_OC4M_2 | TIM_CCMR2_OC4M_1 | TIM_CCMR2_OC4CE);
+#define CCER_TIM4_ADC_TRIG (TIM_CCER_CC4E)
 
 /**
  * @brief 
@@ -434,7 +432,8 @@ static void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
     TIM1->PSC = PWM_TIM_PRESCALER;
 
     // set PWM period relative to the scaled sysclk
-    TIM1->ARR = (uint16_t) (F_SYS_CLK_HZ / ((uint32_t) pwm_freq_hz * (PWM_TIM_PRESCALER + 1)) - 1);
+    uint16_t arr_pwm_dc_value = (uint16_t) (F_SYS_CLK_HZ / ((uint32_t) pwm_freq_hz * (PWM_TIM_PRESCALER + 1)) - 1);
+    TIM1->ARR = arr_pwm_dc_value;
 
     TIM1->CR1 = (TIM_CR1_ARPE | TIM_CR1_CMS);
     TIM1->CR2 = (TIM_CR2_CCPC);
@@ -442,11 +441,24 @@ static void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
     TIM1->CCMR1 = CCMR1_PHASE1_OFF | CCMR1_PHASE2_OFF;
     TIM1->CCMR2 = CCMR2_PHASE3_OFF;
 
+    // set channel 4 PWM mode 1, affects OC4REF as input to ADC
+    // should be co triggered with ch1-3 commutation
+    TIM1->CCMR2 |= CCMR2_TIM4_ADC_TRIG;
+    // enable the channel
+    TIM1->CCER |= CCER_TIM4_ADC_TRIG;
+
     // generate an update event to reload the PSC
     TIM1->EGR |= (TIM_EGR_UG | TIM_EGR_COMG);
 
     TIM1->CR1 |= TIM_CR1_CEN;
     TIM1->BDTR |= TIM_BDTR_MOE;
+
+    // enable interrupt to set GPIOB pin 9 on CH2 PWM low -> high transition
+    // used for ADC timing/alignment verification
+    // TIM1->SR = 0;
+    // TIM1->DIER |= TIM_DIER_CC4IE;
+    // NVIC_SetPriority(TIM1_CC_IRQn, 5);
+    // NVIC_EnableIRQ(TIM1_CC_IRQn);
 }
 
 void TIM2_IRQHandler() {
@@ -657,9 +669,15 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     bool phase3_low  = commutation_values[4];
     bool phase3_high = commutation_values[5];
 
-    uint16_t ccer = 0;
+    uint16_t arr_pwm_dc_value = (uint16_t) (F_SYS_CLK_HZ / ((uint32_t) 48000 * (PWM_TIM_PRESCALER + 1)) - 1);
+    TIM1->CCR4 = arr_pwm_dc_value;
+
+    // uint16_t ccer = 0;
+    uint16_t ccer = CCER_TIM4_ADC_TRIG;
     uint16_t ccmr1 = 0;
-    uint16_t ccmr2 = 0;
+    // uint16_t ccmr2 = 0;
+    uint16_t ccmr2 = CCMR2_TIM4_ADC_TRIG;
+    TIM1->CCR4 = (current_duty_cycle == NUM_RAW_DC_STEPS) ? NUM_RAW_DC_STEPS - MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW : current_duty_cycle;
     if (phase1_low) {
         if (command_brake) {
             TIM1->CCR1 = current_duty_cycle;
@@ -733,23 +751,13 @@ static void trigger_commutation() {
     TIM1->EGR |= TIM_EGR_COMG;
 }
 
-/**
- * @brief 
- * 
- */
-static void TIM1_BRK_UP_TRG_COM_IRQHandler() {
-    // don't think this is actually used
-    // hardware does all transitions on the COM event
-    // still need to clear IT pending bit
+void TIM1_BRK_UP_TRG_COM_IRQHandler() {
 
-    // while (true) {
-    //     GPIOB->BSRR |= GPIO_BSRR_BS_9;
-    //     wait_ms(1);
-    //     GPIOB->BSRR |= GPIO_BSRR_BR_9;
-    //     wait_ms(1);
-    // }
+}
 
-    //TIM1->SR &= ~(TIM_SR_COMIF);
+void TIM1_CC_IRQHandler() {
+    GPIOB->BSRR |= GPIO_BSRR_BS_9;
+    TIM1->SR &= ~(TIM_SR_CC4IF);
 }
 
 /**
@@ -765,8 +773,11 @@ static void pwm6step_set_direct(uint16_t duty_cycle, MotorDirection_t motor_dire
         direction_change_commanded = true;
     }
 
+    // PWM is inverted to facilitate current sensing, so invert user input
+    uint32_t scaled_dc_inv = NUM_RAW_DC_STEPS - scaled_dc;
+
     commanded_motor_direction = motor_direction;
-    current_duty_cycle = scaled_dc;
+    current_duty_cycle = scaled_dc_inv;
 
     perform_commutation_cycle();
 }

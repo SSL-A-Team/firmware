@@ -9,7 +9,7 @@ set(CMAKE_TOOLCHAIN_FILE ${CMAKE_SOURCE_DIR}/cmake/stm32-toolchain.cmake)
 project(ATeam-Firmware
 	LANGUAGES C CXX ASM)
 
-set(CMAKE_BUILD_TYPE Release)
+set(CMAKE_BUILD_TYPE Debug)
 
 #####################
 #  STEVAL-SPIN3201  #

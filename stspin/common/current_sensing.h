@@ -11,6 +11,12 @@
 
 #pragma once
 
+typedef enum {
+  CS_MODE_POLLING,
+  CS_MODE_DMA,
+  CS_MODE_TIMER_DMA
+} CS_Mode_t;
+
 typedef enum 
 {
   CS_OK       = 0x00U,
@@ -42,6 +48,7 @@ typedef enum
 #define ADC_LP_MODE_NONE (0x00000000U)                          /*!< No ADC low power mode activated */
 
 // ADC Trigger mode
+#define ADC_REG_TRIG_EXT_EDGE_DEFAULT   (ADC_CFGR1_EXTEN_1) // falling edge only
 #define ADC_REG_TRIG_SOFTWARE           (0x00000000U)                                                             /*!< ADC group regular conversion trigger internal: SW start. */
 #define ADC_REG_TRIG_EXT_TIM1_TRGO      (ADC_REG_TRIG_EXT_EDGE_DEFAULT)                                           /*!< ADC group regular conversion trigger from external IP: TIM1 TRGO. Trigger edge set to rising edge (default setting). */
 #define ADC_REG_TRIG_EXT_TIM1_CH4       (ADC_CFGR1_EXTSEL_0 | ADC_REG_TRIG_EXT_EDGE_DEFAULT)                      /*!< ADC group regular conversion trigger from external IP: TIM1 channel 4 event (capture compare: input capture or output capture). Trigger edge set to rising edge (default setting). */
@@ -75,16 +82,28 @@ typedef enum
 // TODO tune timing
 #define ADC_STP_TIMEOUT 5 //ms
 
-typedef struct ADC_Result {
+
+// this struct is used as a DMA target. 
+// ADC->DR reads are two bytes, DMA will do half word transfers
+// rm0091 tells us the 16->32 bit port mapping packing scheme
+// which all us to derive that this struct should be packed
+// hald words. Additionally, result must be at the end since a
+// ref to this struct will be passed into DMAR register for N
+// transfers
+typedef struct 
+__attribute__((__packed__)) ADC_Result {
+    uint16_t    V_pot;
+    uint16_t    I_motor;
+    uint16_t    V_motor;
+    uint16_t    T_spin;
+    uint16_t    V_int;
     CS_Status_t status;
-    uint16_t    pot;
-    uint16_t    motor0;
-    uint16_t    vref;
-    uint16_t    vbatt;
 } ADC_Result_t;
 
+void currsen_enable_ht();
+void currsen_read_dma();
 void currsen_read(ADC_Result_t *res);
-CS_Status_t currsen_setup();
+CS_Status_t currsen_setup(CS_Mode_t mode, ADC_Result_t *res, uint8_t num_ch, uint32_t ch_sel, uint32_t sr_sel);
 CS_Status_t currsen_adc_group_config();
 CS_Status_t currsen_adc_conf();
 CS_Status_t currsen_adc_cal();

@@ -42,7 +42,7 @@
             openocd
 
             # userpsace clang and link vars for bindgen subtargets
-            clang
+            clang_multi
 
             # Rust Embedded
             (rust-bin.stable.latest.default.override {
