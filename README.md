@@ -83,4 +83,4 @@ After passing the device through you need to edit the permissions for the device
 
 In order to do this you need to add a file named `50-usb-stm32.rules` to `etc/udev/rules.d` that contains the following line:
 `SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374e", MODE="0666"`
-Then run the command `sudo udevadm test $(udevadm info -q path -n /dev/bus/usb/<bus #>/<device #>)`. You can find the bus # and the device # by running lsusb in your wsl window.
+Then run the command `sudo udevadm test $(udevadm info -q path -n /dev/bus/usb/<bus #>/<device #>)`. You can find the bus # and the device # by running `lsusb` in your wsl window.
