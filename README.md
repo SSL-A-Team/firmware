@@ -62,4 +62,25 @@ Most targets have several variants:
  - `<name>-debug-mon` build the target in debug mode, attach a monitor to the output of `hprintln!` macros
  - `<name>-debug-prog` build the target in debug mode, write to flash
 
+## Passing Through a USB Device
 
+[Microsoft USB Passthrough Documentation](https://learn.microsoft.com/en-us/windows/wsl/connect-usb)
+
+Above link for the passthrough on Win11/WSL2 works fine except for one tweak:
+```
+sudo apt install linux-tools-5.4.0-77-generic hwdata
+sudo update-alternatives --install /usr/local/bin/usbip usbip /usr/lib/linux-tools/5.4.0-77-generic/usbip 20```
+```
+
+should be
+
+```
+sudo apt install linux-tools-5.15.0-52-generic hwdata
+sudo update-alternatives --install /usr/local/bin/usbip usbip /usr/lib/linux-tools/5.15.0-52-generic/usbip 20
+```
+
+After passing the device through you need to edit the permissions for the device in your udev rules such that a user who is not root can read/write for the tests to work.
+
+In order to do this you need to add a file named `50-usb-stm32.rules` to `etc/udev/rules.d` that contains the following line:
+`SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374e", MODE="0666"`
+Then run the command `sudo udevadm test $(udevadm info -q path -n /dev/bus/usb/<bus #>/<device #>)`. You can find the bus # and the device # by running lsusb in your wsl window.
