@@ -23,7 +23,7 @@ Run `exit` to leave the shell.
 
 ### Adding Dependencies
 
-Edit flake.nix and run `nix update`. You should commit both flake.nix and flake.lock.
+Edit flake.nix and run `nix flake update`. You should commit both flake.nix and flake.lock.
 
 ### Supported Platforms
 
