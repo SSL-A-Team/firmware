@@ -50,6 +50,7 @@
               targets = [ "thumbv7em-none-eabihf" "thumbv6m-none-eabi" ];
             })
             rust-analyzer
+            probe-run
 
             # Python
             (pkgs.${python}.withPackages

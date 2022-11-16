@@ -1,4 +1,4 @@
-use crate::queue;
+use crate::queue::{self, Buffer, Queue};
 
 use core::future::Future;
 use embassy_executor::{raw::TaskStorage, SpawnToken};
@@ -14,11 +14,11 @@ pub struct UartReadQueue<
     const LENGTH: usize,
     const DEPTH: usize,
 > {
-    queue_rx: queue::Queue<'a, LENGTH, DEPTH>,
+    queue_rx: Queue<'a, LENGTH, DEPTH>,
     task: TaskStorage<ReadTaskFuture<UART, DMA, LENGTH, DEPTH>>,
 }
 
-type ReadTaskFuture<
+pub type ReadTaskFuture<
     UART: usart::BasicInstance,
     DMA: usart::RxDma<UART>,
     const LENGTH: usize,
@@ -33,25 +33,26 @@ impl<
         const DEPTH: usize,
     > UartReadQueue<'a, UART, DMA, LENGTH, DEPTH>
 {
-    pub const fn new(buffers: &'a mut [queue::Buffer<LENGTH>; DEPTH]) -> Self {
+    pub const fn new(buffers: &'a mut [Buffer<LENGTH>; DEPTH]) -> Self {
         Self {
-            queue_rx: queue::Queue::new(buffers),
+            queue_rx: Queue::new(buffers),
             task: TaskStorage::new(),
         }
     }
 
     fn read_task(
-        queue_rx: &'static queue::Queue<'a, LENGTH, DEPTH>,
+        queue_rx: &'static Queue<'a, LENGTH, DEPTH>,
         mut rx: UartRx<'a, UART, DMA>,
         mut int: UART::Interrupt,
     ) -> ReadTaskFuture<UART, DMA, LENGTH, DEPTH> {
         async move {
             loop {
-                let rx_ref = &mut rx;
-                let int_ref = (&mut int).into_ref();
-                queue_rx
-                    .enqueue(async move |buf2| rx_ref.read_to_idle(buf2, int_ref).await.unwrap())
-                    .await;
+                let mut buf = queue_rx.enqueue().await.unwrap();
+                let len = rx
+                    .read_to_idle(buf.data(), (&mut int).into_ref())
+                    .await
+                    .unwrap();
+                *buf.len() = len;
             }
         }
     }
@@ -64,11 +65,9 @@ impl<
         self.task.spawn(|| Self::read_task(&self.queue_rx, rx, int))
     }
 
-    pub async fn dequeue<F: Future>(
-        &'a self,
-        fn_write: impl FnOnce(&'a [u8]) -> F,
-    ) -> <F as Future>::Output {
-        self.queue_rx.dequeue(fn_write).await
+    pub async fn dequeue<RET>(&self, fn_write: impl FnOnce(&[u8]) -> RET) -> RET {
+        let buf = self.queue_rx.dequeue().await.unwrap();
+        fn_write(buf.data())
     }
 }
 
@@ -79,7 +78,7 @@ pub struct UartWriteQueue<
     const LENGTH: usize,
     const DEPTH: usize,
 > {
-    queue_tx: queue::Queue<'a, LENGTH, DEPTH>,
+    queue_tx: Queue<'a, LENGTH, DEPTH>,
     task: TaskStorage<WriteTaskFuture<UART, DMA, LENGTH, DEPTH>>,
 }
 
@@ -98,26 +97,24 @@ impl<
         const DEPTH: usize,
     > UartWriteQueue<'a, UART, DMA, LENGTH, DEPTH>
 {
-    pub const fn new(buffers: &'a mut [queue::Buffer<LENGTH>; DEPTH]) -> Self {
+    pub const fn new(buffers: &'a mut [Buffer<LENGTH>; DEPTH]) -> Self {
         Self {
-            queue_tx: queue::Queue::new(buffers),
+            queue_tx: Queue::new(buffers),
             task: TaskStorage::new(),
         }
     }
 
     fn write_task(
-        queue_tx: &'static queue::Queue<'a, LENGTH, DEPTH>,
+        queue_tx: &'static Queue<'a, LENGTH, DEPTH>,
         mut tx: UartTx<'a, UART, DMA>,
     ) -> WriteTaskFuture<UART, DMA, LENGTH, DEPTH> {
         async move {
             loop {
-                let tx_ref = &mut tx;
-                queue_tx
-                    .dequeue(async move |buf2| {
-                        tx_ref.write(buf2).await.unwrap();
-                    })
-                    .await;
+                let buf = queue_tx.dequeue().await.unwrap();
+                tx.write(buf.data()).await.unwrap();
+                drop(buf);
                 unsafe {
+                    // TODO: what does this do again?
                     while !UART::regs().isr().read().tc() {}
                     UART::regs().cr1().modify(|w| w.set_te(false));
                     while UART::regs().isr().read().teack() {}
@@ -131,7 +128,17 @@ impl<
         self.task.spawn(|| Self::write_task(&self.queue_tx, tx))
     }
 
-    pub fn enqueue(&self, source: &[u8]) -> Result<(), queue::Error> {
-        self.queue_tx.try_enqueue_copy(source)
+    pub fn enqueue(&self, fn_write: impl FnOnce(&mut [u8]) -> usize) -> Result<(), queue::Error> {
+        let mut buf = self.queue_tx.try_enqueue()?;
+        let len = fn_write(buf.data());
+        *buf.len() = len;
+        Ok(())
+    }
+
+    pub fn enqueue_copy(&self, source: &[u8]) -> Result<(), queue::Error> {
+        self.enqueue(|dest| {
+            dest[..source.len()].copy_from_slice(source);
+            source.len()
+        })
     }
 }

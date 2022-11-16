@@ -50,23 +50,23 @@ async fn main(_spawner: embassy_executor::Spawner) {
     spawner.spawn(QUEUE_RX.spawn_task(rx, int)).unwrap();
     spawner.spawn(QUEUE_TX.spawn_task(tx)).unwrap();
 
-    QUEUE_TX.enqueue(&[0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-    QUEUE_TX.enqueue(&[8, 9, 10, 11, 12, 13, 14]).unwrap();
-    QUEUE_TX.enqueue(&[15, 16, 17]).unwrap();
+    QUEUE_TX.enqueue_copy(&[0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+    QUEUE_TX.enqueue_copy(&[8, 9, 10, 11, 12, 13, 14]).unwrap();
+    QUEUE_TX.enqueue_copy(&[15, 16, 17]).unwrap();
     info!("tx queued");
 
     QUEUE_RX
-        .dequeue(async move |buf2| {
+        .dequeue(|buf2| {
             info!("{:?}", buf2);
         })
         .await;
     QUEUE_RX
-        .dequeue(async move |buf2| {
+        .dequeue(|buf2| {
             info!("{:?}", buf2);
         })
         .await;
     QUEUE_RX
-        .dequeue(async move |buf2| {
+        .dequeue(|buf2| {
             info!("{:?}", buf2);
         })
         .await;

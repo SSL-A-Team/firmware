@@ -64,20 +64,20 @@ mod tests {
         let data2 = [8, 9, 10, 11, 12, 13, 14];
         let data3 = [15, 16, 17];
 
-        QUEUE_TX.enqueue(&data1).unwrap();
-        QUEUE_TX.enqueue(&data2).unwrap();
-        QUEUE_TX.enqueue(&data3).unwrap();
+        QUEUE_TX.enqueue_copy(&data1).unwrap();
+        QUEUE_TX.enqueue_copy(&data2).unwrap();
+        QUEUE_TX.enqueue_copy(&data3).unwrap();
 
-        let result = QUEUE_TX.enqueue(&[]);
-        assert!(result == Err(queue::Error::QueueFull));
+        let result = QUEUE_TX.enqueue_copy(&[]);
+        assert!(result == Err(queue::Error::QueueFullEmpty));
 
-        block_on(QUEUE_RX.dequeue(async move |buf| {
+        block_on(QUEUE_RX.dequeue(|buf| {
             assert_eq!(buf, data1);
         }));
-        block_on(QUEUE_RX.dequeue(async move |buf| {
+        block_on(QUEUE_RX.dequeue(|buf| {
             assert_eq!(buf, data2);
         }));
-        block_on(QUEUE_RX.dequeue(async move |buf| {
+        block_on(QUEUE_RX.dequeue(|buf| {
             assert_eq!(buf, data3);
         }));
     }
