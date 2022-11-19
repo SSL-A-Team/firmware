@@ -11,6 +11,7 @@
 #![feature(const_mut_refs)]
 
 pub mod queue;
+pub mod stm32_interface;
 pub mod uart_queue;
 
 // pub use uart_queue::*;

@@ -12,6 +12,7 @@ mod radio;
 use core::fmt::Write;
 use defmt::*;
 use defmt_rtt as _;
+
 use embassy_stm32::gpio::{Level, OutputOpenDrain, Pin, Pull, Speed};
 use embassy_stm32::time::mhz;
 use embassy_stm32::usart::{self, Uart};
