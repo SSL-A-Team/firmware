@@ -39,10 +39,10 @@
             gnumake
             cmake
             gcc-arm-embedded-10
-            openocd
 
-            # userpsace clang and link vars for bindgen subtargets
-            clang
+            # programmers
+            openocd
+            probe-run
 
             # Rust Embedded
             (rust-bin.stable.latest.default.override {
@@ -53,7 +53,8 @@
             # Python
             (pkgs.${python}.withPackages
               (ps: with ps; [ numpy matplotlib ]))
-          ];
+          ] ++ (if system == "x86-64_linux" then
+          [ clang_multi ] else [ clang ]);
         };
       }
     );
