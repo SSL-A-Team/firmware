@@ -9,21 +9,23 @@ use crate::{
     edm_protocol::EdmPacket,
 };
 
-pub trait Reader<'a> {
-    type F<RET, FN: FnOnce(&[u8]) -> RET>: Future<Output = Result<RET, ()>>
-    where
-        Self: 'a;
+use motor_embassy::uart_queue::{Reader, Writer};
 
-    fn read<RET, FN: FnOnce(&[u8]) -> RET>(&'a self, fn_read: FN) -> Self::F<RET, FN>;
-}
+// pub trait Reader<'a> {
+//     type F<RET, FN: FnOnce(&[u8]) -> RET>: Future<Output = Result<RET, ()>>
+//     where
+//         Self: 'a;
 
-pub trait Writer<'a> {
-    type F<FN: FnOnce(&mut [u8]) -> usize>: Future<Output = Result<(), ()>>
-    where
-        Self: 'a;
+//     fn read<RET, FN: FnOnce(&[u8]) -> RET>(&'a self, fn_read: FN) -> Self::F<RET, FN>;
+// }
 
-    fn write<FN: FnOnce(&mut [u8]) -> usize>(&'a self, fn_write: FN) -> Self::F<FN>;
-}
+// pub trait Writer<'a> {
+//     type F<FN: FnOnce(&mut [u8]) -> usize>: Future<Output = Result<(), ()>>
+//     where
+//         Self: 'a;
+
+//     fn write<FN: FnOnce(&mut [u8]) -> usize>(&'a self, fn_write: FN) -> Self::F<FN>;
+// }
 
 pub enum RadioMode {
     // Unknown,
@@ -237,32 +239,32 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
     }
 }
 
-impl<
-        'a,
-        UART: usart::BasicInstance,
-        Dma: usart::RxDma<UART>,
-        const LEN: usize,
-        const DEPTH: usize,
-    > Reader<'a> for motor_embassy::uart_queue::UartReadQueue<'a, UART, Dma, LEN, DEPTH>
-{
-    type F<RET, FN: FnOnce(&[u8]) -> RET> = impl Future<Output = Result<RET, ()>> where Self: 'a;
+// impl<
+//         'a,
+//         UART: usart::BasicInstance,
+//         Dma: usart::RxDma<UART>,
+//         const LEN: usize,
+//         const DEPTH: usize,
+//     > Reader<'a> for motor_embassy::uart_queue::UartReadQueue<'a, UART, Dma, LEN, DEPTH>
+// {
+//     type F<RET, FN: FnOnce(&[u8]) -> RET> = impl Future<Output = Result<RET, ()>> where Self: 'a;
 
-    fn read<RET, FN: FnOnce(&[u8]) -> RET>(&'a self, fn_read: FN) -> Self::F<RET, FN> {
-        async { Ok(self.dequeue(|buf| fn_read(buf)).await) }
-    }
-}
+//     fn read<RET, FN: FnOnce(&[u8]) -> RET>(&'a self, fn_read: FN) -> Self::F<RET, FN> {
+//         async { Ok(self.dequeue(|buf| fn_read(buf)).await) }
+//     }
+// }
 
-impl<
-        'a,
-        UART: usart::BasicInstance,
-        Dma: usart::TxDma<UART>,
-        const LEN: usize,
-        const DEPTH: usize,
-    > Writer<'a> for motor_embassy::uart_queue::UartWriteQueue<'a, UART, Dma, LEN, DEPTH>
-{
-    type F<FN: FnOnce(&mut [u8]) -> usize> = impl Future<Output = Result<(), ()>> where Self: 'a;
+// impl<
+//         'a,
+//         UART: usart::BasicInstance,
+//         Dma: usart::TxDma<UART>,
+//         const LEN: usize,
+//         const DEPTH: usize,
+//     > Writer<'a> for motor_embassy::uart_queue::UartWriteQueue<'a, UART, Dma, LEN, DEPTH>
+// {
+//     type F<FN: FnOnce(&mut [u8]) -> usize> = impl Future<Output = Result<(), ()>> where Self: 'a;
 
-    fn write<FN: FnOnce(&mut [u8]) -> usize>(&'a self, fn_write: FN) -> Self::F<FN> {
-        async { self.enqueue(|buf| fn_write(buf)).or(Err(())) }
-    }
-}
+//     fn write<FN: FnOnce(&mut [u8]) -> usize>(&'a self, fn_write: FN) -> Self::F<FN> {
+//         async { self.enqueue(|buf| fn_write(buf)).or(Err(())) }
+//     }
+// }

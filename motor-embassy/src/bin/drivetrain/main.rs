@@ -59,7 +59,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let p = embassy_stm32::init(stm32_config);
 
     let mut config = usart::Config::default();
-    config.baudrate = 2_000_000;
+    config.baudrate = 115_200; // max officially support baudrate
+    // config.baudrate = 1_000_000; // this isn't officially supported but seems to work on the stspin...
     config.parity = Parity::ParityEven;
     config.stop_bits = StopBits::STOP0P5;
     let usart = Uart::new(p.UART7, p.PF6, p.PF7, p.DMA1_CH0, p.DMA1_CH1, config);
@@ -80,15 +81,28 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let mut reset_pin = OutputOpenDrain::new(p.PG3, Level::Low, Speed::Medium, Pull::None);
     reset_pin.set_high();
 
-    // let stm32_interface = Stm32Interface(FRONT_LEFT_QUEUE_RX, FRONT_LEFT_QUEUE_TX, Some(boot0_pin), Some(reset_pin));
+    let mut stm32_interface = Stm32Interface::new(&FRONT_LEFT_QUEUE_RX, &FRONT_LEFT_QUEUE_TX, Some(boot0_pin), Some(reset_pin));
+
+    defmt::info!("resetting into bootloader...");
+    stm32_interface.reset_into_bootloader().await;
+    
+    defmt::info!("verify bootloader header...");
+    stm32_interface.verify_bootloader().await;
+
+    defmt::info!("verify device ID...");
+    stm32_interface.get_device_id().await;
+
+    defmt::info!("write flash image...");
+    stm32_interface.write_device_memory(fw_image, None);
+
+    defmt::info!("reset into program...");
+    // stm32_interface.execute_code(None).await;
+    stm32_interface.reset_into_program().await;
+
+    Timer::after(Duration::from_millis(10)).await;
 
     loop {
-        info!("toggle pins");
-        //boot0_pin.set_low();
-        reset_pin.set_low();
-        Timer::after(Duration::from_millis(1000)).await;
-        //boot0_pin.set_high();
-        reset_pin.set_high();
+        defmt::info!("end of program");
         Timer::after(Duration::from_millis(1000)).await;
     }
 }

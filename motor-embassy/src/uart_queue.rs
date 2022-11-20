@@ -142,3 +142,49 @@ impl<
         })
     }
 }
+
+pub trait Reader<'a> {
+    type F<RET, FN: FnOnce(&[u8]) -> RET>: Future<Output = Result<RET, ()>>
+    where
+        Self: 'a;
+
+    fn read<RET, FN: FnOnce(&[u8]) -> RET>(&'a self, fn_read: FN) -> Self::F<RET, FN>;
+}
+
+pub trait Writer<'a> {
+    type F<FN: FnOnce(&mut [u8]) -> usize>: Future<Output = Result<(), ()>>
+    where
+        Self: 'a;
+
+    fn write<FN: FnOnce(&mut [u8]) -> usize>(&'a self, fn_write: FN) -> Self::F<FN>;
+}
+
+impl<
+        'a,
+        UART: usart::BasicInstance,
+        Dma: usart::RxDma<UART>,
+        const LEN: usize,
+        const DEPTH: usize,
+    > Reader<'a> for crate::uart_queue::UartReadQueue<'a, UART, Dma, LEN, DEPTH>
+{
+    type F<RET, FN: FnOnce(&[u8]) -> RET> = impl Future<Output = Result<RET, ()>> where Self: 'a;
+
+    fn read<RET, FN: FnOnce(&[u8]) -> RET>(&'a self, fn_read: FN) -> Self::F<RET, FN> {
+        async { Ok(self.dequeue(|buf| fn_read(buf)).await) }
+    }
+}
+
+impl<
+        'a,
+        UART: usart::BasicInstance,
+        Dma: usart::TxDma<UART>,
+        const LEN: usize,
+        const DEPTH: usize,
+    > Writer<'a> for crate::uart_queue::UartWriteQueue<'a, UART, Dma, LEN, DEPTH>
+{
+    type F<FN: FnOnce(&mut [u8]) -> usize> = impl Future<Output = Result<(), ()>> where Self: 'a;
+
+    fn write<FN: FnOnce(&mut [u8]) -> usize>(&'a self, fn_write: FN) -> Self::F<FN> {
+        async { self.enqueue(|buf| fn_write(buf)).or(Err(())) }
+    }
+}
