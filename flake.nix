@@ -58,7 +58,8 @@
             # Python
             (pkgs.${python}.withPackages
               (ps: with ps; [ numpy matplotlib ]))
-          ];
+          ] ++ (if system == "x86-64_linux" then
+          [ clang_multi ] else [ clang ]);
         };
       }
     );

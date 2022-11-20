@@ -11,6 +11,8 @@
 
 #pragma once
 
+#define IOQ_BUF_LEN 64
+
 ///////////////////
 //  motor model  //
 ///////////////////
