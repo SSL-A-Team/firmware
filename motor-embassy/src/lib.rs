@@ -16,9 +16,9 @@ pub mod stm32_interface;
 pub mod uart_queue;
 
 #[macro_export]
-macro_rules! include_external_bin {
+macro_rules! include_external_cpp_bin {
     ($var_name:ident, $bin_file:literal) => {
-        static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../", $bin_file)).len()] 
-            = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../", $bin_file));
+        pub static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../build/bin/", $bin_file)).len()] 
+            = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../build/bin/", $bin_file));
     }
 }

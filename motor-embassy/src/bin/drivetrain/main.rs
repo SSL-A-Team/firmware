@@ -20,10 +20,13 @@ use panic_probe as _;
 use static_cell::StaticCell;
 
 use motor_embassy::{
-    stm32_interface::Stm32Interface,
+    stm32_interface::{Stm32Interface, self},
     queue::{self, Buffer},
     uart_queue::{UartReadQueue, UartWriteQueue},
+    fw_images, include_external_cpp_bin,
 };
+
+include_external_cpp_bin!{STEVAL3204_DRIB_FW_IMG, "dev3204-drib.bin"}
 
 
 // motor pinout
@@ -33,16 +36,18 @@ use motor_embassy::{
 // BackRight Wheel  - USART3 - tx pb10, rx pb11, boot pa8,  rst pa9
 
 const MAX_TX_PACKET_SIZE: usize = 64;
+const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 64;
+const RX_BUF_DEPTH: usize = 10;
 
 #[link_section = ".axisram.buffers"]
-static mut FRONT_LEFT_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; 3] = [Buffer::EMPTY; 3];
-static FRONT_LEFT_QUEUE_TX: UartWriteQueue<UART7, DMA1_CH0, MAX_TX_PACKET_SIZE, 3> =
+static mut FRONT_LEFT_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] = [Buffer::EMPTY; TX_BUF_DEPTH];
+static FRONT_LEFT_QUEUE_TX: UartWriteQueue<UART7, DMA1_CH0, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
     UartWriteQueue::new(unsafe { &mut FRONT_LEFT_BUFFERS_TX });
 
 #[link_section = ".axisram.buffers"]
-static mut FRONT_LEFT_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; 3] = [Buffer::EMPTY; 3];
-static FRONT_LEFT_QUEUE_RX: UartReadQueue<UART7, DMA1_CH1, MAX_RX_PACKET_SIZE, 3> =
+static mut FRONT_LEFT_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] = [Buffer::EMPTY; RX_BUF_DEPTH];
+static FRONT_LEFT_QUEUE_RX: UartReadQueue<UART7, DMA1_CH1, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
     UartReadQueue::new(unsafe { &mut FRONT_LEFT_BUFFERS_RX });
 
 static EXECUTOR_UART_QUEUE: StaticCell<InterruptExecutor<interrupt::CEC>> = StaticCell::new();
@@ -57,6 +62,15 @@ async fn main(_spawner: embassy_executor::Spawner) {
     stm32_config.rcc.hclk = Some(mhz(200));
     stm32_config.rcc.pclk1 = Some(mhz(100));
     let p = embassy_stm32::init(stm32_config);
+
+    let mut grn_led = Output::new(p.PB0, Level::High, Speed::Medium);
+    let mut ylw_led = Output::new(p.PE1, Level::High, Speed::Medium);
+    let mut red_led = Output::new(p.PB14, Level::High, Speed::Medium);
+
+    Timer::after(Duration::from_millis(1000)).await;
+    ylw_led.set_low();
+    red_led.set_low();
+
 
     let mut config = usart::Config::default();
     config.baudrate = 115_200; // max officially support baudrate
@@ -93,13 +107,34 @@ async fn main(_spawner: embassy_executor::Spawner) {
     stm32_interface.get_device_id().await;
 
     defmt::info!("write flash image...");
-    stm32_interface.write_device_memory(fw_image, None);
+    // stm32_interface.write_device_memory(fw_images::STEVAL3204_DRIB_POTCTRL_FW_IMG, None).await;
+    stm32_interface.write_device_memory(STEVAL3204_DRIB_FW_IMG, None).await;
+
+
+    unsafe { stm32_interface.update_uart_config(2_000_000, Parity::ParityEven) };
 
     defmt::info!("reset into program...");
     // stm32_interface.execute_code(None).await;
     stm32_interface.reset_into_program().await;
 
     Timer::after(Duration::from_millis(10)).await;
+
+    ylw_led.set_high();
+
+    defmt::info!("wait for drib packets");
+    let mut ctr = 0;
+    loop {
+        stm32_interface.receive_packet().await;
+        // red_led.toggle();
+        ctr += 1;
+        if ctr > 1000 {
+            ctr = 0;
+            red_led.toggle();
+        }
+    }
+
+    defmt::info!("end of program");
+    loop {}
 
     loop {
         defmt::info!("end of program");

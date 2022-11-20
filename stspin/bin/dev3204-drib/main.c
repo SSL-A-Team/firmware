@@ -30,6 +30,7 @@ int main() {
     GPIOB->BSRR |= GPIO_BSRR_BR_9;
 
     pwm6step_setup();
+    pwm6step_set_duty_cycle_f(0.0f);
 
     ADC_Result_t res;
     currsen_setup(ADC_MODE, &res, ADC_NUM_CHANNELS, ADC_CH_MASK, ADC_SR_MASK);
@@ -41,7 +42,7 @@ int main() {
     SyncTimer_t torque_loop_timer;
     time_sync_init(&torque_loop_timer, 1);
 
-    MotorCommand_MotionType_t motion_control_type = VELOCITY;
+    MotorCommand_MotionType_t motion_control_type = OPEN_LOOP;
     
     float r_motor_board = 0.0f;
     float u_torque_loop;

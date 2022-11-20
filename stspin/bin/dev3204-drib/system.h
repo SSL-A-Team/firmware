@@ -15,7 +15,7 @@
 //  UART PARAMS  //
 ///////////////////
 
-//#define UART_ENABLED
+#define UART_ENABLED
 #define IOQ_BUF_LENGTH 64
 #define IOQ_BUF_DEPTH 4
 

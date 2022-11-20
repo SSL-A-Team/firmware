@@ -5,11 +5,13 @@ use defmt_rtt as _;
 use defmt::*;
 
 use embassy_stm32::gpio::{Output, OutputOpenDrain, Pin};
-use embassy_stm32::usart;
+use embassy_stm32::pac;
+use embassy_stm32::usart::{self, Parity};
 use embassy_time::{Duration, Timer};
 
 use crate::uart_queue::{Reader, Writer, UartReadQueue, UartWriteQueue};
 
+const STM32_BOOTLOADER_MAX_BAUD_RATE: u32 = 115_200;
 const STM32_BOOTLOADER_ACK: u8 = 0x79;
 const STM32_BOOTLOADER_NACK: u8 = 0x1F;
 const STM32_BOOTLOADER_CODE_SEQUENCE_BYTE: u8 = 0x7F;
@@ -118,7 +120,14 @@ impl<
         // reset the device
         self.hard_reset().await?;
 
+        // ensure it has time to setup it's bootloader
+        // this time isn't documented and can possibly be lowered.
         Timer::after(Duration::from_millis(10)).await;
+
+        // ensure UART is in the expected config for the bootloader
+        // this operation is unsafe because it takes the uart module offline
+        // when the executor may be relying on rx interrupts to unblock a thread
+        unsafe { self.update_uart_config(STM32_BOOTLOADER_MAX_BAUD_RATE, Parity::ParityEven); }
 
         defmt::debug!("sending the bootloader baud calibration command...");
         self.writer
@@ -159,6 +168,55 @@ impl<
         Ok(())
     }
 
+    pub unsafe fn update_uart_config(&self, baudrate: u32, parity: Parity) {
+        let div = (UART::frequency().0 + (baudrate / 2)) / baudrate * UART::MULTIPLIER;
+
+        let r = UART::regs();
+        // disable the uart. Can't modify parity and baudrate while module is enabled
+        r.cr1().modify(|w| {
+            w.set_ue(false);
+        });
+
+        // set the baudrate
+        r.brr().modify(|w| {
+            w.set_brr(div);
+        });
+
+        // set parity 
+        r.cr1().modify(|w| {
+            if parity != Parity::ParityNone {
+                // configure 9 bit transmission and enable parity control
+                w.set_m0(pac::lpuart::vals::M0::BIT9);
+                w.set_pce(true);
+
+                // set polarity type
+                if parity == Parity::ParityEven {
+                    w.set_ps(pac::lpuart::vals::Ps::EVEN);
+                } else {
+                    w.set_ps(pac::lpuart::vals::Ps::ODD);
+                }
+            } else {
+                // disable parity (1 byte transmissions)
+                w.set_m0(pac::lpuart::vals::M0::BIT8);
+                w.set_pce(false);
+            }
+        });
+
+        // reenable UART
+        r.cr1().modify(|w| {
+            w.set_ue(true);
+        });
+        
+    }
+
+    pub fn read_latest_packet(&self) {
+        // self.reader.dequeue(fn_write)
+    }
+
+    pub async fn receive_packet(&self) {
+        self.reader.read(|buf| {}).await;
+    }
+
     ////////////////////////////////////////////////
     //  BOOTLOADER FUNCTIONS                      //
     //                                            //
@@ -173,7 +231,7 @@ impl<
     }
 
     fn bootloader_checksum_buf(buf: &[u8]) -> u8 {
-        let mut cks = buf.len() as u8;
+        let mut cks = buf.len() as u8 - 1;
         for &byte in buf {
             cks ^= byte;
         }
@@ -330,13 +388,26 @@ impl<
         .write(|buf| {
             let cs = Self::bootloader_checksum_buf(data);
             let data_len = data.len();
-            buf[0] = data_len as u8;
+            buf[0] = data_len as u8 - 1;
             buf[1..(data_len + 1)].copy_from_slice(data);
-            buf[data_len] = cs;
+            buf[data_len + 1] = cs;
             defmt::debug!("send data buffer {:?}", buf);
-            5
+            data.len() + 2
         })
         .await?;
+
+        defmt::debug!("wait send data reply");
+        self.reader.read(|buf| {
+            defmt::info!("send data reply {:?}", buf);
+            if buf.len() >= 1 {
+                if buf[0] == STM32_BOOTLOADER_ACK {
+                    res = Ok(());
+                    defmt::info!("data accepted.");
+                } else {
+                    defmt::error!("data rejected (NACK)");
+                }
+            }
+        }).await?;
 
         Ok(())
     }
@@ -354,7 +425,7 @@ impl<
 
         // if user doesn't supply a start address, assume base of mapped flash
         let mut addr = write_base_addr.unwrap_or(0x0800_0000);
-        defmt::debug!("will use start address {:?}", step_size);
+        defmt::debug!("will use start address {:?}", write_base_addr);
 
         for start in (0..buf.len()).step_by(step_size) {
             let end = core::cmp::min(start + step_size, buf.len());
