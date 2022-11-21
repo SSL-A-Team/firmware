@@ -1,4 +1,4 @@
-use crate::queue::{self, Buffer, Queue};
+use crate::queue::{self, Buffer, Queue, DequeueRef, Error};
 
 use core::future::Future;
 use embassy_executor::{raw::TaskStorage, SpawnToken};
@@ -63,6 +63,10 @@ impl<
         int: UART::Interrupt,
     ) -> SpawnToken<impl Sized> {
         self.task.spawn(|| Self::read_task(&self.queue_rx, rx, int))
+    }
+
+    pub fn try_dequeue(&self) -> Result<DequeueRef<LENGTH, DEPTH>, Error> {
+        return self.queue_rx.try_dequeue();
     }
 
     pub async fn dequeue<RET>(&self, fn_write: impl FnOnce(&[u8]) -> RET) -> RET {

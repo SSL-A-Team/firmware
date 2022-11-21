@@ -13,6 +13,7 @@
 pub mod fw_images;
 pub mod queue;
 pub mod stm32_interface;
+pub mod stspin_motor;
 pub mod uart_queue;
 
 #[macro_export]

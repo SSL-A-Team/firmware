@@ -5,7 +5,7 @@ use core::{
     task::{Poll, Waker},
 };
 use critical_section;
-use defmt::info;
+use defmt::{info, Format};
 
 pub struct Buffer<const LENGTH: usize> {
     pub data: [MaybeUninit<u8>; LENGTH],
@@ -58,7 +58,7 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Drop for EnqueueRef<'a, LENGTH
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, defmt::Format)]
 pub enum Error {
     QueueFullEmpty,
     InProgress,

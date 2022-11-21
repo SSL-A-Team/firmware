@@ -1,14 +1,14 @@
 use core::cmp::min;
-use core::future::Future;
 
 use defmt_rtt as _;
 use defmt::*;
 
 use embassy_stm32::gpio::{Output, OutputOpenDrain, Pin};
 use embassy_stm32::pac;
-use embassy_stm32::usart::{self, Parity};
+use embassy_stm32::usart::{self, Parity, StopBits, Config};
 use embassy_time::{Duration, Timer};
 
+use crate::queue::{DequeueRef, Error};
 use crate::uart_queue::{Reader, Writer, UartReadQueue, UartWriteQueue};
 
 const STM32_BOOTLOADER_MAX_BAUD_RATE: u32 = 115_200;
@@ -23,17 +23,23 @@ const STM32_BOOTLOADER_CMD_READ_MEM: u8 = 0x11;
 const STM32_BOOTLOADER_CMD_GO: u8 = 0x21;
 const STM32_BOOTLOADER_CMD_WRITE_MEM: u8 = 0x31;
 const STM32_BOOTLOADER_CMD_ERASE: u8 = 0x43;
-const STM32_BOOTLOADER_CMD_EXTEMDED_ERASE: u8 = 0x44;
+const STM32_BOOTLOADER_CMD_EXTENDED_ERASE: u8 = 0x44;
 const STM32_BOOTLOADER_CMD_WRITE_PROT: u8 = 0x63;
 const STM32_BOOTLOADER_CMD_WRITE_UNPROT: u8 = 0x73;
 const STM32_BOOTLOADER_CMD_READ_PROT: u8 = 0x82;
 const STM32_BOOTLOADER_CMD_READ_UNPROT: u8 = 0x92;
 const STM32_BOOTLOADER_CMD_GET_CHECKSUM: u8 = 0xA1;
 
+pub fn get_bootloader_uart_config() -> Config {
+    let mut config = usart::Config::default();
+    config.baudrate = 115_200; // max officially support baudrate
+    config.parity = Parity::ParityEven;
+    config.stop_bits = StopBits::STOP0P5;
+    config
+}
+
 pub struct Stm32Interface<
         'a,
-        // R: Reader<'a>,
-        // W: Writer<'a>, 
         UART: usart::BasicInstance,
         DmaRx: usart::RxDma<UART>,
         DmaTx: usart::TxDma<UART>,
@@ -44,10 +50,8 @@ pub struct Stm32Interface<
         Boot0Pin: Pin, 
         ResetPin: Pin
 > {
-    reader: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_TX>,
-    writer: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_RX>,
-    // reader: R,
-    // writer: W,
+    reader: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
+    writer: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
     boot0_pin: Option<Output<'a, Boot0Pin>>,
     reset_pin: Option<OutputOpenDrain<'a, ResetPin>>,
 
@@ -56,8 +60,6 @@ pub struct Stm32Interface<
 
 impl<
         'a,
-        // R: Reader<'a>,
-        // W: Writer<'a>, 
         UART: usart::BasicInstance,
         DmaRx: usart::RxDma<UART>,
         DmaTx: usart::TxDma<UART>,
@@ -70,8 +72,8 @@ impl<
     > Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin>
 {
     pub fn new(        
-        read_queue: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_TX>,
-        write_queue: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_RX>,
+        read_queue: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
         mut boot0_pin: Option<Output<'a, Boot0Pin>>,
         mut reset_pin: Option<OutputOpenDrain<'a, ResetPin>>
     ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin> {
@@ -96,15 +98,35 @@ impl<
         defmt::panic!("implement soft reset if needed.");
     }
 
-    pub async fn hard_reset(&mut self) -> Result<(), ()> {
+    pub async fn enter_reset(&mut self) -> Result<(), ()> {
         if self.reset_pin.is_none() {
             return Err(());
         }
 
         self.reset_pin.as_mut().unwrap().set_low();
         Timer::after(Duration::from_micros(100)).await;
+        
+        Ok(())
+    }
+
+    pub async fn leave_reset(&mut self) -> Result<(), ()> {
+        if self.reset_pin.is_none() {
+            return Err(());
+        }
+
         self.reset_pin.as_mut().unwrap().set_high();
         Timer::after(Duration::from_micros(100)).await;
+
+        Ok(())
+    }
+
+    pub async fn hard_reset(&mut self) -> Result<(), ()> {
+        if self.reset_pin.is_none() {
+            return Err(());
+        }
+
+        self.enter_reset().await?;
+        self.leave_reset().await?;
 
         Ok(())
     }
@@ -153,7 +175,7 @@ impl<
         res
     }
 
-    pub async fn reset_into_program(&mut self) -> Result<(), ()> {
+    pub async fn reset_into_program(&mut self, stay_in_reset: bool) -> Result<(), ()> {
         if self.boot0_pin.is_none() || self.reset_pin.is_none() {
             return Err(());
         }
@@ -162,8 +184,13 @@ impl<
         self.boot0_pin.as_mut().unwrap().set_low();
         Timer::after(Duration::from_millis(5)).await;
 
-        // reset the device
-        self.hard_reset().await?;
+        if stay_in_reset {
+            // nrst, so reset and hold
+            self.enter_reset().await?;
+        } else {
+            // reset the device
+            self.hard_reset().await?;
+        }
 
         Ok(())
     }
@@ -209,12 +236,16 @@ impl<
         
     }
 
-    pub fn read_latest_packet(&self) {
-        // self.reader.dequeue(fn_write)
+    pub async fn read_latest_packet(&self) {
+        self.reader.read(|buf| {}).await;
     }
 
-    pub async fn receive_packet(&self) {
-        self.reader.read(|buf| {}).await;
+    pub fn try_read_data(&self) -> Result<DequeueRef<LEN_RX, DEPTH_RX>, Error> {
+        return self.reader.try_dequeue();
+    }
+
+    pub fn try_send_data(&self, data: &[u8]) -> Result<(), Error> {
+        return self.writer.enqueue_copy(data);
     }
 
     ////////////////////////////////////////////////
@@ -330,7 +361,7 @@ impl<
             return Err(());
         }
 
-        defmt::debug!("sending the write command...");
+        // defmt::debug!("sending the write command...");
         self.writer
         .write(|buf| {
             buf[0] = STM32_BOOTLOADER_CMD_WRITE_MEM;
@@ -341,7 +372,7 @@ impl<
 
         let mut res = Err(());
         self.reader.read(|buf| {
-            defmt::info!("go cmd reply {:?}", buf);
+            // defmt::info!("go cmd reply {:?}", buf);
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
                     res = Ok(());
@@ -355,7 +386,7 @@ impl<
             return res;
         }
 
-        defmt::debug!("sending the load address {:?}...", write_base_addr);
+        // defmt::debug!("sending the load address {:?}...", write_base_addr);
         self.writer
         .write(|buf| {
             let sa_bytes: [u8; 4] = write_base_addr.to_be_bytes();
@@ -370,20 +401,20 @@ impl<
         })
         .await?;
 
-        defmt::debug!("wait for load address reply");
+        // defmt::debug!("wait for load address reply");
         self.reader.read(|buf| {
-            defmt::info!("load address reply {:?}", buf);
+            // defmt::info!("load address reply {:?}", buf);
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
                     res = Ok(());
-                    defmt::info!("load address accepted.");
+                    // defmt::info!("load address accepted.");
                 } else {
                     defmt::error!("load address rejected (NACK)");
                 }
             }
         }).await?;
 
-        defmt::debug!("sending the data...");
+        // defmt::debug!("sending the data...");
         self.writer
         .write(|buf| {
             let cs = Self::bootloader_checksum_buf(data);
@@ -391,18 +422,18 @@ impl<
             buf[0] = data_len as u8 - 1;
             buf[1..(data_len + 1)].copy_from_slice(data);
             buf[data_len + 1] = cs;
-            defmt::debug!("send data buffer {:?}", buf);
+            // defmt::debug!("send data buffer {:?}", buf);
             data.len() + 2
         })
         .await?;
 
-        defmt::debug!("wait send data reply");
+        // defmt::debug!("wait send data reply");
         self.reader.read(|buf| {
-            defmt::info!("send data reply {:?}", buf);
+            // defmt::info!("send data reply {:?}", buf);
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
                     res = Ok(());
-                    defmt::info!("data accepted.");
+                    // defmt::info!("data accepted.");
                 } else {
                     defmt::error!("data rejected (NACK)");
                 }
@@ -421,23 +452,113 @@ impl<
         // ensure step size is below bootlaoder supported, below transmit buffer size (incl len and cs bytes),
         // and is 4-byte aligned
         let step_size = min(256, LEN_TX - 2) & 0xFFFF_FFFC;
-        defmt::debug!("will use data chunk sizes of {:?}", step_size);
+        // defmt::debug!("will use data chunk sizes of {:?}", step_size);
 
         // if user doesn't supply a start address, assume base of mapped flash
         let mut addr = write_base_addr.unwrap_or(0x0800_0000);
-        defmt::debug!("will use start address {:?}", write_base_addr);
+        // defmt::debug!("will use start address {:?}", write_base_addr);
 
         for start in (0..buf.len()).step_by(step_size) {
             let end = core::cmp::min(start + step_size, buf.len());
             self.write_device_memory_chunk( &buf[start..end], addr).await?;
             addr += step_size as u32;
         }
+
+        defmt::info!("wrote device memory");
+
+        Ok(())
+    }
+
+    pub async fn erase_flash_memory(&self) -> Result<(), ()> {
+        if !self.in_bootloader {
+            defmt::error!("called bootloader operation when not in bootloader context.");
+            return Err(());
+        }
+
+        defmt::debug!("sending the erase command...");
+        self.writer
+        .write(|buf| {
+            buf[0] = STM32_BOOTLOADER_CMD_EXTENDED_ERASE;
+            buf[1] = !STM32_BOOTLOADER_CMD_EXTENDED_ERASE;
+            2
+        })
+        .await?;
+
+        let mut res = Err(());
+        self.reader.read(|buf| {
+            defmt::info!("extended erase reply {:?}", buf);
+            if buf.len() >= 1 {
+                if buf[0] == STM32_BOOTLOADER_ACK {
+                    res = Ok(());
+                } else {
+                    defmt::error!("bootloader replied with NACK");
+                }
+            }
+        }).await?;
+
+        defmt::debug!("sending erase type...");
+        self.writer
+        .write(|buf| {
+            buf[0] = 0xFF;
+            buf[1] = 0xFF;
+            buf[2] = 0x00;
+            3
+        })
+        .await?;
+
+        let mut res = Err(());
+        self.reader.read(|buf| {
+            defmt::info!("erase reply {:?}", buf);
+            if buf.len() >= 1 {
+                if buf[0] == STM32_BOOTLOADER_ACK {
+                    defmt::info!("flash erased");
+                    res = Ok(());
+                } else {
+                    defmt::error!("bootloader replied with NACK");
+                }
+            }
+        }).await?;
+
+        Ok(())
+    }
+
+    pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
+        if !self.in_bootloader {
+            if let Err(err) = self.reset_into_bootloader().await {
+                return Err(err);
+            }
+        }
+        
+        if let Err(err) = self.verify_bootloader().await {
+            return Err(err);
+        }
+    
+        // let device_id = self.get_device_id().await;
+        match self.get_device_id().await {
+            Err(err) => return Err(err),
+            Ok(device_id) => if device_id != 68 { return Err(()) } 
+        };
+    
+        // erase part
+        if let Err(err) = self.erase_flash_memory().await {
+            return Err(err);
+        }
+
+        // program image
+        if let Err(err) = self.write_device_memory(fw_image_bytes, None).await {
+            return Err(err);
+        }
+
+        if let Err(err) = self.reset_into_program(true).await {
+            return Err(err);
+        }
+        
         Ok(())
     }
 
     pub async fn execute_code(&mut self, start_address: Option<u32>) -> Result<(), ()> {
         defmt::info!("firmware jump/go command implementation not working. will reset part.");
-        self.reset_into_program().await?;
+        self.reset_into_program(false).await?;
         return Ok(());
 
         if !self.in_bootloader {
@@ -509,6 +630,4 @@ impl<
 
         res
     }
-
-
 }
