@@ -77,13 +77,14 @@ impl<
         mut boot0_pin: Option<Output<'a, Boot0Pin>>,
         mut reset_pin: Option<OutputOpenDrain<'a, ResetPin>>
     ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin> {
-        if boot0_pin.is_some() {
-            boot0_pin.as_mut().unwrap().set_low();
-        }
+        // let the user set the initial state
+        // if boot0_pin.is_some() {
+        //     boot0_pin.as_mut().unwrap().set_low();
+        // }
 
-        if reset_pin.is_some() {
-            reset_pin.as_mut().unwrap().set_high();
-        }
+        // if reset_pin.is_some() {
+        //     reset_pin.as_mut().unwrap().set_high();
+        // }
         
         Stm32Interface {
             reader: read_queue,

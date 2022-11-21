@@ -6,10 +6,15 @@ use nalgebra::Vector3;
 
 use ateam_common_packets::stspin_packets::{
     MotorResponsePacket,
+    MotorResponsePacketType_MRP_PARAMS,
+    MotorResponsePacketType_MRP_MOTION, 
     MotorResponse_Motion_Packet,
     MotorResponse_Params_Packet,
-    MotorResponsePacketType_MRP_PARAMS,
-    MotorResponsePacketType_MRP_MOTION, MotorCommand_MotionType, MotorCommand_MotionType_OPEN_LOOP, MotorCommand_Motion_Packet, MotorCommandPacket, MotorCommandPacketType_MCP_MOTION};
+    MotorCommandPacket,
+    MotorCommand_Motion_Packet,
+    MotorCommand_MotionType, 
+    MotorCommand_MotionType_OPEN_LOOP,
+    MotorCommandPacketType_MCP_MOTION};
 
 use crate::stm32_interface::Stm32Interface;
 
