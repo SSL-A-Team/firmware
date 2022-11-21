@@ -94,9 +94,25 @@ async fn main(_spawner: embassy_executor::Spawner) {
     front_left_motor.load_default_firmware_image().await;
     front_left_motor.leave_reset().await;
 
+    let mut ct = 0;
+
+    let mut angle: f32 = 0.0;
+
     loop {
         front_left_motor.process_packets();
-        Timer::after(Duration::from_micros(10)).await;
+        // defmt::info!("processed packets");
+
+        if ct > 100 {
+            ct = 0;
+            front_left_motor.set_setpoint(libm::sinf(angle));
+            front_left_motor.send_motion_command();
+            // defmt::info!("sent motion update");
+
+            angle += core::f32::consts::FRAC_2_PI / 20.0;
+        }
+
+        ct += 1;
+        Timer::after(Duration::from_millis(1)).await;
     }
 
     // load firmware image

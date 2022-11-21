@@ -35,6 +35,7 @@ panic-probe = { version = "0.3", features = ["print-defmt"] }
 static_cell = "1.0"
 critical-section = "1.1.1"
 heapless = "0.7.16"
+libm = "0.2.6"
 nalgebra = { version = "0.31.0", default-features = false }
 ateam-common-packets = { path = "../software-communication/ateam-common-packets/rust-lib" }
 

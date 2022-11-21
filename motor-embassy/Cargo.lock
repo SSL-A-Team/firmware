@@ -821,6 +821,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libm"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "348108ab3fba42ec82ff6e9564fc4ca0247bdccdc68dd8af9764bbc79c3c8ffb"
+
+[[package]]
 name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -883,6 +889,7 @@ dependencies = [
  "embassy-sync",
  "embassy-time",
  "heapless",
+ "libm",
  "nalgebra",
  "panic-probe",
  "static_cell",
