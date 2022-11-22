@@ -222,9 +222,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
     back_left_motor.leave_reset().await;
     back_right_motor.leave_reset().await;
 
-    loop {}
-
-
     /////////////////
     //  main loop  //
     /////////////////

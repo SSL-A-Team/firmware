@@ -133,6 +133,7 @@ impl<
 
             if buf.len() != core::mem::size_of::<MotorResponsePacket>() {
                 defmt::warn!("got invalid packet of len {:?} data: {:?}", buf.len(), buf);
+                continue;
             }
 
             // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
