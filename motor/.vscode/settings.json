@@ -1,5 +1,0 @@
-{
-    "rust-analyzer.cargo.target": "thumbv7em-none-eabihf",
-    "rust-analyzer.checkOnSave.allTargets": false,
-    "editor.inlayHints.enabled": "offUnlessPressed"
-}

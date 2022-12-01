@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [ "$#" -ne 2 || "$#" -ne 3 ]; then
+if [[ "$#" -ne "2" && "$#" -ne "3" ]]; then
 	echo "Usage: program.sh <openocd config file> <target elf> opt:\"monitor\""
 	exit 1
 fi
