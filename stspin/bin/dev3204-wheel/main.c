@@ -50,6 +50,7 @@ int main() {
     // enable ADC hardware trigger (tied to 6step timer)
     currsen_enable_ht();
 
+    // setup encoder
     quadenc_setup();
     quadenc_reset_encoder_delta();
 
