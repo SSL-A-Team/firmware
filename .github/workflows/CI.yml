@@ -5,6 +5,8 @@ on:
   pull_request:
 jobs:
   test-firmware-build:
+    variables:
+      GIT_SUBMODULE_STRATEGY: recursive
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2.4.0
