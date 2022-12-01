@@ -280,7 +280,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
 
     // let mut angle: f32 = 0.0;
-    let angle: f32 = core::f32::consts::PI / 2.0;
+    let angle: f32 = core::f32::consts::PI / 4.0;
     loop {
         front_right_motor.process_packets();
         front_left_motor.process_packets();
