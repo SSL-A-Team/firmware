@@ -79,6 +79,8 @@ sudo apt install linux-tools-5.15.0-52-generic hwdata
 sudo update-alternatives --install /usr/local/bin/usbip usbip /usr/lib/linux-tools/5.15.0-52-generic/usbip 20
 ```
 
+TODO: script kernel version so this always work
+
 After passing the device through you need to edit the permissions for the device in your udev rules such that a user who is not root can read/write for the tests to work.
 
 In order to do this you need to add a file named `50-usb-stm32.rules` to `etc/udev/rules.d` that contains the following line:
