@@ -249,6 +249,10 @@ impl<
         return self.writer.enqueue_copy(data);
     }
 
+    pub fn send_or_discard_data(&self, data: &[u8]) {
+        let _ = self.try_send_data(data);
+    }
+
     ////////////////////////////////////////////////
     //  BOOTLOADER FUNCTIONS                      //
     //                                            //

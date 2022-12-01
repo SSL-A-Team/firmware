@@ -50,6 +50,7 @@ pub struct WheelMotor<
     setpoint: f32,
     motion_type: MotorCommand_MotionType,
     reset_flagged: bool,
+    telemetry_enabled: bool,
 }
 
 impl<
@@ -93,6 +94,7 @@ impl<
             setpoint: 0.0,
             motion_type: MotorCommand_MotionType_OPEN_LOOP,
             reset_flagged: false,
+            telemetry_enabled: false,
         }
     }
 
@@ -176,6 +178,10 @@ impl<
         self.reset_flagged = true;
     }
 
+    pub fn set_telemetry_enabled(&mut self, telemetry_enabled: bool) {
+        self.telemetry_enabled = telemetry_enabled;
+    }
+
     pub fn send_motion_command(&mut self) {
         unsafe {
             let mut cmd: MotorCommandPacket  = {
@@ -185,6 +191,7 @@ impl<
             cmd.type_ = MotorCommandPacketType_MCP_MOTION;
             cmd.crc32 = 0;
             cmd.__bindgen_anon_1.motion.set_reset(self.reset_flagged as u32);
+            cmd.__bindgen_anon_1.motion.set_enable_telemetry(self.telemetry_enabled as u32);
             cmd.__bindgen_anon_1.motion.motion_control_type = self.motion_type;
             cmd.__bindgen_anon_1.motion.setpoint = self.setpoint;
 
@@ -192,7 +199,7 @@ impl<
                 (&cmd as *const MotorCommandPacket) as *const u8,
                 core::mem::size_of::<MotorCommandPacket>());
 
-            self.stm32_uart_interface.try_send_data(struct_bytes);
+            self.stm32_uart_interface.send_or_discard_data(struct_bytes);
         }
 
         self.reset_flagged = false;

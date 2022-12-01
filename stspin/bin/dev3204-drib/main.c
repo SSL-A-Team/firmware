@@ -66,7 +66,6 @@ int main() {
         while (uart_can_read()) {
             MotorCommandPacket_t motor_command_packet;
             uint8_t bytes_moved = uart_read(&motor_command_packet, sizeof(MotorCommandPacket_t));
-
             if (bytes_moved != sizeof(MotorCommandPacket_t)) {
                 // something went wrong, just purge all of the data
                 uart_discard();

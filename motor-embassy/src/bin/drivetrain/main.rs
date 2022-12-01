@@ -15,7 +15,9 @@ use embassy_stm32::{
     peripherals::{USART3, UART4, UART5, UART7},
     usart::{Uart, Parity}, time::mhz,
 };
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Ticker, Timer};
+use futures_util::StreamExt;
+use nalgebra::{Vector4, Vector3};
 use panic_probe as _;
 use static_cell::StaticCell;
 
@@ -23,7 +25,7 @@ use motor_embassy::{
     stm32_interface::{Stm32Interface, self},
     queue::Buffer,
     uart_queue::{UartReadQueue, UartWriteQueue},
-    include_external_cpp_bin, stspin_motor::WheelMotor,
+    include_external_cpp_bin, stspin_motor::WheelMotor, robot_model::{RobotConstants, self, RobotModel},
 };
 
 include_external_cpp_bin!{STEVAL3204_DRIB_POTCTRL_FW_IMG, "dev3204-drib-potctrl.bin"}
@@ -89,6 +91,10 @@ static BACK_RIGHT_QUEUE_RX: UartReadQueue<USART3, DMA1_CH7, MAX_RX_PACKET_SIZE, 
 // executor queue
 static EXECUTOR_UART_QUEUE: StaticCell<InterruptExecutor<interrupt::CEC>> = StaticCell::new();
 
+const WHEEL_ANGLES_DEG: Vector4<f32> = Vector4::new(30.0, 150.0, 225.0, 315.0);
+const WHEEL_RADIUS_M: f32 = 0.049 / 2.0; // wheel dia 49mm
+const WHEEL_DISTANCE_TO_ROBOT_CENTER_M: f32 = 0.085; // 85mm from center of wheel body to center of robot
+
 #[embassy_executor::main]
 async fn main(_spawner: embassy_executor::Spawner) {
     info!("Startup");
@@ -126,6 +132,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
     //  initialize peripherials  //
     ///////////////////////////////
     
+    let wheel_firmware_image = STEVAL3204_WHEEL_FW_IMG;
+
     /* FRONT RIGHT WHEEL - UART5 */
     // FrontRight Wheel - UART5  - tx pb6,  rx pb12,    boot pb1,  rst pb2
 
@@ -142,7 +150,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // initialize the wheel
     let front_right_stm32_interface = Stm32Interface::new(&FRONT_RIGHT_QUEUE_RX, &FRONT_RIGHT_QUEUE_TX, Some(front_right_boot0_pin), Some(front_right_reset_pin));
-    let mut front_right_motor = WheelMotor::new(front_right_stm32_interface, STEVAL3204_DRIB_FW_IMG);
+    let mut front_right_motor = WheelMotor::new(front_right_stm32_interface, wheel_firmware_image);
 
 
     /* FRONT LEFT WHEEL - UART7 */
@@ -161,7 +169,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // initialize the wheel
     let front_left_stm32_interface = Stm32Interface::new(&FRONT_LEFT_QUEUE_RX, &FRONT_LEFT_QUEUE_TX, Some(front_left_boot0_pin), Some(front_left_reset_pin));
-    let mut front_left_motor = WheelMotor::new(front_left_stm32_interface, STEVAL3204_DRIB_FW_IMG);
+    let mut front_left_motor = WheelMotor::new(front_left_stm32_interface, wheel_firmware_image);
 
 
     /* BACK LEFT WHEEL */
@@ -180,7 +188,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // initialize the wheel
     let back_left_stm32_interface = Stm32Interface::new(&BACK_LEFT_QUEUE_RX, &BACK_LEFT_QUEUE_TX, Some(back_left_boot0_pin), Some(back_left_reset_pin));
-    let mut back_left_motor = WheelMotor::new(back_left_stm32_interface, STEVAL3204_DRIB_FW_IMG);
+    let mut back_left_motor = WheelMotor::new(back_left_stm32_interface, wheel_firmware_image);
 
 
     /* BACK RIGHT WHEEL */
@@ -199,67 +207,109 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // initialize the wheel
     let back_right_stm32_interface = Stm32Interface::new(&BACK_RIGHT_QUEUE_RX, &BACK_RIGHT_QUEUE_TX, Some(back_right_boot0_pin), Some(back_right_reset_pin));
-    let mut back_right_motor = WheelMotor::new(back_right_stm32_interface, STEVAL3204_DRIB_FW_IMG);
+    let mut back_right_motor = WheelMotor::new(back_right_stm32_interface, wheel_firmware_image);
 
     ////////////////////////////
     //  load firmware images  //
     ////////////////////////////
 
     // load firmware (use join?)
-    defmt::info!("flashing front right");
-    front_right_motor.load_default_firmware_image().await;
-    defmt::info!("flashing front left");
-    front_left_motor.load_default_firmware_image().await;
-    defmt::info!("flashing back left");
-    back_left_motor.load_default_firmware_image().await;
-    defmt::info!("flashing back right");
-    back_right_motor.load_default_firmware_image().await;
+    // // defmt::info!("flashing front right");
+    // front_right_motor.load_default_firmware_image().await;
+    // // defmt::info!("flashing front left");
+    // front_left_motor.load_default_firmware_image().await;
+    // // defmt::info!("flashing back left");
+    // back_left_motor.load_default_firmware_image().await;
+    // // defmt::info!("flashing back right");
+    // back_right_motor.load_default_firmware_image().await;
+    let _res = embassy_futures::join::join4(front_right_motor.load_default_firmware_image(),
+        front_left_motor.load_default_firmware_image(),
+        back_left_motor.load_default_firmware_image(),
+        back_right_motor.load_default_firmware_image()
+    ).await;
 
     // leave reset
     // don't pull the chip out of reset until we're ready to read packets or we'll fill the queue
-    front_right_motor.leave_reset().await;
-    front_left_motor.leave_reset().await;
-    back_left_motor.leave_reset().await;
-    back_right_motor.leave_reset().await;
+    embassy_futures::join::join4(front_right_motor.leave_reset(), 
+        front_left_motor.leave_reset(), 
+        back_left_motor.leave_reset(), 
+        back_right_motor.leave_reset()).await;
+
+    front_right_motor.set_telemetry_enabled(true);
+    front_left_motor.set_telemetry_enabled(true);
+    back_left_motor.set_telemetry_enabled(true);
+    back_right_motor.set_telemetry_enabled(true);
+
+    // need to have telem off by default and enabled later
+    // theres a race condition to begin processing packets from the first part out
+    // of reset and waiting for the last part to boot up
+    Timer::after(Duration::from_millis(10)).await;
+
+    // front_right_motor.leave_reset().await;
+    // front_left_motor.leave_reset().await;
+    // back_left_motor.leave_reset().await;
+    // back_right_motor.leave_reset().await;
+
+    // robot params
+    let robot_model_constants: RobotConstants = RobotConstants {
+        wheel_angles_rad: Vector4::new(
+            WHEEL_ANGLES_DEG[0].to_radians(),
+            WHEEL_ANGLES_DEG[1].to_radians(),
+            WHEEL_ANGLES_DEG[2].to_radians(),
+            WHEEL_ANGLES_DEG[3].to_radians()),
+        wheel_radius_m: Vector4::new(
+            WHEEL_RADIUS_M,
+            WHEEL_RADIUS_M,
+            WHEEL_RADIUS_M,
+            WHEEL_RADIUS_M),
+        wheel_dist_to_cent_m: Vector4::new(
+            WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+            WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+            WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+            WHEEL_DISTANCE_TO_ROBOT_CENTER_M),
+
+    };
+
+    let robot_model: RobotModel = RobotModel::new(robot_model_constants);
 
     /////////////////
     //  main loop  //
     /////////////////
 
-    let mut ct = 0;
-    let mut angle: f32 = 0.0;
+    // 100 Hz loop rate
+    let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
+
+    // let mut angle: f32 = 0.0;
+    let angle: f32 = core::f32::consts::PI / 2.0;
     loop {
         front_right_motor.process_packets();
         front_left_motor.process_packets();
         back_left_motor.process_packets();
         back_right_motor.process_packets();
 
-        // defmt::info!("processed packets");
+        let vel = 0.0005; // DC
+        let cmd_vel: Vector3<f32> = Vector3::new(libm::sinf(angle) * vel, libm::cosf(angle) * vel, 0.0);
+        let wheel_vels = robot_model.robot_vel_to_wheel_vel(cmd_vel);
 
-        if ct > 100 {
-            ct = 0;
+        // let c_vel = libm::sinf(angle) / 2.0;
+        // let c_vel = 0.2;
+        front_right_motor.set_setpoint(wheel_vels[0]);
+        front_left_motor.set_setpoint(wheel_vels[1]);
+        back_left_motor.set_setpoint(wheel_vels[2]);
+        back_right_motor.set_setpoint(wheel_vels[3]);
+        // angle += core::f32::consts::FRAC_2_PI / 200.0;
 
-            let c_vel = libm::sinf(angle) / 2.0;
+        // let c_vel = 0.2;
+        // front_right_motor.set_setpoint(c_vel);
+        // front_left_motor.set_setpoint(c_vel);
+        // back_left_motor.set_setpoint(c_vel);
+        // back_right_motor.set_setpoint(c_vel);
 
-            front_right_motor.set_setpoint(c_vel);
-            front_left_motor.set_setpoint(c_vel);
-            back_left_motor.set_setpoint(c_vel);
-            back_right_motor.set_setpoint(c_vel);
+        front_right_motor.send_motion_command();
+        front_left_motor.send_motion_command();
+        back_left_motor.send_motion_command();
+        back_right_motor.send_motion_command();
 
-            front_right_motor.send_motion_command();
-            front_left_motor.send_motion_command();
-            back_left_motor.send_motion_command();
-            back_right_motor.send_motion_command();
-
-            // defmt::info!("sent motion update");
-
-            angle += core::f32::consts::FRAC_2_PI / 20.0;
-        }
-
-        ct += 1;
-        Timer::after(Duration::from_millis(1)).await;
+        main_loop_rate_ticker.next().await;
     }
-
-    defmt::info!("end of program");
-    loop {}
 }
