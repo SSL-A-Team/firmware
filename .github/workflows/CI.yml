@@ -3,6 +3,8 @@ on:
   push:
     branches: [ main ]
   pull_request:
+    branches:
+      - main
 jobs:
   test-firmware-build:
     runs-on: ubuntu-20.04
@@ -19,9 +21,19 @@ jobs:
         run: |
           nix flake check
           nix develop -c arm-none-eabi-gcc --version
-      - name: Build Firmware
+      - name: Build Common Packets
+        shell: bash
+        run: |
+          nix develop -c make software-communication-clean
+          nix develop -c make software-communication-build
+          nix develop -c make software-communication-test
+      - name: Build Stspin Firmware
         shell: bash
         run: |
           nix develop -c make clean
-          nix develop -c make all
-
+          nix develop -c make stspin-all
+      - name: Build Motorboard Firmware
+        shell: bash
+        run: |
+          nix develop -c make clean
+          nix develop -c make motorboard-all

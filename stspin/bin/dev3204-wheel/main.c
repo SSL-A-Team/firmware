@@ -38,13 +38,21 @@ int main() {
     GPIOB->BSRR |= GPIO_BSRR_BR_8;
     GPIOB->BSRR |= GPIO_BSRR_BR_9;
 
-    pwm6step_setup();
-
-    quadenc_setup();
-    quadenc_reset_encoder_delta();
+    uint32_t ticks_since_last_command_packet = 0;
+    bool telemetry_enabled = false;
 
     ADC_Result_t res;
     currsen_setup(ADC_MODE, &res, ADC_NUM_CHANNELS, ADC_CH_MASK, ADC_SR_MASK);
+
+    pwm6step_setup();
+    pwm6step_set_duty_cycle_f(0.0f);
+
+    // enable ADC hardware trigger (tied to 6step timer)
+    currsen_enable_ht();
+
+    // setup encoder
+    quadenc_setup();
+    quadenc_reset_encoder_delta();
 
     MotorResponsePacket_t response_packet;
     memset(&response_packet, 0, sizeof(MotorResponsePacket_t));
@@ -58,11 +66,11 @@ int main() {
     IIRFilter_t encoder_filter;
     iir_filter_init(&encoder_filter, iir_filter_alpha_from_Tf(ENCODER_IIR_TF_MS, VELOCITY_LOOP_RATE_MS));
 
-    MotorCommand_MotionType_t motion_control_type = VELOCITY;
+    MotorCommand_MotionType_t motion_control_type = OPEN_LOOP;
     
     float r_motor_board = 0.0f;
-    float u_vel_loop;
-    float u_torque_loop;
+    float u_vel_loop = 0.0f;
+    float u_torque_loop = 0.0f;
     float cur_limit = 0.0f;
 
     const float r_rpm = 500.0f;
@@ -98,8 +106,11 @@ int main() {
                 uart_discard();
             }
 
+            ticks_since_last_command_packet++;
+
             if (motor_command_packet.type == MCP_MOTION) {
                 // we got a motion packet!
+                ticks_since_last_command_packet = 0;
 
                 if (motor_command_packet.motion.reset) {
                     // TODO handle hardware reset
@@ -107,6 +118,7 @@ int main() {
                     while (true); // block, hardware reset flagged
                 }
 
+                telemetry_enabled = motor_command_packet.motion.enable_telemetry;
                 r_motor_board = motor_command_packet.motion.setpoint;
             } else if (motor_command_packet.type == MCP_PARAMS) {
                 // we got some params
@@ -157,11 +169,16 @@ int main() {
         }
 #endif
 
+        // if upstream isn't listening or its been too long since we got a packet, turn off the motor
+        if (!telemetry_enabled || ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
+            r_motor_board = 0.0f;
+        }
+
         bool run_torque_loop = time_sync_ready_rst(&torque_loop_timer);
         bool run_vel_loop = time_sync_ready_rst(&vel_loop_timer);
 
         if (run_torque_loop) {
-            float cur_measurement = 0.0f; // TODO: get current from dma
+            float cur_measurement = (float) res.I_motor;
             // TODO: estimate torque from current
             // TODO: filter?
 
@@ -177,10 +194,10 @@ int main() {
             u_torque_loop = torque_setpoint;
 
             // torque control data
-            response_packet.motion.current_setpoint = 0.0f;
-            response_packet.motion.current_estimate = 0.0f;
-            response_packet.motion.current_computed_error = 0.0f;
-            response_packet.motion.current_computed_setpoint = 0.0f;
+            response_packet.motion.current_setpoint = r;
+            response_packet.motion.current_estimate = cur_measurement;
+            response_packet.motion.current_computed_error = torque_pid.prev_err;
+            response_packet.motion.current_computed_setpoint = torque_setpoint;
         }
 
         if (run_vel_loop) {
@@ -210,8 +227,6 @@ int main() {
             } else {
                 pwm6step_set_duty_cycle_f(u_torque_loop);
             }
-
-
 
             // load system state for transmit
 
@@ -263,6 +278,11 @@ int main() {
                 params_return_packet_requested = false;
 
                 response_packet.type = MCP_PARAMS;
+
+                response_packet.params.version_major = VERSION_MAJOR;
+                response_packet.params.version_major = VERSION_MINOR;
+                response_packet.params.version_major = VERSION_PATCH;
+                response_packet.params.timestamp = time_local_epoch_s();
 
                 response_packet.params.vel_p = vel_pid_constants.kP;
                 response_packet.params.vel_i = vel_pid_constants.kI;

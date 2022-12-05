@@ -9,6 +9,7 @@
 
 #include "6step.h"
 #include "current_sensing.h"
+#include "debug.h"
 #include "iir.h"
 #include "io_queue.h"
 #include "main.h"
@@ -29,10 +30,14 @@ int main() {
     GPIOB->BSRR |= GPIO_BSRR_BR_8;
     GPIOB->BSRR |= GPIO_BSRR_BR_9;
 
-    pwm6step_setup();
-
     ADC_Result_t res;
     currsen_setup(ADC_MODE, &res, ADC_NUM_CHANNELS, ADC_CH_MASK, ADC_SR_MASK);
+
+    pwm6step_setup();
+    pwm6step_set_duty_cycle_f(0.0f);
+
+    // enable ADC hardware trigger (tied to 6step timer)
+    currsen_enable_ht();
 
     MotorResponsePacket_t response_packet;
     memset(&response_packet, 0, sizeof(MotorResponsePacket_t));
@@ -41,7 +46,7 @@ int main() {
     SyncTimer_t torque_loop_timer;
     time_sync_init(&torque_loop_timer, 1);
 
-    MotorCommand_MotionType_t motion_control_type = VELOCITY;
+    MotorCommand_MotionType_t motion_control_type = OPEN_LOOP;
     
     float r_motor_board = 0.0f;
     float u_torque_loop;
@@ -54,8 +59,8 @@ int main() {
 
     // toggle J1-1
     while (true) {
-        //GPIOB->BSRR |= GPIO_BSRR_BR_8;
-        //GPIOB->BSRR |= GPIO_BSRR_BR_9;
+        GPIOB->BSRR |= GPIO_BSRR_BR_8;
+        GPIOB->BSRR |= GPIO_BSRR_BR_9;
 
 #ifdef UART_ENABLED
         while (uart_can_read()) {
@@ -67,6 +72,8 @@ int main() {
             }
 
             if (motor_command_packet.type == MCP_MOTION) {
+                GPIOB->BSRR |= GPIO_BSRR_BS_8;
+
                 // we got a motion packet!
 
                 if (motor_command_packet.motion.reset) {
@@ -77,6 +84,8 @@ int main() {
 
                 r_motor_board = motor_command_packet.motion.setpoint;
             } else if (motor_command_packet.type == MCP_PARAMS) {
+                GPIOB->BSRR |= GPIO_BSRR_BS_9;
+
                 // we got some params
                 params_return_packet_requested = true;
 
@@ -111,7 +120,7 @@ int main() {
         bool run_torque_loop = time_sync_ready_rst(&torque_loop_timer);
 
         if (run_torque_loop) {
-            float cur_measurement = 0.0f; // TODO: get current from dma
+            float cur_measurement = (float) res.I_motor; // TODO: get current from dma
             // TODO: estimate torque from current
             // TODO: filter?
 
@@ -122,10 +131,10 @@ int main() {
             u_torque_loop = torque_setpoint;
 
             // torque control data
-            response_packet.motion.current_setpoint = 0.0f;
-            response_packet.motion.current_estimate = 0.0f;
-            response_packet.motion.current_computed_error = 0.0f;
-            response_packet.motion.current_computed_setpoint = 0.0f;
+            response_packet.motion.current_setpoint = r;
+            response_packet.motion.current_estimate = cur_measurement;
+            response_packet.motion.current_computed_error = torque_pid.prev_err;
+            response_packet.motion.current_computed_setpoint = torque_setpoint;
         }
 
         if (run_torque_loop) {

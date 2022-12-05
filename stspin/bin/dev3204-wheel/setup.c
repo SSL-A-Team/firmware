@@ -192,7 +192,8 @@ void setup_uart() {
 
     // make sure USART1 is disabled
     USART1->CR1 &= ~(USART_CR1_UE);
-    // 9-bits with parity (PCE) inserst parity bit at the 9th bit
+    // 9-bits with parity (PCE) insert parity bit at the 9th bit
+    // defaults to even parity
 	USART1->CR1 |= (USART_CR1_M | USART_CR1_PCE);
     // enable transmision
     USART1->CR1 |= (USART_CR1_TE | USART_CR1_RE);
