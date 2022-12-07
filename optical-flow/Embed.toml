@@ -1,5 +1,5 @@
 [default.general]
-chip = "STM32F042K6Tx"
+chip = "STM32F429ZITx"
 connect_under_reset = true
 
 # [default.reset]

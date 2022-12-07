@@ -69,7 +69,7 @@ $(foreach element,$(stspin_binaries),$(eval $(call create-cmake-targets,$(elemen
 motor_binaries := ${shell cd motor-embassy/src/bin && ls -d * && cd ../../..}
 motor_openocd_cfg_file := board/st_nucleo_h743zi.cfg
 
-define create-rust-targets
+define create-motorboard-rust-targets
 $1-$2: stspin-all
 	cd $1/ && \
 	cargo build --release --bin $2
@@ -92,9 +92,50 @@ $1-$2-debug-run: stspin-all
 	cargo run --bin $2
 
 $1-$2-debug-prog: $1-$2-debug
-	./util/program.sh $3 $1/target/thumbv7em-none-eabihf/debug/$2
+	./util/attach_gdb.sh $3 $1/target/thumbv7em-none-eabihf/debug/$2
 
 endef
-$(foreach element,$(motor_binaries),$(eval $(call create-rust-targets,motor-embassy,$(element),$(motor_openocd_cfg_file))))
+$(foreach element,$(motor_binaries),$(eval $(call create-motorboard-rust-targets,motor-embassy,$(element),$(motor_openocd_cfg_file))))
 
-all:: stspin-all motorboard-all
+##########################
+#  Opticalflow Binaries  #
+##########################
+
+.PHONY: opticalflow-all
+opticalflow_binaries := ${shell cd optical-flow/src/bin && ls -d * && cd ../../..}
+# opticalflow_openocd_cfg_file := board/st_nucleo_h429zi.cfg
+opticalflow_openocd_cfg_file := board/stm32f429discovery.cfg
+
+define create-opticalflow-rust-targets
+$1-$2:
+	cd $1/ && \
+	cargo build --release --bin $2
+opticalflow-all:: $1-$2
+
+$1-$2-run: 
+	cd $1/ && \
+	cargo run --release --bin $2
+
+$1-$2-prog: $1-$2
+	./util/program.sh $3 $1/target/thumbv7em-none-eabihf/release/$2
+
+$1-$2-debug:
+	cd $1/ && \
+	cargo build --bin $2
+opticalflow-all:: $1-$2-debug
+
+$1-$2-debug-run:
+	cd $1/ && \
+	cargo run --bin $2
+
+$1-$2-debug-prog: $1-$2-debug
+	./util/attach_gdb.sh $3 $1/target/thumbv7em-none-eabihf/debug/$2
+
+endef
+$(foreach element,$(opticalflow_binaries),$(eval $(call create-opticalflow-rust-targets,optical-flow,$(element),$(opticalflow_openocd_cfg_file))))
+
+###########
+#  Globs  #
+###########
+
+all:: stspin-all motorboard-all opticalflow-all
