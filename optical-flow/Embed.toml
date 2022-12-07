@@ -1,0 +1,24 @@
+[default.general]
+chip = "STM32F042K6Tx"
+connect_under_reset = true
+
+# [default.reset]
+# # Whether or not the target should be reset.
+# # When flashing is enabled as well, the target will be reset after flashing.
+# enabled = true
+# # Whether or not the target should be halted after reset.
+# halt_afterwards = true
+
+# [with_rtt.rtt]
+# enabled = true
+# # format = 'Defmt'
+# channels = [
+#     { up = 0, down = 0, format = "Defmt" },
+# ]
+
+#[with_rtt.reset]
+#halt_afterwards = true
+
+
+[with_rtt.gdb]
+enabled = true

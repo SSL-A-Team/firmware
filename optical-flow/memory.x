@@ -1,0 +1,9 @@
+/* Linker for STM32F042K6T6 */
+
+MEMORY
+{
+  FLASH  : ORIGIN = 0x08000000, LENGTH = 32K
+
+  /* DTCM  */
+  RAM    : ORIGIN = 0x20000000, LENGTH = 6K
+}
