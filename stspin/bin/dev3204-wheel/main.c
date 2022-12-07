@@ -202,7 +202,7 @@ int main() {
 
         if (run_vel_loop) {
             int32_t enc_delta = quadenc_get_encoder_delta();
-            float enc_vel_rad_s = quadenc_delta_to_w(enc_delta, VELOCITY_LOOP_RATE_MS);
+            float enc_vel_rad_s = quadenc_delta_to_w(enc_delta, VELOCITY_LOOP_RATE_S);
             float enc_rad_s_filt = iir_filter_update(&encoder_filter, enc_vel_rad_s);
         
             float vel_setpoint = pid_calculate(&vel_pid, r_motor_board, enc_rad_s_filt);

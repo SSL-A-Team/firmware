@@ -157,29 +157,13 @@ impl<
                 if mrp.type_ == MotorResponsePacketType_MRP_MOTION {
                     self.current_state = mrp.__bindgen_anon_1.motion;
 
-                    let err = self.current_state.current_estimate;
-                    defmt::info!("current read: {:?}", err);
+                    // let err = self.current_state.current_estimate;
+                    // defmt::info!("current read: {:?}", err);
                 } else if mrp.type_ == MotorResponsePacketType_MRP_PARAMS {
                     self.current_params_state = mrp.__bindgen_anon_1.params;
                 }
             }
         }
-    }
-
-    pub fn set_motion_type(&mut self, motion_type: MotorCommand_MotionType) {
-        self.motion_type = motion_type;
-    }
-
-    pub fn set_setpoint(&mut self, setpoint: f32) {
-        self.setpoint = setpoint;
-    }
-
-    pub fn flag_reset(&mut self) {
-        self.reset_flagged = true;
-    }
-
-    pub fn set_telemetry_enabled(&mut self, telemetry_enabled: bool) {
-        self.telemetry_enabled = telemetry_enabled;
     }
 
     pub fn send_motion_command(&mut self) {
@@ -203,5 +187,33 @@ impl<
         }
 
         self.reset_flagged = false;
+    }
+
+    pub fn set_motion_type(&mut self, motion_type: MotorCommand_MotionType) {
+        self.motion_type = motion_type;
+    }
+
+    pub fn set_setpoint(&mut self, setpoint: f32) {
+        self.setpoint = setpoint;
+    }
+
+    pub fn flag_reset(&mut self) {
+        self.reset_flagged = true;
+    }
+
+    pub fn set_telemetry_enabled(&mut self, telemetry_enabled: bool) {
+        self.telemetry_enabled = telemetry_enabled;
+    }
+
+    pub fn read_current(&self) -> f32 {
+        return self.current_state.current_estimate;
+    }
+
+    pub fn read_encoder_delta(&self) -> i32 {
+        return self.current_state.encoder_delta;
+    }
+
+    pub fn read_rad_s(&self) -> f32 {
+        return self.current_state.vel_enc_estimate;
     }
 }
