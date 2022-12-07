@@ -13,6 +13,7 @@ use core::fmt::Write;
 use defmt::*;
 use defmt_rtt as _;
 
+use embassy_futures::join::join;
 use embassy_stm32::gpio::{Level, OutputOpenDrain, Pin, Pull, Speed};
 use embassy_stm32::time::mhz;
 use embassy_stm32::usart::{self, Uart};
@@ -29,7 +30,7 @@ use heapless::String;
 use motor_embassy::queue;
 use motor_embassy::uart_queue::{UartReadQueue, UartWriteQueue};
 use panic_probe as _;
-use radio::Radio;
+use radio::{Radio, ServerType};
 use static_cell::StaticCell;
 
 use crate::radio::WifiAuth;
@@ -42,8 +43,8 @@ static QUEUE_TX: UartWriteQueue<USART2, DMA1_CH0, 256, 4> =
     UartWriteQueue::new(unsafe { &mut BUFFERS_TX });
 
 #[link_section = ".axisram.buffers"]
-static mut BUFFERS_RX: [queue::Buffer<256>; 4] = [queue::Buffer::EMPTY; 4];
-static QUEUE_RX: UartReadQueue<USART2, DMA1_CH1, 256, 4> =
+static mut BUFFERS_RX: [queue::Buffer<256>; 8] = [queue::Buffer::EMPTY; 8];
+static QUEUE_RX: UartReadQueue<USART2, DMA1_CH1, 256, 8> =
     UartReadQueue::new(unsafe { &mut BUFFERS_RX });
 
 fn get_uuid() -> u16 {
@@ -75,35 +76,30 @@ async fn main(_spawner: embassy_executor::Spawner) {
     spawner.spawn(QUEUE_RX.spawn_task(rx, int)).unwrap();
     spawner.spawn(QUEUE_TX.spawn_task(tx)).unwrap();
 
-    let radio = OdinW2Radio::new(&QUEUE_RX, &QUEUE_TX, p.PA3).await.unwrap();
+    let mut radio = OdinW2Radio::new(&QUEUE_RX, &QUEUE_TX, p.PA3).await.unwrap();
     info!("radio created");
     radio.connect_to_network().await.unwrap();
     info!("radio connected");
 
-    loop {
-        radio.radio.read().await;
-    }
-
-    // radio
-    //     .edm_command_send("AT+UDCP=\"udp://224.4.20.69:42069/?flags=1&local_port=42069\"")
-    //     .unwrap();
-
-    // radio
-    //     .edm_command_send("AT+UDSC=1,udp://0.0.0.0:42069/")
-    //     .unwrap();
-
-    // this one
-    // radio.edm_command_send("AT+UDSC=1,2,42069,1,0").unwrap();
-
-    // radio.edm_basic_command("AT+UMRS?").await.unwrap();
-
-    // radio.edm_basic_command("AT+GMI").await.unwrap();
-    // radio.edm_basic_command("AT+GMM").await.unwrap();
-    // radio.edm_basic_command("ATI9").await.unwrap();
-    // radio.edm_basic_command("AT+GMR").await.unwrap();
-    // radio.edm_basic_command("AT+UMLA=1").await.unwrap();
-    // radio.edm_basic_command("AT+UMLA=2").await.unwrap();
-    // radio.edm_basic_command("AT+UMLA=3").await.unwrap();
+    join(
+        (|| async {
+            loop {
+                radio.send_data(&[b'a', b'b', b'c']).await.unwrap();
+                Timer::after(Duration::from_millis(1000)).await;
+            }
+        })(),
+        (|| async {
+            loop {
+                radio
+                    .read_data(|data| {
+                        info!("{}", data);
+                    })
+                    .await
+                    .unwrap();
+            }
+        })(),
+    )
+    .await;
 
     loop {}
 }
@@ -125,6 +121,7 @@ struct OdinW2Radio<
         UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_RX>,
     >,
     reset_pin: OutputOpenDrain<'a, PIN>,
+    channel: Option<u8>,
 }
 
 impl<
@@ -181,23 +178,51 @@ impl<
         radio.wait_edm_startup().await?;
         Timer::after(Duration::from_millis(50)).await;
 
-        Ok(Self { radio, reset_pin })
+        Ok(Self {
+            radio,
+            reset_pin,
+            channel: None,
+        })
     }
 
-    pub async fn connect_to_network(&self) -> Result<(), ()> {
+    pub async fn connect_to_network(&mut self) -> Result<(), ()> {
         let mut s = String::<17>::new();
         core::write!(&mut s, "A-Team Robot {:04X}", get_uuid()).unwrap();
         self.radio.set_host_name(s.as_str()).await?;
         self.radio
             .config_wifi(
-                0,
+                1,
                 "PROMISED_LAN_DC_DEVEL",
                 WifiAuth::WPA {
                     passphrase: "plddevel",
                 },
             )
             .await?;
-        self.radio.connect_wifi(0).await?;
+        self.radio.connect_wifi(1).await?;
+        let channel = self
+            .radio
+            .connect_peer("udp://224.4.20.69:42069/?flags=1&local_port=42069")
+            .await?;
+        self.channel = Some(channel);
         Ok(())
+    }
+
+    pub async fn send_data(&self, data: &[u8]) -> Result<(), ()> {
+        if let Some(channel) = self.channel {
+            self.radio.send_data(channel, data).await
+        } else {
+            Err(())
+        }
+    }
+
+    pub async fn read_data<RET, FN>(&'a self, fn_read: FN) -> Result<RET, ()>
+    where
+        FN: FnOnce(&[u8]) -> RET,
+    {
+        if self.channel.is_some() {
+            self.radio.read_data(fn_read).await
+        } else {
+            Err(())
+        }
     }
 }

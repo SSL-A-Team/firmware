@@ -130,7 +130,7 @@ impl EdmPacketRaw {
 pub enum EdmPacket<'a> {
     ConnectEvent {
         channel: u8,
-        event_type: ConnectEventType<'a>,
+        event_type: ConnectEventType,
     },
     DisconnectEvent {
         channel: u8,
@@ -180,10 +180,10 @@ struct ConnectEvent<P: ?Sized = [u8]> {
 }
 
 #[derive(defmt::Format)]
-pub enum ConnectEventType<'a> {
-    ConnectEventBluetooth(&'a ConnectEventBluetooth),
-    ConnectEventIPv4(&'a ConnectEventIPv4),
-    ConnectEventIPv6(&'a ConnectEventIPv6),
+pub enum ConnectEventType {
+    // ConnectEventBluetooth(ConnectEventBluetooth),
+    ConnectEventIPv4(ConnectEventIPv4),
+    // ConnectEventIPv6(ConnectEventIPv6),
 }
 
 #[derive(defmt::Format)]
@@ -215,30 +215,26 @@ pub struct ConnectEventIPv6 {
 impl ConnectEvent {
     fn get_payload(&self) -> Result<ConnectEventType, ()> {
         match self.connect_type {
-            0x01 => {
-                // Bluetooth Connect Event
-                if self.payload.len() == mem::size_of::<ConnectEventBluetooth>() {
-                    let payload =
-                        unsafe { &*(self.payload.as_ptr() as *const ConnectEventBluetooth) };
-                    Ok(ConnectEventType::ConnectEventBluetooth(payload))
-                } else {
-                    Err(())
-                }
-            }
             0x02 => {
                 // IPv4 Connect Event
-                if self.payload.len() == mem::size_of::<ConnectEventIPv4>() {
-                    let payload = unsafe { &*(self.payload.as_ptr() as *const ConnectEventIPv4) };
-                    Ok(ConnectEventType::ConnectEventIPv4(payload))
-                } else {
-                    Err(())
-                }
-            }
-            0x03 => {
-                // IPv6 Connect Event
-                if self.payload.len() == mem::size_of::<ConnectEventIPv6>() {
-                    let payload = unsafe { &*(self.payload.as_ptr() as *const ConnectEventIPv6) };
-                    Ok(ConnectEventType::ConnectEventIPv6(payload))
+                if self.payload.len() == 13 {
+                    Ok(ConnectEventType::ConnectEventIPv4(ConnectEventIPv4 {
+                        protocol: self.payload[0],
+                        remote_addr: [
+                            self.payload[1],
+                            self.payload[2],
+                            self.payload[3],
+                            self.payload[4],
+                        ],
+                        remote_port: u16::from_be_bytes([self.payload[5], self.payload[6]]),
+                        local_addr: [
+                            self.payload[7],
+                            self.payload[8],
+                            self.payload[9],
+                            self.payload[10],
+                        ],
+                        local_port: u16::from_be_bytes([self.payload[11], self.payload[12]]),
+                    }))
                 } else {
                     Err(())
                 }

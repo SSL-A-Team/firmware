@@ -28,6 +28,9 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> DequeueRef<'a, LENGTH, DEPTH> 
     pub fn data(&self) -> &[u8] {
         self.data
     }
+    pub fn cancel(self) {
+        self.queue.cancel_dequeue();
+    }
 }
 
 impl<'a, const LENGTH: usize, const DEPTH: usize> Drop for DequeueRef<'a, LENGTH, DEPTH> {
@@ -49,6 +52,9 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> EnqueueRef<'a, LENGTH, DEPTH> 
 
     pub fn len(&mut self) -> &mut usize {
         self.len
+    }
+    pub fn cancel(self) {
+        self.queue.cancel_enqueue();
     }
 }
 
@@ -129,6 +135,12 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<'a, LENGTH, DEPTH> {
         .await
     }
 
+    fn cancel_dequeue(&self) {
+        critical_section::with(|_| unsafe {
+            *self.read_in_progress.get() = false;
+        });
+    }
+
     fn finish_dequeue(&self) {
         critical_section::with(|_| unsafe {
             *self.read_in_progress.get() = false;
@@ -181,6 +193,12 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<'a, LENGTH, DEPTH> {
             })
         })
         .await
+    }
+
+    fn cancel_enqueue(&self) {
+        critical_section::with(|_| unsafe {
+            *self.write_in_progress.get() = false;
+        });
     }
 
     fn finish_enqueue(&self) {
