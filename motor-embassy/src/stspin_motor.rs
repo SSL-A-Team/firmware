@@ -1,4 +1,4 @@
-use core::mem::MaybeUninit;
+use core::{mem::MaybeUninit, f32::consts::PI};
 
 use embassy_stm32::{usart::{self, Parity}, gpio::Pin};
 use embassy_time::{Timer, Duration};
@@ -213,7 +213,11 @@ impl<
         return self.current_state.encoder_delta;
     }
 
-    pub fn read_rad_s(&self) -> f32 {
+    pub fn read_rads(&self) -> f32 {
         return self.current_state.vel_enc_estimate;
+    }
+
+    pub fn read_rpm(&self) -> f32 {
+        return self.current_state.vel_enc_estimate * 60.0 / (2.0 * PI);
     }
 }

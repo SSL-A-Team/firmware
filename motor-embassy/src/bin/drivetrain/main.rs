@@ -289,13 +289,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
         back_left_motor.process_packets();
         back_right_motor.process_packets();
 
-        let vel = 0.0005; // DC
-        let cmd_vel: Vector3<f32> = Vector3::new(libm::cosf(angle) * vel, libm::sinf(angle) * vel, 0.0);
-        defmt::info!("cmd vel [{:?},{:?},{:?}]", cmd_vel[0], cmd_vel[1], cmd_vel[2]);
-        let wheel_vels = robot_model.robot_vel_to_wheel_vel(cmd_vel);
-        defmt::info!("set duty cycles [{:?},{:?},{:?},{:?}]", wheel_vels[0],  wheel_vels[1],  wheel_vels[2],  wheel_vels[3]);
-        let rec_body_vel = robot_model.wheel_vel_to_robot_vel(wheel_vels);
-        defmt::info!("rec_body_vel [{:?},{:?},{:?}]", rec_body_vel[0], rec_body_vel[1], rec_body_vel[2]);
+        // let vel = 0.0005; // DC
+        // let cmd_vel: Vector3<f32> = Vector3::new(libm::cosf(angle) * vel, libm::sinf(angle) * vel, 0.0);
+        // defmt::info!("cmd vel [{:?},{:?},{:?}]", cmd_vel[0], cmd_vel[1], cmd_vel[2]);
+        // let wheel_vels = robot_model.robot_vel_to_wheel_vel(cmd_vel);
+        // defmt::info!("set duty cycles [{:?},{:?},{:?},{:?}]", wheel_vels[0],  wheel_vels[1],  wheel_vels[2],  wheel_vels[3]);
+        // let rec_body_vel = robot_model.wheel_vel_to_robot_vel(wheel_vels);
+        // defmt::info!("rec_body_vel [{:?},{:?},{:?}]", rec_body_vel[0], rec_body_vel[1], rec_body_vel[2]);
 
 
 
@@ -307,11 +307,11 @@ async fn main(_spawner: embassy_executor::Spawner) {
         // back_right_motor.set_setpoint(wheel_vels[3]);
         // angle += core::f32::consts::FRAC_2_PI / 200.0;
 
-        // let c_vel = 0.2;
-        // front_right_motor.set_setpoint(c_vel);
-        // front_left_motor.set_setpoint(c_vel);
-        // back_left_motor.set_setpoint(c_vel);
-        // back_right_motor.set_setpoint(c_vel);
+        let c_vel = 0.2;
+        front_right_motor.set_setpoint(c_vel);
+        front_left_motor.set_setpoint(c_vel);
+        back_left_motor.set_setpoint(c_vel);
+        back_right_motor.set_setpoint(c_vel);
         // front_right_motor.set_setpoint(1.0);
 
         front_right_motor.send_motion_command();
@@ -319,9 +319,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
         back_left_motor.send_motion_command();
         back_right_motor.send_motion_command();
 
-        defmt::info!("current estimate: {:?}", front_right_motor.read_current());
+        defmt::info!("torque: {:?}, RPM {:?}", front_right_motor.read_current(), front_right_motor.read_rpm());
         defmt::info!("encoder delta: {:?}", front_right_motor.read_encoder_delta());
-        defmt::info!("vel rad/s: {:?}", front_right_motor.read_rad_s() * 60.0 / (2.0 * PI));
+        // defmt::info!("vel rad/s: {:?}", front_right_motor.read_rads() * 60.0 / (2.0 * PI));
+        // defmt::info!("vel rad/s: {:?}", front_right_motor.read_rads());
+        // defmt::info!("vel RPM: {:?}", front_right_motor.read_rads() * 60.0 / (2.0 * PI));
+
+
 
         main_loop_rate_ticker.next().await;
     }
