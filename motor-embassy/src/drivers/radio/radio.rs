@@ -4,12 +4,10 @@ use core::fmt::Write;
 use embassy_stm32::usart;
 use heapless::String;
 
-use crate::{
-    at_protocol::{ATEvent, ATResponse},
-    edm_protocol::EdmPacket,
-};
+use super::at_protocol::{ATEvent, ATResponse};
+use super::edm_protocol::EdmPacket;
 
-use motor_embassy::uart_queue::{Reader, Writer};
+use crate::uart_queue::{Reader, Writer};
 
 // pub trait Reader<'a> {
 //     type F<RET, FN: FnOnce(&[u8]) -> RET>: Future<Output = Result<RET, ()>>
@@ -300,13 +298,15 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
     where
         FN: FnOnce(&[u8]) -> RET,
     {
-        self.reader.read(|buf| {
-            if let EdmPacket::DataEvent { channel: _, data } = self.to_packet(buf)? {
-                Ok(fn_read(data))
-            } else {
-                Err(())
-            }
-        }).await?
+        self.reader
+            .read(|buf| {
+                if let EdmPacket::DataEvent { channel: _, data } = self.to_packet(buf)? {
+                    Ok(fn_read(data))
+                } else {
+                    Err(())
+                }
+            })
+            .await?
     }
 
     pub async fn send_command(&self, cmd: &str) -> Result<(), ()> {
