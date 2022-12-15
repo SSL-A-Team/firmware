@@ -35,6 +35,7 @@ embassy-sync = { version = "0.1.0" }
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 static_cell = "1.0"
 critical-section = "1.1.1"
+const_format = "0.2.30"
 heapless = "0.7.16"
 libm = "0.2.6"
 nalgebra = { version = "0.31.0", default-features = false, features = [ "libm" ] }
@@ -85,8 +86,3 @@ embassy-sync = { git = "https://github.com/SSL-A-Team/embassy", branch = "uart-r
 embassy-time = { git = "https://github.com/SSL-A-Team/embassy", branch = "uart-read-idle" }
 embassy-stm32 = { git = "https://github.com/SSL-A-Team/embassy", branch = "uart-read-idle" }
 embassy-futures = { git = "https://github.com/SSL-A-Team/embassy", branch = "uart-read-idle" }
-#embassy-executor = { path = "/Users/petersonev/Documents/Projects/git/embassy/embassy-executor" }
-#embassy-sync = { path = "/Users/petersonev/Documents/Projects/git/embassy/embassy-sync" }
-#embassy-time = { path = "/Users/petersonev/Documents/Projects/git/embassy/embassy-time" }
-#embassy-stm32 = { path = "/Users/petersonev/Documents/Projects/git/embassy/embassy-stm32" }
-#embassy-futures = { path = "/Users/petersonev/Documents/Projects/git/embassy/embassy-futures" }

@@ -8,7 +8,6 @@
 use defmt::*;
 use defmt_rtt as _;
 
-use embassy_futures::join::join;
 use embassy_stm32::time::mhz;
 use embassy_stm32::usart::{self, Uart};
 use embassy_stm32::{
@@ -18,7 +17,7 @@ use embassy_stm32::{
     peripherals::{DMA1_CH0, DMA1_CH1, USART2},
 };
 use embassy_time::{Duration, Timer};
-use motor_embassy::drivers::radio::RobotRadio;
+use motor_embassy::drivers::radio::{RobotRadio, TeamColor};
 use motor_embassy::queue;
 use motor_embassy::uart_queue::{UartReadQueue, UartWriteQueue};
 use panic_probe as _;
@@ -66,25 +65,36 @@ async fn main(_spawner: embassy_executor::Spawner) {
     radio.connect_to_network().await.unwrap();
     info!("radio connected");
 
-    join(
-        (|| async {
-            loop {
-                radio.send_data(&[b'a', b'b', b'c']).await.unwrap();
-                Timer::after(Duration::from_millis(1000)).await;
+    radio.open_multicast().await.unwrap();
+    info!("multicast open");
+
+    loop {
+        info!("sending hello");
+        radio.send_hello(0, TeamColor::Blue).await.unwrap();
+        let hello = radio.wait_hello(Duration::from_millis(1000)).await;
+
+        match hello {
+            Ok(hello) => {
+                info!(
+                    "recieved hello resp to: {}.{}.{}.{}:{}",
+                    hello.ipv4[0], hello.ipv4[1], hello.ipv4[2], hello.ipv4[3], hello.port
+                );
+                radio.close_peer().await.unwrap();
+                info!("multicast peer closed");
+                radio.open_unicast(hello.ipv4, hello.port).await.unwrap();
+                info!("unicast open");
+                break;
             }
-        })(),
-        (|| async {
-            loop {
-                radio
-                    .read_data(|data| {
-                        info!("{}", data);
-                    })
-                    .await
-                    .unwrap();
-            }
-        })(),
-    )
-    .await;
+            Err(_) => {}
+        }
+    }
+
+    loop {
+        let control = radio.read_control().await;
+        if let Ok(control) = control {
+            info!("{:?}", defmt::Debug2Format(&control));
+        }
+    }
 
     loop {}
 }

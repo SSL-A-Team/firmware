@@ -51,6 +51,11 @@ pub enum ServerType {
     ATP = 8,
 }
 
+pub struct PeerConnection {
+    pub peer_id: u8,
+    pub channel_id: u8,
+}
+
 pub struct Radio<'a, R: Reader<'a>, W: Writer<'a>> {
     reader: &'a R,
     writer: &'a W,
@@ -235,16 +240,16 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
         Ok(())
     }
 
-    pub async fn connect_peer(&self, url: &str) -> Result<u8, ()> {
+    pub async fn connect_peer(&self, url: &str) -> Result<PeerConnection, ()> {
         let mut str: String<64> = String::new();
         write!(str, "AT+UDCP={url}").or(Err(()))?;
         self.send_command(str.as_str()).await?;
 
-        let mut ok = false;
+        let mut peer_id = None;
         let mut peer_connected_ip = false;
         let mut channel_ret = None;
 
-        while !ok || !peer_connected_ip || channel_ret.is_none() {
+        while peer_id.is_none() || !peer_connected_ip || channel_ret.is_none() {
             self.reader
                 .read(|buf| {
                     match self.to_packet(buf)? {
@@ -265,8 +270,12 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
                         } => {
                             channel_ret = Some(channel);
                         }
-                        EdmPacket::ATResponse(ATResponse::Ok(_)) => {
-                            ok = true;
+                        EdmPacket::ATResponse(ATResponse::Ok(resp)) => {
+                            if let Some(i) = resp.find("+UDCP:") {
+                                peer_id = Some(resp[i + 6..].parse::<u8>().or(Err(()))?);
+                            } else {
+                                return Err(());
+                            }
                         }
                         _ => {
                             return Err(());
@@ -277,7 +286,49 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
                 })
                 .await??;
         }
-        Ok(channel_ret.unwrap())
+        Ok(PeerConnection {
+            peer_id: peer_id.unwrap(),
+            channel_id: channel_ret.unwrap(),
+        })
+    }
+
+    pub async fn close_peer(&self, peer_id: u8) -> Result<(), ()> {
+        let mut str: String<12> = String::new();
+        write!(str, "AT+UDCPC={peer_id}").or(Err(()))?;
+        self.send_command(str.as_str()).await?;
+
+        let mut ok = false;
+        let mut peer_disconnect = false;
+        let mut disconnect = false;
+
+        while !ok || !peer_disconnect || !disconnect {
+            self.reader
+                .read(|buf| {
+                    match self.to_packet(buf)? {
+                        EdmPacket::ATEvent(ATEvent::PeerDisconnected { peer_handle: _ }) => {
+                            peer_disconnect = true
+                        }
+                        EdmPacket::DisconnectEvent { channel: _ } => {
+                            disconnect = true;
+                        }
+                        EdmPacket::ATResponse(ATResponse::Ok("")) => {
+                            ok = true;
+                        }
+                        EdmPacket::DataEvent {
+                            channel: _,
+                            data: _,
+                        } => {}
+                        _ => {
+                            return Err(());
+                        }
+                    };
+
+                    Ok(())
+                })
+                .await??;
+        }
+
+        Ok(())
     }
 
     pub async fn send_data(&self, channel_id: u8, data: &[u8]) -> Result<(), ()> {

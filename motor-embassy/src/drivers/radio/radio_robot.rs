@@ -1,12 +1,29 @@
-use super::radio::{Radio, WifiAuth};
+use super::radio::{PeerConnection, Radio, WifiAuth};
 use crate::uart_queue::{UartReadQueue, UartWriteQueue};
+use ateam_common_packets::bindings_radio::{
+    self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data,
+};
+use const_format::formatcp;
 use core::fmt::Write;
+use core::mem::size_of;
+use embassy_futures::select::{select, Either};
 use embassy_stm32::gpio::{Level, OutputOpenDrain, Pin, Pull, Speed};
 use embassy_stm32::pac;
 use embassy_stm32::usart;
 use embassy_stm32::Peripheral;
 use embassy_time::{Duration, Timer};
 use heapless::String;
+
+const MULTICAST_IP: &str = "224.4.20.69";
+const MULTICAST_PORT: u16 = 42069;
+const LOCAL_PORT: u16 = 42069;
+const WIFI_SSID: &str = "PROMISED_LAN_DC_DEVEL";
+const WIFI_PASS: &str = "plddevel";
+
+pub enum TeamColor {
+    Yellow,
+    Blue,
+}
 
 fn get_uuid() -> u16 {
     unsafe { *(0x1FF1_E800 as *const u16) }
@@ -29,7 +46,7 @@ pub struct RobotRadio<
         UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_RX>,
     >,
     reset_pin: OutputOpenDrain<'a, PIN>,
-    channel: Option<u8>,
+    peer: Option<PeerConnection>,
 }
 
 impl<
@@ -89,7 +106,7 @@ impl<
         Ok(Self {
             radio,
             reset_pin,
-            channel: None,
+            peer: None,
         })
     }
 
@@ -100,24 +117,57 @@ impl<
         self.radio
             .config_wifi(
                 1,
-                "PROMISED_LAN_DC_DEVEL",
+                WIFI_SSID,
                 WifiAuth::WPA {
-                    passphrase: "plddevel",
+                    passphrase: WIFI_PASS,
                 },
             )
             .await?;
         self.radio.connect_wifi(1).await?;
-        let channel = self
-            .radio
-            .connect_peer("udp://224.4.20.69:42069/?flags=1&local_port=42069")
-            .await?;
-        self.channel = Some(channel);
         Ok(())
     }
 
+    pub async fn open_multicast(&mut self) -> Result<(), ()> {
+        let peer = self
+            .radio
+            .connect_peer(formatcp!(
+                "udp://{MULTICAST_IP}:{MULTICAST_PORT}/?flags=1&local_port={LOCAL_PORT}"
+            ))
+            .await?;
+        self.peer = Some(peer);
+        Ok(())
+    }
+
+    pub async fn open_unicast(&mut self, ipv4: [u8; 4], port: u16) -> Result<(), ()> {
+        let mut s = String::<50>::new();
+        core::write!(
+            &mut s,
+            "udp://{}.{}.{}.{}:{}/?local_port={LOCAL_PORT}",
+            ipv4[0],
+            ipv4[1],
+            ipv4[2],
+            ipv4[3],
+            port
+        )
+        .unwrap();
+        let peer = self.radio.connect_peer(s.as_str()).await?;
+        self.peer = Some(peer);
+        Ok(())
+    }
+
+    pub async fn close_peer(&mut self) -> Result<(), ()> {
+        if let Some(peer) = &self.peer {
+            self.radio.close_peer(peer.peer_id).await?;
+            self.peer = None;
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+
     pub async fn send_data(&self, data: &[u8]) -> Result<(), ()> {
-        if let Some(channel) = self.channel {
-            self.radio.send_data(channel, data).await
+        if let Some(peer) = &self.peer {
+            self.radio.send_data(peer.channel_id, data).await
         } else {
             Err(())
         }
@@ -127,10 +177,129 @@ impl<
     where
         FN: FnOnce(&[u8]) -> RET,
     {
-        if self.channel.is_some() {
+        if self.peer.is_some() {
             self.radio.read_data(fn_read).await
         } else {
             Err(())
         }
+    }
+
+    pub async fn send_ack(&self, nack: bool) -> Result<(), ()> {
+        let packet = RadioPacket {
+            crc32: 0,
+            major_version: bindings_radio::kProtocolVersionMajor,
+            minor_version: bindings_radio::kProtocolVersionMinor,
+            command_code: if nack {
+                CommandCode::CC_NACK
+            } else {
+                CommandCode::CC_ACK
+            },
+            data: unsafe { core::mem::zeroed() },
+        };
+        let packet_bytes = unsafe {
+            core::slice::from_raw_parts(
+                &packet as *const _ as *const u8,
+                size_of::<RadioPacket>() - size_of::<RadioPacket_Data>(),
+            )
+        };
+        self.send_data(packet_bytes).await?;
+
+        Ok(())
+    }
+
+    pub async fn wait_ack(&self, timeout: Duration) -> Result<bool, ()> {
+        let read_fut = self.read_data(|data| {
+            if data.len() != size_of::<RadioPacket>() - size_of::<RadioPacket_Data>() {
+                return Err(());
+            }
+            let packet = unsafe { &*(data as *const _ as *const RadioPacket) };
+
+            match packet.command_code {
+                CommandCode::CC_ACK => Ok(true),
+                CommandCode::CC_NACK => Ok(false),
+                _ => Err(()),
+            }
+        });
+        match select(read_fut, Timer::after(timeout)).await {
+            Either::First(ret) => ret?,
+            Either::Second(_) => Err(()),
+        }
+    }
+
+    pub async fn send_hello(&self, id: u8, team: TeamColor) -> Result<(), ()> {
+        let packet = RadioPacket {
+            crc32: 0,
+            major_version: bindings_radio::kProtocolVersionMajor,
+            minor_version: bindings_radio::kProtocolVersionMinor,
+            command_code: CommandCode::CC_HELLO_REQ,
+            data: RadioPacket_Data {
+                hello_request: HelloRequest {
+                    robot_id: id,
+                    color: match team {
+                        TeamColor::Yellow => bindings_radio::TeamColor::TC_YELLOW,
+                        TeamColor::Blue => bindings_radio::TeamColor::TC_BLUE,
+                    },
+                },
+            },
+        };
+        let packet_bytes = unsafe {
+            core::slice::from_raw_parts(
+                &packet as *const _ as *const u8,
+                size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                    + size_of::<HelloRequest>(),
+            )
+        };
+        self.send_data(packet_bytes).await?;
+
+        Ok(())
+    }
+
+    pub async fn wait_hello(&self, timeout: Duration) -> Result<HelloResponse, ()> {
+        let read_fut = self.read_data(|data| {
+            const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                + size_of::<HelloResponse>();
+            if data.len() != PACKET_SIZE {
+                return Err(());
+            }
+
+            let mut data_copy = [0u8; PACKET_SIZE];
+            data_copy.clone_from_slice(&data[0..PACKET_SIZE]);
+
+            let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
+
+            if packet.command_code != CommandCode::CC_HELLO_RESP {
+                return Err(());
+            }
+            // TODO: handle nack
+
+            Ok(unsafe { packet.data.hello_response })
+        });
+
+        match select(read_fut, Timer::after(timeout)).await {
+            Either::First(ret) => ret?,
+            Either::Second(_) => Err(()),
+        }
+    }
+
+    pub async fn read_control(&self) -> Result<BasicControl, ()> {
+        self.read_data(|data| {
+            const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                + size_of::<BasicControl>();
+            if data.len() != PACKET_SIZE {
+                return Err(());
+            }
+
+            let mut data_copy = [0u8; PACKET_SIZE];
+            data_copy.clone_from_slice(&data[0..PACKET_SIZE]);
+
+            let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
+
+            if packet.command_code != CommandCode::CC_CONTROL {
+                return Err(());
+            }
+
+            Ok(unsafe { packet.data.control })
+        })
+        .await?
     }
 }

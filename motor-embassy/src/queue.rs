@@ -5,7 +5,6 @@ use core::{
     task::{Poll, Waker},
 };
 use critical_section;
-use defmt::{info, Format};
 
 pub struct Buffer<const LENGTH: usize> {
     pub data: [MaybeUninit<u8>; LENGTH],
@@ -117,9 +116,10 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<'a, LENGTH, DEPTH> {
     }
 
     pub async fn dequeue(&self) -> Result<DequeueRef<LENGTH, DEPTH>, Error> {
-        if critical_section::with(|_| unsafe { (*self.dequeue_waker.get()).is_some() }) {
-            return Err(Error::InProgress);
-        }
+        // TODO: look at this (when uncommented causes issue cancelling dequeue)
+        // if critical_section::with(|_| unsafe { (*self.dequeue_waker.get()).is_some() }) {
+        //     return Err(Error::InProgress);
+        // }
 
         poll_fn(|cx| {
             critical_section::with(|_| unsafe {
