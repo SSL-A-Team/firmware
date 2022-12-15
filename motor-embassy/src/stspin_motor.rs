@@ -213,7 +213,7 @@ impl<
         self.reset_flagged = false;
     }
 
-    pub fn set_motion_type(&mut self, motion_type: MotorCommand_MotionType) {
+    pub fn set_motion_type(&mut self, motion_type: MotorCommand_MotionType::Type) {
         self.motion_type = motion_type;
     }
 

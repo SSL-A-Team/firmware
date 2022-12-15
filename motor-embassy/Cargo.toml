@@ -67,7 +67,7 @@ test = false
 harness = false
 
 [[bin]]
-name = "drivetrain"
+name = "proto-drivetrain"
 test = false
 harness = false
 
