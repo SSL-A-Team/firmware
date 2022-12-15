@@ -2,8 +2,8 @@
 target = "thumbv7em-none-eabihf"
 
 [target.thumbv7em-none-eabihf]
-# runner = 'probe-run --chip STM32H743ZITx --connect-under-reset --probe 0017000F4D46500F20383832'
-runner = 'probe-run --chip STM32H743ZITx --connect-under-reset'
+runner = 'probe-run --chip STM32H743ZITx --connect-under-reset --probe 0017000F4D46500F20383832'
+# runner = 'probe-run --chip STM32H743ZITx --connect-under-reset'
 # runner = 'probe-run --chip STM32H7A3ZITx --connect-under-reset'
 
 [env]

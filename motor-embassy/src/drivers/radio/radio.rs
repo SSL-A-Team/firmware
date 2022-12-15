@@ -4,12 +4,10 @@ use core::fmt::Write;
 use embassy_stm32::usart;
 use heapless::String;
 
-use crate::{
-    at_protocol::{ATEvent, ATResponse},
-    edm_protocol::EdmPacket,
-};
+use super::at_protocol::{ATEvent, ATResponse};
+use super::edm_protocol::EdmPacket;
 
-use motor_embassy::uart_queue::{Reader, Writer};
+use crate::uart_queue::{Reader, Writer};
 
 // pub trait Reader<'a> {
 //     type F<RET, FN: FnOnce(&[u8]) -> RET>: Future<Output = Result<RET, ()>>
@@ -42,10 +40,22 @@ pub enum WifiAuth<'a> {
     EAPTLS,
 }
 
+pub enum ServerType {
+    Disabled = 0,
+    TCP = 1,
+    UDP = 2,
+    SPP = 3,
+    DUN = 4,
+    UUID = 5,
+    SPS = 6,
+    ATP = 8,
+}
+
 pub struct Radio<'a, R: Reader<'a>, W: Writer<'a>> {
     reader: &'a R,
     writer: &'a W,
     mode: RadioMode,
+    wifiConnected: bool,
 }
 
 impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
@@ -54,6 +64,7 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
             reader,
             writer,
             mode: RadioMode::CommandMode,
+            wifiConnected: false,
         }
     }
 
@@ -181,10 +192,124 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
         write!(str, "AT+UWSCA={config_id},3").or(Err(()))?;
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
+
+        let mut networkUp = 0;
+
+        while networkUp < 2 {
+            self.reader
+                .read(|buf| {
+                    let packet = self.to_packet(buf)?;
+
+                    if let EdmPacket::ATEvent(ATEvent::NetworkUp { interface_id: 0 }) = packet {
+                        networkUp += 1;
+                    } else if let EdmPacket::ATEvent(ATEvent::WifiLinkConnected {
+                        conn_id: _,
+                        bssid: _,
+                        channel: _,
+                    }) = packet
+                    {
+                        // TODO
+                        // self.wifiConnected = true;
+                    } else {
+                        return Err(());
+                    }
+                    Ok(())
+                })
+                .await??;
+        }
+
         Ok(())
     }
 
-    async fn send_command(&self, cmd: &str) -> Result<(), ()> {
+    pub async fn config_server(
+        &self,
+        server_id: u8,
+        server_type: ServerType,
+        port: u16,
+    ) -> Result<(), ()> {
+        let mut str: String<64> = String::new();
+        let server_type = server_type as u8;
+        write!(str, "AT+UDSC={server_id},{server_type},{port},1,0").or(Err(()))?;
+        self.send_command(str.as_str()).await?;
+        self.read_ok().await?;
+        Ok(())
+    }
+
+    pub async fn connect_peer(&self, url: &str) -> Result<u8, ()> {
+        let mut str: String<64> = String::new();
+        write!(str, "AT+UDCP={url}").or(Err(()))?;
+        self.send_command(str.as_str()).await?;
+
+        let mut ok = false;
+        let mut peer_connected_ip = false;
+        let mut channel_ret = None;
+
+        while !ok || !peer_connected_ip || channel_ret.is_none() {
+            self.reader
+                .read(|buf| {
+                    match self.to_packet(buf)? {
+                        EdmPacket::ATEvent(ATEvent::PeerConnectedIP {
+                            peer_handle: _,
+                            is_ipv6: _,
+                            protocol: _,
+                            local_address: _,
+                            local_port: _,
+                            remote_address: _,
+                            remote_port: _,
+                        }) => {
+                            peer_connected_ip = true;
+                        }
+                        EdmPacket::ConnectEvent {
+                            channel,
+                            event_type: _,
+                        } => {
+                            channel_ret = Some(channel);
+                        }
+                        EdmPacket::ATResponse(ATResponse::Ok(_)) => {
+                            ok = true;
+                        }
+                        _ => {
+                            return Err(());
+                        }
+                    };
+
+                    Ok(())
+                })
+                .await??;
+        }
+        Ok(channel_ret.unwrap())
+    }
+
+    pub async fn send_data(&self, channel_id: u8, data: &[u8]) -> Result<(), ()> {
+        self.writer
+            .write(|buf| {
+                EdmPacket::DataCommand {
+                    channel: channel_id,
+                    data: data,
+                }
+                .write(buf)
+                .unwrap()
+            })
+            .await?; // TODO: unwrap
+        Ok(())
+    }
+
+    pub async fn read_data<RET, FN>(&'a self, fn_read: FN) -> Result<RET, ()>
+    where
+        FN: FnOnce(&[u8]) -> RET,
+    {
+        self.reader
+            .read(|buf| {
+                if let EdmPacket::DataEvent { channel: _, data } = self.to_packet(buf)? {
+                    Ok(fn_read(data))
+                } else {
+                    Err(())
+                }
+            })
+            .await?
+    }
+
+    pub async fn send_command(&self, cmd: &str) -> Result<(), ()> {
         match self.mode {
             RadioMode::CommandMode => {
                 self.writer
@@ -206,16 +331,15 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
         }
     }
 
-    async fn get_response(&self ) {
-
-    }
+    async fn get_response(&self) {}
 
     pub async fn read(&self) {
         self.reader
             .read(|buf| {
                 defmt::info!("{:?}", self.to_packet(buf).unwrap());
             })
-            .await.unwrap();
+            .await
+            .unwrap();
     }
 
     async fn read_ok(&self) -> Result<(), ()> {
