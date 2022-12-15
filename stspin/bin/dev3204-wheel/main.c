@@ -128,6 +128,9 @@ int main() {
         //GPIOB->BSRR |= GPIO_BSRR_BR_9;
 
 #ifdef UART_ENABLED
+        // increment the soft watchdog
+        ticks_since_last_command_packet++;
+
         // process all available packets
         while (uart_can_read()) {
             MotorCommandPacket_t motor_command_packet;
@@ -136,9 +139,6 @@ int main() {
                 // something went wrong, just purge all of the data
                 uart_discard();
             }
-
-            // increment the soft watchdog
-            ticks_since_last_command_packet++;
 
             // process different packet types
             if (motor_command_packet.type == MCP_MOTION) {
