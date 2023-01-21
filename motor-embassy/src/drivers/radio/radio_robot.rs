@@ -1,7 +1,7 @@
 use super::radio::{PeerConnection, Radio, WifiAuth};
 use crate::uart_queue::{UartReadQueue, UartWriteQueue};
 use ateam_common_packets::bindings_radio::{
-    self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data,
+    self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data, BasicTelemetry,
 };
 use const_format::formatcp;
 use core::fmt::Write;
@@ -20,6 +20,7 @@ const LOCAL_PORT: u16 = 42069;
 const WIFI_SSID: &str = "PROMISED_LAN_DC_DEVEL";
 const WIFI_PASS: &str = "plddevel";
 
+#[derive(Copy, Clone)]
 pub enum TeamColor {
     Yellow,
     Blue,
@@ -29,21 +30,40 @@ fn get_uuid() -> u16 {
     unsafe { *(0x1FF1_E800 as *const u16) }
 }
 
+unsafe impl<
+        'a,
+        UART: usart::BasicInstance,
+        DmaRx: usart::RxDma<UART>,
+        DmaTx: usart::TxDma<UART>,
+        const LEN_RX: usize,
+        const LEN_TX: usize,
+        const DEPTH_TX: usize,
+        const DEPTH_RX: usize,
+        PIN: Pin,
+    > Send for RobotRadio<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_TX, DEPTH_RX, PIN>
+{
+}
+
 pub struct RobotRadio<
     'a,
     UART: usart::BasicInstance,
     DmaRx: usart::RxDma<UART>,
     DmaTx: usart::TxDma<UART>,
-    const LEN_RX: usize,
     const LEN_TX: usize,
+    const LEN_RX: usize,
     const DEPTH_TX: usize,
     const DEPTH_RX: usize,
     PIN: Pin,
 > {
     radio: Radio<
         'a,
-        UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_TX>,
-        UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_RX>,
+        UART,
+        DmaTx,
+        DmaRx,
+        LEN_TX,
+        LEN_RX,
+        DEPTH_TX,
+        DEPTH_RX,
     >,
     reset_pin: OutputOpenDrain<'a, PIN>,
     peer: Option<PeerConnection>,
@@ -54,18 +74,18 @@ impl<
         UART: usart::BasicInstance,
         DmaRx: usart::RxDma<UART>,
         DmaTx: usart::TxDma<UART>,
-        const LEN_RX: usize,
         const LEN_TX: usize,
+        const LEN_RX: usize,
         const DEPTH_TX: usize,
         const DEPTH_RX: usize,
         PIN: Pin,
-    > RobotRadio<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_TX, DEPTH_RX, PIN>
+    > RobotRadio<'a, UART, DmaRx, DmaTx, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, PIN>
 {
     pub async fn new(
-        read_queue: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_TX>,
-        write_queue: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_RX>,
+        read_queue: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
         reset_pin: impl Peripheral<P = PIN> + 'a,
-    ) -> Result<RobotRadio<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_TX, DEPTH_RX, PIN>, ()>
+    ) -> Result<RobotRadio<'a, UART, DmaRx, DmaTx, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, PIN>, ()>
     {
         let mut reset_pin = OutputOpenDrain::new(reset_pin, Level::Low, Speed::Medium, Pull::None);
         Timer::after(Duration::from_micros(100)).await;
@@ -247,6 +267,28 @@ impl<
                 &packet as *const _ as *const u8,
                 size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
                     + size_of::<HelloRequest>(),
+            )
+        };
+        self.send_data(packet_bytes).await?;
+
+        Ok(())
+    }
+
+    pub async fn send_telemetry(&self, telemetry: BasicTelemetry) -> Result<(), ()> {
+        let packet = RadioPacket {
+            crc32: 0,
+            major_version: bindings_radio::kProtocolVersionMajor,
+            minor_version: bindings_radio::kProtocolVersionMinor,
+            command_code: CommandCode::CC_TELEMETRY,
+            data: RadioPacket_Data {
+                telemetry: telemetry
+            },
+        };
+        let packet_bytes = unsafe {
+            core::slice::from_raw_parts(
+                &packet as *const _ as *const u8,
+                size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                    + size_of::<BasicTelemetry>(),
             )
         };
         self.send_data(packet_bytes).await?;

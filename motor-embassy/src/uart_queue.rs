@@ -1,4 +1,4 @@
-use crate::queue::{self, Buffer, Queue, DequeueRef, Error};
+use crate::queue::{self, Buffer, DequeueRef, Error, Queue};
 
 use core::future::Future;
 use embassy_executor::{raw::TaskStorage, SpawnToken};
@@ -16,6 +16,17 @@ pub struct UartReadQueue<
 > {
     queue_rx: Queue<'a, LENGTH, DEPTH>,
     task: TaskStorage<ReadTaskFuture<UART, DMA, LENGTH, DEPTH>>,
+}
+
+// TODO: pretty sure shouldn't do this
+unsafe impl<
+        'a,
+        UART: usart::BasicInstance,
+        DMA: usart::RxDma<UART>,
+        const LENGTH: usize,
+        const DEPTH: usize,
+    > Send for UartReadQueue<'a, UART, DMA, LENGTH, DEPTH>
+{
 }
 
 pub type ReadTaskFuture<

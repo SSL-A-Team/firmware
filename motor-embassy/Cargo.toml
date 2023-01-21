@@ -70,6 +70,11 @@ name = "drivetrain"
 test = false
 harness = false
 
+[[bin]]
+name = "bodge-bot"
+test = false
+harness = false
+
 [[test]]
 name = "basic-test"
 harness = false

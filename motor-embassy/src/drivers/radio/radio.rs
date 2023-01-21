@@ -4,10 +4,12 @@ use core::fmt::Write;
 use embassy_stm32::usart;
 use heapless::String;
 
+use crate::uart_queue::{UartReadQueue, UartWriteQueue};
+
 use super::at_protocol::{ATEvent, ATResponse};
 use super::edm_protocol::EdmPacket;
 
-use crate::uart_queue::{Reader, Writer};
+// use crate::uart_queue::{Reader, Writer};
 
 // pub trait Reader<'a> {
 //     type F<RET, FN: FnOnce(&[u8]) -> RET>: Future<Output = Result<RET, ()>>
@@ -56,15 +58,38 @@ pub struct PeerConnection {
     pub channel_id: u8,
 }
 
-pub struct Radio<'a, R: Reader<'a>, W: Writer<'a>> {
-    reader: &'a R,
-    writer: &'a W,
+// pub struct Radio<'a, R: Reader<'a>, W: Writer<'a>> {
+pub struct Radio<
+    'a,
+    UART: usart::BasicInstance,
+    TxDma: usart::TxDma<UART>,
+    RxDma: usart::RxDma<UART>,
+    const LEN_TX: usize,
+    const LEN_RX: usize,
+    const DEPTH_TX: usize,
+    const DEPTH_RX: usize,
+> {
+    reader: &'a UartReadQueue<'a, UART, RxDma, LEN_RX, DEPTH_RX>,
+    writer: &'a UartWriteQueue<'a, UART, TxDma, LEN_TX, DEPTH_TX>,
     mode: RadioMode,
     wifiConnected: bool,
 }
 
-impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
-    pub fn new(reader: &'a R, writer: &'a W) -> Self {
+impl<
+        'a,
+        UART: usart::BasicInstance,
+        TxDma: usart::TxDma<UART>,
+        RxDma: usart::RxDma<UART>,
+        const LEN_TX: usize,
+        const LEN_RX: usize,
+        const DEPTH_TX: usize,
+        const DEPTH_RX: usize,
+    > Radio<'a, UART, TxDma, RxDma, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>
+{
+    pub fn new(
+        reader: &'a UartReadQueue<'a, UART, RxDma, LEN_RX, DEPTH_RX>,
+        writer: &'a UartWriteQueue<'a, UART, TxDma, LEN_TX, DEPTH_TX>,
+    ) -> Self {
         Self {
             reader,
             writer,
@@ -75,26 +100,26 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
 
     pub async fn wait_startup(&self) -> Result<(), ()> {
         self.reader
-            .read(|buf| {
+            .dequeue(|buf| {
                 if let EdmPacket::ATResponse(ATResponse::Other("+STARTUP")) = self.to_packet(buf)? {
                     Ok(())
                 } else {
                     Err(())
                 }
             })
-            .await?
+            .await
     }
 
     pub async fn wait_edm_startup(&self) -> Result<(), ()> {
         self.reader
-            .read(|buf| {
+            .dequeue(|buf| {
                 if let EdmPacket::StartEvent = self.to_packet(buf)? {
                     Ok(())
                 } else {
                     Err(())
                 }
             })
-            .await?
+            .await
     }
 
     pub async fn attention(&self) -> Result<(), ()> {
@@ -202,7 +227,7 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
 
         while networkUp < 2 {
             self.reader
-                .read(|buf| {
+                .dequeue(|buf| {
                     let packet = self.to_packet(buf)?;
 
                     if let EdmPacket::ATEvent(ATEvent::NetworkUp { interface_id: 0 }) = packet {
@@ -220,7 +245,7 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
                     }
                     Ok(())
                 })
-                .await??;
+                .await?;
         }
 
         Ok(())
@@ -251,7 +276,7 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
 
         while peer_id.is_none() || !peer_connected_ip || channel_ret.is_none() {
             self.reader
-                .read(|buf| {
+                .dequeue(|buf| {
                     match self.to_packet(buf)? {
                         EdmPacket::ATEvent(ATEvent::PeerConnectedIP {
                             peer_handle: _,
@@ -284,7 +309,7 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
 
                     Ok(())
                 })
-                .await??;
+                .await?;
         }
         Ok(PeerConnection {
             peer_id: peer_id.unwrap(),
@@ -303,7 +328,7 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
 
         while !ok || !peer_disconnect || !disconnect {
             self.reader
-                .read(|buf| {
+                .dequeue(|buf| {
                     match self.to_packet(buf)? {
                         EdmPacket::ATEvent(ATEvent::PeerDisconnected { peer_handle: _ }) => {
                             peer_disconnect = true
@@ -325,7 +350,7 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
 
                     Ok(())
                 })
-                .await??;
+                .await?;
         }
 
         Ok(())
@@ -333,15 +358,14 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
 
     pub async fn send_data(&self, channel_id: u8, data: &[u8]) -> Result<(), ()> {
         self.writer
-            .write(|buf| {
+            .enqueue(|buf| {
                 EdmPacket::DataCommand {
                     channel: channel_id,
                     data: data,
                 }
                 .write(buf)
                 .unwrap()
-            })
-            .await?; // TODO: unwrap
+            }); // TODO: unwrap
         Ok(())
     }
 
@@ -350,32 +374,29 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
         FN: FnOnce(&[u8]) -> RET,
     {
         self.reader
-            .read(|buf| {
+            .dequeue(|buf| {
                 if let EdmPacket::DataEvent { channel: _, data } = self.to_packet(buf)? {
                     Ok(fn_read(data))
                 } else {
                     Err(())
                 }
-            })
-            .await?
+            }).await
     }
 
     pub async fn send_command(&self, cmd: &str) -> Result<(), ()> {
         match self.mode {
             RadioMode::CommandMode => {
                 self.writer
-                    .write(|buf| {
+                    .enqueue(|buf| {
                         buf[..cmd.len()].clone_from_slice(cmd.as_bytes());
                         buf[cmd.len()] = b'\r';
                         cmd.len() + 1
-                    })
-                    .await?;
+                    });
                 Ok(())
             }
             RadioMode::ExtendedDataMode => {
                 self.writer
-                    .write(|buf| EdmPacket::ATRequest(cmd).write(buf).unwrap())
-                    .await?; // TODO: unwrap
+                    .enqueue(|buf| EdmPacket::ATRequest(cmd).write(buf).unwrap());
                 Ok(())
             }
             _ => Err(()),
@@ -386,23 +407,22 @@ impl<'a, R: Reader<'a>, W: Writer<'a>> Radio<'a, R, W> {
 
     pub async fn read(&self) {
         self.reader
-            .read(|buf| {
+            .dequeue(|buf| {
                 defmt::info!("{:?}", self.to_packet(buf).unwrap());
             })
-            .await
-            .unwrap();
+            .await;
     }
 
     async fn read_ok(&self) -> Result<(), ()> {
         self.reader
-            .read(|buf| {
+            .dequeue(|buf| {
                 if let EdmPacket::ATResponse(ATResponse::Ok("")) = self.to_packet(buf)? {
                     Ok(())
                 } else {
                     Err(())
                 }
             })
-            .await?
+            .await
     }
 
     fn to_packet<'b>(&self, buf: &'b [u8]) -> Result<EdmPacket<'b>, ()> {
