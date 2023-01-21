@@ -1,4 +1,4 @@
-use ateam_common_packets::bindings_radio::BasicControl;
+use ateam_common_packets::bindings_radio::{BasicControl, BasicTelemetry};
 use embassy_executor::SendSpawner;
 use embassy_stm32::{
     gpio::{Level, Output, OutputOpenDrain, Pull, Speed},
@@ -316,7 +316,7 @@ impl Control {
         Timer::after(Duration::from_millis(10)).await;
     }
 
-    pub fn tick(&mut self, latest_control: Option<BasicControl>) {
+    pub fn tick(&mut self, latest_control: Option<BasicControl>) -> Option<BasicTelemetry> {
         
         self.front_right_motor.process_packets();
         self.front_left_motor.process_packets();
@@ -351,5 +351,23 @@ impl Control {
         self.front_left_motor.send_motion_command();
         self.back_left_motor.send_motion_command();
         self.back_right_motor.send_motion_command();
+
+        Some(BasicTelemetry {
+                    sequence_number: 0,
+                    robot_revision_major: 0,
+                    robot_revision_minor: 0,
+                    battery_level: 0.,
+                    battery_temperature: 0.,
+                    _bitfield_align_1: [],
+                    _bitfield_1: BasicTelemetry::new_bitfield_1(
+                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    ),
+                    motor_0_temperature: 0.,
+                    motor_1_temperature: 0.,
+                    motor_2_temperature: 0.,
+                    motor_3_temperature: 0.,
+                    motor_4_temperature: 0.,
+                    kicker_charge_level: 0.,
+                })
     }
 }

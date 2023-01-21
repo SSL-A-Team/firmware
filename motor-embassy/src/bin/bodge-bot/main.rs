@@ -4,19 +4,21 @@
 #![feature(const_mut_refs)]
 // #![feature(async_fn_in_trait)]
 
-use ateam_common_packets::bindings_radio::BasicTelemetry;
 use control::Control;
 use defmt::info;
 use embassy_stm32::{
     executor::InterruptExecutor,
-    gpio::{Level, OutputOpenDrain, Pull, Speed},
+    gpio::{Input, Pull},
     interrupt::{self, InterruptExt},
     time::mhz,
     usart::{self, Uart},
 };
-use embassy_time::{Duration, Timer, Ticker};
+use embassy_time::{Duration, Ticker};
 use futures_util::StreamExt;
-use motor_embassy::{drivers::radio::TeamColor, stm32_interface::get_bootloader_uart_config};
+use motor_embassy::{
+    drivers::{radio::TeamColor, rotary::Rotary, shell_indicator::ShellIndicator},
+    stm32_interface::get_bootloader_uart_config,
+};
 use panic_probe as _;
 use pins::{RadioReset, RadioRxDMA, RadioTxDMA, RadioUART};
 use radio::{
@@ -60,6 +62,18 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     let radio_usart = Uart::new(p.USART2, p.PD6, p.PD5, p.DMA2_CH0, p.DMA2_CH1, config);
     let radio_int = interrupt::take!(USART2);
+
+    let rotary = Rotary::new(p.PG6, p.PG5, p.PG4, p.PG8);
+    let mut shell_indicator = ShellIndicator::new(p.PE10, p.PD11, p.PD12, p.PD13);
+    let team_dip0 = Input::new(p.PE12, Pull::Down);
+
+    let robot_id = rotary.read();
+    shell_indicator.set(robot_id);
+    let team = if team_dip0.is_high() {
+        TeamColor::Blue
+    } else {
+        TeamColor::Yellow
+    };
 
     let front_right_usart = Uart::new(
         p.UART5,
@@ -128,7 +142,14 @@ async fn main(_spawner: embassy_executor::Spawner) {
                 RadioTxDMA,
                 RadioReset,
             >))
-            .setup(&spawner, radio_usart, radio_int, p.PC0, 0, TeamColor::Blue)
+            .setup(
+                &spawner,
+                radio_usart,
+                radio_int,
+                p.PC0,
+                robot_id,
+                team,
+            )
             .await
     };
     spawner.spawn(token).unwrap();
@@ -137,32 +158,11 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     loop {
         let latest = RADIO_TEST.get_latest_control();
-        control.tick(latest);
-
-        // info!("{}", defmt::Debug2Format(&latest));
-        // RADIO_TEST
-        //     .send_telemetry(BasicTelemetry {
-        //         sequence_number: 0,
-        //         robot_revision_major: 0,
-        //         robot_revision_minor: 0,
-        //         battery_level: 0.,
-        //         battery_temperature: 0.,
-        //         _bitfield_align_1: [],
-        //         _bitfield_1: BasicTelemetry::new_bitfield_1(
-        //             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        //         ),
-        //         motor_0_temperature: 0.,
-        //         motor_1_temperature: 0.,
-        //         motor_2_temperature: 0.,
-        //         motor_3_temperature: 0.,
-        //         motor_4_temperature: 0.,
-        //         kicker_charge_level: 0.,
-        //     })
-        //     .await;
-
-        // Timer::after(Duration::from_millis(500)).await;
+        let telemetry = control.tick(latest);
+        if let Some(telemetry) = telemetry {
+            RADIO_TEST.send_telemetry(telemetry).await;
+        }
 
         main_loop_rate_ticker.next().await;
-
     }
 }
