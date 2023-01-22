@@ -126,8 +126,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.PG2,
         p.PG0,
         p.PF4,
-        p.PG3,
         p.PB2,
+        p.PG3,
         p.PG1,
         p.PA3,
     );

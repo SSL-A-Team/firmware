@@ -27,7 +27,7 @@ pub type MotorFLBootPin = PG2;
 pub type MotorBLBootPin = PG0;
 pub type MotorBRBootPin = PF4;
 
-pub type MotorFRResetPin = PG3;
-pub type MotorFLResetPin = PB2;
+pub type MotorFRResetPin = PB2;
+pub type MotorFLResetPin = PG3;
 pub type MotorBLResetPin = PG1;
 pub type MotorBRResetPin = PA3;

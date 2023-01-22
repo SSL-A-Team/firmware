@@ -61,12 +61,17 @@ impl<
                 let mut buf = queue_rx.enqueue().await.unwrap();
                 let len = rx
                     .read_until_idle(buf.data())
-                    .await
-                    .unwrap();
-                if len == 0 {
-                    buf.cancel();
+                    .await;
+                    // .unwrap();
+                    // TODO: this
+                if let Ok(len) = len {
+                    if len == 0 {
+                        buf.cancel();
+                    } else {
+                        *buf.len() = len;
+                    }
                 } else {
-                    *buf.len() = len;
+                    buf.cancel();
                 }
             }
         }

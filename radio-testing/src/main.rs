@@ -67,8 +67,8 @@ fn main() -> std::io::Result<()> {
         command_code: CommandCode::CC_CONTROL,
         data: RadioPacket_Data {
             control: BasicControl {
-                vel_x_linear: 0.,
-                vel_y_linear: 0.,
+                vel_x_linear: 0.0005,
+                vel_y_linear: 0.0005,
                 vel_z_angular: 0.,
                 kick_vel: 0.,
                 dribbler_speed: 0.,

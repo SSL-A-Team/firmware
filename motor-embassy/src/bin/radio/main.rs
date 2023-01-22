@@ -60,7 +60,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
     spawner.spawn(QUEUE_RX.spawn_task(rx)).unwrap();
     spawner.spawn(QUEUE_TX.spawn_task(tx)).unwrap();
 
-    let mut radio = RobotRadio::new(&QUEUE_RX, &QUEUE_TX, p.PA3).await.unwrap();
+    // let reset = p.PA3;
+    let reset = p.PC0;
+    let mut radio = RobotRadio::new(&QUEUE_RX, &QUEUE_TX, reset).await.unwrap();
     info!("radio created");
     radio.connect_to_network().await.unwrap();
     info!("radio connected");
