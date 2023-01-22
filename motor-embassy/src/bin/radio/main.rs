@@ -95,6 +95,4 @@ async fn main(_spawner: embassy_executor::Spawner) {
             info!("{:?}", defmt::Debug2Format(&control));
         }
     }
-
-    loop {}
 }

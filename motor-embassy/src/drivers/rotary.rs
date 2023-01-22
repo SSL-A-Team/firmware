@@ -1,4 +1,4 @@
-use embassy_stm32::gpio::{Input, Level, Output, Pin, Pull, Speed};
+use embassy_stm32::gpio::{Input, Pin, Pull};
 
 pub struct Rotary<'a, Pin0: Pin, Pin1: Pin, Pin2: Pin, Pin3: Pin> {
     pin0: Input<'a, Pin0>,

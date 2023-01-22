@@ -61,7 +61,8 @@ mod tests {
         // config.baudrate = 2_000_000;
         // config.parity = Parity::ParityEven;
         // config.stop_bits = StopBits::STOP0P5;
-        let usart = Uart::new(p.UART7, p.PF6, p.PF7, p.DMA1_CH0, p.DMA1_CH1, config);
+        let irq = interrupt::take!(UART7);
+        let usart = Uart::new(p.UART7, p.PF6, p.PF7, irq, p.DMA1_CH0, p.DMA1_CH1, config);
         let (tx, rx) = usart.split();
 
         let irq = interrupt::take!(CEC);
@@ -69,8 +70,7 @@ mod tests {
         let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
         let spawner = executor.start();
 
-        let int = interrupt::take!(UART7);
-        spawner.spawn(FRONT_LEFT_QUEUE_RX.spawn_task(rx, int)).unwrap();
+        spawner.spawn(FRONT_LEFT_QUEUE_RX.spawn_task(rx)).unwrap();
         spawner.spawn(FRONT_LEFT_QUEUE_TX.spawn_task(tx)).unwrap();
 
         let mut boot0_pin = OutputOpenDrain::new(p.PC13, Level::Low, Speed::Medium, Pull::None);
