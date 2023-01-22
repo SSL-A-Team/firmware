@@ -30,6 +30,9 @@ int main() {
     GPIOB->BSRR |= GPIO_BSRR_BR_8;
     GPIOB->BSRR |= GPIO_BSRR_BR_9;
 
+    uint32_t ticks_since_last_command_packet = 0;
+    bool telemetry_enabled = false;
+
     ADC_Result_t res;
     currsen_setup(ADC_MODE, &res, ADC_NUM_CHANNELS, ADC_CH_MASK, ADC_SR_MASK);
 
@@ -38,6 +41,9 @@ int main() {
 
     // enable ADC hardware trigger (tied to 6step timer)
     currsen_enable_ht();
+
+    MotorCommandPacket motor_command_packet;
+    memset(&motor_command_packet, 0, sizeof(MotorCommandPacket));
 
     MotorResponsePacket response_packet;
     memset(&response_packet, 0, sizeof(MotorResponsePacket));
@@ -59,8 +65,11 @@ int main() {
 
     // toggle J1-1
     while (true) {
-        GPIOB->BSRR |= GPIO_BSRR_BR_8;
-        GPIOB->BSRR |= GPIO_BSRR_BR_9;
+        // GPIOB->BSRR |= GPIO_BSRR_BR_8;
+        // GPIOB->BSRR |= GPIO_BSRR_BR_9;
+
+        // watchdog on receiving a command packet
+        ticks_since_last_command_packet++;
 
 #ifdef UART_ENABLED
         while (uart_can_read()) {
@@ -72,9 +81,10 @@ int main() {
             }
 
             if (motor_command_packet.type == MCP_MOTION) {
-                GPIOB->BSRR |= GPIO_BSRR_BS_8;
+                // GPIOB->BSRR |= GPIO_BSRR_BS_8;
 
                 // we got a motion packet!
+                ticks_since_last_command_packet = 0;
 
                 if (motor_command_packet.data.motion.reset) {
                     // TODO handle hardware reset
@@ -82,9 +92,10 @@ int main() {
                     while (true); // block, hardware reset flagged
                 }
 
+                telemetry_enabled = motor_command_packet.data.motion.enable_telemetry;
                 r_motor_board = motor_command_packet.data.motion.setpoint;
             } else if (motor_command_packet.type == MCP_PARAMS) {
-                GPIOB->BSRR |= GPIO_BSRR_BS_9;
+                // GPIOB->BSRR |= GPIO_BSRR_BS_9;
 
                 // we got some params
                 params_return_packet_requested = true;
@@ -116,6 +127,11 @@ int main() {
             }
         }
 #endif
+
+        // if upstream isn't listening or its been too long since we got a packet, turn off the motor
+        if (!telemetry_enabled || ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
+            r_motor_board = 0.0f;
+        }
 
         bool run_torque_loop = time_sync_ready_rst(&torque_loop_timer);
 

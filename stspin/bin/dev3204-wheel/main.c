@@ -54,6 +54,9 @@ int main() {
     quadenc_setup();
     quadenc_reset_encoder_delta();
 
+    MotorCommandPacket motor_command_packet;
+    memset(&motor_command_packet, 0, sizeof(MotorCommandPacket));
+
     MotorResponsePacket response_packet;
     memset(&response_packet, 0, sizeof(MotorResponsePacket));
     bool params_return_packet_requested = false;
@@ -97,16 +100,16 @@ int main() {
         //GPIOB->BSRR |= GPIO_BSRR_BR_8;
         //GPIOB->BSRR |= GPIO_BSRR_BR_9;
 
+        // watchdog on receiving a command packet
+        ticks_since_last_command_packet++;
+
 #ifdef UART_ENABLED
         while (uart_can_read()) {
-            MotorCommandPacket motor_command_packet;
             uint8_t bytes_moved = uart_read(&motor_command_packet, sizeof(MotorCommandPacket));
             if (bytes_moved != sizeof(MotorCommandPacket)) {
                 // something went wrong, just purge all of the data
                 uart_discard();
             }
-
-            ticks_since_last_command_packet++;
 
             if (motor_command_packet.type == MCP_MOTION) {
                 // we got a motion packet!
