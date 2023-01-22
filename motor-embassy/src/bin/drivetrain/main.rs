@@ -139,13 +139,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // front right IO
     let front_right_uart_config = stm32_interface::get_bootloader_uart_config();
-    let front_right_usart = Uart::new(p.UART5, p.PB12, p.PB6, p.DMA1_CH0, p.DMA1_CH1, front_right_uart_config);
+    let front_right_int = interrupt::take!(UART5);
+    let front_right_usart = Uart::new(p.UART5, p.PB12, p.PB6, front_right_int, p.DMA1_CH0, p.DMA1_CH1, front_right_uart_config);
     let (front_right_tx, front_right_rx) = front_right_usart.split();
     let front_right_boot0_pin = Output::new(p.PB1, Level::Low, Speed::Medium); // boot0 not active
 
     // register front right uart primitives with executor
-    let front_right_int = interrupt::take!(UART5);
-    spawner.spawn(FRONT_RIGHT_QUEUE_RX.spawn_task(front_right_rx, front_right_int)).unwrap();
+    spawner.spawn(FRONT_RIGHT_QUEUE_RX.spawn_task(front_right_rx)).unwrap();
     spawner.spawn(FRONT_RIGHT_QUEUE_TX.spawn_task(front_right_tx)).unwrap();
 
     // initialize the wheel
@@ -158,13 +158,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // front left IO
     let front_left_uart_config = stm32_interface::get_bootloader_uart_config();
-    let front_left_usart = Uart::new(p.UART7, p.PF6, p.PF7, p.DMA1_CH2, p.DMA1_CH3, front_left_uart_config);
+    let front_left_int = interrupt::take!(UART7);
+    let front_left_usart = Uart::new(p.UART7, p.PF6, p.PF7, front_left_int, p.DMA1_CH2, p.DMA1_CH3, front_left_uart_config);
     let (front_left_tx, front_left_rx) = front_left_usart.split();
     let front_left_boot0_pin = Output::new(p.PG2, Level::Low, Speed::Medium); // boot0 not active
 
     // register front left uart primitives with executor
-    let front_left_int = interrupt::take!(UART7);
-    spawner.spawn(FRONT_LEFT_QUEUE_RX.spawn_task(front_left_rx, front_left_int)).unwrap();
+    spawner.spawn(FRONT_LEFT_QUEUE_RX.spawn_task(front_left_rx)).unwrap();
     spawner.spawn(FRONT_LEFT_QUEUE_TX.spawn_task(front_left_tx)).unwrap();
 
     // initialize the wheel
@@ -177,13 +177,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // back left IO
     let back_left_uart_config = stm32_interface::get_bootloader_uart_config();
-    let back_left_usart = Uart::new(p.UART4, p.PD0, p.PD1, p.DMA1_CH4, p.DMA1_CH5, back_left_uart_config);
+    let back_left_int = interrupt::take!(UART4);
+    let back_left_usart = Uart::new(p.UART4, p.PD0, p.PD1, back_left_int, p.DMA1_CH4, p.DMA1_CH5, back_left_uart_config);
     let (back_left_tx, back_left_rx) = back_left_usart.split();
     let back_left_boot0_pin = Output::new(p.PG0, Level::Low, Speed::Medium); // boot0 not active
 
     // register front left uart primitives with executor
-    let back_left_int = interrupt::take!(UART4);
-    spawner.spawn(BACK_LEFT_QUEUE_RX.spawn_task(back_left_rx, back_left_int)).unwrap();
+    spawner.spawn(BACK_LEFT_QUEUE_RX.spawn_task(back_left_rx)).unwrap();
     spawner.spawn(BACK_LEFT_QUEUE_TX.spawn_task(back_left_tx)).unwrap();
 
     // initialize the wheel
@@ -196,13 +196,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // back right IO
     let back_right_uart_config = stm32_interface::get_bootloader_uart_config();
-    let back_right_usart = Uart::new(p.USART3, p.PB11, p.PB10, p.DMA1_CH6, p.DMA1_CH7, back_right_uart_config);
+    let back_right_int = interrupt::take!(USART3);
+    let back_right_usart = Uart::new(p.USART3, p.PB11, p.PB10, back_right_int, p.DMA1_CH6, p.DMA1_CH7, back_right_uart_config);
     let (back_right_tx, back_right_rx) = back_right_usart.split();
     let back_right_boot0_pin = Output::new(p.PF4, Level::Low, Speed::Medium); // boot0 not active
 
     // register back right uart primitives with executor
-    let back_right_int = interrupt::take!(USART3);
-    spawner.spawn(BACK_RIGHT_QUEUE_RX.spawn_task(back_right_rx, back_right_int)).unwrap();
+    spawner.spawn(BACK_RIGHT_QUEUE_RX.spawn_task(back_right_rx)).unwrap();
     spawner.spawn(BACK_RIGHT_QUEUE_TX.spawn_task(back_right_tx)).unwrap();
 
     // initialize the wheel

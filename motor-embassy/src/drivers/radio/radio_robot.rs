@@ -17,8 +17,8 @@ use heapless::String;
 const MULTICAST_IP: &str = "224.4.20.69";
 const MULTICAST_PORT: u16 = 42069;
 const LOCAL_PORT: u16 = 42069;
-const WIFI_SSID: &str = "PROMISED_LAN_DC_DEVEL";
-const WIFI_PASS: &str = "plddevel";
+const WIFI_SSID: &str = "A-Team Field";
+const WIFI_PASS: &str = "plancomestogether";
 
 #[derive(Copy, Clone)]
 pub enum TeamColor {

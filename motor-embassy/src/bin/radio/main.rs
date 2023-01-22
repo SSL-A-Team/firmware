@@ -9,7 +9,7 @@ use defmt::*;
 use defmt_rtt as _;
 
 use embassy_stm32::time::mhz;
-use embassy_stm32::usart::{self, Uart};
+use embassy_stm32::usart::{self, Uart, StopBits};
 use embassy_stm32::{
     self as _,
     executor::InterruptExecutor,
@@ -46,7 +46,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
     stm32_config.rcc.pclk1 = Some(mhz(100));
     let p = embassy_stm32::init(stm32_config);
     let config = usart::Config::default();
-    let usart = Uart::new(p.USART2, p.PD6, p.PD5, p.DMA1_CH0, p.DMA1_CH1, config);
+    let int = interrupt::take!(USART2);
+    let usart = Uart::new(p.USART2, p.PD6, p.PD5, int, p.DMA1_CH0, p.DMA1_CH1, config);
 
     let (tx, rx) = usart.split();
 
@@ -56,8 +57,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let spawner = executor.start();
     info!("start");
 
-    let int = interrupt::take!(USART2);
-    spawner.spawn(QUEUE_RX.spawn_task(rx, int)).unwrap();
+    spawner.spawn(QUEUE_RX.spawn_task(rx)).unwrap();
     spawner.spawn(QUEUE_TX.spawn_task(tx)).unwrap();
 
     let mut radio = RobotRadio::new(&QUEUE_RX, &QUEUE_TX, p.PA3).await.unwrap();

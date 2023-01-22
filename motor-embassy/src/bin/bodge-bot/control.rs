@@ -20,10 +20,10 @@ use motor_embassy::{
 use nalgebra::{Vector3, Vector4};
 
 use crate::pins::{
-    MotorBLBootPin, MotorBLDmaRx, MotorBLDmaTx, MotorBLInt, MotorBLResetPin, MotorBLUart,
-    MotorBRBootPin, MotorBRDmaRx, MotorBRDmaTx, MotorBRInt, MotorBRResetPin, MotorBRUart,
-    MotorFLBootPin, MotorFLDmaRx, MotorFLDmaTx, MotorFLInt, MotorFLResetPin, MotorFLUart,
-    MotorFRBootPin, MotorFRDmaRx, MotorFRDmaTx, MotorFRInt, MotorFRResetPin, MotorFRUart,
+    MotorBLBootPin, MotorBLDmaRx, MotorBLDmaTx, MotorBLResetPin, MotorBLUart,
+    MotorBRBootPin, MotorBRDmaRx, MotorBRDmaTx, MotorBRResetPin, MotorBRUart,
+    MotorFLBootPin, MotorFLDmaRx, MotorFLDmaTx, MotorFLResetPin, MotorFLUart,
+    MotorFRBootPin, MotorFRDmaRx, MotorFRDmaTx, MotorFRResetPin, MotorFRUart,
 };
 
 include_external_cpp_bin! {STEVAL3204_DRIB_POTCTRL_FW_IMG, "dev3204-drib-potctrl.bin"}
@@ -159,10 +159,6 @@ impl Control {
         front_left_usart: Uart<'static, MotorFLUart, MotorFLDmaTx, MotorFLDmaRx>,
         back_left_usart: Uart<'static, MotorBLUart, MotorBLDmaTx, MotorBLDmaRx>,
         back_right_usart: Uart<'static, MotorBRUart, MotorBRDmaTx, MotorBRDmaRx>,
-        front_right_int: MotorFRInt,
-        front_left_int: MotorFLInt,
-        back_left_int: MotorBLInt,
-        back_right_int: MotorBRInt,
         front_right_boot0_pin: MotorFRBootPin,
         front_left_boot0_pin: MotorFLBootPin,
         back_left_boot0_pin: MotorBLBootPin,
@@ -194,25 +190,25 @@ impl Control {
             OutputOpenDrain::new(back_right_reset_pin, Level::Low, Speed::Medium, Pull::None); // reset active
 
         spawner
-            .spawn(FRONT_RIGHT_QUEUE_RX.spawn_task(front_right_rx, front_right_int))
+            .spawn(FRONT_RIGHT_QUEUE_RX.spawn_task(front_right_rx))
             .unwrap();
         spawner
             .spawn(FRONT_RIGHT_QUEUE_TX.spawn_task(front_right_tx))
             .unwrap();
         spawner
-            .spawn(FRONT_LEFT_QUEUE_RX.spawn_task(front_left_rx, front_left_int))
+            .spawn(FRONT_LEFT_QUEUE_RX.spawn_task(front_left_rx))
             .unwrap();
         spawner
             .spawn(FRONT_LEFT_QUEUE_TX.spawn_task(front_left_tx))
             .unwrap();
         spawner
-            .spawn(BACK_LEFT_QUEUE_RX.spawn_task(back_left_rx, back_left_int))
+            .spawn(BACK_LEFT_QUEUE_RX.spawn_task(back_left_rx))
             .unwrap();
         spawner
             .spawn(BACK_LEFT_QUEUE_TX.spawn_task(back_left_tx))
             .unwrap();
         spawner
-            .spawn(BACK_RIGHT_QUEUE_RX.spawn_task(back_right_rx, back_right_int))
+            .spawn(BACK_RIGHT_QUEUE_RX.spawn_task(back_right_rx))
             .unwrap();
         spawner
             .spawn(BACK_RIGHT_QUEUE_TX.spawn_task(back_right_tx))
@@ -224,8 +220,7 @@ impl Control {
             Some(front_right_boot0_pin),
             Some(front_right_reset_pin),
         );
-        let front_right_motor =
-            WheelMotor::new(front_right_stm32_interface, wheel_firmware_image);
+        let front_right_motor = WheelMotor::new(front_right_stm32_interface, wheel_firmware_image);
 
         let front_left_stm32_interface = Stm32Interface::new(
             &FRONT_LEFT_QUEUE_RX,
@@ -233,8 +228,7 @@ impl Control {
             Some(front_left_boot0_pin),
             Some(front_left_reset_pin),
         );
-        let front_left_motor =
-            WheelMotor::new(front_left_stm32_interface, wheel_firmware_image);
+        let front_left_motor = WheelMotor::new(front_left_stm32_interface, wheel_firmware_image);
 
         let back_left_stm32_interface = Stm32Interface::new(
             &BACK_LEFT_QUEUE_RX,
@@ -250,8 +244,7 @@ impl Control {
             Some(back_right_boot0_pin),
             Some(back_right_reset_pin),
         );
-        let back_right_motor =
-            WheelMotor::new(back_right_stm32_interface, wheel_firmware_image);
+        let back_right_motor = WheelMotor::new(back_right_stm32_interface, wheel_firmware_image);
 
         let robot_model_constants: RobotConstants = RobotConstants {
             wheel_angles_rad: Vector4::new(
@@ -317,18 +310,21 @@ impl Control {
     }
 
     pub fn tick(&mut self, latest_control: Option<BasicControl>) -> Option<BasicTelemetry> {
-        
         self.front_right_motor.process_packets();
         self.front_left_motor.process_packets();
         self.back_left_motor.process_packets();
         self.back_right_motor.process_packets();
-        
+
         // let vel = 0.0005; // DC
         // let angle: f32 = core::f32::consts::PI / 4.0;
         // let cmd_vel: Vector3<f32> =
         //     Vector3::new(libm::sinf(angle) * vel, libm::cosf(angle) * vel, 0.0);
         if let Some(latest_control) = &latest_control {
-            let cmd_vel = Vector3::new(latest_control.vel_x_linear, latest_control.vel_y_linear, latest_control.vel_z_angular);
+            let cmd_vel = Vector3::new(
+                latest_control.vel_x_linear,
+                latest_control.vel_y_linear,
+                latest_control.vel_z_angular,
+            );
             self.cmd_vel = cmd_vel;
         }
         let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel);
@@ -353,21 +349,21 @@ impl Control {
         self.back_right_motor.send_motion_command();
 
         Some(BasicTelemetry {
-                    sequence_number: 0,
-                    robot_revision_major: 0,
-                    robot_revision_minor: 0,
-                    battery_level: 0.,
-                    battery_temperature: 0.,
-                    _bitfield_align_1: [],
-                    _bitfield_1: BasicTelemetry::new_bitfield_1(
-                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    ),
-                    motor_0_temperature: 0.,
-                    motor_1_temperature: 0.,
-                    motor_2_temperature: 0.,
-                    motor_3_temperature: 0.,
-                    motor_4_temperature: 0.,
-                    kicker_charge_level: 0.,
-                })
+            sequence_number: 0,
+            robot_revision_major: 0,
+            robot_revision_minor: 0,
+            battery_level: 0.,
+            battery_temperature: 0.,
+            _bitfield_align_1: [],
+            _bitfield_1: BasicTelemetry::new_bitfield_1(
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ),
+            motor_0_temperature: 0.,
+            motor_1_temperature: 0.,
+            motor_2_temperature: 0.,
+            motor_3_temperature: 0.,
+            motor_4_temperature: 0.,
+            kicker_charge_level: 0.,
+        })
     }
 }

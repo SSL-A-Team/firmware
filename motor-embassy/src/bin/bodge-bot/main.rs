@@ -60,8 +60,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
     let spawner = executor.start();
 
-    let radio_usart = Uart::new(p.USART2, p.PD6, p.PD5, p.DMA2_CH0, p.DMA2_CH1, config);
     let radio_int = interrupt::take!(USART2);
+    let radio_usart = Uart::new(p.USART2, p.PD6, p.PD5, radio_int, p.DMA2_CH0, p.DMA2_CH1, config);
 
     let rotary = Rotary::new(p.PG6, p.PG5, p.PG4, p.PG8);
     let mut shell_indicator = ShellIndicator::new(p.PE10, p.PD11, p.PD12, p.PD13);
@@ -75,10 +75,16 @@ async fn main(_spawner: embassy_executor::Spawner) {
         TeamColor::Yellow
     };
 
+    let front_right_int = interrupt::take!(UART5);
+    let front_left_int = interrupt::take!(UART7);
+    let back_left_int = interrupt::take!(UART4);
+    let back_right_int = interrupt::take!(USART3);
+
     let front_right_usart = Uart::new(
         p.UART5,
         p.PB12,
         p.PB6,
+        front_right_int,
         p.DMA1_CH0,
         p.DMA1_CH1,
         get_bootloader_uart_config(),
@@ -87,6 +93,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.UART7,
         p.PF6,
         p.PF7,
+        front_left_int,
         p.DMA1_CH2,
         p.DMA1_CH3,
         get_bootloader_uart_config(),
@@ -95,6 +102,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.UART4,
         p.PD0,
         p.PD1,
+        back_left_int,
         p.DMA1_CH4,
         p.DMA1_CH5,
         get_bootloader_uart_config(),
@@ -103,6 +111,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.USART3,
         p.PB11,
         p.PB10,
+        back_right_int,
         p.DMA1_CH6,
         p.DMA1_CH7,
         get_bootloader_uart_config(),
@@ -114,10 +123,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
         front_left_usart,
         back_left_usart,
         back_right_usart,
-        interrupt::take!(UART5),
-        interrupt::take!(UART7),
-        interrupt::take!(UART4),
-        interrupt::take!(USART3),
         p.PB1,
         p.PG2,
         p.PG0,
@@ -145,7 +150,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
             .setup(
                 &spawner,
                 radio_usart,
-                radio_int,
                 p.PC0,
                 robot_id,
                 team,

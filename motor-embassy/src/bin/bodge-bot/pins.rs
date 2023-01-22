@@ -13,11 +13,6 @@ pub type MotorFLUart = UART7;
 pub type MotorBLUart = UART4;
 pub type MotorBRUart = USART3;
 
-pub type MotorFRInt = interrupt::UART5;
-pub type MotorFLInt = interrupt::UART7;
-pub type MotorBLInt = interrupt::UART4;
-pub type MotorBRInt = interrupt::USART3;
-
 pub type MotorFRDmaTx = DMA1_CH0;
 pub type MotorFRDmaRx = DMA1_CH1;
 pub type MotorFLDmaTx = DMA1_CH2;

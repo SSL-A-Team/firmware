@@ -36,7 +36,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     let p = embassy_stm32::init(Default::default());
     let config = usart::Config::default();
-    let usart = Uart::new(p.UART7, p.PF6, p.PF7, p.DMA1_CH0, p.DMA1_CH1, config);
+    let int = interrupt::take!(UART7);
+    let usart = Uart::new(p.UART7, p.PF6, p.PF7, int, p.DMA1_CH0, p.DMA1_CH1, config);
 
     let (tx, rx) = usart.split();
 
@@ -46,8 +47,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let spawner = executor.start();
     info!("start1");
 
-    let int = interrupt::take!(UART7);
-    spawner.spawn(QUEUE_RX.spawn_task(rx, int)).unwrap();
+    spawner.spawn(QUEUE_RX.spawn_task(rx)).unwrap();
     spawner.spawn(QUEUE_TX.spawn_task(tx)).unwrap();
 
     QUEUE_TX.enqueue_copy(&[0, 1, 2, 3, 4, 5, 6, 7]).unwrap();

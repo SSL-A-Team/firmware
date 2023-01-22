@@ -11,6 +11,7 @@
 #![feature(const_mut_refs)]
 #![feature(adt_const_params)]
 #![feature(ptr_metadata)]
+#![feature(async_fn_in_trait)]
 
 pub mod fw_images;
 pub mod queue;

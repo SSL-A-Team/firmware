@@ -177,14 +177,13 @@ where
         &'static mut self,
         spawner: &SendSpawner,
         uart: usart::Uart<'static, UART, TxDma, RxDma>,
-        int: UART::Interrupt,
         reset_pin: impl Peripheral<P = ResetPin> + 'static,
         id: u8,
         team: TeamColor,
     ) -> SpawnToken<impl Sized> {
         let (tx, rx) = uart.split();
 
-        spawner.spawn(self.queue_rx.spawn_task(rx, int)).unwrap();
+        spawner.spawn(self.queue_rx.spawn_task(rx)).unwrap();
         spawner.spawn(self.queue_tx.spawn_task(tx)).unwrap();
 
         let mut radio = RobotRadio::new(&self.queue_rx, &self.queue_tx, reset_pin)

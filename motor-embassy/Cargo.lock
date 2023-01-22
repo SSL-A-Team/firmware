@@ -161,7 +161,7 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 [[package]]
 name = "chiptool"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/chiptool?rev=28ffa8a19d84914089547f52900ffb5877a5dc23#28ffa8a19d84914089547f52900ffb5877a5dc23"
+source = "git+https://github.com/embassy-rs/chiptool?rev=1d9e0a39a6acc291e50cabc4ed617a87f06d5e89#1d9e0a39a6acc291e50cabc4ed617a87f06d5e89"
 dependencies = [
  "anyhow",
  "clap",
@@ -448,7 +448,7 @@ checksum = "90e5c1c8368803113bf0c9584fc495a58b86dc8a29edbf8fe877d21d9507e797"
 [[package]]
 name = "embassy-cortex-m"
 version = "0.1.0"
-source = "git+https://github.com/SSL-A-Team/embassy?branch=uart-read-idle#32b21d02c9a5f3398a70622f168f21640168044b"
+source = "git+https://github.com/embassy-rs/embassy#f98ba4ebac192e81c46933c0dc1dfb2d907cd532"
 dependencies = [
  "atomic-polyfill 1.0.1",
  "cfg-if",
@@ -463,12 +463,12 @@ dependencies = [
 [[package]]
 name = "embassy-embedded-hal"
 version = "0.1.0"
-source = "git+https://github.com/SSL-A-Team/embassy?branch=uart-read-idle#32b21d02c9a5f3398a70622f168f21640168044b"
+source = "git+https://github.com/embassy-rs/embassy#f98ba4ebac192e81c46933c0dc1dfb2d907cd532"
 dependencies = [
  "defmt",
  "embassy-sync",
  "embedded-hal 0.2.7",
- "embedded-hal 1.0.0-alpha.8",
+ "embedded-hal 1.0.0-alpha.9",
  "embedded-hal-async",
  "embedded-storage",
  "embedded-storage-async",
@@ -477,8 +477,8 @@ dependencies = [
 
 [[package]]
 name = "embassy-executor"
-version = "0.1.0"
-source = "git+https://github.com/SSL-A-Team/embassy?branch=uart-read-idle#32b21d02c9a5f3398a70622f168f21640168044b"
+version = "0.1.1"
+source = "git+https://github.com/embassy-rs/embassy#f98ba4ebac192e81c46933c0dc1dfb2d907cd532"
 dependencies = [
  "atomic-polyfill 1.0.1",
  "cfg-if",
@@ -493,20 +493,21 @@ dependencies = [
 [[package]]
 name = "embassy-futures"
 version = "0.1.0"
-source = "git+https://github.com/SSL-A-Team/embassy?branch=uart-read-idle#32b21d02c9a5f3398a70622f168f21640168044b"
+source = "git+https://github.com/embassy-rs/embassy#f98ba4ebac192e81c46933c0dc1dfb2d907cd532"
 
 [[package]]
 name = "embassy-hal-common"
 version = "0.1.0"
-source = "git+https://github.com/SSL-A-Team/embassy?branch=uart-read-idle#32b21d02c9a5f3398a70622f168f21640168044b"
+source = "git+https://github.com/embassy-rs/embassy#f98ba4ebac192e81c46933c0dc1dfb2d907cd532"
 dependencies = [
+ "defmt",
  "num-traits",
 ]
 
 [[package]]
 name = "embassy-macros"
 version = "0.1.0"
-source = "git+https://github.com/SSL-A-Team/embassy?branch=uart-read-idle#32b21d02c9a5f3398a70622f168f21640168044b"
+source = "git+https://github.com/embassy-rs/embassy#f98ba4ebac192e81c46933c0dc1dfb2d907cd532"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -515,9 +516,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "embassy-net-driver"
+version = "0.1.0"
+source = "git+https://github.com/embassy-rs/embassy#f98ba4ebac192e81c46933c0dc1dfb2d907cd532"
+dependencies = [
+ "defmt",
+]
+
+[[package]]
 name = "embassy-stm32"
 version = "0.1.0"
-source = "git+https://github.com/SSL-A-Team/embassy?branch=uart-read-idle#32b21d02c9a5f3398a70622f168f21640168044b"
+source = "git+https://github.com/embassy-rs/embassy#f98ba4ebac192e81c46933c0dc1dfb2d907cd532"
 dependencies = [
  "atomic-polyfill 1.0.1",
  "bxcan",
@@ -531,12 +540,14 @@ dependencies = [
  "embassy-executor",
  "embassy-futures",
  "embassy-hal-common",
+ "embassy-net-driver",
  "embassy-sync",
  "embassy-time",
- "embassy-usb",
+ "embassy-usb-driver",
  "embedded-hal 0.2.7",
- "embedded-hal 1.0.0-alpha.8",
+ "embedded-hal 1.0.0-alpha.9",
  "embedded-hal-async",
+ "embedded-hal-nb",
  "embedded-io",
  "embedded-storage",
  "embedded-storage-async",
@@ -555,9 +566,8 @@ dependencies = [
 [[package]]
 name = "embassy-sync"
 version = "0.1.0"
-source = "git+https://github.com/SSL-A-Team/embassy?branch=uart-read-idle#32b21d02c9a5f3398a70622f168f21640168044b"
+source = "git+https://github.com/embassy-rs/embassy#f98ba4ebac192e81c46933c0dc1dfb2d907cd532"
 dependencies = [
- "atomic-polyfill 1.0.1",
  "cfg-if",
  "critical-section 1.1.1",
  "defmt",
@@ -569,26 +579,25 @@ dependencies = [
 [[package]]
 name = "embassy-time"
 version = "0.1.0"
-source = "git+https://github.com/SSL-A-Team/embassy?branch=uart-read-idle#32b21d02c9a5f3398a70622f168f21640168044b"
+source = "git+https://github.com/embassy-rs/embassy#f98ba4ebac192e81c46933c0dc1dfb2d907cd532"
 dependencies = [
  "atomic-polyfill 1.0.1",
  "cfg-if",
  "critical-section 1.1.1",
  "defmt",
- "embassy-macros",
+ "embassy-sync",
  "embedded-hal 0.2.7",
- "embedded-hal 1.0.0-alpha.8",
+ "embedded-hal 1.0.0-alpha.9",
  "futures-util",
+ "heapless",
 ]
 
 [[package]]
-name = "embassy-usb"
+name = "embassy-usb-driver"
 version = "0.1.0"
-source = "git+https://github.com/SSL-A-Team/embassy?branch=uart-read-idle#32b21d02c9a5f3398a70622f168f21640168044b"
+source = "git+https://github.com/embassy-rs/embassy#f98ba4ebac192e81c46933c0dc1dfb2d907cd532"
 dependencies = [
  "defmt",
- "embassy-futures",
- "heapless",
 ]
 
 [[package]]
@@ -603,27 +612,34 @@ dependencies = [
 
 [[package]]
 name = "embedded-hal"
-version = "1.0.0-alpha.8"
+version = "1.0.0-alpha.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3babfc7fd332142a0b11aebf592992f211f4e01b6222fb04b03aba1bd80018d"
+checksum = "129b101ddfee640565f7c07b301a31d95aa21e5acef21a491c307139f5fa4c91"
+
+[[package]]
+name = "embedded-hal-async"
+version = "0.2.0-alpha.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "608a322808d65da06715e03109c0cb69f79a5459af756fba393ab83e875d4969"
 dependencies = [
+ "embedded-hal 1.0.0-alpha.9",
+]
+
+[[package]]
+name = "embedded-hal-nb"
+version = "1.0.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e0760ec0a3bf76859d5e33f39542af103f157d5b2ecfb00ace56dd461472e3a"
+dependencies = [
+ "embedded-hal 1.0.0-alpha.9",
  "nb 1.0.0",
 ]
 
 [[package]]
-name = "embedded-hal-async"
-version = "0.1.0-alpha.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "022249738afde9b2b755a28a367ae20c9367e8e9c24b9aaf60bcc9255a255ec5"
-dependencies = [
- "embedded-hal 1.0.0-alpha.8",
-]
-
-[[package]]
 name = "embedded-io"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36673b79844ff4ec0e3f00aeca0b2cfff564ff6739ab9801d13f45a8ec6cc1c7"
+checksum = "ef1a6892d9eef45c8fa6b9e0086428a2cca8491aca8f787c534a3d6d0bcb3ced"
 dependencies = [
  "defmt",
 ]
@@ -811,6 +827,12 @@ name = "inflections"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a257582fdcde896fd96463bf2d40eefea0580021c0712a0e2b028b60b47a837a"
+
+[[package]]
+name = "itoa"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fad582f4b9e86b6caa621cabeb0963332d92eea04729ab12892c2533951e6440"
 
 [[package]]
 name = "lazy_static"
@@ -1252,6 +1274,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_json"
+version = "1.0.91"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "877c235533714907a8c2464236f5c4b2a17262ef1bd71f38f35ea592c8da6883"
+dependencies = [
+ "itoa",
+ "ryu",
+ "serde",
+]
+
+[[package]]
 name = "serde_yaml"
 version = "0.8.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1317,7 +1350,7 @@ dependencies = [
 [[package]]
 name = "stm32-metapac"
 version = "0.1.0"
-source = "git+https://github.com/SSL-A-Team/embassy?branch=uart-read-idle#32b21d02c9a5f3398a70622f168f21640168044b"
+source = "git+https://github.com/embassy-rs/embassy#f98ba4ebac192e81c46933c0dc1dfb2d907cd532"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
@@ -1328,12 +1361,13 @@ dependencies = [
 [[package]]
 name = "stm32-metapac-gen"
 version = "0.1.0"
-source = "git+https://github.com/SSL-A-Team/embassy?branch=uart-read-idle#32b21d02c9a5f3398a70622f168f21640168044b"
+source = "git+https://github.com/embassy-rs/embassy#f98ba4ebac192e81c46933c0dc1dfb2d907cd532"
 dependencies = [
  "chiptool",
  "proc-macro2",
  "regex",
  "serde",
+ "serde_json",
  "serde_yaml",
 ]
 
