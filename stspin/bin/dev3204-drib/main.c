@@ -78,6 +78,8 @@ int main() {
             if (bytes_moved != sizeof(MotorCommandPacket)) {
                 // something went wrong, just purge all of the data
                 uart_discard();
+
+                continue;
             }
 
             if (motor_command_packet.type == MCP_MOTION) {
