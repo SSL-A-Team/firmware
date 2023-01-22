@@ -143,9 +143,12 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<'a, LENGTH, DEPTH> {
 
     fn finish_dequeue(&self) {
         critical_section::with(|_| unsafe {
-            *self.read_in_progress.get() = false;
-            *self.read_index.get() = (*self.read_index.get() + 1) % DEPTH;
-            *self.size.get() -= 1;
+            let read_in_progress = self.read_in_progress.get();
+            if *read_in_progress {
+                *read_in_progress = false;
+                *self.read_index.get() = (*self.read_index.get() + 1) % DEPTH;
+                *self.size.get() -= 1;
+            }
             if let Some(w) = (*self.enqueue_waker.get()).take() {
                 w.wake();
             }
@@ -208,9 +211,9 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<'a, LENGTH, DEPTH> {
                 *write_in_progress = false;
                 *self.write_index.get() = (*self.write_index.get() + 1) % DEPTH;
                 *self.size.get() += 1;
-                if let Some(w) = (*self.dequeue_waker.get()).take() {
-                    w.wake();
-                }
+            }
+            if let Some(w) = (*self.dequeue_waker.get()).take() {
+                w.wake();
             }
         });
     }

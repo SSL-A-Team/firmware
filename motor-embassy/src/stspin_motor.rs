@@ -1,5 +1,6 @@
 use core::mem::MaybeUninit;
 
+use defmt::info;
 use embassy_stm32::{
     gpio::Pin,
     usart::{self, Parity},
@@ -141,6 +142,7 @@ impl<
         // this is safe because load firmware image call will reset the target device
         // it will begin issueing telemetry updates
         // these are the only packets it sends so any blocked process should get the data it now needs
+        info!("update config");
         unsafe {
             self.stm32_uart_interface
                 .update_uart_config(2_000_000, Parity::ParityEven)
@@ -161,6 +163,7 @@ impl<
         while let Ok(res) = self.stm32_uart_interface.try_read_data() {
             let buf = res.data();
 
+            defmt::info!("got packet");
             if buf.len() != core::mem::size_of::<MotorResponsePacket>() {
                 defmt::warn!("got invalid packet of len {:?} data: {:?}", buf.len(), buf);
                 continue;
@@ -184,7 +187,7 @@ impl<
                     self.current_state = mrp.data.motion;
 
                     let err = self.current_state.current_estimate;
-                    defmt::info!("current read: {:?}", err);
+                    // defmt::info!("current read: {:?}", err);
                 } else if mrp.type_ == MRP_PARAMS {
                     self.current_params_state = mrp.data.params;
                 }

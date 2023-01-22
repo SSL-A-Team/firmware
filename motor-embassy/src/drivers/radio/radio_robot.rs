@@ -94,7 +94,7 @@ impl<
         let mut radio = Radio::new(read_queue, write_queue);
         radio.wait_startup().await?;
 
-        let baudrate = 5250000;
+        let baudrate = 5_250_000;
         radio.set_echo(false).await?;
         radio.config_uart(baudrate, false, 8, true).await?;
 

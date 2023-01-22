@@ -228,6 +228,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
         back_right_motor.load_default_firmware_image()
     ).await;
 
+    info!("after load firmware");
+
     // leave reset
     // don't pull the chip out of reset until we're ready to read packets or we'll fill the queue
     embassy_futures::join::join4(front_right_motor.leave_reset(), 
@@ -235,10 +237,14 @@ async fn main(_spawner: embassy_executor::Spawner) {
         back_left_motor.leave_reset(), 
         back_right_motor.leave_reset()).await;
 
+    info!("after leave reset");
+
     front_right_motor.set_telemetry_enabled(true);
     front_left_motor.set_telemetry_enabled(true);
     back_left_motor.set_telemetry_enabled(true);
     back_right_motor.set_telemetry_enabled(true);
+
+    info!("after telemetry enable");
 
     // need to have telem off by default and enabled later
     // theres a race condition to begin processing packets from the first part out
@@ -272,6 +278,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     let robot_model: RobotModel = RobotModel::new(robot_model_constants);
 
+    info!("before");
+    Timer::after(Duration::from_millis(1000)).await;
+
     /////////////////
     //  main loop  //
     /////////////////
@@ -282,6 +291,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // let mut angle: f32 = 0.0;
     let angle: f32 = core::f32::consts::PI / 4.0;
     loop {
+        // info!("tick");
         front_right_motor.process_packets();
         front_left_motor.process_packets();
         back_left_motor.process_packets();

@@ -38,6 +38,8 @@ int main() {
     GPIOB->BSRR |= GPIO_BSRR_BR_8;
     GPIOB->BSRR |= GPIO_BSRR_BR_9;
 
+    GPIOB->BSRR |= GPIO_BSRR_BS_8;
+
     uint32_t ticks_since_last_command_packet = 0;
     bool telemetry_enabled = false;
 
@@ -103,6 +105,7 @@ int main() {
         // watchdog on receiving a command packet
         ticks_since_last_command_packet++;
 
+        GPIOB->BSRR |= GPIO_BSRR_BS_9;
 #ifdef UART_ENABLED
         while (uart_can_read()) {
             uint8_t bytes_moved = uart_read(&motor_command_packet, sizeof(MotorCommandPacket));
@@ -114,6 +117,7 @@ int main() {
             }
 
             if (motor_command_packet.type == MCP_MOTION) {
+
                 // we got a motion packet!
                 ticks_since_last_command_packet = 0;
 
@@ -275,7 +279,9 @@ int main() {
             // GPIOB->BSRR |= GPIO_BSRR_BS_8;
             uart_wait_for_transmission();
             // takes ~270uS, mostly hardware DMA
-            uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
+            if (telemetry_enabled) {
+                uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
+            }
             // GPIOB->BSRR |= GPIO_BSRR_BR_8;
 #endif
 

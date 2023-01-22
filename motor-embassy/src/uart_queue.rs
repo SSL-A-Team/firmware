@@ -1,6 +1,7 @@
 use crate::queue::{self, Buffer, DequeueRef, Error, Queue};
 
 use core::future::Future;
+use defmt::info;
 use embassy_executor::{raw::TaskStorage, SpawnToken};
 use embassy_stm32::{
     usart::{self, UartRx, UartTx},
@@ -66,11 +67,13 @@ impl<
                     // TODO: this
                 if let Ok(len) = len {
                     if len == 0 {
+                        info!("uart zero");
                         buf.cancel();
                     } else {
                         *buf.len() = len;
                     }
                 } else {
+                    info!("{}", len);
                     buf.cancel();
                 }
             }

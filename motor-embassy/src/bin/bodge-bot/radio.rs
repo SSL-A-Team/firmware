@@ -253,6 +253,7 @@ where
         async move {
             loop {
                 let control = radio.read_control().await;
+                info!("{:?}", defmt::Debug2Format(&control));
                 if let Ok(control) = control {
                     let mut latest_control = latest_control.lock().await;
                     *latest_control = Some(control);

@@ -1,4 +1,5 @@
 use ateam_common_packets::bindings_radio::{BasicControl, BasicTelemetry};
+use defmt::info;
 use embassy_executor::SendSpawner;
 use embassy_stm32::{
     gpio::{Level, Output, OutputOpenDrain, Pull, Speed},
@@ -327,6 +328,7 @@ impl Control {
             );
             self.cmd_vel = cmd_vel;
         }
+        info!("{} {}", self.cmd_vel[0], self.cmd_vel[1]);
         let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel);
 
         // let c_vel = libm::sinf(angle) / 2.0;
