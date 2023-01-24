@@ -81,7 +81,7 @@ fn main() -> std::io::Result<()> {
 // 0.001
     let mut vel = 0.;
     // let max = 0.001;
-    let max = 0.015;
+    let max = 1.0;
     let mut up = true;
     loop {
         // packet.data.control.vel_x_linear = vel;
