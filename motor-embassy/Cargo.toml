@@ -46,6 +46,8 @@ defmt-test = "0.3.0"
 
 [profile.dev]
 opt-level = 3
+lto = 'fat'
+debug-assertions = false
 
 [profile.release]
 debug = true
@@ -66,7 +68,7 @@ test = false
 harness = false
 
 [[bin]]
-name = "drivetrain"
+name = "proto-drivetrain"
 test = false
 harness = false
 

@@ -339,7 +339,8 @@ static void pwm6step_setup_hall_timer() {
     // prescaler of 48 -> 1MHz input cleck -> each cycle is 1us
     TIM16->PSC = 49;
     TIM16->EGR |= (TIM_EGR_UG);
-    TIM16->CCR1 = 20; // commutation delay of 20us
+    // this might should be a function of velocity (estimated or measured)
+    TIM16->CCR1 = 61; // commutation delay of 20us
 
     // enable timer delay for commutation
     TIM16->DIER |= TIM_DIER_CC1IE;
