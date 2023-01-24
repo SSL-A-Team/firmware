@@ -7,9 +7,9 @@
         {
             "type": "cortex-debug",
             "request": "attach",
-            "name": "Debug executable 'motor-embassy'",
+            "name": "Debug executable 'drivetrain'",
             "gdbPath": "/opt/homebrew/bin/arm-none-eabi-gdb",
-            "executable": "target/thumbv7em-none-eabihf/debug/motor-embassy",
+            "executable": "target/thumbv7em-none-eabihf/debug/drivetrain",
             // "debugServer": 1337,
             "servertype": "external",
             "gdbTarget": ":1337",

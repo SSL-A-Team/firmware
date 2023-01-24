@@ -298,7 +298,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
         back_right_motor.process_packets();
 
         let vel = 0.0005; // DC
-        let cmd_vel: Vector3<f32> = Vector3::new(libm::sinf(angle) * vel, libm::cosf(angle) * vel, 0.0);
+        // let cmd_vel: Vector3<f32> = Vector3::new(libm::sinf(angle) * vel, libm::cosf(angle) * vel, 0.0);
+        let cmd_vel: Vector3<f32> = Vector3::new(vel, 0.0, 0.0);
         let wheel_vels = robot_model.robot_vel_to_wheel_vel(cmd_vel);
 
         // let c_vel = libm::sinf(angle) / 2.0;

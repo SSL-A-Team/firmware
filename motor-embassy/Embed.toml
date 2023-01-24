@@ -16,8 +16,8 @@ connect_under_reset = true
 #     { up = 0, down = 0, format = "Defmt" },
 # ]
 
-#[with_rtt.reset]
-#halt_afterwards = true
+[with_rtt.reset]
+halt_afterwards = true
 
 
 [with_rtt.gdb]

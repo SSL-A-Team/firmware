@@ -279,9 +279,9 @@ int main() {
             // GPIOB->BSRR |= GPIO_BSRR_BS_8;
             uart_wait_for_transmission();
             // takes ~270uS, mostly hardware DMA
-            if (telemetry_enabled) {
+            // if (telemetry_enabled) {
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
-            }
+            // }
             // GPIOB->BSRR |= GPIO_BSRR_BR_8;
 #endif
 

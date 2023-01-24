@@ -139,13 +139,13 @@ impl<
                 let buf = queue_tx.dequeue().await.unwrap();
                 tx.write(buf.data()).await.unwrap();
                 drop(buf);
-                unsafe {
-                    // TODO: what does this do again?
-                    while !UART::regs().isr().read().tc() {}
-                    UART::regs().cr1().modify(|w| w.set_te(false));
-                    while UART::regs().isr().read().teack() {}
-                    UART::regs().cr1().modify(|w| w.set_te(true));
-                }
+                // unsafe {
+                //     // TODO: what does this do again?
+                //     while !UART::regs().isr().read().tc() {}
+                //     UART::regs().cr1().modify(|w| w.set_te(false));
+                //     while UART::regs().isr().read().teack() {}
+                //     UART::regs().cr1().modify(|w| w.set_te(true));
+                // }
             }
         }
     }

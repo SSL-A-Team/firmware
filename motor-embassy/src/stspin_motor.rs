@@ -163,7 +163,6 @@ impl<
         while let Ok(res) = self.stm32_uart_interface.try_read_data() {
             let buf = res.data();
 
-            defmt::info!("got packet");
             if buf.len() != core::mem::size_of::<MotorResponsePacket>() {
                 defmt::warn!("got invalid packet of len {:?} data: {:?}", buf.len(), buf);
                 continue;

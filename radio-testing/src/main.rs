@@ -44,6 +44,7 @@ fn main() -> std::io::Result<()> {
         major_version: bindings_radio::kProtocolVersionMajor,
         minor_version: bindings_radio::kProtocolVersionMinor,
         command_code: CommandCode::CC_HELLO_RESP,
+        data_length: size_of::<HelloResponse>() as u16,
         data: RadioPacket_Data {
             hello_response: HelloResponse {
                 ipv4: local_ip.octets(),
@@ -60,15 +61,16 @@ fn main() -> std::io::Result<()> {
     };
     socket.send_to(packet_bytes, src)?;
 
-    let packet = RadioPacket {
+    let mut packet = RadioPacket {
         crc32: 0,
         major_version: bindings_radio::kProtocolVersionMajor,
         minor_version: bindings_radio::kProtocolVersionMinor,
         command_code: CommandCode::CC_CONTROL,
+        data_length: size_of::<BasicControl>() as u16,
         data: RadioPacket_Data {
             control: BasicControl {
-                vel_x_linear: 0.0005,
-                vel_y_linear: 0.0005,
+                vel_x_linear: 0.,
+                vel_y_linear: 0.,
                 vel_z_angular: 0.,
                 kick_vel: 0.,
                 dribbler_speed: 0.,
@@ -76,8 +78,15 @@ fn main() -> std::io::Result<()> {
             },
         },
     };
-
+// 0.001
+    let mut vel = 0.;
+    // let max = 0.001;
+    let max = 0.015;
+    let mut up = true;
     loop {
+        // packet.data.control.vel_x_linear = vel;
+        packet.data.control.vel_z_angular = vel;
+
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
@@ -86,6 +95,18 @@ fn main() -> std::io::Result<()> {
             )
         };
         socket.send_to(packet_bytes, src)?;
-        std::thread::sleep(Duration::from_millis(1000));
+        std::thread::sleep(Duration::from_millis(10));
+
+        if up {
+            vel += max/200.;
+        } else {
+            vel -= max/200.;
+        }
+        if vel >= max {
+            up = false;
+        }
+        if vel <= -max {
+            up = true;
+        }
     }
 }

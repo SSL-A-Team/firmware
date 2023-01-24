@@ -214,6 +214,7 @@ impl<
             } else {
                 CommandCode::CC_ACK
             },
+            data_length: 0,
             data: unsafe { core::mem::zeroed() },
         };
         let packet_bytes = unsafe {
@@ -252,6 +253,7 @@ impl<
             major_version: bindings_radio::kProtocolVersionMajor,
             minor_version: bindings_radio::kProtocolVersionMinor,
             command_code: CommandCode::CC_HELLO_REQ,
+            data_length: size_of::<HelloRequest>() as u16,
             data: RadioPacket_Data {
                 hello_request: HelloRequest {
                     robot_id: id,
@@ -280,6 +282,7 @@ impl<
             major_version: bindings_radio::kProtocolVersionMajor,
             minor_version: bindings_radio::kProtocolVersionMinor,
             command_code: CommandCode::CC_TELEMETRY,
+            data_length: size_of::<BasicTelemetry>() as u16,
             data: RadioPacket_Data {
                 telemetry: telemetry
             },

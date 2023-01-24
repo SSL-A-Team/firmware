@@ -21,10 +21,10 @@ use motor_embassy::{
 use nalgebra::{Vector3, Vector4};
 
 use crate::pins::{
-    MotorBLBootPin, MotorBLDmaRx, MotorBLDmaTx, MotorBLResetPin, MotorBLUart,
-    MotorBRBootPin, MotorBRDmaRx, MotorBRDmaTx, MotorBRResetPin, MotorBRUart,
-    MotorFLBootPin, MotorFLDmaRx, MotorFLDmaTx, MotorFLResetPin, MotorFLUart,
-    MotorFRBootPin, MotorFRDmaRx, MotorFRDmaTx, MotorFRResetPin, MotorFRUart,
+    MotorBLBootPin, MotorBLDmaRx, MotorBLDmaTx, MotorBLResetPin, MotorBLUart, MotorBRBootPin,
+    MotorBRDmaRx, MotorBRDmaTx, MotorBRResetPin, MotorBRUart, MotorFLBootPin, MotorFLDmaRx,
+    MotorFLDmaTx, MotorFLResetPin, MotorFLUart, MotorFRBootPin, MotorFRDmaRx, MotorFRDmaTx,
+    MotorFRResetPin, MotorFRUart,
 };
 
 include_external_cpp_bin! {STEVAL3204_DRIB_POTCTRL_FW_IMG, "dev3204-drib-potctrl.bin"}
@@ -41,6 +41,8 @@ const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 64;
 const RX_BUF_DEPTH: usize = 20;
+
+const TICKS_WITHOUT_PACKET_STOP: u16 = 10;
 
 // buffers for front right
 #[link_section = ".axisram.buffers"]
@@ -149,6 +151,7 @@ pub struct Control {
         MotorBRBootPin,
         MotorBRResetPin,
     >,
+    ticks_since_packet: u16,
 }
 
 // Uart<UART5, DMA1_CH0, DMA1_CH1>
@@ -277,6 +280,7 @@ impl Control {
             front_left_motor,
             back_left_motor,
             back_right_motor,
+            ticks_since_packet: 0,
         }
     }
 
@@ -327,8 +331,14 @@ impl Control {
                 latest_control.vel_z_angular,
             );
             self.cmd_vel = cmd_vel;
+            self.ticks_since_packet = 0;
+        } else {
+            self.ticks_since_packet += 1;
+            if self.ticks_since_packet >= TICKS_WITHOUT_PACKET_STOP {
+                self.cmd_vel = Vector3::new(0., 0., 0.);
+                self.ticks_since_packet = 0;
+            }
         }
-        info!("{} {}", self.cmd_vel[0], self.cmd_vel[1]);
         let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel);
 
         // let c_vel = libm::sinf(angle) / 2.0;
