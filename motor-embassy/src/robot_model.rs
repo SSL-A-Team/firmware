@@ -33,12 +33,13 @@ impl RobotModel {
     fn T_body_wheel_from_model(robot_constants: RobotConstants) -> Matrix4x3<f32> {
         let theta = &robot_constants.wheel_angles_rad;
         let l = &robot_constants.wheel_dist_to_cent_m;
+        let r = &robot_constants.wheel_radius_m;
 
         Matrix4x3::new(
-            sinf(theta[0]), cosf(theta[0]), l[0],
-            sinf(theta[1]), cosf(theta[1]), l[1],
-            sinf(theta[2]), cosf(theta[2]), l[2],
-            sinf(theta[3]), cosf(theta[3]), l[3],
+            sinf(theta[0]) / r[0], cosf(theta[0]) / r[0], l[0] / r[0],
+            sinf(theta[1]) / r[1], cosf(theta[1]) / r[1], l[1] / r[1],
+            sinf(theta[2]) / r[2], cosf(theta[2]) / r[2], l[2] / r[2],
+            sinf(theta[3]) / r[3], cosf(theta[3]) / r[3], l[3] / r[3],
         )
     }
 
