@@ -30,6 +30,14 @@ int main() {
     // Setups clocks
     setup();
 
+    // start watchdog
+    IWDG->KR = 0x0000CCCC; // enable the module
+    IWDG->KR = 0x00005555; // enable register writes
+    IWDG->PR = 0x4; // set prescaler to 64, 40kHz -> 625Hz, 1.6ms per tick
+    IWDG->RLR = 5; // count to 10 ticks, 16ms then trigger a system reset
+    while (IWDG->SR) {} // wait for value to take
+    IWDG->KR = 0x0000AAAA; // feed the watchdog
+
     GPIOB->BSRR |= GPIO_BSRR_BR_8;
     GPIOB->BSRR |= GPIO_BSRR_BR_9;
 
@@ -75,6 +83,8 @@ int main() {
 
     // toggle J1-1
     while (true) {
+        IWDG->KR = 0x0000AAAA; // feed the watchdog
+
         // GPIOB->BSRR |= GPIO_BSRR_BR_8;
         // GPIOB->BSRR |= GPIO_BSRR_BR_9;
 

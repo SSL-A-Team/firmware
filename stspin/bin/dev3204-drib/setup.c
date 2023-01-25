@@ -20,6 +20,14 @@
 #include "setup.h"
 #include "system.h"
 
+void NMI_Handler() {
+    NVIC_SystemReset();
+}
+
+void HardFault_Handler() {
+    NVIC_SystemReset();
+}
+
 /**
  * @brief Setup the clock tree
  * 
