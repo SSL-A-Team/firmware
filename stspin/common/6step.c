@@ -405,10 +405,10 @@ static void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
     GPIOA->PUPDR |= (GPIO_PUPDR_PUPDR11_1); // pull down
     GPIOA->BSRR |= GPIO_BSRR_BR_11; // clear bit
 
-    // set OC 500mA, leave standby
+    // set OC 100mA, leave standby
     GPIOF->MODER |= (GPIO_MODER_MODER6_0 | GPIO_MODER_MODER7_0);
     GPIOF->PUPDR |= (GPIO_PUPDR_PUPDR6_1 | GPIO_PUPDR_PUPDR7_1);
-    GPIOF->BSRR |= (GPIO_BSRR_BS_6 | GPIO_BSRR_BS_7);
+    GPIOF->BSRR |= (GPIO_BSRR_BR_6 | GPIO_BSRR_BS_7);
 
     // set pin direction to AF
     GPIOA->MODER |= (GPIO_MODER_MODER8_1 | GPIO_MODER_MODER9_1 | GPIO_MODER_MODER10_1);
@@ -792,6 +792,8 @@ static void pwm6step_set_direct(uint16_t duty_cycle, MotorDirection_t motor_dire
  * 
  */
 void pwm6step_setup() {
+
+
     pwm6step_setup_hall_timer();
     pwm6step_setup_commutation_timer(PWM_FREQ_HZ);
 }
