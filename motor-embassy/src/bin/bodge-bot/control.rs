@@ -1,4 +1,4 @@
-use ateam_common_packets::bindings_radio::{BasicControl, BasicTelemetry};
+use ateam_common_packets::{bindings_radio::{BasicControl, BasicTelemetry}, bindings_stspin::MotorResponse_Motion_Packet};
 use defmt::info;
 use embassy_executor::SendSpawner;
 use embassy_stm32::{
@@ -42,7 +42,7 @@ const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 64;
 const RX_BUF_DEPTH: usize = 20;
 
-const TICKS_WITHOUT_PACKET_STOP: u16 = 10;
+const TICKS_WITHOUT_PACKET_STOP: u16 = 25;
 
 // buffers for front right
 #[link_section = ".axisram.buffers"]
@@ -319,6 +319,11 @@ impl Control {
         self.front_left_motor.process_packets();
         self.back_left_motor.process_packets();
         self.back_right_motor.process_packets();
+
+        self.front_right_motor.log_reset("FR");
+        self.front_left_motor.log_reset("RL");
+        self.back_left_motor.log_reset("BL");
+        self.back_right_motor.log_reset("BR");
 
         // let vel = 0.0005; // DC
         // let angle: f32 = core::f32::consts::PI / 4.0;

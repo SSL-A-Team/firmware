@@ -7,10 +7,10 @@ use control::Control;
 use defmt::info;
 use embassy_stm32::{
     executor::InterruptExecutor,
-    gpio::{Input, Pull},
+    gpio::{Input, Pull, Level, Speed, Output},
     interrupt::{self, InterruptExt},
     time::mhz,
-    usart::{self, Uart},
+    usart::{self, Uart}, exti::ExtiInput,
 };
 use embassy_time::{Duration, Ticker};
 use futures_util::StreamExt;
@@ -19,7 +19,7 @@ use motor_embassy::{
     stm32_interface::get_bootloader_uart_config,
 };
 use panic_probe as _;
-use pins::{RadioReset, RadioRxDMA, RadioTxDMA, RadioUART};
+use pins::{RadioReset, RadioRxDMA, RadioTxDMA, RadioUART, PowerStatePin, ShutdownCompletePin, PowerStateExti};
 use radio::{
     RadioTest, BUFFERS_RX, BUFFERS_TX, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH,
     TX_BUF_DEPTH,
@@ -59,6 +59,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
     let spawner = executor.start();
 
+    spawner.spawn(power_off_task(p.PD15, p.EXTI15, p.PD14)).unwrap();
+
     let radio_int = interrupt::take!(USART2);
     let radio_usart = Uart::new(p.USART2, p.PD6, p.PD5, radio_int, p.DMA2_CH0, p.DMA2_CH1, config);
 
@@ -67,6 +69,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let team_dip0 = Input::new(p.PE12, Pull::Down);
 
     let robot_id = rotary.read();
+    info!("id: {}", robot_id);
     shell_indicator.set(robot_id);
     let team = if team_dip0.is_high() {
         TeamColor::Blue
@@ -168,4 +171,15 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
         main_loop_rate_ticker.next().await;
     }
+}
+
+
+#[embassy_executor::task]
+async fn power_off_task(power_state_pin: PowerStatePin, exti: PowerStateExti, shutdown_pin: ShutdownCompletePin) {
+    let power_state = Input::new(power_state_pin, Pull::None);
+    let mut shutdown = Output::new(shutdown_pin, Level::Low, Speed::Low);
+    let mut power_state = ExtiInput::new(power_state, exti);
+    power_state.wait_for_falling_edge().await;
+    shutdown.set_high();
+    loop {}
 }

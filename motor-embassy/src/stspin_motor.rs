@@ -191,6 +191,24 @@ impl<
         }
     }
 
+    pub fn log_reset(&self, motor_id: &str) {
+        if self.current_state.reset_watchdog_independent() != 0 {
+            defmt::warn!("Motor {} Reset: Watchdog Independent", motor_id);
+        }
+        if self.current_state.reset_watchdog_window() != 0 {
+            defmt::warn!("Motor {} Reset: Watchdog Window", motor_id);
+        }
+        if self.current_state.reset_low_power() != 0 {
+            defmt::warn!("Motor {} Reset: Low Power", motor_id);
+        }
+        if self.current_state.reset_software() != 0 {
+            defmt::warn!("Motor {} Reset: Software", motor_id);
+        }
+        if self.current_state.reset_pin() != 0 {
+            defmt::warn!("Motor {} Reset: Pin", motor_id);
+        }
+    }
+
     pub fn send_motion_command(&mut self) {
         unsafe {
             let mut cmd: MotorCommandPacket = { MaybeUninit::zeroed().assume_init() };

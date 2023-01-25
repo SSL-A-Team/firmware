@@ -22,9 +22,9 @@ impl<'a, Pin0: Pin, Pin1: Pin, Pin2: Pin, Pin3: Pin> Rotary<'a, Pin0, Pin1, Pin2
     }
 
     pub fn read(&self) -> u8 {
-        (self.pin0.is_high() as u8) << 3
-            | (self.pin1.is_high() as u8) << 2
-            | (self.pin2.is_high() as u8) << 1
-            | (self.pin3.is_high() as u8)
+        (self.pin3.is_high() as u8) << 3
+            | (self.pin2.is_high() as u8) << 2
+            | (self.pin1.is_high() as u8) << 1
+            | (self.pin0.is_high() as u8)
     }
 }

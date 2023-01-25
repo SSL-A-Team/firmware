@@ -28,9 +28,9 @@ impl<'a, Pin0: Pin, Pin1: Pin, Pin2: Pin, Pin3: Pin> ShellIndicator<'a, Pin0, Pi
 
     pub fn set(&mut self, robot_id: u8) {
         let shell_bits = Self::ID_TO_PATTERN[robot_id as usize];
-        self.pin0.set_level((shell_bits & 0x01 != 0).into());
-        self.pin1.set_level((shell_bits & 0x02 != 0).into());
-        self.pin2.set_level((shell_bits & 0x04 != 0).into());
-        self.pin3.set_level((shell_bits & 0x08 != 0).into());
+        self.pin0.set_level((shell_bits & 0x01 == 0).into());
+        self.pin1.set_level((shell_bits & 0x02 == 0).into());
+        self.pin2.set_level((shell_bits & 0x04 == 0).into());
+        self.pin3.set_level((shell_bits & 0x08 == 0).into());
     }
 }
