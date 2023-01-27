@@ -8,7 +8,7 @@
 use defmt::*;
 use defmt_rtt as _;
 
-use embassy_stm32::gpio::{Output, Level, Speed};
+use embassy_stm32::gpio::{Output, Level, Speed, Input, Pull};
 use embassy_stm32::time::mhz;
 use embassy_stm32::{self as _,};
 use embassy_time::{Duration, Timer};
@@ -25,9 +25,16 @@ async fn main(_spawner: embassy_executor::Spawner) {
     stm32_config.rcc.pclk1 = Some(mhz(100));
     let p = embassy_stm32::init(stm32_config);
 
-    // PF9: MOTOR_AUX_RST
+    let btn = Input::new(p.PF5, Pull::Up);
     let mut output = Output::new(p.PF9, Level::Low, Speed::High);
+    while btn.is_high() {}
+
+    info!("kick");
+
+    // PF9: MOTOR_AUX_RST
     output.set_high();
-    Timer::after(Duration::from_micros(500)).await;
+    Timer::after(Duration::from_micros(8000)).await;
     output.set_low();
+    info!("done");
+    loop {}
 }
