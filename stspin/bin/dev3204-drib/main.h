@@ -17,6 +17,15 @@
 
 #define IOQ_BUF_LEN 64
 
+#define AVDD_V 3.3f
+
+///////////////////////////////////////////
+//  current sense amplification network  //
+///////////////////////////////////////////
+
+#define CS_AMP_NETWORK_V_TO_I_LINEAR_M 1.432f
+#define CS_AMP_NETWORK_V_TO_I_LINEAR_B 0.252f
+
 ///////////////////
 //  motor model  //
 ///////////////////
@@ -25,3 +34,11 @@
 #define HALL_TRANSITIONS_PER_REV 48
 #define MAX_MOTOR_RPM 5260
 #define MAX_MOTOR_REV_PER_S (5260.0f / 60.0f)
+
+////////////////////////
+//  FILTERING/TUNING  //
+////////////////////////
+
+#define ENCODER_IIR_TF_MS 0.20f
+#define TORQUE_IIR_TF_MS 0.40f
+// #define DC_IIR_TF_MS 0.20f

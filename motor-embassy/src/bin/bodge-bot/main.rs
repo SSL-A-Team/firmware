@@ -81,6 +81,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let front_left_int = interrupt::take!(UART7);
     let back_left_int = interrupt::take!(UART4);
     let back_right_int = interrupt::take!(USART3);
+    let drib_int = interrupt::take!(USART6);
 
     let front_right_usart = Uart::new(
         p.UART5,
@@ -118,21 +119,35 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.DMA1_CH7,
         get_bootloader_uart_config(),
     );
+    let drib_usart = Uart::new(
+        p.USART6,
+        p.PC7,
+        p.PC6,
+        drib_int,
+        p.DMA2_CH2,
+        p.DMA2_CH3,
+        get_bootloader_uart_config(),
+    );
 
+    let ball_detected_thresh = 1.0;
     let mut control = Control::new(
         &spawner,
         front_right_usart,
         front_left_usart,
         back_left_usart,
         back_right_usart,
+        drib_usart,
         p.PB1,
         p.PG2,
         p.PG0,
         p.PF4,
+        p.PC2,
         p.PB2,
         p.PG3,
         p.PG1,
         p.PA3,
+        p.PD7,
+        ball_detected_thresh,
     );
 
     control.load_firmware().await;

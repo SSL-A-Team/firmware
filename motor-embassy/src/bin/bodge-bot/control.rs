@@ -4,8 +4,9 @@ use embassy_executor::SendSpawner;
 use embassy_stm32::{
     gpio::{Level, Output, OutputOpenDrain, Pull, Speed},
     peripherals::{
-        DMA1_CH0, DMA1_CH1, DMA1_CH2, DMA1_CH3, DMA1_CH4, DMA1_CH5, DMA1_CH6, DMA1_CH7, UART4,
-        UART5, UART7, USART3,
+        DMA1_CH0, DMA1_CH1, DMA1_CH2, DMA1_CH3, DMA1_CH4, DMA1_CH5, DMA1_CH6, DMA1_CH7,
+        DMA2_CH2, DMA2_CH3,
+        UART4, UART5, UART7, USART3, USART6,
     },
     usart::Uart,
 };
@@ -15,27 +16,23 @@ use motor_embassy::{
     queue::Buffer,
     robot_model::{RobotConstants, RobotModel},
     stm32_interface::Stm32Interface,
-    stspin_motor::WheelMotor,
+    stspin_motor::{WheelMotor, DribblerMotor},
     uart_queue::{UartReadQueue, UartWriteQueue},
 };
 use nalgebra::{Vector3, Vector4};
 
-use crate::pins::{
-    MotorBLBootPin, MotorBLDmaRx, MotorBLDmaTx, MotorBLResetPin, MotorBLUart, MotorBRBootPin,
-    MotorBRDmaRx, MotorBRDmaTx, MotorBRResetPin, MotorBRUart, MotorFLBootPin, MotorFLDmaRx,
-    MotorFLDmaTx, MotorFLResetPin, MotorFLUart, MotorFRBootPin, MotorFRDmaRx, MotorFRDmaTx,
-    MotorFRResetPin, MotorFRUart,
-};
+use crate::pins::*;
 
 include_external_cpp_bin! {STEVAL3204_DRIB_POTCTRL_FW_IMG, "dev3204-drib-potctrl.bin"}
 include_external_cpp_bin! {STEVAL3204_DRIB_FW_IMG, "dev3204-drib.bin"}
 include_external_cpp_bin! {STEVAL3204_WHEEL_FW_IMG, "dev3204-wheel.bin"}
 
 // motor pinout
-// FrontRight Wheel - UART5  - tx pb6,  pb12,    boot pb1,  rst pb2, DMA0/1
-// FrontLeft Wheel  - UART7  - tx pf7,  rx pf6,  boot pg2,  rst pg3, DMA2/3
-// BackLeft Wheel   - UART4  - tx pd1,  rx pd0,  boot pg0,  rst pg1, DMA4/5
-// BackRight Wheel  - USART3 - tx pb10, rx pb11, boot pf4,  rst pa3, DMA6/7
+// FrontRight Wheel - UART5  - tx pb6,  pb12,    boot pb1,  rst pb2, DMA1 0/1
+// FrontLeft Wheel  - UART7  - tx pf7,  rx pf6,  boot pg2,  rst pg3, DMA1 2/3
+// BackLeft Wheel   - UART4  - tx pd1,  rx pd0,  boot pg0,  rst pg1, DMA1 4/5
+// BackRight Wheel  - USART3 - tx pb10, rx pb11, boot pf4,  rst pa3, DMA1 6/7
+// Dribbler         - USART6 - tx pc6,  rx pc7,  boot pc2,  rst pd7, DMA2 2/3
 
 const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 3;
@@ -96,6 +93,19 @@ static mut BACK_RIGHT_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
 static BACK_RIGHT_QUEUE_RX: UartReadQueue<USART3, DMA1_CH7, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
     UartReadQueue::new(unsafe { &mut BACK_RIGHT_BUFFERS_RX });
 
+// buffers for dribbler
+#[link_section = ".axisram.buffers"]
+static mut DRIB_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
+    [Buffer::EMPTY; TX_BUF_DEPTH];
+static DRIB_QUEUE_TX: UartWriteQueue<USART6, DMA2_CH2, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
+    UartWriteQueue::new(unsafe { &mut DRIB_BUFFERS_TX });
+
+#[link_section = ".axisram.buffers"]
+static mut DRIB_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
+    [Buffer::EMPTY; RX_BUF_DEPTH];
+static DRIB_QUEUE_RX: UartReadQueue<USART6, DMA2_CH3, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
+    UartReadQueue::new(unsafe { &mut DRIB_BUFFERS_RX });
+
 const WHEEL_ANGLES_DEG: Vector4<f32> = Vector4::new(30.0, 150.0, 225.0, 315.0);
 const WHEEL_RADIUS_M: f32 = 0.049 / 2.0; // wheel dia 49mm
 const WHEEL_DISTANCE_TO_ROBOT_CENTER_M: f32 = 0.085; // 85mm from center of wheel body to center of robot
@@ -151,6 +161,18 @@ pub struct Control {
         MotorBRBootPin,
         MotorBRResetPin,
     >,
+    drib_motor: DribblerMotor<
+        'static,
+        MotorDUart,
+        MotorDDmaRx,
+        MotorDDmaTx,
+        MAX_RX_PACKET_SIZE,
+        MAX_TX_PACKET_SIZE,
+        RX_BUF_DEPTH,
+        TX_BUF_DEPTH,
+        MotorDBootPin,
+        MotorDResetPin,
+    >,
     ticks_since_packet: u16,
 }
 
@@ -163,26 +185,33 @@ impl Control {
         front_left_usart: Uart<'static, MotorFLUart, MotorFLDmaTx, MotorFLDmaRx>,
         back_left_usart: Uart<'static, MotorBLUart, MotorBLDmaTx, MotorBLDmaRx>,
         back_right_usart: Uart<'static, MotorBRUart, MotorBRDmaTx, MotorBRDmaRx>,
+        drib_usart: Uart<'static, MotorDUart, MotorDDmaTx, MotorDDmaRx>,
         front_right_boot0_pin: MotorFRBootPin,
         front_left_boot0_pin: MotorFLBootPin,
         back_left_boot0_pin: MotorBLBootPin,
         back_right_boot0_pin: MotorBRBootPin,
+        drib_boot0_pin: MotorDBootPin,
         front_right_reset_pin: MotorFRResetPin,
         front_left_reset_pin: MotorFLResetPin,
         back_left_reset_pin: MotorBLResetPin,
         back_right_reset_pin: MotorBRResetPin,
+        drib_reset_pin: MotorDResetPin,
+        ball_detected_thresh: f32,
     ) -> Control {
         let wheel_firmware_image = STEVAL3204_WHEEL_FW_IMG;
+        let drib_firmware_image = STEVAL3204_DRIB_FW_IMG;
 
         let (front_right_tx, front_right_rx) = front_right_usart.split();
         let (front_left_tx, front_left_rx) = front_left_usart.split();
         let (back_left_tx, back_left_rx) = back_left_usart.split();
         let (back_right_tx, back_right_rx) = back_right_usart.split();
+        let (drib_tx, drib_rx) = drib_usart.split();
 
         let front_right_boot0_pin = Output::new(front_right_boot0_pin, Level::Low, Speed::Medium); // boot0 not active
         let front_left_boot0_pin = Output::new(front_left_boot0_pin, Level::Low, Speed::Medium); // boot0 not active
         let back_left_boot0_pin = Output::new(back_left_boot0_pin, Level::Low, Speed::Medium); // boot0 not active
         let back_right_boot0_pin = Output::new(back_right_boot0_pin, Level::Low, Speed::Medium); // boot0 not active
+        let drib_boot0_pin = Output::new(drib_boot0_pin, Level::Low, Speed::Medium); // boot0 not active
 
         let front_right_reset_pin =
             OutputOpenDrain::new(front_right_reset_pin, Level::Low, Speed::Medium, Pull::None); // reset active
@@ -192,6 +221,8 @@ impl Control {
             OutputOpenDrain::new(back_left_reset_pin, Level::Low, Speed::Medium, Pull::None); // reset active
         let back_right_reset_pin =
             OutputOpenDrain::new(back_right_reset_pin, Level::Low, Speed::Medium, Pull::None); // reset active
+        let drib_reset_pin = 
+            OutputOpenDrain::new(drib_reset_pin, Level::Low, Speed::Medium, Pull::None); // reset active
 
         spawner
             .spawn(FRONT_RIGHT_QUEUE_RX.spawn_task(front_right_rx))
@@ -217,6 +248,12 @@ impl Control {
         spawner
             .spawn(BACK_RIGHT_QUEUE_TX.spawn_task(back_right_tx))
             .unwrap();
+        spawner
+            .spawn(DRIB_QUEUE_RX.spawn_task(drib_rx))
+            .unwrap();
+        spawner
+            .spawn(DRIB_QUEUE_TX.spawn_task(drib_tx))
+            .unwrap(); 
 
         let front_right_stm32_interface = Stm32Interface::new(
             &FRONT_RIGHT_QUEUE_RX,
@@ -250,6 +287,14 @@ impl Control {
         );
         let back_right_motor = WheelMotor::new(back_right_stm32_interface, wheel_firmware_image);
 
+        let drib_stm32_interface = Stm32Interface::new(
+            &DRIB_QUEUE_RX,
+            &DRIB_QUEUE_TX,
+            Some(drib_boot0_pin),
+            Some(drib_reset_pin),
+        );
+        let drib_motor = DribblerMotor::new(drib_stm32_interface, drib_firmware_image, ball_detected_thresh);
+
         let robot_model_constants: RobotConstants = RobotConstants {
             wheel_angles_rad: Vector4::new(
                 WHEEL_ANGLES_DEG[0].to_radians(),
@@ -280,26 +325,29 @@ impl Control {
             front_left_motor,
             back_left_motor,
             back_right_motor,
+            drib_motor,
             ticks_since_packet: 0,
         }
     }
 
     pub async fn load_firmware(&mut self) {
-        let _res = embassy_futures::join::join4(
+        let _res = embassy_futures::join::join5(
             self.front_right_motor.load_default_firmware_image(),
             self.front_left_motor.load_default_firmware_image(),
             self.back_left_motor.load_default_firmware_image(),
             self.back_right_motor.load_default_firmware_image(),
+            self.drib_motor.load_default_firmware_image(),
         )
         .await;
 
         // leave reset
         // don't pull the chip out of reset until we're ready to read packets or we'll fill the queue
-        embassy_futures::join::join4(
+        embassy_futures::join::join5(
             self.front_right_motor.leave_reset(),
             self.front_left_motor.leave_reset(),
             self.back_left_motor.leave_reset(),
             self.back_right_motor.leave_reset(),
+            self.drib_motor.leave_reset(),
         )
         .await;
 
@@ -307,6 +355,7 @@ impl Control {
         self.front_left_motor.set_telemetry_enabled(true);
         self.back_left_motor.set_telemetry_enabled(true);
         self.back_right_motor.set_telemetry_enabled(true);
+        self.drib_motor.set_telemetry_enabled(true);
 
         // need to have telem off by default and enabled later
         // theres a race condition to begin processing packets from the first part out
@@ -319,11 +368,17 @@ impl Control {
         self.front_left_motor.process_packets();
         self.back_left_motor.process_packets();
         self.back_right_motor.process_packets();
+        self.drib_motor.process_packets();
 
         self.front_right_motor.log_reset("FR");
         self.front_left_motor.log_reset("RL");
         self.back_left_motor.log_reset("BL");
         self.back_right_motor.log_reset("BR");
+        self.drib_motor.log_reset("DRIB");
+
+        if self.drib_motor.ball_detected() {
+            defmt::info!("ball detected");
+        }
 
         // let vel = 0.0005; // DC
         // let angle: f32 = core::f32::consts::PI / 4.0;
@@ -353,6 +408,7 @@ impl Control {
         self.back_left_motor.set_setpoint(wheel_vels[2]);
         self.back_right_motor.set_setpoint(wheel_vels[3]);
         // angle += core::f32::consts::FRAC_2_PI / 200.0;
+        self.drib_motor.set_setpoint(0.05);
 
         // let c_vel = 0.2;
         // front_right_motor.set_setpoint(c_vel);
@@ -364,6 +420,7 @@ impl Control {
         self.front_left_motor.send_motion_command();
         self.back_left_motor.send_motion_command();
         self.back_right_motor.send_motion_command();
+        self.drib_motor.send_motion_command();
 
         Some(BasicTelemetry {
             sequence_number: 0,

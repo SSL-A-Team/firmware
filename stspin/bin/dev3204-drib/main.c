@@ -70,6 +70,9 @@ int main() {
     SyncTimer_t torque_loop_timer;
     time_sync_init(&torque_loop_timer, 1);
 
+    IIRFilter_t torque_filter;
+    iir_filter_init(&torque_filter, iir_filter_alpha_from_Tf(TORQUE_IIR_TF_MS, TORQUE_LOOP_RATE_MS));
+
     MotorCommand_MotionType motion_control_type = OPEN_LOOP;
     
     float r_motor_board = 0.0f;
@@ -158,9 +161,13 @@ int main() {
         bool run_torque_loop = time_sync_ready_rst(&torque_loop_timer);
 
         if (run_torque_loop) {
-            float cur_measurement = (float) res.I_motor; // TODO: get current from dma
+            float cur_measurement = ((float) res.I_motor / (float) UINT16_MAX) * AVDD_V;
+            // TODO: recover current from voltage
             // TODO: estimate torque from current
             // TODO: filter?
+
+            cur_measurement = iir_filter_update(&torque_filter, cur_measurement);
+
 
             float r = r_motor_board;
 
