@@ -113,6 +113,7 @@ const WHEEL_DISTANCE_TO_ROBOT_CENTER_M: f32 = 0.085; // 85mm from center of whee
 pub struct Control {
     robot_model: RobotModel,
     cmd_vel: Vector3<f32>,
+    drib_vel: f32,
     front_right_motor: WheelMotor<
         'static,
         MotorFRUart,
@@ -321,6 +322,7 @@ impl Control {
         Control {
             robot_model,
             cmd_vel: Vector3::new(0., 0., 0.),
+            drib_vel: 0.0,
             front_right_motor,
             front_left_motor,
             back_left_motor,
@@ -391,6 +393,7 @@ impl Control {
                 latest_control.vel_z_angular,
             );
             self.cmd_vel = cmd_vel;
+            self.drib_vel = latest_control.dribbler_speed;
             self.ticks_since_packet = 0;
         } else {
             self.ticks_since_packet += 1;
@@ -408,7 +411,8 @@ impl Control {
         self.back_left_motor.set_setpoint(wheel_vels[2]);
         self.back_right_motor.set_setpoint(wheel_vels[3]);
         // angle += core::f32::consts::FRAC_2_PI / 200.0;
-        self.drib_motor.set_setpoint(0.05);
+        let drib_dc = self.drib_vel / 1000.0;
+        self.drib_motor.set_setpoint(drib_dc);
 
         // let c_vel = 0.2;
         // front_right_motor.set_setpoint(c_vel);
