@@ -34,6 +34,9 @@ static int slipped_control_frame_count = 0;
 
 __attribute__((optimize("O0")))
 int main() {
+    uint32_t rcc_csr = RCC->CSR;
+    RCC->CSR |= RCC_CSR_RMVF;
+
     // Setups clocks
     setup();
 
@@ -73,6 +76,13 @@ int main() {
 
     MotorResponsePacket response_packet;
     memset(&response_packet, 0, sizeof(MotorResponsePacket));
+
+    response_packet.data.motion.reset_watchdog_independent = rcc_csr & RCC_CSR_IWDGRSTF != 0;
+    response_packet.data.motion.reset_watchdog_window = rcc_csr & RCC_CSR_WWDGRSTF != 0;
+    response_packet.data.motion.reset_low_power = rcc_csr & RCC_CSR_LPWRRSTF != 0;
+    response_packet.data.motion.reset_software = rcc_csr & RCC_CSR_SFTRSTF != 0;
+    response_packet.data.motion.reset_pin = rcc_csr & RCC_CSR_PINRSTF != 0;
+
     bool params_return_packet_requested = false;
 
     // setup the loop rate regulators
@@ -137,7 +147,6 @@ int main() {
     // toggle J1-1
     while (true) {
         IWDG->KR = 0x0000AAAA; // feed the watchdog
-
 
         //GPIOB->BSRR |= GPIO_BSRR_BR_8;
         //GPIOB->BSRR |= GPIO_BSRR_BR_9;
