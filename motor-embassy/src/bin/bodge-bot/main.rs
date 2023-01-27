@@ -3,23 +3,28 @@
 #![feature(type_alias_impl_trait)]
 #![feature(const_mut_refs)]
 
+use ateam_common_packets::bindings_radio::KickRequest;
 use control::Control;
 use defmt::info;
 use embassy_stm32::{
     executor::InterruptExecutor,
-    gpio::{Input, Pull, Level, Speed, Output},
+    exti::ExtiInput,
+    gpio::{Input, Level, Output, Pull, Speed},
     interrupt::{self, InterruptExt},
     time::mhz,
-    usart::{self, Uart}, exti::ExtiInput,
+    usart::{self, Uart},
 };
-use embassy_time::{Duration, Ticker};
+use embassy_time::{Duration, Ticker, Timer};
 use futures_util::StreamExt;
 use motor_embassy::{
     drivers::{radio::TeamColor, rotary::Rotary, shell_indicator::ShellIndicator},
     stm32_interface::get_bootloader_uart_config,
 };
 use panic_probe as _;
-use pins::{RadioReset, RadioRxDMA, RadioTxDMA, RadioUART, PowerStatePin, ShutdownCompletePin, PowerStateExti};
+use pins::{
+    PowerStateExti, PowerStatePin, RadioReset, RadioRxDMA, RadioTxDMA, RadioUART,
+    ShutdownCompletePin,
+};
 use radio::{
     RadioTest, BUFFERS_RX, BUFFERS_TX, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH,
     TX_BUF_DEPTH,
@@ -59,14 +64,20 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
     let spawner = executor.start();
 
-    spawner.spawn(power_off_task(p.PD15, p.EXTI15, p.PD14)).unwrap();
+    spawner
+        .spawn(power_off_task(p.PD15, p.EXTI15, p.PD14))
+        .unwrap();
 
     let radio_int = interrupt::take!(USART2);
-    let radio_usart = Uart::new(p.USART2, p.PD6, p.PD5, radio_int, p.DMA2_CH0, p.DMA2_CH1, config);
+    let radio_usart = Uart::new(
+        p.USART2, p.PD6, p.PD5, radio_int, p.DMA2_CH0, p.DMA2_CH1, config,
+    );
 
     let rotary = Rotary::new(p.PG6, p.PG5, p.PG4, p.PG8);
     let mut shell_indicator = ShellIndicator::new(p.PE10, p.PD11, p.PD12, p.PD13);
     let team_dip0 = Input::new(p.PE12, Pull::Down);
+
+    let mut kicker = Output::new(p.PF9, Level::Low, Speed::High);
 
     let robot_id = rotary.read();
     info!("id: {}", robot_id);
@@ -149,19 +160,14 @@ async fn main(_spawner: embassy_executor::Spawner) {
                 RadioTxDMA,
                 RadioReset,
             >))
-            .setup(
-                &spawner,
-                radio_usart,
-                p.PC0,
-                robot_id,
-                team,
-            )
+            .setup(&spawner, radio_usart, p.PC0, robot_id, team)
             .await
     };
     spawner.spawn(token).unwrap();
 
     let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
 
+    let mut last_kicked = 1000;
     loop {
         let latest = RADIO_TEST.get_latest_control();
         let telemetry = control.tick(latest);
@@ -169,13 +175,26 @@ async fn main(_spawner: embassy_executor::Spawner) {
             RADIO_TEST.send_telemetry(telemetry).await;
         }
 
+        if let Some(latest) = &latest {
+            if last_kicked > 100 && latest.kick_request == KickRequest::KR_KICK_NOW {
+                kicker.set_high();
+                Timer::after(Duration::from_micros(7000)).await;
+                kicker.set_low();
+                last_kicked = 0;
+            }
+        }
+        last_kicked = core::cmp::min(last_kicked + 1, 1000);
+
         main_loop_rate_ticker.next().await;
     }
 }
 
-
 #[embassy_executor::task]
-async fn power_off_task(power_state_pin: PowerStatePin, exti: PowerStateExti, shutdown_pin: ShutdownCompletePin) {
+async fn power_off_task(
+    power_state_pin: PowerStatePin,
+    exti: PowerStateExti,
+    shutdown_pin: ShutdownCompletePin,
+) {
     let power_state = Input::new(power_state_pin, Pull::None);
     let mut shutdown = Output::new(shutdown_pin, Level::Low, Speed::Low);
     let mut power_state = ExtiInput::new(power_state, exti);

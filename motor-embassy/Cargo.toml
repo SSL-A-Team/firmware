@@ -77,6 +77,11 @@ name = "bodge-bot"
 test = false
 harness = false
 
+[[bin]]
+name = "kicker"
+test = false
+harness = false
+
 [[test]]
 name = "basic-test"
 harness = false

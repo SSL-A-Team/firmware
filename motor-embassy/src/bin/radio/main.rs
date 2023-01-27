@@ -5,11 +5,12 @@
 #![feature(const_mut_refs)]
 #![feature(ptr_metadata)]
 
+use ateam_common_packets::bindings_radio::BasicTelemetry;
 use defmt::*;
 use defmt_rtt as _;
 
 use embassy_stm32::time::mhz;
-use embassy_stm32::usart::{self, Uart, StopBits};
+use embassy_stm32::usart::{self, StopBits, Uart};
 use embassy_stm32::{
     self as _,
     executor::InterruptExecutor,
@@ -26,13 +27,13 @@ use static_cell::StaticCell;
 static EXECUTOR_UART_QUEUE: StaticCell<InterruptExecutor<interrupt::CEC>> = StaticCell::new();
 
 #[link_section = ".axisram.buffers"]
-static mut BUFFERS_TX: [queue::Buffer<256>; 4] = [queue::Buffer::EMPTY; 4];
-static QUEUE_TX: UartWriteQueue<USART2, DMA1_CH0, 256, 4> =
+static mut BUFFERS_TX: [queue::Buffer<256>; 10] = [queue::Buffer::EMPTY; 10];
+static QUEUE_TX: UartWriteQueue<USART2, DMA1_CH0, 256, 10> =
     UartWriteQueue::new(unsafe { &mut BUFFERS_TX });
 
 #[link_section = ".axisram.buffers"]
-static mut BUFFERS_RX: [queue::Buffer<256>; 8] = [queue::Buffer::EMPTY; 8];
-static QUEUE_RX: UartReadQueue<USART2, DMA1_CH1, 256, 8> =
+static mut BUFFERS_RX: [queue::Buffer<256>; 20] = [queue::Buffer::EMPTY; 20];
+static QUEUE_RX: UartReadQueue<USART2, DMA1_CH1, 256, 20> =
     UartReadQueue::new(unsafe { &mut BUFFERS_RX });
 
 #[embassy_executor::main]
@@ -60,7 +61,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
     spawner.spawn(QUEUE_RX.spawn_task(rx)).unwrap();
     spawner.spawn(QUEUE_TX.spawn_task(tx)).unwrap();
 
-    let reset = p.PC0;
+    // let reset = p.PC0;
+    let reset = p.PA3;
     let mut radio = RobotRadio::new(&QUEUE_RX, &QUEUE_TX, reset).await.unwrap();
     info!("radio created");
     radio.connect_to_network().await.unwrap();
@@ -71,7 +73,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     loop {
         info!("sending hello");
-        radio.send_hello(0, TeamColor::Blue).await.unwrap();
+        radio.send_hello(0, TeamColor::Yellow).await.unwrap();
         let hello = radio.wait_hello(Duration::from_millis(1000)).await;
 
         match hello {
@@ -90,10 +92,33 @@ async fn main(_spawner: embassy_executor::Spawner) {
         }
     }
 
+    let mut seq: u16 = 0;
     loop {
+        radio
+            .send_telemetry(BasicTelemetry {
+                sequence_number: seq,
+                robot_revision_major: 0,
+                robot_revision_minor: 0,
+                battery_level: 0.,
+                battery_temperature: 0.,
+                _bitfield_align_1: [],
+                _bitfield_1: BasicTelemetry::new_bitfield_1(
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ),
+                motor_0_temperature: 0.,
+                motor_1_temperature: 0.,
+                motor_2_temperature: 0.,
+                motor_3_temperature: 0.,
+                motor_4_temperature: 0.,
+                kicker_charge_level: 0.,
+            })
+            .await;
+        info!("send");
         let control = radio.read_control().await;
         if let Ok(control) = control {
-            info!("{:?}", defmt::Debug2Format(&control));
+            // info!("{:?}", defmt::Debug2Format(&control));
         }
+        info!("{}", seq);
+        seq = (seq + 1) % 10000;
     }
 }
