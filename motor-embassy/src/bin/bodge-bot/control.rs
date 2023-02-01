@@ -342,6 +342,9 @@ impl Control {
         )
         .await;
 
+
+        defmt::info!("flashed");
+
         // leave reset
         // don't pull the chip out of reset until we're ready to read packets or we'll fill the queue
         embassy_futures::join::join5(

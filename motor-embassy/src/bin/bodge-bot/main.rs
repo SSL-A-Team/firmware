@@ -132,7 +132,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     );
     let drib_usart = Uart::new(
         p.USART6,
-        p.PC7,
+        p.PG9,
         p.PC6,
         drib_int,
         p.DMA2_CH2,
@@ -157,7 +157,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.PG3,
         p.PG1,
         p.PA3,
-        p.PD7,
+        p.PE9,
         ball_detected_thresh,
     );
 
@@ -193,7 +193,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         if let Some(latest) = &latest {
             if last_kicked > 100 && latest.kick_request == KickRequest::KR_KICK_NOW {
                 kicker.set_high();
-                Timer::after(Duration::from_micros(7000)).await;
+                Timer::after(Duration::from_micros(3500)).await;
                 kicker.set_low();
                 last_kicked = 0;
             }

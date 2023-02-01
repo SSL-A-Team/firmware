@@ -9,7 +9,7 @@ use embassy_stm32::{peripherals::{
     PG0, PG1, PG2, PG3,
     UART4, UART5, UART7,
     USART2, USART3, USART6,
-    EXTI15,
+    EXTI15, PE9,
 }, interrupt};
 
 pub type RadioUART = USART2;
@@ -44,7 +44,7 @@ pub type MotorFRResetPin = PB2;
 pub type MotorFLResetPin = PG3;
 pub type MotorBLResetPin = PG1;
 pub type MotorBRResetPin = PA3;
-pub type MotorDResetPin = PD7;
+pub type MotorDResetPin = PE9;
 
 
 pub type PowerStatePin = PD15;
