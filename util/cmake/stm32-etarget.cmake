@@ -21,7 +21,7 @@ macro(ateam_add_targets root_dir linker_file device_prefix)
 
     # get common header files
     header_directories(LOCAL_COMMON_INCLUDE_DIRS ${common_dir})
-    set(COMMON_PACKETS_DIR "${PROJECT_SOURCE_DIR}/software-communication/")
+    set(COMMON_PACKETS_DIR "${PROJECT_SOURCE_DIR}/../software-communication/")
 
     subdirlist(bin_folders "${binaries_dir}")
     foreach(bin_dir ${bin_folders})

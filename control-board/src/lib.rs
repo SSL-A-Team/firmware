@@ -25,7 +25,7 @@ pub mod drivers;
 #[macro_export]
 macro_rules! include_external_cpp_bin {
     ($var_name:ident, $bin_file:literal) => {
-        pub static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../build/bin/", $bin_file)).len()] 
-            = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../build/bin/", $bin_file));
+        pub static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../motor-controller/build/bin/", $bin_file)).len()] 
+            = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../motor-controller/build/bin/", $bin_file));
     }
 }

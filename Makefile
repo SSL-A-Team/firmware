@@ -1,26 +1,5 @@
-.PHONY: all
-.DEFAULT_GOAL := all
-
-.PHONY: .cmake-setup
-.cmake-setup:
-	mkdir -p build/ && \
-	cd build && \
-	cmake .. \
-
-clean-stspin:
-	rm -rf build
-
-clean-motor: clean-stspin
-	cd motor-embassy && \
-	cargo clean
-
-.PHONY: clean
-clean: clean-stspin clean-motor software-communication-clean
-
-.PHONY: test
-
 ############################
-#  Software Communication  #
+#  software communication  #
 ############################
 
 software-communication-clean:
@@ -37,64 +16,115 @@ software-communication-test:
 	make test
 test:: software-communication-test
 
-#####################
-#  STSPIN binaries  #
-#####################
+####################
+#  common targets  #
+####################
 
-.PHONY: stspin-all
-stspin_binaries := ${shell cd stspin/bin && ls -d * && cd ../..}
+.PHONY: common-all
+common_binaries := ${shell cd common/src/bin && ls -d * && cd ../../..}
 
-define create-cmake-targets
-$1: .cmake-setup
-	cd build/ && \
+define create-common-targets
+$1-$2:
+	cd $1/ && \
+	cargo build --release --bin $2
+common-all:: $1-$2
+
+$1-$2-run:
+	cd $1/ && \
+	cargo run --release --bin $2
+
+$1-$2-debug:
+	cd $1/ && \
+	cargo build --bin $2
+common-all:: $1-$2-debug
+
+$1-$2-debug-run:
+	cd $1/ && \
+	cargo run --bin $2
+endef
+$(foreach element,$(common_binaries),$(eval $(call create-common-targets,common,$(element))))
+
+common-clean:
+	cd common && \
+	cargo clean
+
+###############################
+#  motor controller binaries  #
+###############################
+
+.PHONY: .motor-controller-setup
+.motor-controller-setup:
+	cd motor-controller/ && \
+	cmake -B build/ \
+
+.PHONY: motor-controller-all
+motor_controller_binaries := ${shell cd motor-controller/bin && ls -d * && cd ../..}
+
+define create-motor-controller-targets
+$1: .motor-controller-setup
+	cd motor-controller/build/ && \
 	make $1
-all:: $1
-stspin-all:: $1
+motor-controller-all:: $1
 
 $1-prog: $1
-	cd build/ && \
+	cd motor-controller/build/ && \
 	make $1-prog
 
 $1-gdb: $1
-	cd build/ && \
+	cd motor-controller/build/ && \
 	make $1-gdb
 endef
-$(foreach element,$(stspin_binaries),$(eval $(call create-cmake-targets,$(element))))
+$(foreach element,$(motor_controller_binaries),$(eval $(call create-motor-controller-targets,$(element))))
 
-#########################
-#  Motorboard Binaries  #
-#########################
+motor-controller-clean:
+	rm -rf motor-controller/build
 
-.PHONY: motorboard-all
-motor_binaries := ${shell cd motor-embassy/src/bin && ls -d * && cd ../../..}
-motor_openocd_cfg_file := board/st_nucleo_h743zi.cfg
+############################
+#  control board binaries  #
+############################
 
-define create-rust-targets
-$1-$2: stspin-all
+.PHONY: control-board-all
+control_binaries := ${shell cd control-board/src/bin && ls -d * && cd ../../..}
+control_openocd_cfg_file := board/st_nucleo_h743zi.cfg
+
+define create-control-board-rust-targets
+$1-$2: motor-controller-all
 	cd $1/ && \
 	cargo build --release --bin $2
-motorboard-all:: $1-$2
+control-board-all:: $1-$2
 
-$1-$2-run: stspin-all
+$1-$2-run: motor-controller-all
 	cd $1/ && \
 	cargo run --release --bin $2
 
 $1-$2-prog: $1-$2
 	./util/program.sh $3 $1/target/thumbv7em-none-eabihf/release/$2
 
-$1-$2-debug: stspin-all
+$1-$2-debug: motor-controller-all
 	cd $1/ && \
 	cargo build --bin $2
-motorboard-all:: $1-$2-debug
+control-board-all:: $1-$2-debug
 
-$1-$2-debug-run: stspin-all
+$1-$2-debug-run: motor-controller-all
 	cd $1/ && \
 	cargo run --bin $2
 
-$1-$2-debug-prog: $1-$2-debug
+$1-$2-debug-prog: motor-controller-all
 	./util/program.sh $3 $1/target/thumbv7em-none-eabihf/debug/$2
-
 endef
-$(foreach element,$(motor_binaries),$(eval $(call create-rust-targets,motor-embassy,$(element),$(motor_openocd_cfg_file))))
+$(foreach element,$(control_binaries),$(eval $(call create-control-board-rust-targets,control-board,$(element),$(control_openocd_cfg_file))))
 
-all:: stspin-all motorboard-all
+control-board-clean: motor-controller-clean
+	cd control-board && \
+	cargo clean
+
+##################
+#  meta targets  #
+##################
+
+.PHONY: all
+.DEFAULT_GOAL := all
+all:: motor-controller-all control-board-all
+
+.PHONY: clean
+clean: software-communication-clean motor-controller-clean control-board-clean
