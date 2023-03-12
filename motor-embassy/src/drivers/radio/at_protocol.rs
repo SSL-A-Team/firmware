@@ -1,8 +1,3 @@
-use core::future::Future;
-
-use embassy_stm32::usart;
-
-// use motor_embassy::uart_queue::{ReadFuture, ReadTaskFuture};
 
 // pub enum ATRequest {
 //     Attention,

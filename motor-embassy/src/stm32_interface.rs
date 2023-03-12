@@ -7,6 +7,8 @@ use embassy_stm32::gpio::{Output, OutputOpenDrain, Pin};
 use embassy_stm32::pac;
 use embassy_stm32::usart::{self, Parity, StopBits, Config};
 use embassy_time::{Duration, Timer};
+use embassy_stm32::pac::lpuart::regs;
+use embassy_stm32::interrupt::{Interrupt, InterruptExt};
 
 use crate::queue::{DequeueRef, Error};
 use crate::uart_queue::{Reader, Writer, UartReadQueue, UartWriteQueue};
@@ -199,6 +201,9 @@ impl<
     pub unsafe fn update_uart_config(&self, baudrate: u32, parity: Parity) {
         let div = (UART::frequency().0 + (baudrate / 2)) / baudrate * UART::MULTIPLIER;
 
+        // let irq = UART::Interrupt::steal();
+        // irq.disable();
+
         let r = UART::regs();
         // disable the uart. Can't modify parity and baudrate while module is enabled
         r.cr1().modify(|w| {
@@ -234,7 +239,45 @@ impl<
         r.cr1().modify(|w| {
             w.set_ue(true);
         });
-        
+
+        // let div = (pclk_freq.0 + (config.baudrate / 2)) / config.baudrate * multiplier;
+
+        // unsafe {
+        //     r.brr().write_value(regs::Brr(div));
+        //     r.cr2().write(|_w| {});
+        //     r.cr1().write(|w| {
+        //         // enable uart
+        //         w.set_ue(true);
+        //         // enable transceiver
+        //         w.set_te(true);
+        //         // enable receiver
+        //         w.set_re(true);
+        //         // configure word size
+        //         w.set_m0(if parity != Parity::ParityNone {
+        //             pac::lpuart::vals::M0::BIT9
+        //         } else {
+        //             pac::lpuart::vals::M0::BIT8
+        //         });
+        //         // configure parity
+        //         w.set_pce(parity != Parity::ParityNone);
+        //         w.set_ps(match parity {
+        //             Parity::ParityOdd => pac::lpuart::vals::Ps::ODD,
+        //             Parity::ParityEven => pac::lpuart::vals::Ps::EVEN,
+        //             _ => pac::lpuart::vals::Ps::EVEN,
+        //         });
+        //     });
+        // }
+
+        // r.icr().write(|w| {
+        //     w.set_fecf(true);
+        // });
+
+        // irq.unpend();
+        // irq.enable();
+
+        // r.cr1().modify(|w| {
+        //     w.set_idleie(true);
+        // });
     }
 
     pub async fn read_latest_packet(&self) {
@@ -554,9 +597,13 @@ impl<
             return Err(err);
         }
 
-        if let Err(err) = self.reset_into_program(true).await {
+        info!("before reset");
+
+        if let Err(err) = self.reset_into_program(false).await {
             return Err(err);
         }
+
+        info!("after reset");
         
         Ok(())
     }

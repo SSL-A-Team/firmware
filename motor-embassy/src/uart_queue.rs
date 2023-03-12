@@ -1,6 +1,7 @@
-use crate::queue::{self, Buffer, Queue, DequeueRef, Error};
+use crate::queue::{self, Buffer, DequeueRef, Error, Queue};
 
 use core::future::Future;
+use defmt::info;
 use embassy_executor::{raw::TaskStorage, SpawnToken};
 use embassy_stm32::{
     usart::{self, UartRx, UartTx},
@@ -16,6 +17,17 @@ pub struct UartReadQueue<
 > {
     queue_rx: Queue<'a, LENGTH, DEPTH>,
     task: TaskStorage<ReadTaskFuture<UART, DMA, LENGTH, DEPTH>>,
+}
+
+// TODO: pretty sure shouldn't do this
+unsafe impl<
+        'a,
+        UART: usart::BasicInstance,
+        DMA: usart::RxDma<UART>,
+        const LENGTH: usize,
+        const DEPTH: usize,
+    > Send for UartReadQueue<'a, UART, DMA, LENGTH, DEPTH>
+{
 }
 
 pub type ReadTaskFuture<
@@ -43,16 +55,27 @@ impl<
     fn read_task(
         queue_rx: &'static Queue<'a, LENGTH, DEPTH>,
         mut rx: UartRx<'a, UART, DMA>,
-        mut int: UART::Interrupt,
+        // mut int: UART::Interrupt,
     ) -> ReadTaskFuture<UART, DMA, LENGTH, DEPTH> {
         async move {
             loop {
                 let mut buf = queue_rx.enqueue().await.unwrap();
                 let len = rx
-                    .read_to_idle(buf.data(), (&mut int).into_ref())
-                    .await
-                    .unwrap();
-                *buf.len() = len;
+                    .read_until_idle(buf.data())
+                    .await;
+                    // .unwrap();
+                    // TODO: this
+                if let Ok(len) = len {
+                    if len == 0 {
+                        info!("uart zero");
+                        buf.cancel();
+                    } else {
+                        *buf.len() = len;
+                    }
+                } else {
+                    info!("{}", len);
+                    buf.cancel();
+                }
             }
         }
     }
@@ -60,9 +83,8 @@ impl<
     pub fn spawn_task(
         &'static self,
         rx: UartRx<'a, UART, DMA>,
-        int: UART::Interrupt,
     ) -> SpawnToken<impl Sized> {
-        self.task.spawn(|| Self::read_task(&self.queue_rx, rx, int))
+        self.task.spawn(|| Self::read_task(&self.queue_rx, rx))
     }
 
     pub fn try_dequeue(&self) -> Result<DequeueRef<LENGTH, DEPTH>, Error> {
@@ -117,13 +139,13 @@ impl<
                 let buf = queue_tx.dequeue().await.unwrap();
                 tx.write(buf.data()).await.unwrap();
                 drop(buf);
-                unsafe {
-                    // TODO: what does this do again?
-                    while !UART::regs().isr().read().tc() {}
-                    UART::regs().cr1().modify(|w| w.set_te(false));
-                    while UART::regs().isr().read().teack() {}
-                    UART::regs().cr1().modify(|w| w.set_te(true));
-                }
+                // unsafe {
+                //     // TODO: what does this do again?
+                //     while !UART::regs().isr().read().tc() {}
+                //     UART::regs().cr1().modify(|w| w.set_te(false));
+                //     while UART::regs().isr().read().teack() {}
+                //     UART::regs().cr1().modify(|w| w.set_te(true));
+                // }
             }
         }
     }
@@ -147,20 +169,12 @@ impl<
     }
 }
 
-pub trait Reader<'a> {
-    type F<RET, FN: FnOnce(&[u8]) -> RET>: Future<Output = Result<RET, ()>>
-    where
-        Self: 'a;
-
-    fn read<RET, FN: FnOnce(&[u8]) -> RET>(&'a self, fn_read: FN) -> Self::F<RET, FN>;
+pub trait Reader {
+    async fn read<RET, FN: FnOnce(&[u8]) -> RET>(&self, fn_read: FN) -> Result<RET, ()>;
 }
 
-pub trait Writer<'a> {
-    type F<FN: FnOnce(&mut [u8]) -> usize>: Future<Output = Result<(), ()>>
-    where
-        Self: 'a;
-
-    fn write<FN: FnOnce(&mut [u8]) -> usize>(&'a self, fn_write: FN) -> Self::F<FN>;
+pub trait Writer {
+    async fn write<FN: FnOnce(&mut [u8]) -> usize>(&self, fn_write: FN) -> Result<(), ()>;
 }
 
 impl<
@@ -169,12 +183,10 @@ impl<
         Dma: usart::RxDma<UART>,
         const LEN: usize,
         const DEPTH: usize,
-    > Reader<'a> for crate::uart_queue::UartReadQueue<'a, UART, Dma, LEN, DEPTH>
+    > Reader for crate::uart_queue::UartReadQueue<'a, UART, Dma, LEN, DEPTH>
 {
-    type F<RET, FN: FnOnce(&[u8]) -> RET> = impl Future<Output = Result<RET, ()>> where Self: 'a;
-
-    fn read<RET, FN: FnOnce(&[u8]) -> RET>(&'a self, fn_read: FN) -> Self::F<RET, FN> {
-        async { Ok(self.dequeue(|buf| fn_read(buf)).await) }
+    async fn read<RET, FN: FnOnce(&[u8]) -> RET>(&self, fn_read: FN) -> Result<RET, ()> {
+        Ok(self.dequeue(|buf| fn_read(buf)).await)
     }
 }
 
@@ -184,11 +196,9 @@ impl<
         Dma: usart::TxDma<UART>,
         const LEN: usize,
         const DEPTH: usize,
-    > Writer<'a> for crate::uart_queue::UartWriteQueue<'a, UART, Dma, LEN, DEPTH>
+    > Writer for crate::uart_queue::UartWriteQueue<'a, UART, Dma, LEN, DEPTH>
 {
-    type F<FN: FnOnce(&mut [u8]) -> usize> = impl Future<Output = Result<(), ()>> where Self: 'a;
-
-    fn write<FN: FnOnce(&mut [u8]) -> usize>(&'a self, fn_write: FN) -> Self::F<FN> {
-        async { self.enqueue(|buf| fn_write(buf)).or(Err(())) }
+    async fn write<FN: FnOnce(&mut [u8]) -> usize>(&self, fn_write: FN) -> Result<(), ()> {
+        self.enqueue(|buf| fn_write(buf)).or(Err(()))
     }
 }

@@ -10,6 +10,8 @@
 )]
 #![feature(const_mut_refs)]
 #![feature(adt_const_params)]
+#![feature(ptr_metadata)]
+#![feature(async_fn_in_trait)]
 
 pub mod fw_images;
 pub mod queue;
@@ -17,6 +19,8 @@ pub mod robot_model;
 pub mod stm32_interface;
 pub mod stspin_motor;
 pub mod uart_queue;
+
+pub mod drivers;
 
 #[macro_export]
 macro_rules! include_external_cpp_bin {

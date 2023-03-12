@@ -5,7 +5,7 @@ ENTRY(Reset_Handler)
 _estack = ORIGIN(RAM) + LENGTH(RAM); /* end of "RAM" Ram type memory */
 
 _Min_Heap_Size = 0x0; /* required amount of heap */
-_Min_Stack_Size = 0x800 ; /* required amount of stack */
+_Min_Stack_Size = 0xC00 ; /* required amount of stack */
 
 /* Memories definition */
 MEMORY

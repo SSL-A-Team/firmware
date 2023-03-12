@@ -45,7 +45,8 @@ mod tests {
     fn init() {
         let p = embassy_stm32::init(Default::default());
         let config = usart::Config::default();
-        let usart = Uart::new(p.UART7, p.PF6, p.PF7, p.DMA1_CH0, p.DMA1_CH1, config);
+        let irq = interrupt::take!(UART7);
+        let usart = Uart::new(p.UART7, p.PF6, p.PF7, irq, p.DMA1_CH0, p.DMA1_CH1, config);
         let (tx, rx) = usart.split();
 
         let irq = interrupt::take!(CEC);
@@ -53,8 +54,7 @@ mod tests {
         let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
         let spawner = executor.start();
 
-        let int = interrupt::take!(UART7);
-        spawner.spawn(QUEUE_RX.spawn_task(rx, int)).unwrap();
+        spawner.spawn(QUEUE_RX.spawn_task(rx)).unwrap();
         spawner.spawn(QUEUE_TX.spawn_task(tx)).unwrap();
     }
 

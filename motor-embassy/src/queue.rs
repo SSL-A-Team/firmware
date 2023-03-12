@@ -5,7 +5,6 @@ use core::{
     task::{Poll, Waker},
 };
 use critical_section;
-use defmt::{info, Format};
 
 pub struct Buffer<const LENGTH: usize> {
     pub data: [MaybeUninit<u8>; LENGTH],
@@ -28,6 +27,9 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> DequeueRef<'a, LENGTH, DEPTH> 
     pub fn data(&self) -> &[u8] {
         self.data
     }
+    pub fn cancel(self) {
+        self.queue.cancel_dequeue();
+    }
 }
 
 impl<'a, const LENGTH: usize, const DEPTH: usize> Drop for DequeueRef<'a, LENGTH, DEPTH> {
@@ -49,6 +51,9 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> EnqueueRef<'a, LENGTH, DEPTH> 
 
     pub fn len(&mut self) -> &mut usize {
         self.len
+    }
+    pub fn cancel(self) {
+        self.queue.cancel_enqueue();
     }
 }
 
@@ -111,9 +116,10 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<'a, LENGTH, DEPTH> {
     }
 
     pub async fn dequeue(&self) -> Result<DequeueRef<LENGTH, DEPTH>, Error> {
-        if critical_section::with(|_| unsafe { (*self.dequeue_waker.get()).is_some() }) {
-            return Err(Error::InProgress);
-        }
+        // TODO: look at this (when uncommented causes issue cancelling dequeue)
+        // if critical_section::with(|_| unsafe { (*self.dequeue_waker.get()).is_some() }) {
+        //     return Err(Error::InProgress);
+        // }
 
         poll_fn(|cx| {
             critical_section::with(|_| unsafe {
@@ -129,11 +135,20 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<'a, LENGTH, DEPTH> {
         .await
     }
 
-    fn finish_dequeue(&self) {
+    fn cancel_dequeue(&self) {
         critical_section::with(|_| unsafe {
             *self.read_in_progress.get() = false;
-            *self.read_index.get() = (*self.read_index.get() + 1) % DEPTH;
-            *self.size.get() -= 1;
+        });
+    }
+
+    fn finish_dequeue(&self) {
+        critical_section::with(|_| unsafe {
+            let read_in_progress = self.read_in_progress.get();
+            if *read_in_progress {
+                *read_in_progress = false;
+                *self.read_index.get() = (*self.read_index.get() + 1) % DEPTH;
+                *self.size.get() -= 1;
+            }
             if let Some(w) = (*self.enqueue_waker.get()).take() {
                 w.wake();
             }
@@ -183,11 +198,20 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<'a, LENGTH, DEPTH> {
         .await
     }
 
-    fn finish_enqueue(&self) {
+    fn cancel_enqueue(&self) {
         critical_section::with(|_| unsafe {
             *self.write_in_progress.get() = false;
-            *self.write_index.get() = (*self.write_index.get() + 1) % DEPTH;
-            *self.size.get() += 1;
+        });
+    }
+
+    fn finish_enqueue(&self) {
+        critical_section::with(|_| unsafe {
+            let write_in_progress = self.write_in_progress.get();
+            if *write_in_progress {
+                *write_in_progress = false;
+                *self.write_index.get() = (*self.write_index.get() + 1) % DEPTH;
+                *self.size.get() += 1;
+            }
             if let Some(w) = (*self.dequeue_waker.get()).take() {
                 w.wake();
             }

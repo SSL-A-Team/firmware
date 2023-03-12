@@ -4,6 +4,8 @@
 #![feature(const_mut_refs)]
 #![feature(async_closure)]
 
+use core::f32::consts::PI;
+
 use defmt_rtt as _;
 use defmt::*;
 use embassy_stm32::{
@@ -139,13 +141,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // front right IO
     let front_right_uart_config = stm32_interface::get_bootloader_uart_config();
-    let front_right_usart = Uart::new(p.UART5, p.PB12, p.PB6, p.DMA1_CH0, p.DMA1_CH1, front_right_uart_config);
+    let front_right_int = interrupt::take!(UART5);
+    let front_right_usart = Uart::new(p.UART5, p.PB12, p.PB6, front_right_int, p.DMA1_CH0, p.DMA1_CH1, front_right_uart_config);
     let (front_right_tx, front_right_rx) = front_right_usart.split();
     let front_right_boot0_pin = Output::new(p.PB1, Level::Low, Speed::Medium); // boot0 not active
 
     // register front right uart primitives with executor
-    let front_right_int = interrupt::take!(UART5);
-    spawner.spawn(FRONT_RIGHT_QUEUE_RX.spawn_task(front_right_rx, front_right_int)).unwrap();
+    spawner.spawn(FRONT_RIGHT_QUEUE_RX.spawn_task(front_right_rx)).unwrap();
     spawner.spawn(FRONT_RIGHT_QUEUE_TX.spawn_task(front_right_tx)).unwrap();
 
     // initialize the wheel
@@ -158,13 +160,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // front left IO
     let front_left_uart_config = stm32_interface::get_bootloader_uart_config();
-    let front_left_usart = Uart::new(p.UART7, p.PF6, p.PF7, p.DMA1_CH2, p.DMA1_CH3, front_left_uart_config);
+    let front_left_int = interrupt::take!(UART7);
+    let front_left_usart = Uart::new(p.UART7, p.PF6, p.PF7, front_left_int, p.DMA1_CH2, p.DMA1_CH3, front_left_uart_config);
     let (front_left_tx, front_left_rx) = front_left_usart.split();
     let front_left_boot0_pin = Output::new(p.PG2, Level::Low, Speed::Medium); // boot0 not active
 
     // register front left uart primitives with executor
-    let front_left_int = interrupt::take!(UART7);
-    spawner.spawn(FRONT_LEFT_QUEUE_RX.spawn_task(front_left_rx, front_left_int)).unwrap();
+    spawner.spawn(FRONT_LEFT_QUEUE_RX.spawn_task(front_left_rx)).unwrap();
     spawner.spawn(FRONT_LEFT_QUEUE_TX.spawn_task(front_left_tx)).unwrap();
 
     // initialize the wheel
@@ -177,13 +179,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // back left IO
     let back_left_uart_config = stm32_interface::get_bootloader_uart_config();
-    let back_left_usart = Uart::new(p.UART4, p.PD0, p.PD1, p.DMA1_CH4, p.DMA1_CH5, back_left_uart_config);
+    let back_left_int = interrupt::take!(UART4);
+    let back_left_usart = Uart::new(p.UART4, p.PD0, p.PD1, back_left_int, p.DMA1_CH4, p.DMA1_CH5, back_left_uart_config);
     let (back_left_tx, back_left_rx) = back_left_usart.split();
     let back_left_boot0_pin = Output::new(p.PG0, Level::Low, Speed::Medium); // boot0 not active
 
     // register front left uart primitives with executor
-    let back_left_int = interrupt::take!(UART4);
-    spawner.spawn(BACK_LEFT_QUEUE_RX.spawn_task(back_left_rx, back_left_int)).unwrap();
+    spawner.spawn(BACK_LEFT_QUEUE_RX.spawn_task(back_left_rx)).unwrap();
     spawner.spawn(BACK_LEFT_QUEUE_TX.spawn_task(back_left_tx)).unwrap();
 
     // initialize the wheel
@@ -196,13 +198,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // back right IO
     let back_right_uart_config = stm32_interface::get_bootloader_uart_config();
-    let back_right_usart = Uart::new(p.USART3, p.PB11, p.PB10, p.DMA1_CH6, p.DMA1_CH7, back_right_uart_config);
+    let back_right_int = interrupt::take!(USART3);
+    let back_right_usart = Uart::new(p.USART3, p.PB11, p.PB10, back_right_int, p.DMA1_CH6, p.DMA1_CH7, back_right_uart_config);
     let (back_right_tx, back_right_rx) = back_right_usart.split();
     let back_right_boot0_pin = Output::new(p.PF4, Level::Low, Speed::Medium); // boot0 not active
 
     // register back right uart primitives with executor
-    let back_right_int = interrupt::take!(USART3);
-    spawner.spawn(BACK_RIGHT_QUEUE_RX.spawn_task(back_right_rx, back_right_int)).unwrap();
+    spawner.spawn(BACK_RIGHT_QUEUE_RX.spawn_task(back_right_rx)).unwrap();
     spawner.spawn(BACK_RIGHT_QUEUE_TX.spawn_task(back_right_tx)).unwrap();
 
     // initialize the wheel
@@ -228,6 +230,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
         back_right_motor.load_default_firmware_image()
     ).await;
 
+    info!("after load firmware");
+
     // leave reset
     // don't pull the chip out of reset until we're ready to read packets or we'll fill the queue
     embassy_futures::join::join4(front_right_motor.leave_reset(), 
@@ -235,15 +239,19 @@ async fn main(_spawner: embassy_executor::Spawner) {
         back_left_motor.leave_reset(), 
         back_right_motor.leave_reset()).await;
 
+    info!("after leave reset");
+
     front_right_motor.set_telemetry_enabled(true);
     front_left_motor.set_telemetry_enabled(true);
     back_left_motor.set_telemetry_enabled(true);
     back_right_motor.set_telemetry_enabled(true);
 
+    info!("after telemetry enable");
+
     // need to have telem off by default and enabled later
     // theres a race condition to begin processing packets from the first part out
     // of reset and waiting for the last part to boot up
-    Timer::after(Duration::from_millis(10)).await;
+    Timer::after(Duration::from_millis(5)).await;
 
     // front_right_motor.leave_reset().await;
     // front_left_motor.leave_reset().await;
@@ -272,6 +280,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     let robot_model: RobotModel = RobotModel::new(robot_model_constants);
 
+    info!("before");
+    Timer::after(Duration::from_millis(1000)).await;
+
     /////////////////
     //  main loop  //
     /////////////////
@@ -280,16 +291,23 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
 
     // let mut angle: f32 = 0.0;
-    let angle: f32 = core::f32::consts::PI / 4.0;
+    let mut angle: f32 = core::f32::consts::PI / 2.0;
     loop {
+        // info!("tick");
         front_right_motor.process_packets();
         front_left_motor.process_packets();
         back_left_motor.process_packets();
         back_right_motor.process_packets();
 
-        let vel = 0.0005; // DC
-        let cmd_vel: Vector3<f32> = Vector3::new(libm::sinf(angle) * vel, libm::cosf(angle) * vel, 0.0);
+        let vel = 0.1; // DC
+        let cmd_vel: Vector3<f32> = Vector3::new(libm::cosf(angle) * vel, libm::sinf(angle) * vel, 0.0);
+        defmt::info!("cmd vel [{:?},{:?},{:?}]", cmd_vel[0], cmd_vel[1], cmd_vel[2]);
         let wheel_vels = robot_model.robot_vel_to_wheel_vel(cmd_vel);
+        defmt::info!("set duty cycles [{:?},{:?},{:?},{:?}]", wheel_vels[0],  wheel_vels[1],  wheel_vels[2],  wheel_vels[3]);
+        let rec_body_vel = robot_model.wheel_vel_to_robot_vel(wheel_vels);
+        defmt::info!("rec_body_vel [{:?},{:?},{:?}]", rec_body_vel[0], rec_body_vel[1], rec_body_vel[2]);
+
+
 
         // let c_vel = libm::sinf(angle) / 2.0;
         // let c_vel = 0.2;
@@ -297,18 +315,27 @@ async fn main(_spawner: embassy_executor::Spawner) {
         front_left_motor.set_setpoint(wheel_vels[1]);
         back_left_motor.set_setpoint(wheel_vels[2]);
         back_right_motor.set_setpoint(wheel_vels[3]);
-        // angle += core::f32::consts::FRAC_2_PI / 200.0;
+        angle += core::f32::consts::FRAC_2_PI / 200.0;
 
         // let c_vel = 0.2;
         // front_right_motor.set_setpoint(c_vel);
         // front_left_motor.set_setpoint(c_vel);
         // back_left_motor.set_setpoint(c_vel);
         // back_right_motor.set_setpoint(c_vel);
+        // front_right_motor.set_setpoint(1.0);
 
         front_right_motor.send_motion_command();
         front_left_motor.send_motion_command();
         back_left_motor.send_motion_command();
         back_right_motor.send_motion_command();
+
+        defmt::info!("FR = torque: {:?}, RPM {:?}", front_right_motor.read_current(), front_right_motor.read_rpm());
+        // defmt::info!("encoder delta: {:?}", front_right_motor.read_encoder_delta());
+        // defmt::info!("vel rad/s: {:?}", front_right_motor.read_rads() * 60.0 / (2.0 * PI));
+        // defmt::info!("vel rad/s: {:?}", front_right_motor.read_rads());
+        // defmt::info!("vel RPM: {:?}", front_right_motor.read_rads() * 60.0 / (2.0 * PI));
+
+
 
         main_loop_rate_ticker.next().await;
     }

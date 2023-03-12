@@ -44,12 +44,9 @@
 #define TORQUE_LOOP_RATE_MS 1
 #define TORQUE_LOOP_RATE_S ((float) TORQUE_LOOP_RATE_MS / (float) MS_PER_S)
 
-////////////////////////
-//  FILTERING/TUNING  //
-////////////////////////
-
-#define ENCODER_IIR_TF_MS 0.20f
-#define DC_IIR_TF_MS 0.20f
 
 
-#define MOTOR_MAXIMUM_RAD_S 550.825911929f
+
+
+
+// #define MOTOR_MAXIMUM_RAD_S 550.825911929f
