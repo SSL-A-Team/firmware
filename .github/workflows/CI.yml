@@ -31,9 +31,9 @@ jobs:
         shell: bash
         run: |
           nix develop -c make clean
-          nix develop -c make stspin-all
+          nix develop -c make motor-controller-all
       - name: Build Motorboard Firmware
         shell: bash
         run: |
           nix develop -c make clean
-          nix develop -c make motorboard-all
+          nix develop -c make control-board-all
