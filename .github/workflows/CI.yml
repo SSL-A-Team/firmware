@@ -21,6 +21,11 @@ jobs:
         run: |
           nix flake check
           nix develop -c arm-none-eabi-gcc --version
+      - name: Build Common Libraries
+        shell: bash
+        run: |
+          nix develop -c make common-clean
+          nix develop -c make common-all 
       - name: Build Common Packets
         shell: bash
         run: |
