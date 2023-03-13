@@ -11,7 +11,7 @@ use embassy_stm32::{
     peripherals::{DMA1_CH0, DMA1_CH1, UART7},
     usart::{self, Uart},
 };
-use motor_embassy::{
+use ateam_control_board::{
     queue::{self, Buffer},
     uart_queue::{UartReadQueue, UartWriteQueue},
 };

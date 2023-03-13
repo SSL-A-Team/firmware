@@ -11,7 +11,7 @@ use embassy_stm32::{
     usart::Uart,
 };
 use embassy_time::{Duration, Timer};
-use motor_embassy::{
+use ateam_control_board::{
     include_external_cpp_bin,
     queue::Buffer,
     robot_model::{RobotConstants, RobotModel},

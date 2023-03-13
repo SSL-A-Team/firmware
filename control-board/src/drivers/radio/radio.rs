@@ -440,7 +440,7 @@ impl<
 //         Dma: usart::RxDma<UART>,
 //         const LEN: usize,
 //         const DEPTH: usize,
-//     > Reader<'a> for motor_embassy::uart_queue::UartReadQueue<'a, UART, Dma, LEN, DEPTH>
+//     > Reader<'a> for ateam_control_board::uart_queue::UartReadQueue<'a, UART, Dma, LEN, DEPTH>
 // {
 //     type F<RET, FN: FnOnce(&[u8]) -> RET> = impl Future<Output = Result<RET, ()>> where Self: 'a;
 
@@ -455,7 +455,7 @@ impl<
 //         Dma: usart::TxDma<UART>,
 //         const LEN: usize,
 //         const DEPTH: usize,
-//     > Writer<'a> for motor_embassy::uart_queue::UartWriteQueue<'a, UART, Dma, LEN, DEPTH>
+//     > Writer<'a> for ateam_control_board::uart_queue::UartWriteQueue<'a, UART, Dma, LEN, DEPTH>
 // {
 //     type F<FN: FnOnce(&mut [u8]) -> usize> = impl Future<Output = Result<(), ()>> where Self: 'a;
 

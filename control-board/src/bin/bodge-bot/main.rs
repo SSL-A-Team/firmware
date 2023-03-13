@@ -16,7 +16,7 @@ use embassy_stm32::{
 };
 use embassy_time::{Duration, Ticker, Timer};
 use futures_util::StreamExt;
-use motor_embassy::{
+use ateam_control_board::{
     drivers::{radio::TeamColor, rotary::Rotary, shell_indicator::ShellIndicator},
     stm32_interface::get_bootloader_uart_config,
 };

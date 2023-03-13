@@ -13,8 +13,8 @@ use embassy_stm32::{
     interrupt::{self, InterruptExt},
     peripherals::{DMA1_CH0, DMA1_CH1, UART7},
 };
-use motor_embassy::queue;
-use motor_embassy::uart_queue::{UartReadQueue, UartWriteQueue};
+use ateam_control_board::queue;
+use ateam_control_board::uart_queue::{UartReadQueue, UartWriteQueue};
 use panic_probe as _;
 use static_cell::StaticCell;
 

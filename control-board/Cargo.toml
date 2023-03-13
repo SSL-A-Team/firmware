@@ -1,5 +1,5 @@
 [package]
-name = "motor-embassy"
+name = "ateam-control-board"
 version = "0.1.0"
 edition = "2021"
 
@@ -58,7 +58,7 @@ test = false
 harness = false
 
 [[bin]]
-name = "motor-embassy"
+name = "ateam-control-board"
 test = false
 harness = false
 

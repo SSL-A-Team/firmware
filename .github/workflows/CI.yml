@@ -25,19 +25,26 @@ jobs:
         shell: bash
         run: |
           nix develop -c make common-clean
-          nix develop -c make common-all 
+          nix develop -c make common-all
+      - name: Test Common Libraries
+        shell: bash
+        run: |
+          nix develop -c make common-test
       - name: Build Common Packets
         shell: bash
         run: |
           nix develop -c make software-communication-clean
           nix develop -c make software-communication-build
+      - name: Test Common Packets
+        shell: bash
+        run: |
           nix develop -c make software-communication-test
-      - name: Build Stspin Firmware
+      - name: Build Motor Controller Firmware
         shell: bash
         run: |
           nix develop -c make clean
           nix develop -c make motor-controller-all
-      - name: Build Motorboard Firmware
+      - name: Build Control Board Firmware
         shell: bash
         run: |
           nix develop -c make clean

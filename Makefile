@@ -1,3 +1,5 @@
+.PHONY: test
+
 ############################
 #  software communication  #
 ############################
@@ -43,6 +45,11 @@ $1-$2-debug-run:
 	cargo run --bin $2
 endef
 $(foreach element,$(common_binaries),$(eval $(call create-common-targets,common,$(element))))
+
+common-test:
+	cd common/ && \
+	cargo test
+test:: common-test
 
 common-clean:
 	cd common && \

@@ -7,7 +7,7 @@ use embassy_executor::{raw::TaskStorage, SendSpawner, SpawnToken};
 use embassy_stm32::{gpio::Pin, interrupt::Interrupt, usart, Peripheral};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::Duration;
-use motor_embassy::{
+use ateam_control_board::{
     drivers::radio::{RobotRadio, TeamColor},
     queue,
     uart_queue::{UartReadQueue, UartWriteQueue},

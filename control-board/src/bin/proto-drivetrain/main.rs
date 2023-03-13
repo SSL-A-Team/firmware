@@ -23,7 +23,7 @@ use nalgebra::{Vector4, Vector3};
 use panic_probe as _;
 use static_cell::StaticCell;
 
-use motor_embassy::{
+use ateam_control_board::{
     stm32_interface::{Stm32Interface, self},
     queue::Buffer,
     uart_queue::{UartReadQueue, UartWriteQueue},
