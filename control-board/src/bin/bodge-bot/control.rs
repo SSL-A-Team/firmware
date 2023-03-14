@@ -23,9 +23,8 @@ use nalgebra::{Vector3, Vector4};
 
 use crate::pins::*;
 
-include_external_cpp_bin! {STEVAL3204_DRIB_POTCTRL_FW_IMG, "dev3204-drib-potctrl.bin"}
-include_external_cpp_bin! {STEVAL3204_DRIB_FW_IMG, "dev3204-drib.bin"}
-include_external_cpp_bin! {STEVAL3204_WHEEL_FW_IMG, "dev3204-wheel.bin"}
+include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
+include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 
 // motor pinout
 // FrontRight Wheel - UART5  - tx pb6,  pb12,    boot pb1,  rst pb2, DMA1 0/1
@@ -199,8 +198,8 @@ impl Control {
         drib_reset_pin: MotorDResetPin,
         ball_detected_thresh: f32,
     ) -> Control {
-        let wheel_firmware_image = STEVAL3204_WHEEL_FW_IMG;
-        let drib_firmware_image = STEVAL3204_DRIB_FW_IMG;
+        let wheel_firmware_image = WHEEL_FW_IMG;
+        let drib_firmware_image = DRIB_FW_IMG;
 
         let (front_right_tx, front_right_rx) = front_right_usart.split();
         let (front_left_tx, front_left_rx) = front_left_usart.split();
