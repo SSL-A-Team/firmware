@@ -92,9 +92,8 @@ typedef enum
 // transfers
 typedef struct 
 __attribute__((__packed__)) ADC_Result {
-    uint16_t    V_pot;
+    uint16_t    I_motor_filt;
     uint16_t    I_motor;
-    uint16_t    V_motor;
     uint16_t    T_spin;
     uint16_t    V_int;
     CS_Status_t status;

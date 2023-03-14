@@ -37,6 +37,13 @@ int main() {
     uint32_t rcc_csr = RCC->CSR;
     RCC->CSR |= RCC_CSR_RMVF;
 
+    // turn off LEDs
+    GPIOB->BSRR |= GPIO_BSRR_BR_6;
+    GPIOB->BSRR |= GPIO_BSRR_BR_7;
+
+    // turn on Red LED
+    GPIOB->BSRR |= GPIO_BSRR_BS_6;
+
     // Setups clocks
     setup();
 
@@ -48,8 +55,8 @@ int main() {
     while (IWDG->SR) {} // wait for value to take
     IWDG->KR = 0x0000AAAA; // feed the watchdog
 
-    GPIOB->BSRR |= GPIO_BSRR_BR_8;
-    GPIOB->BSRR |= GPIO_BSRR_BR_9;
+    GPIOB->BSRR |= GPIO_BSRR_BR_6;
+    GPIOB->BSRR |= GPIO_BSRR_BR_7;
 
     GPIOB->BSRR |= GPIO_BSRR_BS_8;
 
@@ -143,6 +150,10 @@ int main() {
     pid_initialize(&torque_pid, &torque_pid_constants);
 
     torque_pid_constants.kP = 1.0f;
+
+    // turn off LEDs
+    GPIOB->BSRR |= GPIO_BSRR_BR_6;
+    GPIOB->BSRR |= GPIO_BSRR_BS_7;
 
     // toggle J1-1
     while (true) {
@@ -238,6 +249,11 @@ int main() {
             r_motor_board = 0.0f;
         }
 
+        // if any critical error is latched, coast the motor
+        if (response_packet.data.motion.master_error) {
+            r_motor_board = 0.0f;
+        }
+
         // determine which loops need to be run
         bool run_torque_loop = time_sync_ready_rst(&torque_loop_timer);
         bool run_vel_loop = time_sync_ready_rst(&vel_loop_timer);
@@ -246,7 +262,7 @@ int main() {
         if (run_torque_loop) {
             // recover torque using the shunt voltage drop, amplification network model and motor model
             // pct of voltage range 0-3.3V
-            float current_sense_shunt_v = ((float) res.I_motor / (float) UINT16_MAX) * AVDD_V;
+            float current_sense_shunt_v = ((float) res.I_motor_filt / (float) UINT16_MAX) * AVDD_V;
             // map voltage given by the amp network to current
             float current_sense_I = mm_voltage_to_current(&df45_model, current_sense_shunt_v);
             // map current to torque using the motor model
@@ -317,6 +333,9 @@ int main() {
 
 
         if (run_torque_loop || run_vel_loop) {
+            // detect if the encoder is not pulling the detect pin down
+            bool encoder_disconnected = (GPIOB->IDR | GPIO_IDR_5) != 0;
+
             // set the motor duty cycle
             if (motion_control_type == OPEN_LOOP) {
                 pwm6step_set_duty_cycle_f(r_motor_board);
@@ -332,7 +351,6 @@ int main() {
             const MotorErrors_t reported_motor_errors = pwm6step_get_motor_errors();
 
             response_packet.type = MCP_MOTION;
-            response_packet.data.motion.master_error = false; // TODO update any error
 
             // bldc errors
             response_packet.data.motion.hall_power_error = reported_motor_errors.hall_power;
@@ -341,7 +359,7 @@ int main() {
             response_packet.data.motion.bldc_commutation_watchdog_error = reported_motor_errors.commutation_watchdog_timeout;
 
             // encoder errors
-            response_packet.data.motion.enc_disconnected_error = false;
+            response_packet.data.motion.enc_disconnected_error = encoder_disconnected;
             response_packet.data.motion.enc_decoding_error = false;
 
             // velocity checks
@@ -358,10 +376,22 @@ int main() {
             // loop time
             response_packet.data.motion.control_loop_time_error = false;
 
+            // master error
+            response_packet.data.motion.master_error = response_packet.data.motion.hall_power_error
+                    || response_packet.data.motion.hall_power_error
+                    || response_packet.data.motion.hall_disconnected_error
+                    || response_packet.data.motion.bldc_transition_error
+                    || response_packet.data.motion.bldc_commutation_watchdog_error
+                    || response_packet.data.motion.enc_disconnected_error
+                    || response_packet.data.motion.enc_decoding_error
+                    || response_packet.data.motion.hall_enc_vel_disagreement_error
+                    || response_packet.data.motion.overcurrent_error
+                    || response_packet.data.motion.undervoltage_error
+                    || response_packet.data.motion.overvoltage_error
+                    || response_packet.data.motion.control_loop_time_error;
+
             // timestamp
             response_packet.data.motion.timestamp = time_local_epoch_s();
-
-
 
             // transmit packets
 #ifdef UART_ENABLED

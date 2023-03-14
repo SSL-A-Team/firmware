@@ -43,7 +43,7 @@ void DMA1_Channel1_IRQHandler() {
  */
 void currsen_read(ADC_Result_t *res)
 {
-    const int NUM_CHANNELS = 5;
+    const int NUM_CHANNELS = 4;
 
     ADC1->CR |= ADC_CR_ADSTART;
 
@@ -77,19 +77,16 @@ void currsen_read(ADC_Result_t *res)
             switch (i)
             {
                 case 0:
-                    res->V_pot = currADC;
+                    res->I_motor_filt = currADC;
                     //return;
                     break;
                 case 1:
                     res->I_motor = currADC;
                     break;
                 case 2:
-                    res->V_motor = currADC;
-                    break;
-                case 3:
                     res->T_spin = currADC;
                     break;
-                case 4:
+                case 3:
                     res->V_int = currADC;
                     return;
                     //return res;

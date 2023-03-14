@@ -156,6 +156,7 @@ inline void setup_io() {
     RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
 
     GPIOA->MODER &= ~(GPIO_MODER_MODER5_0 | GPIO_MODER_MODER5_1);  // set input, encoder det
+    GPIOA->PUPDR |= (GPIO_PUPDR_PUPDR5_0);                         // pull encoder det high
     GPIOB->MODER &= ~(GPIO_MODER_MODER1_0 | GPIO_MODER_MODER1_1);  // set input, encoder z
 
     GPIOB->MODER |= GPIO_MODER_MODER6_0;  // set output, Red LED, Err
