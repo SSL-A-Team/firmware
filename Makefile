@@ -68,16 +68,16 @@ common-clean:
 motor_controller_binaries := ${shell cd motor-controller/bin && ls -d * && cd ../..}
 
 define create-motor-controller-targets
-$1: .motor-controller-setup
+mc-$1: .motor-controller-setup
 	cd motor-controller/build/ && \
 	make $1
-motor-controller-all:: $1
+motor-controller-all:: mc-$1
 
-$1-prog: $1
+mc-$1-prog: mc-$1
 	cd motor-controller/build/ && \
 	make $1-prog
 
-$1-gdb: $1
+mc-$1-gdb: mc-$1
 	cd motor-controller/build/ && \
 	make $1-gdb
 endef
