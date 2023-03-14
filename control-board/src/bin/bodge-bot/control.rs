@@ -45,65 +45,65 @@ const TICKS_WITHOUT_PACKET_STOP: u16 = 25;
 #[link_section = ".axisram.buffers"]
 static mut FRONT_RIGHT_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
     [Buffer::EMPTY; TX_BUF_DEPTH];
-static FRONT_RIGHT_QUEUE_TX: UartWriteQueue<UART5, DMA1_CH0, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
+static FRONT_RIGHT_QUEUE_TX: UartWriteQueue<MotorFRUart, MotorFRDmaTx, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
     UartWriteQueue::new(unsafe { &mut FRONT_RIGHT_BUFFERS_TX });
 
 #[link_section = ".axisram.buffers"]
 static mut FRONT_RIGHT_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
     [Buffer::EMPTY; RX_BUF_DEPTH];
-static FRONT_RIGHT_QUEUE_RX: UartReadQueue<UART5, DMA1_CH1, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
+static FRONT_RIGHT_QUEUE_RX: UartReadQueue<MotorFRUart, MotorFRDmaRx, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
     UartReadQueue::new(unsafe { &mut FRONT_RIGHT_BUFFERS_RX });
 
 // buffers for front left
 #[link_section = ".axisram.buffers"]
 static mut FRONT_LEFT_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
     [Buffer::EMPTY; TX_BUF_DEPTH];
-static FRONT_LEFT_QUEUE_TX: UartWriteQueue<UART7, DMA1_CH2, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
+static FRONT_LEFT_QUEUE_TX: UartWriteQueue<MotorFLUart, MotorFLDmaTx, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
     UartWriteQueue::new(unsafe { &mut FRONT_LEFT_BUFFERS_TX });
 
 #[link_section = ".axisram.buffers"]
 static mut FRONT_LEFT_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
     [Buffer::EMPTY; RX_BUF_DEPTH];
-static FRONT_LEFT_QUEUE_RX: UartReadQueue<UART7, DMA1_CH3, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
+static FRONT_LEFT_QUEUE_RX: UartReadQueue<MotorFLUart, MotorFLDmaRx, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
     UartReadQueue::new(unsafe { &mut FRONT_LEFT_BUFFERS_RX });
 
 // buffers for back left
 #[link_section = ".axisram.buffers"]
 static mut BACK_LEFT_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
     [Buffer::EMPTY; TX_BUF_DEPTH];
-static BACK_LEFT_QUEUE_TX: UartWriteQueue<UART4, DMA1_CH4, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
+static BACK_LEFT_QUEUE_TX: UartWriteQueue<MotorBLUart, MotorBLDmaTx, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
     UartWriteQueue::new(unsafe { &mut BACK_LEFT_BUFFERS_TX });
 
 #[link_section = ".axisram.buffers"]
 static mut BACK_LEFT_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
     [Buffer::EMPTY; RX_BUF_DEPTH];
-static BACK_LEFT_QUEUE_RX: UartReadQueue<UART4, DMA1_CH5, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
+static BACK_LEFT_QUEUE_RX: UartReadQueue<MotorBLUart, MotorBLDmaRx, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
     UartReadQueue::new(unsafe { &mut BACK_LEFT_BUFFERS_RX });
 
 // buffers for back right
 #[link_section = ".axisram.buffers"]
 static mut BACK_RIGHT_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
     [Buffer::EMPTY; TX_BUF_DEPTH];
-static BACK_RIGHT_QUEUE_TX: UartWriteQueue<USART3, DMA1_CH6, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
+static BACK_RIGHT_QUEUE_TX: UartWriteQueue<MotorBRUart, MotorBRDmaTx, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
     UartWriteQueue::new(unsafe { &mut BACK_RIGHT_BUFFERS_TX });
 
 #[link_section = ".axisram.buffers"]
 static mut BACK_RIGHT_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
     [Buffer::EMPTY; RX_BUF_DEPTH];
-static BACK_RIGHT_QUEUE_RX: UartReadQueue<USART3, DMA1_CH7, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
+static BACK_RIGHT_QUEUE_RX: UartReadQueue<MotorBRUart, MotorBRDmaRx, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
     UartReadQueue::new(unsafe { &mut BACK_RIGHT_BUFFERS_RX });
 
 // buffers for dribbler
 #[link_section = ".axisram.buffers"]
 static mut DRIB_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
     [Buffer::EMPTY; TX_BUF_DEPTH];
-static DRIB_QUEUE_TX: UartWriteQueue<USART6, DMA2_CH2, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
+static DRIB_QUEUE_TX: UartWriteQueue<MotorDUart, MotorDDmaTx, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
     UartWriteQueue::new(unsafe { &mut DRIB_BUFFERS_TX });
 
 #[link_section = ".axisram.buffers"]
 static mut DRIB_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
     [Buffer::EMPTY; RX_BUF_DEPTH];
-static DRIB_QUEUE_RX: UartReadQueue<USART6, DMA2_CH3, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
+static DRIB_QUEUE_RX: UartReadQueue<MotorDUart, MotorDDmaRx, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
     UartReadQueue::new(unsafe { &mut DRIB_BUFFERS_RX });
 
 const WHEEL_ANGLES_DEG: Vector4<f32> = Vector4::new(30.0, 150.0, 225.0, 315.0);
