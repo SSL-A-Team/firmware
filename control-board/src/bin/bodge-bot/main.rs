@@ -65,19 +65,19 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let spawner = executor.start();
 
     spawner
-        .spawn(power_off_task(p.PD15, p.EXTI15, p.PD14))
+        .spawn(power_off_task(p.PF5, p.EXTI5, p.PF4))
         .unwrap();
 
-    let radio_int = interrupt::take!(USART2);
+    let radio_int = interrupt::take!(USART10);
     let radio_usart = Uart::new(
-        p.USART2, p.PD6, p.PD5, radio_int, p.DMA2_CH0, p.DMA2_CH1, config,
+        p.USART10, p.PE2, p.PE3, radio_int, p.DMA2_CH0, p.DMA2_CH1, config,
     );
 
-    let rotary = Rotary::new(p.PG6, p.PG5, p.PG4, p.PG8);
-    let mut shell_indicator = ShellIndicator::new(p.PE10, p.PD11, p.PD12, p.PD13);
-    let team_dip0 = Input::new(p.PE12, Pull::Down);
+    let rotary = Rotary::new(p.PG9, p.PG10, p.PG11, p.PG12);
+    let mut shell_indicator = ShellIndicator::new(p.PD0, p.PD1, p.PD3, p.PD4);
+    let team_dip0 = Input::new(p.PD14, Pull::Down);
 
-    let mut kicker = Output::new(p.PF9, Level::Low, Speed::High);
+    // let mut kicker = Output::new(p.PF9, Level::Low, Speed::High);
 
     let robot_id = rotary.read();
     info!("id: {}", robot_id);
@@ -88,52 +88,52 @@ async fn main(_spawner: embassy_executor::Spawner) {
         TeamColor::Yellow
     };
 
-    let front_right_int = interrupt::take!(UART5);
-    let front_left_int = interrupt::take!(UART7);
-    let back_left_int = interrupt::take!(UART4);
-    let back_right_int = interrupt::take!(USART3);
-    let drib_int = interrupt::take!(USART6);
+    let front_right_int = interrupt::take!(USART1);
+    let front_left_int = interrupt::take!(UART4);
+    let back_left_int = interrupt::take!(UART7);
+    let back_right_int = interrupt::take!(UART8);
+    let drib_int = interrupt::take!(UART5);
 
     let front_right_usart = Uart::new(
-        p.UART5,
-        p.PB12,
-        p.PB6,
+        p.USART1,
+        p.PB15,
+        p.PB14,
         front_right_int,
         p.DMA1_CH0,
         p.DMA1_CH1,
         get_bootloader_uart_config(),
     );
     let front_left_usart = Uart::new(
-        p.UART7,
-        p.PF6,
-        p.PF7,
+        p.UART4,
+        p.PA1,
+        p.PA0,
         front_left_int,
         p.DMA1_CH2,
         p.DMA1_CH3,
         get_bootloader_uart_config(),
     );
     let back_left_usart = Uart::new(
-        p.UART4,
-        p.PD0,
-        p.PD1,
+        p.UART7,
+        p.PF6,
+        p.PF7,
         back_left_int,
         p.DMA1_CH4,
         p.DMA1_CH5,
         get_bootloader_uart_config(),
     );
     let back_right_usart = Uart::new(
-        p.USART3,
-        p.PB11,
-        p.PB10,
+        p.UART8,
+        p.PE0,
+        p.PE1,
         back_right_int,
         p.DMA1_CH6,
         p.DMA1_CH7,
         get_bootloader_uart_config(),
     );
     let drib_usart = Uart::new(
-        p.USART6,
-        p.PG9,
-        p.PC6,
+        p.UART5,
+        p.PB12,
+        p.PB13,
         drib_int,
         p.DMA2_CH2,
         p.DMA2_CH3,
@@ -148,16 +148,16 @@ async fn main(_spawner: embassy_executor::Spawner) {
         back_left_usart,
         back_right_usart,
         drib_usart,
-        p.PB1,
-        p.PG2,
-        p.PG0,
-        p.PF4,
-        p.PC2,
-        p.PB2,
-        p.PG3,
-        p.PG1,
-        p.PA3,
-        p.PE9,
+        p.PD8,
+        p.PC1,
+        p.PF8,
+        p.PB9,
+        p.PD13,
+        p.PD9,
+        p.PC0,
+        p.PF9,
+        p.PB8,
+        p.PD12,
         ball_detected_thresh,
     );
 
@@ -175,7 +175,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
                 RadioTxDMA,
                 RadioReset,
             >))
-            .setup(&spawner, radio_usart, p.PC0, robot_id, team)
+            .setup(&spawner, radio_usart, p.PC13, robot_id, team)
             .await
     };
     spawner.spawn(token).unwrap();
@@ -192,9 +192,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
         if let Some(latest) = &latest {
             if last_kicked > 100 && latest.kick_request == KickRequest::KR_KICK_NOW {
-                kicker.set_high();
-                Timer::after(Duration::from_micros(3500)).await;
-                kicker.set_low();
+                // kicker.set_high();
+                // Timer::after(Duration::from_micros(3500)).await;
+                // kicker.set_low();
                 last_kicked = 0;
             }
         }
