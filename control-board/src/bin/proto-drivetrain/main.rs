@@ -30,9 +30,9 @@ use ateam_control_board::{
     include_external_cpp_bin, stspin_motor::WheelMotor, robot_model::{RobotConstants, self, RobotModel},
 };
 
-include_external_cpp_bin!{STEVAL3204_DRIB_POTCTRL_FW_IMG, "dev3204-drib-potctrl.bin"}
-include_external_cpp_bin!{STEVAL3204_DRIB_FW_IMG, "dev3204-drib.bin"}
-include_external_cpp_bin!{STEVAL3204_WHEEL_FW_IMG, "dev3204-wheel.bin"}
+// include_external_cpp_bin!{STEVAL3204_DRIB_POTCTRL_FW_IMG, "dev3204-drib-potctrl.bin"}
+// include_external_cpp_bin!{STEVAL3204_DRIB_FW_IMG, "dev3204-drib.bin"}
+include_external_cpp_bin!{STEVAL3204_WHEEL_FW_IMG, "wheel.bin"}
 
 
 // motor pinout
@@ -130,8 +130,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     red_led.set_low();
 
 
-    ///////////////////////////////
-    //  initialize peripherials  //
+    ///////////////////////////////STEVAL
     ///////////////////////////////
     
     let wheel_firmware_image = STEVAL3204_WHEEL_FW_IMG;
