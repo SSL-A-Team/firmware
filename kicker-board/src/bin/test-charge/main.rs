@@ -31,5 +31,35 @@ async fn main(_spawner: Spawner) {
     let executor = INTERRUPT_EXECUTOR.init(InterruptExecutor::new(irq));
     let spawner = executor.start();
 
-    loop {}
+    let reg_done = Input::new(p.PB4, Pull::None);
+    let reg_fault = Input::new(p.PB5, Pull::None);
+
+    let mut reg_charge = Output::new(p.PB3, Level::Low, Speed::Medium);
+    let mut status_led_green = Output::new(p.PA11, Level::Low, Speed::Medium);
+    let mut status_led_red = Output::new(p.PA12, Level::Low, Speed::Medium);
+
+    status_led_green.set_high();
+    Timer::after(Duration::from_millis(500)).await;
+    status_led_green.set_low();
+    Timer::after(Duration::from_millis(500)).await;
+
+    reg_charge.set_high();
+    Timer::after(Duration::from_millis(100)).await;
+    reg_charge.set_low();
+
+    loop {
+        reg_charge.set_low();
+
+        if reg_done.is_low() {
+            status_led_green.set_high();
+        } else {
+            status_led_green.set_low();
+        }
+
+        if reg_fault.is_low() {
+            status_led_red.set_high();
+        } else {
+            status_led_red.set_low();
+        }
+    }
 }
