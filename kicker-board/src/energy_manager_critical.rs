@@ -22,17 +22,44 @@
  *   is in an active state.
  */
 
+use crate::pins::{ChargePin, RegulatorDonePin, RegulatorFaultPin, HighVoltageReadPin, BatteryVoltageReadPin};
 
 enum EnergyManagementState {
-
+    FaultInitializeSafetyShutdown,
+    FaultSafetyShutdownComplete,
 }
 
 pub struct CriticalEnergyManager {
+    // external interface    
+    charge_pin: ChargePin,
+    done_pin: RegulatorDonePin,
+    fault_pin: RegulatorFaultPin,
+    high_voltage_feedback_pin: HighVoltageReadPin, 
+    battery_voltage_feedback_pin: BatteryVoltageReadPin,
 
+    // internal peripherals
+
+    // record keeping
 }
 
 impl CriticalEnergyManager {
-    pub fn new() -> CriticalEnergyManager {
-        CriticalEnergyManager {}
+    pub fn new(
+            charge_pin: ChargePin, 
+            done_pin: RegulatorDonePin, 
+            fault_pin: RegulatorFaultPin, 
+            high_voltage_feedback_pin: HighVoltageReadPin, 
+            battery_voltage_feedback_pin: BatteryVoltageReadPin
+    ) -> CriticalEnergyManager {
+        CriticalEnergyManager {
+            charge_pin,
+            done_pin,
+            fault_pin,
+            high_voltage_feedback_pin,
+            battery_voltage_feedback_pin
+        }
+    }
+
+    fn update_tick() {
+        // read adc
     }
 }
