@@ -78,6 +78,12 @@ int main() {
     quadenc_setup();
     quadenc_reset_encoder_delta();
 
+    // pwm6step_set_duty_cycle_f(0.05f);
+
+    // while (1) {
+    //     IWDG->KR = 0x0000AAAA; // feed the watchdog
+    // }
+
     MotorCommandPacket motor_command_packet;
     memset(&motor_command_packet, 0, sizeof(MotorCommandPacket));
 
@@ -334,7 +340,7 @@ int main() {
 
         if (run_torque_loop || run_vel_loop) {
             // detect if the encoder is not pulling the detect pin down
-            bool encoder_disconnected = (GPIOB->IDR | GPIO_IDR_5) != 0;
+            bool encoder_disconnected = (GPIOA->IDR & GPIO_IDR_5) != 0;
 
             // set the motor duty cycle
             if (motion_control_type == OPEN_LOOP) {
