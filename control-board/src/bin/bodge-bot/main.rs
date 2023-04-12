@@ -3,7 +3,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(const_mut_refs)]
 
-use ateam_common_packets::bindings_radio::KickRequest;
+use ateam_common_packets::bindings_radio::{KickRequest, BasicControl};
 use control::Control;
 use defmt::info;
 use embassy_stm32::{
@@ -63,6 +63,15 @@ async fn main(_spawner: embassy_executor::Spawner) {
     irq.set_priority(interrupt::Priority::P6);
     let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
     let spawner = executor.start();
+
+    // info!("booted");
+
+    // let mut led0 = Output::new(p.PF3, Level::Low, Speed::High);
+
+    // loop {
+    //     Timer::after(Duration::from_millis(1000)).await;
+    //     led0.toggle();
+    // };
 
     spawner
         .spawn(power_off_task(p.PF5, p.EXTI5, p.PF4))
@@ -163,33 +172,43 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     control.load_firmware().await;
 
-    let token = unsafe {
-        (&mut *(&RADIO_TEST as *const _
-            as *mut RadioTest<
-                MAX_TX_PACKET_SIZE,
-                MAX_RX_PACKET_SIZE,
-                TX_BUF_DEPTH,
-                RX_BUF_DEPTH,
-                RadioUART,
-                RadioRxDMA,
-                RadioTxDMA,
-                RadioReset,
-            >))
-            .setup(&spawner, radio_usart, p.PC13, robot_id, team)
-            .await
-    };
-    spawner.spawn(token).unwrap();
+    // loop {}
+
+    // let token = unsafe {
+    //     (&mut *(&RADIO_TEST as *const _
+    //         as *mut RadioTest<
+    //             MAX_TX_PACKET_SIZE,
+    //             MAX_RX_PACKET_SIZE,
+    //             TX_BUF_DEPTH,
+    //             RX_BUF_DEPTH,
+    //             RadioUART,
+    //             RadioRxDMA,
+    //             RadioTxDMA,
+    //             RadioReset,
+    //         >))
+    //         .setup(&spawner, radio_usart, p.PC13, robot_id, team)
+    //         .await
+    // };
+    // spawner.spawn(token).unwrap();
 
     let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
 
     let mut last_kicked = 1000;
     loop {
-        let latest = RADIO_TEST.get_latest_control();
+        // let latest = RADIO_TEST.get_latest_control();
+        let latest = Some(BasicControl{
+            vel_x_linear: 0.,
+            vel_y_linear: 0.,
+            vel_z_angular: 0.05,
+            kick_vel: 0.,
+            dribbler_speed: 0.,
+            kick_request: 0,
+        });
         let telemetry = control.tick(latest);
         if let Some(telemetry) = telemetry {
-            RADIO_TEST.send_telemetry(telemetry).await;
+            // info!("{:?}", defmt::Debug2Format(&telemetry));
+        //     RADIO_TEST.send_telemetry(telemetry).await;
         }
-
         if let Some(latest) = &latest {
             if last_kicked > 100 && latest.kick_request == KickRequest::KR_KICK_NOW {
                 // kicker.set_high();

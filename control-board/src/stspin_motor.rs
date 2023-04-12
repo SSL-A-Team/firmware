@@ -179,11 +179,34 @@ impl<
                     *state.offset(i as isize) = buf[i];
                 }
 
+                
                 // TODO probably do some checksum stuff eventually
-
+                
                 // decode union type, and reinterpret subtype
                 if mrp.type_ == MRP_MOTION {
                     self.current_state = mrp.data.motion;
+                    // info!("{:?}", defmt::Debug2Format(&mrp.data.motion));
+                    info!("\n");
+                    // info!("vel set {:?}", mrp.data.motion.vel_setpoint + 0.);
+                    // info!("vel enc {:?}", mrp.data.motion.vel_enc_estimate + 0.);
+                    // info!("vel hall {:?}", mrp.data.motion.vel_hall_estimate + 0.);
+                    info!("master_error {:?}", mrp.data.motion.master_error());
+                    info!("hall_power_error {:?}", mrp.data.motion.hall_power_error());
+                    info!("hall_disconnected_error {:?}", mrp.data.motion.hall_disconnected_error());
+                    info!("bldc_transition_error {:?}", mrp.data.motion.bldc_transition_error());
+                    info!("bldc_commutation_watchdog_error {:?}", mrp.data.motion.bldc_commutation_watchdog_error());
+                    info!("enc_disconnected_error {:?}", mrp.data.motion.enc_disconnected_error());
+                    info!("enc_decoding_error {:?}", mrp.data.motion.enc_decoding_error());
+                    info!("hall_enc_vel_disagreement_error {:?}", mrp.data.motion.hall_enc_vel_disagreement_error());
+                    info!("overcurrent_error {:?}", mrp.data.motion.overcurrent_error());
+                    info!("undervoltage_error {:?}", mrp.data.motion.undervoltage_error());
+                    info!("overvoltage_error {:?}", mrp.data.motion.overvoltage_error());
+                    info!("torque_limited {:?}", mrp.data.motion.torque_limited());
+                    info!("control_loop_time_error {:?}", mrp.data.motion.control_loop_time_error());
+                    info!("reset_watchdog_independent {:?}", mrp.data.motion.reset_watchdog_independent());
+                    info!("reset_watchdog_window {:?}", mrp.data.motion.reset_watchdog_window());
+                    info!("reset_low_power {:?}", mrp.data.motion.reset_low_power());
+                    info!("reset_software {:?}", mrp.data.motion.reset_software());
                 } else if mrp.type_ == MRP_PARAMS {
                     self.current_params_state = mrp.data.params;
                 }
@@ -221,6 +244,7 @@ impl<
                 .set_enable_telemetry(self.telemetry_enabled as u32);
             cmd.data.motion.motion_control_type = self.motion_type;
             cmd.data.motion.setpoint = self.setpoint;
+            info!("setpoint: {:?}", cmd.data.motion.setpoint);
 
             let struct_bytes = core::slice::from_raw_parts(
                 (&cmd as *const MotorCommandPacket) as *const u8,

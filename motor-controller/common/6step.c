@@ -408,7 +408,7 @@ static void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
     // set OC 100mA, leave standby
     GPIOF->MODER |= (GPIO_MODER_MODER6_0 | GPIO_MODER_MODER7_0);
     GPIOF->PUPDR |= (GPIO_PUPDR_PUPDR6_1 | GPIO_PUPDR_PUPDR7_1);
-    GPIOF->BSRR |= (GPIO_BSRR_BR_6 | GPIO_BSRR_BS_7);
+    GPIOF->BSRR |= (GPIO_BSRR_BS_6 | GPIO_BSRR_BR_7);
 
     // set pin direction to AF
     GPIOA->MODER |= (GPIO_MODER_MODER8_1 | GPIO_MODER_MODER9_1 | GPIO_MODER_MODER10_1);
@@ -597,9 +597,10 @@ static void perform_commutation_cycle() {
     prev_hall_value = hall_recorded_state_on_transition;
 
     // check for transition error
-    if (hall_transition_error_count >= HALL_TRANSITION_ERROR_THRESHOLD) {
-        motor_errors.invalid_transitions = true;
-    }
+    // TODO: fix this
+    // if (hall_transition_error_count >= HALL_TRANSITION_ERROR_THRESHOLD) {
+    //     motor_errors.invalid_transitions = true;
+    // }
 
     // check for errors
     if (motor_errors.hall_power || motor_errors.hall_disconnected) { // || motor_errors.invalid_transitions) {
