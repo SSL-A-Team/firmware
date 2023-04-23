@@ -25,16 +25,69 @@ use embassy_time::{Delay, Duration, Timer, Ticker};
 
 use static_cell::StaticCell;
 
-use ateam_kicker_board::{adc_publisher::{AdcPublisher, SamplePin}, pins::{HighVoltageReadPin, BatteryVoltageReadPin}};
+use ateam_kicker_board::pins::{HighVoltageReadPin, BatteryVoltageReadPin, ChargePin, RegulatorDonePin, RegulatorFaultPin, RedStatusLedPin, GreenStatusLedPin};
+
+// #[embassy_executor::task]
+// async fn run_critical_section_task(p: Peripherals) {
+//     let reg_done = Input::new(p.PB4, Pull::None);
+//     let reg_fault = Input::new(p.PB5, Pull::None);
+
+//     let mut reg_charge = Output::new(p.PB3, Level::Low, Speed::Medium);
+//     let mut status_led_green = Output::new(p.PA11, Level::Low, Speed::Medium);
+//     let mut status_led_red = Output::new(p.PA12, Level::Low, Speed::Medium);
+
+//     status_led_green.set_high();
+//     Timer::after(Duration::from_millis(500)).await;
+//     status_led_green.set_low();
+//     Timer::after(Duration::from_millis(500)).await;
+
+//     reg_charge.set_high();
+//     Timer::after(Duration::from_millis(100)).await;
+//     reg_charge.set_low();
+
+//     loop {
+//         reg_charge.set_low();
+
+//         if reg_done.is_low() {
+//             status_led_green.set_high();
+//         } else {
+//             status_led_green.set_low();
+//         }
+
+//         if reg_fault.is_low() {
+//             status_led_red.set_high();
+//         } else {
+//             status_led_red.set_low();
+//         }
+//     }
+// }
+
+// #[embassy_executor::task]
+// async fn read_adc_samples(aps: PubSubChannel::<NoopRawMutex, AnalogValues, 1, 2, 1>) -> ! {
+//     let sub = aps.subscriber().unwrap();
+//     loop {
+//         info!(sub.)
+//     }
+// }
 
 #[embassy_executor::task]
-async fn run_critical_section_task(p: Peripherals) {
-    let reg_done = Input::new(p.PB4, Pull::None);
-    let reg_fault = Input::new(p.PB5, Pull::None);
+async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>, 
+        mut hv_pin: HighVoltageReadPin, 
+        mut batt_pin: BatteryVoltageReadPin, 
+        mut reg_charge: ChargePin,
+        mut reg_done: RegulatorDonePin,
+        mut reg_fault: RegulatorFaultPin,
+        mut status_led_red: RedStatusLedPin,
+        mut status_led_green: GreenStatusLedPin) -> ! {
 
-    let mut reg_charge = Output::new(p.PB3, Level::Low, Speed::Medium);
-    let mut status_led_green = Output::new(p.PA11, Level::Low, Speed::Medium);
-    let mut status_led_red = Output::new(p.PA12, Level::Low, Speed::Medium);
+    let mut ticker = Ticker::every(Duration::from_millis(1));
+
+    let reg_done = Input::new(reg_done, Pull::None);
+    let reg_fault = Input::new(reg_fault, Pull::None);
+
+    let mut reg_charge = Output::new(reg_charge, Level::Low, Speed::Medium);
+    let mut status_led_green = Output::new(status_led_green, Level::Low, Speed::Medium);
+    let mut status_led_red = Output::new(status_led_red, Level::Low, Speed::Medium);
 
     status_led_green.set_high();
     Timer::after(Duration::from_millis(500)).await;
@@ -42,10 +95,15 @@ async fn run_critical_section_task(p: Peripherals) {
     Timer::after(Duration::from_millis(500)).await;
 
     reg_charge.set_high();
-    Timer::after(Duration::from_millis(100)).await;
+    Timer::after(Duration::from_millis(50)).await;
     reg_charge.set_low();
 
     loop {
+        let hv = (adc.read(&mut hv_pin) as u32 * 10) / 12;
+        let bv = (adc.read(&mut batt_pin) as u32 * 10) / 12;
+
+        info!("hv mv: {}, batt mv: {}", (hv * 200) / 1000, bv);
+
         reg_charge.set_low();
 
         if reg_done.is_low() {
@@ -59,40 +117,7 @@ async fn run_critical_section_task(p: Peripherals) {
         } else {
             status_led_red.set_low();
         }
-    }
-}
 
-#[embassy_executor::task]
-async fn read_adc_samples(aps: PubSubChannel::<NoopRawMutex, AnalogValues, 1, 2, 1>) -> ! {
-    let sub = aps.subscriber().unwrap();
-    loop {
-        info!(sub.)
-    }
-}
-
-#[embassy_executor::task]
-async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>, 
-        mut temp_ch: Temperature, 
-        mut hv_pin: HighVoltageReadPin, 
-        mut batt_pin: BatteryVoltageReadPin, 
-        aps: PubSubChannel::<NoopRawMutex, AnalogValues, 1, 2, 1>) -> ! {
-
-    let psh = aps.publisher().unwrap();
-
-    let mut ticker = Ticker::every(Duration::from_millis(1));
-    let mut av = AnalogValues {
-        high_voltage: 0, 
-        batt_voltage: 0,
-        temp: 0 
-    };
-    loop {
-        av.high_voltage = adc.read(&mut hv_pin);
-        av.batt_voltage = adc.read(&mut batt_pin);
-        av.temp = adc.read_internal(&mut temp_ch);
-
-        psh.publish_immediate(av);
-
-        // Timer::after(Duration::from_millis(1));
         ticker.next().await;
     }
 }
@@ -119,7 +144,7 @@ fn main() -> ! {
     info!("kicker startup!");
     let mut nvic: NVIC = unsafe { mem::transmute(()) };
 
-    let aps = PubSubChannel::<NoopRawMutex, AnalogValues, 1, 2, 1>::new();
+    // let aps = PubSubChannel::<NoopRawMutex, AnalogValues, 1, 2, 1>::new();
 
 
     // highest priorty, energy management
@@ -134,11 +159,11 @@ fn main() -> ! {
 
     let mut adc = Adc::new(p.ADC, &mut Delay);
     adc.set_sample_time(SampleTime::Cycles71_5);
-    let mut temp_ch = adc.enable_temperature(&mut Delay);
+    // let mut temp_ch = adc.enable_temperature(&mut Delay);
 
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        unwrap!(spawner.spawn(sample_adc(adc, temp_ch, p.PA0, p.PA1, aps)));
+        unwrap!(spawner.spawn(sample_adc(adc, p.PA0, p.PA1, p.PB3, p.PB4, p.PB5, p.PA12, p.PA11)));
     });
 }
