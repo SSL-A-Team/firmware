@@ -29,6 +29,8 @@ async fn blink(
     let mut status_led_red = Output::new(status_led_red, Level::Low, Speed::Medium);
 
     loop {
+        reg_charge.set_low();
+
         status_led_green.set_high();
         status_led_red.set_low();
         Timer::after(Duration::from_millis(500)).await;
