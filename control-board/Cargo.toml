@@ -29,6 +29,8 @@ embassy-stm32 = { version = "0.1.0", features = [
     "unstable-pac",
     "unstable-traits",
 ] }
+smart-leds = "0.3.0"
+apa102-spi = "0.3.2"
 embassy-futures = { version = "0.1.0" }
 futures-util = { version = "0.3.17", default-features = false }
 embassy-sync = { version = "0.1.0" }

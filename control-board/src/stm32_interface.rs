@@ -576,6 +576,8 @@ impl<
                 return Err(err);
             }
         }
+
+        info!("here1");
         
         if let Err(err) = self.verify_bootloader().await {
             return Err(err);
