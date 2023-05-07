@@ -7,7 +7,7 @@ use const_format::formatcp;
 use core::fmt::Write;
 use core::mem::size_of;
 use embassy_futures::select::{select, Either};
-use embassy_stm32::gpio::{Level, OutputOpenDrain, Pin, Pull, Speed};
+use embassy_stm32::gpio::{Level, OutputOpenDrain, Pin, Pull, Speed, Output};
 use embassy_stm32::pac;
 use embassy_stm32::usart;
 use embassy_stm32::Peripheral;
@@ -17,8 +17,10 @@ use heapless::String;
 const MULTICAST_IP: &str = "224.4.20.69";
 const MULTICAST_PORT: u16 = 42069;
 const LOCAL_PORT: u16 = 42069;
-const WIFI_SSID: &str = "A-Team Field";
-const WIFI_PASS: &str = "plancomestogether";
+// const WIFI_SSID: &str = "A-Team Field";
+const WIFI_SSID: &str = "PROMISED_LAN_DC_DEVEL";
+// const WIFI_PASS: &str = "plancomestogether";
+const WIFI_PASS: &str = "plddevel";
 
 #[derive(Copy, Clone)]
 pub enum TeamColor {
@@ -65,7 +67,7 @@ pub struct RobotRadio<
         DEPTH_TX,
         DEPTH_RX,
     >,
-    reset_pin: OutputOpenDrain<'a, PIN>,
+    reset_pin: Output<'a, PIN>,
     peer: Option<PeerConnection>,
 }
 
@@ -87,9 +89,9 @@ impl<
         reset_pin: impl Peripheral<P = PIN> + 'a,
     ) -> Result<RobotRadio<'a, UART, DmaRx, DmaTx, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, PIN>, ()>
     {
-        let mut reset_pin = OutputOpenDrain::new(reset_pin, Level::Low, Speed::Medium, Pull::None);
+        let mut reset_pin = Output::new(reset_pin, Level::High, Speed::Medium);
         Timer::after(Duration::from_micros(100)).await;
-        reset_pin.set_high();
+        reset_pin.set_low();
 
         let mut radio = Radio::new(read_queue, write_queue);
         radio.wait_startup().await?;

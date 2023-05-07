@@ -224,36 +224,36 @@ impl Control {
         let drib_reset_pin = 
             OutputOpenDrain::new(drib_reset_pin, Level::Low, Speed::Medium, Pull::None); // reset active
 
-        // spawner
-        //     .spawn(FRONT_RIGHT_QUEUE_RX.spawn_task(front_right_rx))
-        //     .unwrap();
-        // spawner
-        //     .spawn(FRONT_RIGHT_QUEUE_TX.spawn_task(front_right_tx))
-        //     .unwrap();
-        // spawner
-        //     .spawn(FRONT_LEFT_QUEUE_RX.spawn_task(front_left_rx))
-        //     .unwrap();
-        // spawner
-        //     .spawn(FRONT_LEFT_QUEUE_TX.spawn_task(front_left_tx))
-        //     .unwrap();
+        spawner
+            .spawn(FRONT_RIGHT_QUEUE_RX.spawn_task(front_right_rx))
+            .unwrap();
+        spawner
+            .spawn(FRONT_RIGHT_QUEUE_TX.spawn_task(front_right_tx))
+            .unwrap();
+        spawner
+            .spawn(FRONT_LEFT_QUEUE_RX.spawn_task(front_left_rx))
+            .unwrap();
+        spawner
+            .spawn(FRONT_LEFT_QUEUE_TX.spawn_task(front_left_tx))
+            .unwrap();
         spawner
             .spawn(BACK_LEFT_QUEUE_RX.spawn_task(back_left_rx))
             .unwrap();
         spawner
             .spawn(BACK_LEFT_QUEUE_TX.spawn_task(back_left_tx))
             .unwrap();
-        // spawner
-        //     .spawn(BACK_RIGHT_QUEUE_RX.spawn_task(back_right_rx))
-        //     .unwrap();
-        // spawner
-        //     .spawn(BACK_RIGHT_QUEUE_TX.spawn_task(back_right_tx))
-        //     .unwrap();
-        // spawner
-        //     .spawn(DRIB_QUEUE_RX.spawn_task(drib_rx))
-        //     .unwrap();
-        // spawner
-        //     .spawn(DRIB_QUEUE_TX.spawn_task(drib_tx))
-        //     .unwrap(); 
+        spawner
+            .spawn(BACK_RIGHT_QUEUE_RX.spawn_task(back_right_rx))
+            .unwrap();
+        spawner
+            .spawn(BACK_RIGHT_QUEUE_TX.spawn_task(back_right_tx))
+            .unwrap();
+        spawner
+            .spawn(DRIB_QUEUE_RX.spawn_task(drib_rx))
+            .unwrap();
+        spawner
+            .spawn(DRIB_QUEUE_TX.spawn_task(drib_tx))
+            .unwrap(); 
 
         let front_right_stm32_interface = Stm32Interface::new(
             &FRONT_RIGHT_QUEUE_RX,
@@ -332,18 +332,14 @@ impl Control {
     }
 
     pub async fn load_firmware(&mut self) {
-        // let _res = embassy_futures::join::join5(
-        //     self.front_right_motor.load_default_firmware_image(),
-        //     self.front_left_motor.load_default_firmware_image(),
-        //     self.back_left_motor.load_default_firmware_image(),
-        //     self.back_right_motor.load_default_firmware_image(),
-        //     self.drib_motor.load_default_firmware_image(),
-        // )
-        // .await;
-
-        self.back_left_motor.load_default_firmware_image().await;
-
-
+        let _res = embassy_futures::join::join5(
+            self.front_right_motor.load_default_firmware_image(),
+            self.front_left_motor.load_default_firmware_image(),
+            self.back_left_motor.load_default_firmware_image(),
+            self.back_right_motor.load_default_firmware_image(),
+            self.drib_motor.load_default_firmware_image(),
+        )
+        .await;
 
         defmt::info!("flashed");
 
@@ -371,17 +367,17 @@ impl Control {
     }
 
     pub fn tick(&mut self, latest_control: Option<BasicControl>) -> Option<BasicTelemetry> {
-        // self.front_right_motor.process_packets();
-        // self.front_left_motor.process_packets();
+        self.front_right_motor.process_packets();
+        self.front_left_motor.process_packets();
         self.back_left_motor.process_packets();
-        // self.back_right_motor.process_packets();
-        // self.drib_motor.process_packets();
+        self.back_right_motor.process_packets();
+        self.drib_motor.process_packets();
 
-        // self.front_right_motor.log_reset("FR");
-        // self.front_left_motor.log_reset("RL");
+        self.front_right_motor.log_reset("FR");
+        self.front_left_motor.log_reset("RL");
         self.back_left_motor.log_reset("BL");
-        // self.back_right_motor.log_reset("BR");
-        // self.drib_motor.log_reset("DRIB");
+        self.back_right_motor.log_reset("BR");
+        self.drib_motor.log_reset("DRIB");
 
         if self.drib_motor.ball_detected() {
             defmt::info!("ball detected");
@@ -411,13 +407,13 @@ impl Control {
 
         // let c_vel = libm::sinf(angle) / 2.0;
         // let c_vel = 0.2;
-        // self.front_right_motor.set_setpoint(wheel_vels[0]);
-        // self.front_left_motor.set_setpoint(wheel_vels[1]);
+        self.front_right_motor.set_setpoint(wheel_vels[0]);
+        self.front_left_motor.set_setpoint(wheel_vels[1]);
         self.back_left_motor.set_setpoint(wheel_vels[2]);
-        // self.back_right_motor.set_setpoint(wheel_vels[3]);
+        self.back_right_motor.set_setpoint(wheel_vels[3]);
         // angle += core::f32::consts::FRAC_2_PI / 200.0;
         let drib_dc = self.drib_vel / 1000.0;
-        // self.drib_motor.set_setpoint(drib_dc);
+        self.drib_motor.set_setpoint(drib_dc);
 
         // let c_vel = 0.2;
         // front_right_motor.set_setpoint(c_vel);
@@ -425,11 +421,11 @@ impl Control {
         // back_left_motor.set_setpoint(c_vel);
         // back_right_motor.set_setpoint(c_vel);
 
-        // self.front_right_motor.send_motion_command();
-        // self.front_left_motor.send_motion_command();
+        self.front_right_motor.send_motion_command();
+        self.front_left_motor.send_motion_command();
         self.back_left_motor.send_motion_command();
-        // self.back_right_motor.send_motion_command();
-        // self.drib_motor.send_motion_command();
+        self.back_right_motor.send_motion_command();
+        self.drib_motor.send_motion_command();
 
         Some(BasicTelemetry {
             sequence_number: 0,
