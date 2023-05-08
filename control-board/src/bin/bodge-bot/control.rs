@@ -18,6 +18,13 @@ use ateam_control_board::{
     stm32_interface::Stm32Interface,
     stspin_motor::{WheelMotor, DribblerMotor},
     uart_queue::{UartReadQueue, UartWriteQueue},
+    motion::{
+        constant_gain_kalman_filter::CgKalmanFilter,
+        params::{
+            body_vel_filter_params,
+            body_vel_pid_params,
+        }
+    }
 };
 use nalgebra::{Vector3, Vector4};
 
@@ -109,8 +116,9 @@ const WHEEL_ANGLES_DEG: Vector4<f32> = Vector4::new(30.0, 150.0, 225.0, 315.0);
 const WHEEL_RADIUS_M: f32 = 0.049 / 2.0; // wheel dia 49mm
 const WHEEL_DISTANCE_TO_ROBOT_CENTER_M: f32 = 0.085; // 85mm from center of wheel body to center of robot
 
-pub struct Control {
+pub struct Control<'a> {
     robot_model: RobotModel,
+    body_vel_filter: CgKalmanFilter<'a, {body_vel_filter_params::NumStates}, {body_vel_filter_params::NumControlInputs}, {body_vel_filter_params::NumObservations}>,
     cmd_vel: Vector3<f32>,
     drib_vel: f32,
     front_right_motor: WheelMotor<
@@ -178,7 +186,7 @@ pub struct Control {
 
 // Uart<UART5, DMA1_CH0, DMA1_CH1>
 
-impl Control {
+impl<'a> Control<'a> {
     pub fn new(
         spawner: &SendSpawner,
         front_right_usart: Uart<'static, MotorFRUart, MotorFRDmaTx, MotorFRDmaRx>,
@@ -197,7 +205,7 @@ impl Control {
         back_right_reset_pin: MotorBRResetPin,
         drib_reset_pin: MotorDResetPin,
         ball_detected_thresh: f32,
-    ) -> Control {
+    ) -> Control<'a> {
         let wheel_firmware_image = WHEEL_FW_IMG;
         let drib_firmware_image = DRIB_FW_IMG;
 
@@ -317,9 +325,21 @@ impl Control {
         };
 
         let robot_model: RobotModel = RobotModel::new(robot_model_constants);
+        let body_vel_filter: CgKalmanFilter<{body_vel_filter_params::NumStates},
+                {body_vel_filter_params::NumControlInputs},
+                {body_vel_filter_params::NumObservations}> = CgKalmanFilter::new(
+                    &body_vel_filter_params::F,
+                    &body_vel_filter_params::B,
+                    &body_vel_filter_params::H,
+                    &body_vel_filter_params::Q,
+                    &body_vel_filter_params::R,
+                    &body_vel_filter_params::P,
+                    &body_vel_filter_params::K,
+                );
 
         Control {
             robot_model,
+            body_vel_filter,
             cmd_vel: Vector3::new(0., 0., 0.),
             drib_vel: 0.0,
             front_right_motor,
@@ -366,12 +386,16 @@ impl Control {
         Timer::after(Duration::from_millis(10)).await;
     }
 
-    pub fn tick(&mut self, latest_control: Option<BasicControl>) -> Option<BasicTelemetry> {
+    fn process_mc_packets(&mut self) {
         self.front_right_motor.process_packets();
         self.front_left_motor.process_packets();
         self.back_left_motor.process_packets();
         self.back_right_motor.process_packets();
         self.drib_motor.process_packets();
+    }
+
+    pub fn tick(&mut self, latest_control: Option<BasicControl>) -> Option<BasicTelemetry> {
+        self.process_mc_packets();
 
         self.front_right_motor.log_reset("FR");
         self.front_left_motor.log_reset("RL");
@@ -403,6 +427,29 @@ impl Control {
                 self.ticks_since_packet = 0;
             }
         }
+
+        // now we have contol input u in self.cmd_vel
+
+        ///////////////////////////////
+        //  update state estimation  //
+        ///////////////////////////////
+
+        // get latest wheel vals and gyro (observe the state)
+        // process observation input into CGKF (call update())
+
+        // read the state estimate
+
+        //
+        //  do controls
+        //
+
+        // apply control law against control input from soccer + current estimate of the state
+        // use control law adjusted value to predict the next cycle's state
+        // e.g. call CGKF.predict(post PID u)
+
+
+        // process body vel into the wheel velocities
+
         let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel);
 
         // let c_vel = libm::sinf(angle) / 2.0;

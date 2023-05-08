@@ -54,7 +54,7 @@ static RADIO_TEST: RadioTest<
     RadioReset,
 > = RadioTest::new(unsafe { &mut BUFFERS_TX }, unsafe { &mut BUFFERS_RX });
 
-include_external_cpp_bin! {KICKER_FW_IMG, "kicker.bin"}
+// include_external_cpp_bin! {KICKER_FW_IMG, "kicker.bin"}
 
 #[link_section = ".sram4"]
 static mut SPI6_BUF: [u8; 4] = [0x0; 4];
