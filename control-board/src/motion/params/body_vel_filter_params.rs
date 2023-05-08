@@ -6,10 +6,10 @@ pub const NumObservations: usize = 5;
 
 const ExpectedDt: f32 = 10000.0;  // 10mS = 10000uS
 const ExpectedDt2: f32 = ExpectedDt * ExpectedDt;
-const EncoderNoise: f32 = 0.0;
-const GyroNoise: f32 = 0.0;
-const ProcessNoise: f32 = 0.0;
-const InitialCovariance: f32 = 0.0;
+const EncoderNoise: f32 = 0.11;  // noise in rad / sampling time 
+const GyroNoise: f32 = 0.002;  // BMI085 compensated for spectral noise at 100Hz sample rate
+const ProcessNoise: f32 = 0.05;
+const InitialCovariance: f32 = 0.11;
 
 
 // Assume constant velocity as a valid linearization of the transition system
