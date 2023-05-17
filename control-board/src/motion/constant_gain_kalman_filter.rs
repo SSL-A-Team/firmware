@@ -1,5 +1,6 @@
-use nalgebra::base::{SMatrix};
+use nalgebra::base::SMatrix;
 
+#[allow(non_camel_case_types)]
 pub struct CgKalmanFilter<'a, const NUM_STATES: usize, const NUM_CONTROL_INPUTS: usize, const NUM_OBSERVATIONS: usize> {
     F_k: &'a SMatrix<f32, NUM_STATES, NUM_STATES>,
     B_k: &'a SMatrix<f32, NUM_STATES, NUM_CONTROL_INPUTS>,

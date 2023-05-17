@@ -44,6 +44,7 @@ nalgebra = { version = "0.32.2", default-features = false, features = [
         "libm", 
         "macros",
 ] }
+num-traits = "0.2.15"
 ateam-common-packets = { path = "../software-communication/ateam-common-packets/rust-lib" }
 
 [dev-dependencies]
