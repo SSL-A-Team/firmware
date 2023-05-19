@@ -7,6 +7,6 @@ pub static K: Matrix3x5<f32> =
                 1.0, 0.0, 0.0, 0.0, 0.0];
 
 // x, y, theta (m/s, m/s, rad/s)
-pub static body_vel_lim: Vector3<f32> = vector![8.0, 8.0, 34.9];  // 8, 8, 34.9 maxes out motors/IMU measurement rate
-pub static body_acc_lim: Vector3<f32> = vector![1.0, 1.0, 1.0];  // TODO calibrate/ignore
-pub static wheel_acc_lim: Vector4<f32> = vector![1.0, 1.0, 1.0, 1.0];  // TODO calibrate/ignore
+pub static BODY_VEL_LIM: Vector3<f32> = vector![8.0, 8.0, 34.9];  // 8, 8, 34.9 maxes out motors/IMU measurement rate
+pub static BODY_ACC_LIM: Vector3<f32> = vector![1.0, 1.0, 1.0];  // TODO calibrate/ignore
+pub static WHEEL_ACC_LIM: Vector4<f32> = vector![1.0, 1.0, 1.0, 1.0];  // TODO calibrate/ignore
