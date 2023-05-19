@@ -1,8 +1,8 @@
 use nalgebra::{matrix, Matrix3, Matrix3x4, Matrix3x5, Matrix5, Matrix5x3};
 
-pub const NumStates: usize = 3;
-pub const NumControlInputs: usize = 4;
-pub const NumObservations: usize = 5;
+pub const KfNumStates: usize = 3;
+pub const KfNumControlInputs: usize = 4;
+pub const KfNumObservations: usize = 5;
 
 const ExpectedDt: f32 = 10000.0;  // 10mS = 10000uS
 const ExpectedDt2: f32 = ExpectedDt * ExpectedDt;
@@ -32,9 +32,9 @@ pub static H: Matrix5x3<f32> =
                 0.0, 0.0, 0.0];
 
 pub static Q: Matrix3<f32> =
-        matrix![NumStates as f32 * ProcessNoise / ExpectedDt2, 0.0,                                           0.0;
-                0.0,                                           NumStates as f32 * ProcessNoise / ExpectedDt2, 0.0;
-                0.0,                                           0.0,                                           NumStates as f32 * ProcessNoise / ExpectedDt2];
+        matrix![KfNumStates as f32 * ProcessNoise / ExpectedDt2, 0.0,                                           0.0;
+                0.0,                                           KfNumStates as f32 * ProcessNoise / ExpectedDt2, 0.0;
+                0.0,                                           0.0,                                           KfNumStates as f32 * ProcessNoise / ExpectedDt2];
 
 pub static R: Matrix5<f32> = 
         matrix![EncoderNoise, 0.0,          0.0,          0.0,          0.0;

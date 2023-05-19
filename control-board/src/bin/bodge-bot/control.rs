@@ -118,7 +118,7 @@ const WHEEL_DISTANCE_TO_ROBOT_CENTER_M: f32 = 0.085; // 85mm from center of whee
 
 pub struct Control<'a> {
     robot_model: RobotModel,
-    body_vel_filter: CgKalmanFilter<'a, {body_vel_filter_params::NumStates}, {body_vel_filter_params::NumControlInputs}, {body_vel_filter_params::NumObservations}>,
+    body_vel_filter: CgKalmanFilter<'a, {body_vel_filter_params::KfNumStates}, {body_vel_filter_params::KfNumControlInputs}, {body_vel_filter_params::KfNumObservations}>,
     cmd_vel: Vector3<f32>,
     drib_vel: f32,
     front_right_motor: WheelMotor<
@@ -325,9 +325,9 @@ impl<'a> Control<'a> {
         };
 
         let robot_model: RobotModel = RobotModel::new(robot_model_constants);
-        let body_vel_filter: CgKalmanFilter<{body_vel_filter_params::NumStates},
-                {body_vel_filter_params::NumControlInputs},
-                {body_vel_filter_params::NumObservations}> = CgKalmanFilter::new(
+        let body_vel_filter: CgKalmanFilter<{body_vel_filter_params::KfNumStates},
+                {body_vel_filter_params::KfNumControlInputs},
+                {body_vel_filter_params::KfNumObservations}> = CgKalmanFilter::new(
                     &body_vel_filter_params::F,
                     &body_vel_filter_params::B,
                     &body_vel_filter_params::H,
@@ -418,7 +418,9 @@ impl<'a> Control<'a> {
                 latest_control.vel_z_angular,
             );
             self.cmd_vel = cmd_vel;
+
             self.drib_vel = latest_control.dribbler_speed;
+
             self.ticks_since_packet = 0;
         } else {
             self.ticks_since_packet += 1;
@@ -428,27 +430,8 @@ impl<'a> Control<'a> {
             }
         }
 
-        // now we have contol input u in self.cmd_vel
+        // now we have setpoint r(t) in self.cmd_vel
 
-        ///////////////////////////////
-        //  update state estimation  //
-        ///////////////////////////////
-
-        // get latest wheel vals and gyro (observe the state)
-        // process observation input into CGKF (call update())
-
-        // read the state estimate
-
-        //
-        //  do controls
-        //
-
-        // apply control law against control input from soccer + current estimate of the state
-        // use control law adjusted value to predict the next cycle's state
-        // e.g. call CGKF.predict(post PID u)
-
-
-        // process body vel into the wheel velocities
 
         let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel);
 

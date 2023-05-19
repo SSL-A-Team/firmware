@@ -38,13 +38,13 @@ impl<'a, const NUM_STATES: usize, const NUM_CONTROL_INPUTS: usize, const NUM_OBS
         filter
     }
 
-    fn predict(&mut self, u: &SMatrix<f32, NUM_CONTROL_INPUTS, 1>) {
+    pub fn predict(&mut self, u: &SMatrix<f32, NUM_CONTROL_INPUTS, 1>) {
         self.x_hat = self.F_k * self.x_hat + self.B_k * u;
         let P_k_hat = self.F_k * self.P_k * self.F_k.transpose() + self.Q_k;
         self.P_k.copy_from(&P_k_hat);
     }
 
-    fn update(&mut self, z: &SMatrix<f32, NUM_OBSERVATIONS, 1>) {
+    pub fn update(&mut self, z: &SMatrix<f32, NUM_OBSERVATIONS, 1>) {
         // y = z - H*x_hat
         // S = H*P*H' + R
         // K = P*H'*S^-1
@@ -55,7 +55,11 @@ impl<'a, const NUM_STATES: usize, const NUM_CONTROL_INPUTS: usize, const NUM_OBS
         self.x_hat += self.K_k * y;
     }
 
-    fn get_state(&self, x_hat: &mut SMatrix<f32, NUM_STATES, 1>) -> SMatrix<f32, NUM_STATES, 1> {
+    pub fn read_state(&self, x_hat: &mut SMatrix<f32, NUM_STATES, 1>) -> SMatrix<f32, NUM_STATES, 1> {
+       x_hat = *self.x_hat
+    }
+
+    pub fn get_state(&self) -> SMatrix<f32, NUM_STATES, 1> {
         self.x_hat
     }
 }

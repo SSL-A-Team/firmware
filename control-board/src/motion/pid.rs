@@ -16,7 +16,7 @@ pub struct PidController<'a, const NUM_STATES: usize> {
 }
 
 impl<'a, const NUM_STATES: usize> PidController<'a, NUM_STATES> {
-    fn from_gains_matrix(K: &'a SMatrix<f32, NUM_STATES, 5>) -> PidController<'a, NUM_STATES> {
+    pub fn from_gains_matrix(K: &'a SMatrix<f32, NUM_STATES, 5>) -> PidController<'a, NUM_STATES> {
         PidController {
             K: K, 
             u: SVector::<f32, NUM_STATES>::zeros(),
@@ -25,12 +25,13 @@ impl<'a, const NUM_STATES: usize> PidController<'a, NUM_STATES> {
         }
     }
 
-    fn calculate(&mut self, r: SVector<f32, NUM_STATES>, y: SVector<f32, NUM_STATES>, dt: f32) {
+    pub fn calculate(&mut self, r: SVector<f32, NUM_STATES>, y: SVector<f32, NUM_STATES>, dt: f32) {
         let error = r - y;
 
         // calculate integrated error
         let ie = self.integrated_error + error;
         // clamp error
+        // is there a better way to do this? 
         self.integrated_error = ie.zip_zip_map(&self.K.column(3), &self.K.column(4), |err, min_err, max_err| clamp(err, min_err, max_err));
 
         // calculate derivative error
@@ -43,7 +44,11 @@ impl<'a, const NUM_STATES: usize> PidController<'a, NUM_STATES> {
         self.u = r + (p + i + d);
     }
 
-    fn read_u() {
+    pub fn read_u(&self, u: &mut SVector<f32, NUM_STATES>) {
+        *u = self.u;
+    }
 
+    pub fn get_u(&self) -> SVector<f32, NUM_STATES> {
+        self.u
     }
 }
