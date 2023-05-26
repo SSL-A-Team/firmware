@@ -28,9 +28,6 @@ Edit flake.nix and run `nix flake update`. You should commit both flake.nix and 
 ### Supported Platforms
 
 We support the following platforms that have a valid Nix install:
-- "aarch64-darwin"
-- "aarch64-linux"
-- "x86\_64-darwin"
 - "x86\_64-linux"
 
 ### Configuring VS Code Rust Analyzer 

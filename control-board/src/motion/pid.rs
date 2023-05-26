@@ -2,11 +2,6 @@ use nalgebra::{
     base::{SMatrix, SVector},
     clamp
 };
-use num_traits::Num;
-
-pub const fn discreteTimeDerivative<T: Num>(val: T, prev_val: T, dt: f32) {
-    (val - prev_val) / dt
-}
 
 pub struct PidController<'a, const NUM_STATES: usize> {
     K: &'a SMatrix<f32, NUM_STATES, 5>,

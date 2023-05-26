@@ -65,7 +65,6 @@ dependencies = [
  "heapless",
  "libm",
  "nalgebra",
- "num-traits",
  "panic-probe",
  "smart-leds",
  "static_cell",

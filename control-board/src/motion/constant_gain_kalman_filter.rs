@@ -55,8 +55,8 @@ impl<'a, const NUM_STATES: usize, const NUM_CONTROL_INPUTS: usize, const NUM_OBS
         self.x_hat += self.K_k * y;
     }
 
-    pub fn read_state(&self, x_hat: &mut SMatrix<f32, NUM_STATES, 1>) -> SMatrix<f32, NUM_STATES, 1> {
-       x_hat = *self.x_hat
+    pub fn read_state(&self, x_hat: &mut SMatrix<f32, NUM_STATES, 1>) {
+       x_hat.copy_from(&self.x_hat);
     }
 
     pub fn get_state(&self) -> SMatrix<f32, NUM_STATES, 1> {
