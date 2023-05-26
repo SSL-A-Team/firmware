@@ -83,13 +83,13 @@ impl<'a> BodyVelocityController<'a> {
         }
     }
 
-    fn control_update(&mut self, setpoint: &Vector3<f32>, wheel_velocities: &Vector4<f32>, gryo_theta: f32) {
+    pub fn control_update(&mut self, setpoint: &Vector3<f32>, wheel_velocities: &Vector4<f32>, gryo_theta: f32) {
         // construct the observation vector the KF expects
         let z: Vector5<f32> = Vector5::new(wheel_velocities[0], wheel_velocities[1], wheel_velocities[2], wheel_velocities[3], gryo_theta);
         self.control_update_z(setpoint, z);
     }
 
-    fn control_update_z(&mut self, setpoint: &Vector3<f32>, z: Vector5<f32>) {
+    pub fn control_update_z(&mut self, setpoint: &Vector3<f32>, z: Vector5<f32>) {
         // TODO there are a few discrete time intergrals and derivatives in here
         // these should probably be genericized/templated some how
 
@@ -136,7 +136,7 @@ impl<'a> BodyVelocityController<'a> {
 
     }
 
-    fn get_wheel_velocities(&self) -> Vector4<f32> {
+    pub fn get_wheel_velocities(&self) -> Vector4<f32> {
         self.cmd_wheel_velocities
     }
 }

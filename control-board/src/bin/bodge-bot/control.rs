@@ -23,7 +23,7 @@ use ateam_control_board::{
         params::{
             body_vel_filter_params,
             body_vel_pid_params,
-        }
+        }, robot_controller::BodyVelocityController
     }
 };
 use nalgebra::{Vector3, Vector4};
@@ -118,7 +118,8 @@ const WHEEL_DISTANCE_TO_ROBOT_CENTER_M: f32 = 0.085; // 85mm from center of whee
 
 pub struct Control<'a> {
     robot_model: RobotModel,
-    body_vel_filter: CgKalmanFilter<'a, {body_vel_filter_params::KfNumStates}, {body_vel_filter_params::KfNumControlInputs}, {body_vel_filter_params::KfNumObservations}>,
+    // body_vel_filter: CgKalmanFilter<'a, {body_vel_filter_params::KfNumStates}, {body_vel_filter_params::KfNumControlInputs}, {body_vel_filter_params::KfNumObservations}>,
+    robot_controller: BodyVelocityController<'a>,
     cmd_vel: Vector3<f32>,
     drib_vel: f32,
     front_right_motor: WheelMotor<
@@ -325,21 +326,13 @@ impl<'a> Control<'a> {
         };
 
         let robot_model: RobotModel = RobotModel::new(robot_model_constants);
-        let body_vel_filter: CgKalmanFilter<{body_vel_filter_params::KfNumStates},
-                {body_vel_filter_params::KfNumControlInputs},
-                {body_vel_filter_params::KfNumObservations}> = CgKalmanFilter::new(
-                    &body_vel_filter_params::F,
-                    &body_vel_filter_params::B,
-                    &body_vel_filter_params::H,
-                    &body_vel_filter_params::Q,
-                    &body_vel_filter_params::R,
-                    &body_vel_filter_params::P,
-                    &body_vel_filter_params::K,
-                );
+
+        let body_velocity_controller = BodyVelocityController::new_from_global_params(1.0 / 120.0, robot_model);
 
         Control {
             robot_model,
-            body_vel_filter,
+            // body_vel_filter,
+            robot_controller: body_velocity_controller,
             cmd_vel: Vector3::new(0., 0., 0.),
             drib_vel: 0.0,
             front_right_motor,
@@ -432,8 +425,22 @@ impl<'a> Control<'a> {
 
         // now we have setpoint r(t) in self.cmd_vel
 
+        // TODO read from DIP swtich
+        let controls_enabled = false;
+        let wheel_vels = if controls_enabled {
+            // TODO check order
+            let wheel_vels = Vector4::new(self.front_right_motor.read_rads(),
+                self.front_left_motor.read_rads(),
+                self.back_left_motor.read_rads(),
+                self.back_right_motor.read_rads());
+            // TODO read from channel or something
+            let gyro_rads = 0.0;
+            self.robot_controller.control_update(&self.cmd_vel, &wheel_vels, gyro_rads);
 
-        let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel);
+            self.robot_controller.get_wheel_velocities()
+        } else {
+            self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel)
+        };
 
         // let c_vel = libm::sinf(angle) / 2.0;
         // let c_vel = 0.2;
