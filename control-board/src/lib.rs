@@ -15,6 +15,7 @@
 
 pub mod fw_images;
 pub mod queue;
+pub mod hardware_models;
 pub mod motion;
 pub mod stm32_interface;
 pub mod stspin_motor;
