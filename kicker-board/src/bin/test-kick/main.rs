@@ -25,7 +25,7 @@ use embassy_time::{Delay, Duration, Timer, Ticker};
 
 use static_cell::StaticCell;
 
-use ateam_kicker_board::pins::{HighVoltageReadPin, BatteryVoltageReadPin, ChargePin, RegulatorDonePin, RegulatorFaultPin, RedStatusLedPin, GreenStatusLedPin};
+use ateam_kicker_board::pins::{HighVoltageReadPin, BatteryVoltageReadPin, ChargePin, RegulatorDonePin, RegulatorFaultPin, RedStatusLedPin, GreenStatusLedPin, KickPin};
 
 // #[embassy_executor::task]
 // async fn run_critical_section_task(p: Peripherals) {
@@ -78,9 +78,12 @@ async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
         mut reg_done: RegulatorDonePin,
         mut reg_fault: RegulatorFaultPin,
         mut status_led_red: RedStatusLedPin,
-        mut status_led_green: GreenStatusLedPin) -> ! {
+        mut status_led_green: GreenStatusLedPin,
+        mut kick_pin: KickPin) -> ! {
 
     let mut ticker = Ticker::every(Duration::from_millis(1));
+
+    let mut kick = Output::new(kick_pin, Level::Low, Speed::Medium);
 
     let reg_done = Input::new(reg_done, Pull::None);
     let reg_fault = Input::new(reg_fault, Pull::None);
@@ -100,15 +103,35 @@ async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
     let reg_fault_stat = reg_fault.is_low();
     reg_charge.set_low();
 
+    let mut hv = adc.read(&mut hv_pin) as u32;
+    let mut bv = adc.read(&mut batt_pin) as u32;
+    info!("hv V: {}, batt mv: {}", (hv * 200) / 1000, bv);
+
+    Timer::after(Duration::from_millis(1000)).await;
+
+    kick.set_high();
+    Timer::after(Duration::from_micros(10000)).await;
+    kick.set_low();
+
+    Timer::after(Duration::from_millis(2000)).await;
+
+    kick.set_high();
+    Timer::after(Duration::from_micros(500000)).await;
+    kick.set_low();
+
+    Timer::after(Duration::from_millis(1000)).await;
+
+
     loop {
-        let hv = adc.read(&mut hv_pin) as u32;
+        hv = adc.read(&mut hv_pin) as u32;
         // let bv = (adc.read(&mut batt_pin) as u32 * 10) / 12;
-        let bv = adc.read(&mut batt_pin) as u32;
+        bv = adc.read(&mut batt_pin) as u32;
 
 
         info!("hv V: {}, batt mv: {}", (hv * 200) / 1000, bv);
 
         reg_charge.set_low();
+        kick.set_low();
 
         if reg_done_stat {
             status_led_green.set_high();
@@ -168,6 +191,6 @@ fn main() -> ! {
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        unwrap!(spawner.spawn(sample_adc(adc, p.PA0, p.PA1, p.PB3, p.PB4, p.PB5, p.PA12, p.PA11)));
+        unwrap!(spawner.spawn(sample_adc(adc, p.PA0, p.PA1, p.PB3, p.PB4, p.PB5, p.PA12, p.PA11, p.PB0)));
     });
 }
