@@ -54,7 +54,7 @@ static RADIO_TEST: RadioTest<
     RadioReset,
 > = RadioTest::new(unsafe { &mut BUFFERS_TX }, unsafe { &mut BUFFERS_RX });
 
-// include_external_cpp_bin! {KICKER_FW_IMG, "kicker.bin"}
+include_external_cpp_bin! {KICKER_FW_IMG, "kicker.bin"}
 
 #[link_section = ".sram4"]
 static mut SPI6_BUF: [u8; 4] = [0x0; 4];
@@ -186,52 +186,52 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // loop {}
 
-    // let mut imu_spi = spi::Spi::new(
-    //     p.SPI6,
-    //     p.PA5,
-    //     p.PA7,
-    //     p.PA6,
-    //     p.BDMA_CH0,
-    //     p.BDMA_CH1,
-    //     hz(1_000_000),
-    //     spi::Config::default(),
-    // );
+    let mut imu_spi = spi::Spi::new(
+        p.SPI6,
+        p.PA5,
+        p.PA7,
+        p.PA6,
+        p.BDMA_CH0,
+        p.BDMA_CH1,
+        hz(1_000_000),
+        spi::Config::default(),
+    );
 
     // // acceleromter
-    // let mut imu_cs1 = Output::new(p.PC4, Level::High, Speed::VeryHigh);
+    let mut imu_cs1 = Output::new(p.PC4, Level::High, Speed::VeryHigh);
     // // gyro
-    // let mut imu_cs2 = Output::new(p.PC5, Level::High, Speed::VeryHigh);
+    let mut imu_cs2 = Output::new(p.PC5, Level::High, Speed::VeryHigh);
 
-    // Timer::after(Duration::from_millis(1)).await;
+    Timer::after(Duration::from_millis(1)).await;
 
     // // let mut buf = [0u8, 2];
 
-    // unsafe {
-    //     SPI6_BUF[0] = 0x80;
-    //     // info!("xfer {=[u8]:x}", SPI6_BUF[0..1]);
-    //     imu_cs1.set_low();
-    //     imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
-    //     imu_cs1.set_high();
-    //     let accel_id = SPI6_BUF[1];
-    //     info!("accelerometer id: 0x{:x}", accel_id);
+    unsafe {
+        SPI6_BUF[0] = 0x80;
+        // info!("xfer {=[u8]:x}", SPI6_BUF[0..1]);
+        imu_cs1.set_low();
+        imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
+        imu_cs1.set_high();
+        let accel_id = SPI6_BUF[1];
+        info!("accelerometer id: 0x{:x}", accel_id);
 
-    //     SPI6_BUF[0] = 0x80;
-    //     imu_cs2.set_low();
-    //     imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
-    //     imu_cs2.set_high();
-    //     let gyro_id = SPI6_BUF[1];
-    //     info!("gyro id: 0x{:x}", gyro_id);
+        SPI6_BUF[0] = 0x80;
+        imu_cs2.set_low();
+        imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
+        imu_cs2.set_high();
+        let gyro_id = SPI6_BUF[1];
+        info!("gyro id: 0x{:x}", gyro_id);
 
-    //     loop {
-    //         SPI6_BUF[0] = 0x86;
-    //         // SPI6_BUF[0] = 0x86;
-    //         imu_cs2.set_low();
-    //         imu_spi.transfer_in_place(&mut SPI6_BUF[0..3]).await;
-    //         imu_cs2.set_high();
-    //         let rate_z = (SPI6_BUF[2] as u16 * 256 + SPI6_BUF[1] as u16) as i16;
-    //         info!("z rate: {}", rate_z);
-    //     }
-    // }
+        loop {
+            SPI6_BUF[0] = 0x86;
+            // SPI6_BUF[0] = 0x86;
+            imu_cs2.set_low();
+            imu_spi.transfer_in_place(&mut SPI6_BUF[0..3]).await;
+            imu_cs2.set_high();
+            let rate_z = (SPI6_BUF[2] as u16 * 256 + SPI6_BUF[1] as u16) as i16;
+            info!("z rate: {}", rate_z);
+        }
+    }
 
     // loop {}
 

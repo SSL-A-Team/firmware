@@ -341,25 +341,6 @@ impl Control {
         )
         .await;
 
-        // defmt::info!("flashing firmware");
-
-        // self.front_right_motor.load_default_firmware_image().await;
-        // defmt::info!("FR flashed");
-
-        // self.front_left_motor.load_default_firmware_image().await;
-        // defmt::info!("FL flashed");
-
-        // self.back_left_motor.load_default_firmware_image().await;
-        // defmt::info!("BL flashed");
-
-        // self.back_right_motor.load_default_firmware_image().await;
-        // defmt::info!("BR flashed");
-
-        // self.drib_motor.load_default_firmware_image().await;
-        // defmt::info!("DRIB flashed");
-
-
-
         defmt::info!("flashed");
 
         // leave reset
