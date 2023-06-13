@@ -24,42 +24,59 @@
 
 use crate::pins::{ChargePin, RegulatorDonePin, RegulatorFaultPin, HighVoltageReadPin, BatteryVoltageReadPin};
 
+const CHARGE_COOLDOWN_US: usize = 500;
+const KICK_COOLDOWN_MS: usize = 500; // TODO: get estiamted mechanical return time from Matt and pad it
+
 enum EnergyManagementState {
-    FaultInitializeSafetyShutdown,
-    FaultSafetyShutdownComplete,
+    Idle,
+    Charge,
+    Kick_ChargeCooldown(usize),
+    Kick_,
+    FaultSafetyShutdown_Start,
+    FaultSafetyShutdown_Complete,
 }
 
 pub struct CriticalEnergyManager {
-    // external interface    
+    // external interface
     charge_pin: ChargePin,
-    done_pin: RegulatorDonePin,
-    fault_pin: RegulatorFaultPin,
     high_voltage_feedback_pin: HighVoltageReadPin, 
     battery_voltage_feedback_pin: BatteryVoltageReadPin,
 
     // internal peripherals
 
     // record keeping
+    current_state: EnergyManagementState,
 }
 
 impl CriticalEnergyManager {
     pub fn new(
             charge_pin: ChargePin, 
-            done_pin: RegulatorDonePin, 
-            fault_pin: RegulatorFaultPin, 
             high_voltage_feedback_pin: HighVoltageReadPin, 
             battery_voltage_feedback_pin: BatteryVoltageReadPin
     ) -> CriticalEnergyManager {
         CriticalEnergyManager {
             charge_pin,
-            done_pin,
-            fault_pin,
             high_voltage_feedback_pin,
-            battery_voltage_feedback_pin
+            battery_voltage_feedback_pin,
+            current_state: EnergyManagementState::Idle,
         }
     }
 
-    fn update_tick() {
+    async fn do_fsm_update(external_error: bool, charge: bool, kick: bool, chip: bool) {
+
+    }
+
+    pub fn update_tick() {
         // read adc
+
+        // latch HV OV fault
+        // latch batt UV/OV faults
+
+        // read breakbeam
+
+        // update FSM
+
+        // publish adc values
+        // publish breakbeam values
     }
 }
