@@ -7,6 +7,8 @@ use core::mem;
 use defmt::*;
 use {defmt_rtt as _, panic_probe as _};
 
+use core::hint::black_box;
+
 // use cortex_m::{peripheral::NVIC, delay::Delay};
 use cortex_m::{peripheral::NVIC};
 use cortex_m_rt::entry;
@@ -70,6 +72,10 @@ use ateam_kicker_board::pins::{HighVoltageReadPin, BatteryVoltageReadPin, Charge
 //     }
 // }
 
+pub fn printy(hv: u32, bv: u32) {
+    info!("hv V: {}, batt mv: {}", ((hv * 200) * 8 / 10), (bv * 25000 / 1650 * (8 / 10))); // 8 / 10 for adc offset
+}
+
 #[embassy_executor::task]
 async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>, 
         mut hv_pin: HighVoltageReadPin, 
@@ -105,7 +111,8 @@ async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
 
     let mut hv = adc.read(&mut hv_pin) as u32;
     let mut bv = adc.read(&mut batt_pin) as u32;
-    info!("hv V: {}, batt mv: {}", (hv * 200) / 1000, bv);
+    info!("hv V: {}, batt mv: {}", ((hv * 200) * 8 / 10), (bv * 25000 / 1650 * (8 / 10))); // 8 / 10 for adc offset
+    // black_box(printy(hv, bv));
 
     Timer::after(Duration::from_millis(1000)).await;
 

@@ -95,7 +95,7 @@ async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
     Timer::after(Duration::from_millis(500)).await;
 
     reg_charge.set_high();
-    Timer::after(Duration::from_millis(600)).await;
+    Timer::after(Duration::from_millis(400)).await;
     let reg_done_stat = reg_done.is_low();
     let reg_fault_stat = reg_fault.is_low();
     reg_charge.set_low();
