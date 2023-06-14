@@ -3,6 +3,7 @@
 #![feature(type_alias_impl_trait)]
 
 use core::mem;
+use static_cell::StaticCell;
 
 use defmt::*;
 use {defmt_rtt as _, panic_probe as _};
@@ -12,68 +13,79 @@ use cortex_m_rt::entry;
 
 use embassy_executor::{Executor, InterruptExecutor};
 use embassy_stm32::{
-    adc::{Adc, AdcPin},
+    adc::{Adc, SampleTime},
     pac::Interrupt,
-    Peripherals,
-    gpio::{Input, Level, Output, Pull, Speed},
-    gpio::low_level::Pin,
+    gpio::{Level, Output, Speed},
     interrupt,
 };
-use embassy_time::{Delay, Duration, Timer};
+use embassy_time::{Delay};
 
-use static_cell::StaticCell;
+use ateam_kicker_board::{
+    adc_raw_to_mv,
+    adc_mv_to_battery_voltage,
+    adc_mv_to_rail_voltage,
+    kick_manager::{
+        KickManager, 
+        KickType},
+    pins::{HighVoltageReadPin,
+        BatteryVoltageReadPin,
+        ChargePin,
+        KickPin,
+        ChipPin}
+};
 
 #[embassy_executor::task]
-async fn run_critical_section_task(p: Peripherals) {
-    let reg_done = Input::new(p.PB4, Pull::None);
-    let reg_fault = Input::new(p.PB5, Pull::None);
+async fn high_pri_kick_task(
+        mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
+        charge_pin: ChargePin,
+        kick_pin: KickPin,
+        chip_pin: ChipPin,
+        mut rail_pin: HighVoltageReadPin,
+        mut battery_voltage_pin: BatteryVoltageReadPin) -> ! {
 
-    let mut reg_charge = Output::new(p.PB3, Level::Low, Speed::Medium);
-    let mut status_led_green = Output::new(p.PA11, Level::Low, Speed::Medium);
-    let mut status_led_red = Output::new(p.PA12, Level::Low, Speed::Medium);
-
-    status_led_green.set_high();
-    Timer::after(Duration::from_millis(500)).await;
-    status_led_green.set_low();
-    Timer::after(Duration::from_millis(500)).await;
-
-    reg_charge.set_high();
-    Timer::after(Duration::from_millis(100)).await;
-    reg_charge.set_low();
+    let charge_pin = Output::new(charge_pin, Level::Low, Speed::Medium);
+    let kick_pin = Output::new(kick_pin, Level::Low, Speed::Medium);
+    let chip_pin = Output::new(chip_pin, Level::Low, Speed::Medium);
+    let mut kick_manager = KickManager::new(charge_pin, kick_pin, chip_pin);
 
     loop {
-        reg_charge.set_low();
+        let rail_voltage = adc_mv_to_rail_voltage(adc_raw_to_mv(adc.read(&mut rail_pin) as f32));
+        let battery_voltage = adc_mv_to_battery_voltage(adc_raw_to_mv(adc.read(&mut battery_voltage_pin) as f32));
 
-        if reg_done.is_low() {
-            status_led_green.set_high();
-        } else {
-            status_led_green.set_low();
-        }
+        // read breakbeam
+        // read commands
 
-        if reg_fault.is_low() {
-            status_led_red.set_high();
-        } else {
-            status_led_red.set_low();
-        }
+        // convert breakbeam state + command into action(s)
+
+        // TODO use result to send errors upstream
+        let _ = kick_manager.command(battery_voltage, rail_voltage, false, KickType::None, 0.0).await;
+
+        // publish adc values
+        // publish breakbeam values
+        // do ticker
     }
+
 }
 
 #[embassy_executor::task]
-async fn low_pri_ticker() {
+async fn low_pri_coms_task() {
     loop {
-        info!("[low] Starting long computation");
+        // read packets from control
+        // publish command to kick channel
 
-        Timer::after(Duration::from_ticks(32983)).await;
+        // read packets from kick system channels (voltages, breakbeam, status)
+        // update LEDs
+        // send upstream packet
     }
 }
 
-// static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
+static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
 static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
-// #[interrupt]
-// unsafe fn I2C1() {
-//     EXECUTOR_HIGH.on_interrupt();
-// }
+#[interrupt]
+unsafe fn I2C1() {
+    EXECUTOR_HIGH.on_interrupt();
+}
 
 #[entry]
 fn main() -> ! {
@@ -81,19 +93,21 @@ fn main() -> ! {
     info!("kicker startup!");
     let mut nvic: NVIC = unsafe { mem::transmute(()) };
 
-    // highest priorty, energy management
-    // medium priority, ADC publisher
-    // low priority uart handler
-    // lowest prioiryt main update loop
+    let mut adc = Adc::new(p.ADC, &mut Delay);
+    adc.set_sample_time(SampleTime::Cycles71_5);
 
+
+
+    // high priority executor handles kicking system
     // High-priority executor: I2C1, priority level 6
-    // unsafe { nvic.set_priority(Interrupt::I2C1, 6 << 4) };
-    // let spawner = EXECUTOR_HIGH.start(Interrupt::I2C1);
-    // unwrap!(spawner.spawn(run_critical_section_task(p)));
+    unsafe { nvic.set_priority(Interrupt::I2C1, 6 << 4) };
+    let spawner = EXECUTOR_HIGH.start(Interrupt::I2C1);
+    unwrap!(spawner.spawn(high_pri_kick_task(adc, p.PB3, p.PB0, p.PB1, p.PA0, p.PA1)));
 
+    // low priority executor handles coms and user IO
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        unwrap!(spawner.spawn(low_pri_ticker()));
+        unwrap!(spawner.spawn(low_pri_coms_task()));
     });
 }
