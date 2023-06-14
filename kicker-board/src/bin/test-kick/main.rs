@@ -7,7 +7,7 @@ use core::mem;
 use defmt::*;
 use {defmt_rtt as _, panic_probe as _};
 
-use core::hint::black_box;
+// use core::hint::black_box;
 
 // use cortex_m::{peripheral::NVIC, delay::Delay};
 use cortex_m::{peripheral::NVIC};
@@ -27,7 +27,7 @@ use embassy_time::{Delay, Duration, Timer, Ticker};
 
 use static_cell::StaticCell;
 
-use ateam_kicker_board::pins::{HighVoltageReadPin, BatteryVoltageReadPin, ChargePin, RegulatorDonePin, RegulatorFaultPin, RedStatusLedPin, GreenStatusLedPin, KickPin};
+use ateam_kicker_board::{pins::{HighVoltageReadPin, BatteryVoltageReadPin, ChargePin, RegulatorDonePin, RegulatorFaultPin, RedStatusLedPin, GreenStatusLedPin, KickPin}, adc_mv_to_rail_voltage, adc_raw_to_mv, adc_mv_to_battery_voltage};
 
 // #[embassy_executor::task]
 // async fn run_critical_section_task(p: Peripherals) {
@@ -72,10 +72,6 @@ use ateam_kicker_board::pins::{HighVoltageReadPin, BatteryVoltageReadPin, Charge
 //     }
 // }
 
-pub fn printy(hv: u32, bv: u32) {
-    info!("hv V: {}, batt mv: {}", ((hv * 200) * 8 / 10), (bv * 25000 / 1650 * (8 / 10))); // 8 / 10 for adc offset
-}
-
 #[embassy_executor::task]
 async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>, 
         mut hv_pin: HighVoltageReadPin, 
@@ -109,10 +105,10 @@ async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
     let reg_fault_stat = reg_fault.is_low();
     reg_charge.set_low();
 
-    let mut hv = adc.read(&mut hv_pin) as u32;
-    let mut bv = adc.read(&mut batt_pin) as u32;
-    info!("hv V: {}, batt mv: {}", ((hv * 200) * 8 / 10), (bv * 25000 / 1650 * (8 / 10))); // 8 / 10 for adc offset
-    // black_box(printy(hv, bv));
+    let mut hv = adc.read(&mut hv_pin) as f32;
+    let mut bv = adc.read(&mut batt_pin) as f32;
+    // info!("hv V: {}, batt mv: {}", ((hv * 200) * 8 / 10), (bv * 25000 / 1650 * (8 / 10))); // 8 / 10 for adc offset
+    info!("hv V: {}, batt mv: {}", adc_mv_to_rail_voltage(adc_raw_to_mv(hv)), adc_mv_to_battery_voltage(adc_raw_to_mv(bv)));
 
     Timer::after(Duration::from_millis(1000)).await;
 
@@ -130,12 +126,14 @@ async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
 
 
     loop {
-        hv = adc.read(&mut hv_pin) as u32;
+        hv = adc.read(&mut hv_pin) as f32;
         // let bv = (adc.read(&mut batt_pin) as u32 * 10) / 12;
-        bv = adc.read(&mut batt_pin) as u32;
+        bv = adc.read(&mut batt_pin) as f32;
 
 
-        info!("hv V: {}, batt mv: {}", (hv * 200) / 1000, bv);
+        // info!("hv V: {}, batt mv: {}", (hv * 200) / 1000, bv);
+        info!("hv V: {}, batt mv: {}", adc_mv_to_rail_voltage(adc_raw_to_mv(hv)), adc_mv_to_battery_voltage(adc_raw_to_mv(bv)));
+
 
         reg_charge.set_low();
         kick.set_low();

@@ -69,6 +69,11 @@ name = "test-charge"
 test = false
 harness = false
 
+[[bin]]
+name = "test-kick"
+test = false
+harness = false
+
 
 [patch.crates-io]
 embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "047ea9066f0d946fd4d706577b21df38fd3b1647" }
