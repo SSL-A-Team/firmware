@@ -9,6 +9,7 @@ use embassy_stm32::usart::{self, Parity, StopBits, Config};
 use embassy_time::{Duration, Timer};
 use embassy_stm32::pac::lpuart::regs;
 use embassy_stm32::interrupt::{Interrupt, InterruptExt};
+use embassy_time::with_timeout;
 
 use crate::queue::{DequeueRef, Error};
 use crate::uart_queue::{Reader, Writer, UartReadQueue, UartWriteQueue};
@@ -55,7 +56,7 @@ pub struct Stm32Interface<
     reader: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
     writer: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
     boot0_pin: Option<Output<'a, Boot0Pin>>,
-    reset_pin: Option<OutputOpenDrain<'a, ResetPin>>,
+    reset_pin: Option<Output<'a, ResetPin>>,
 
     in_bootloader: bool,
 }
@@ -76,8 +77,8 @@ impl<
     pub fn new(        
         read_queue: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
         write_queue: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
-        mut boot0_pin: Option<Output<'a, Boot0Pin>>,
-        mut reset_pin: Option<OutputOpenDrain<'a, ResetPin>>
+        boot0_pin: Option<Output<'a, Boot0Pin>>,
+        reset_pin: Option<Output<'a, ResetPin>>
     ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin> {
         // let the user set the initial state
         // if boot0_pin.is_some() {
@@ -163,7 +164,7 @@ impl<
         .await?;
 
         let mut res = Err(());
-        self.reader.read(|buf| {
+        let sync_res = with_timeout(Duration::from_millis(100), self.reader.read(|buf| {
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
                     defmt::info!("bootloader replied with ACK after calibration.");
@@ -173,7 +174,12 @@ impl<
                     defmt::error!("bootloader replied with NACK after calibration.");
                 }
             }
-        }).await?;
+        })).await;
+
+        if sync_res.is_err() {
+            defmt::warn!("*** HARDWARE CHECK *** - bootloader baud calibration timed out.");
+            return Err(())
+        }
 
         res
     }

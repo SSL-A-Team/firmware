@@ -5,24 +5,28 @@
 #![feature(const_mut_refs)]
 #![feature(ptr_metadata)]
 
-use ateam_common_packets::bindings_radio::BasicTelemetry;
 use defmt::*;
 use defmt_rtt as _;
+use panic_probe as _;
 
-use embassy_stm32::time::mhz;
-use embassy_stm32::usart::{self, StopBits, Uart};
+use static_cell::StaticCell;
+
 use embassy_stm32::{
     self as _,
     executor::InterruptExecutor,
     interrupt::{self, InterruptExt},
     peripherals::{DMA1_CH0, DMA1_CH1, USART2},
+    usart::{self, Uart},
+    time::mhz
 };
-use embassy_time::{Duration, Timer};
+use embassy_time::Duration;
+
 use ateam_control_board::drivers::radio::{RobotRadio, TeamColor};
 use ateam_control_board::queue;
 use ateam_control_board::uart_queue::{UartReadQueue, UartWriteQueue};
-use panic_probe as _;
-use static_cell::StaticCell;
+
+use ateam_common_packets::bindings_radio::BasicTelemetry;
+
 
 static EXECUTOR_UART_QUEUE: StaticCell<InterruptExecutor<interrupt::CEC>> = StaticCell::new();
 
@@ -94,7 +98,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     let mut seq: u16 = 0;
     loop {
-        radio
+        let _ = radio
             .send_telemetry(BasicTelemetry {
                 sequence_number: seq,
                 robot_revision_major: 0,
@@ -115,7 +119,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
             .await;
         info!("send");
         let control = radio.read_control().await;
-        if let Ok(control) = control {
+        if let Ok(_) = control {
+            info!("received control packet.")
             // info!("{:?}", defmt::Debug2Format(&control));
         }
         info!("{}", seq);
