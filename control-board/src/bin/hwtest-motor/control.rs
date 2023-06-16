@@ -214,15 +214,15 @@ impl Control {
         let drib_boot0_pin = Output::new(drib_boot0_pin, Level::Low, Speed::Medium); // boot0 not active
 
         let front_right_reset_pin =
-            OutputOpenDrain::new(front_right_reset_pin, Level::Low, Speed::Medium, Pull::None); // reset active
+            Output::new(front_right_reset_pin, Level::Low, Speed::Medium); // reset active
         let front_left_reset_pin =
-            OutputOpenDrain::new(front_left_reset_pin, Level::Low, Speed::Medium, Pull::None); // reset active
+            Output::new(front_left_reset_pin, Level::Low, Speed::Medium); // reset active
         let back_left_reset_pin =
-            OutputOpenDrain::new(back_left_reset_pin, Level::Low, Speed::Medium, Pull::None); // reset active
+            Output::new(back_left_reset_pin, Level::Low, Speed::Medium); // reset active
         let back_right_reset_pin =
-            OutputOpenDrain::new(back_right_reset_pin, Level::Low, Speed::Medium, Pull::None); // reset active
+            Output::new(back_right_reset_pin, Level::Low, Speed::Medium); // reset active
         let drib_reset_pin = 
-            OutputOpenDrain::new(drib_reset_pin, Level::Low, Speed::Medium, Pull::None); // reset active
+            Output::new(drib_reset_pin, Level::Low, Speed::Medium); // reset active
 
         spawner
             .spawn(FRONT_RIGHT_QUEUE_RX.spawn_task(front_right_rx))
@@ -332,35 +332,26 @@ impl Control {
     }
 
     pub async fn load_firmware(&mut self) {
-        let _res = embassy_futures::join::join5(
-            self.front_right_motor.load_default_firmware_image(),
-            self.front_left_motor.load_default_firmware_image(),
-            self.back_left_motor.load_default_firmware_image(),
-            self.back_right_motor.load_default_firmware_image(),
-            self.drib_motor.load_default_firmware_image(),
-        )
-        .await;
+        defmt::info!("flashing firmware");
 
-        // defmt::info!("flashing firmware");
+        self.front_right_motor.load_default_firmware_image().await;
+        defmt::info!("FR flashed");
 
-        // self.front_right_motor.load_default_firmware_image().await;
-        // defmt::info!("FR flashed");
+        self.front_left_motor.load_default_firmware_image().await;
+        defmt::info!("FL flashed");
 
-        // self.front_left_motor.load_default_firmware_image().await;
-        // defmt::info!("FL flashed");
+        self.back_left_motor.load_default_firmware_image().await;
+        defmt::info!("BL flashed");
 
-        // self.back_left_motor.load_default_firmware_image().await;
-        // defmt::info!("BL flashed");
+        self.back_right_motor.load_default_firmware_image().await;
+        defmt::info!("BR flashed");
 
-        // self.back_right_motor.load_default_firmware_image().await;
-        // defmt::info!("BR flashed");
-
-        // self.drib_motor.load_default_firmware_image().await;
-        // defmt::info!("DRIB flashed");
+        self.drib_motor.load_default_firmware_image().await;
+        defmt::info!("DRIB flashed");
 
 
 
-        defmt::info!("flashed");
+        defmt::info!("all motor controller firmware flashed");
 
         // leave reset
         // don't pull the chip out of reset until we're ready to read packets or we'll fill the queue

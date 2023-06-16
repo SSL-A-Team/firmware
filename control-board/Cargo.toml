@@ -65,17 +65,27 @@ test = false
 harness = false
 
 [[bin]]
-name = "radio"
+name = "control"
+test = false
+harness = false
+
+[[bin]]
+name = "hwtest-imu"
+test = false
+harness = false
+
+[[bin]]
+name = "hwtest-motor"
+test = false
+harness = false
+
+[[bin]]
+name = "hwtest-radio"
 test = false
 harness = false
 
 [[bin]]
 name = "proto-drivetrain"
-test = false
-harness = false
-
-[[bin]]
-name = "bodge-bot"
 test = false
 harness = false
 
