@@ -15,6 +15,9 @@ use embassy_stm32::{
     usart::{self, Uart},
 };
 use embassy_time::{Duration, Ticker, Timer};
+use ateam_kicker_board::{
+    drivers::{breakbeam::Breakbeam}
+};
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -26,8 +29,7 @@ async fn main(_spawner: Spawner) {
     let mut status_led_blue = Output::new(p.PA8, Level::Low, Speed::Medium);
 
     // Breakbeam 
-    let mut breakbeam_emitter = Output::new(p.PA2, Level::High, Speed::Low);
-    let breakbeam_receiver = Input::new(p.PA3, Pull::None);
+    let mut breakbeam = Breakbeam::new(p.PA2, p.PA3);
 
     status_led_green.set_high();
     Timer::after(Duration::from_millis(250)).await;
@@ -40,9 +42,10 @@ async fn main(_spawner: Spawner) {
 
     loop 
     {
-        breakbeam_emitter.set_high();
-
-        if breakbeam_receiver.is_high()
+        // Enable transmitter, wait 100ms, drive blue status LED if receiving, wait 1 sec
+        breakbeam.enable_tx();
+        Timer::after(Duration::from_millis(100)).await;
+        if breakbeam.read()
         {
             status_led_blue.set_high();
         } 
@@ -50,6 +53,19 @@ async fn main(_spawner: Spawner) {
         {
             status_led_blue.set_low();
         }
+        Timer::after(Duration::from_millis(1000)).await;
+
+        // Disable transmitter, wait 100ms, drive blue status LED if receiving, wait 1 sec
+        breakbeam.disable_tx();
+        if breakbeam.read()
+        {
+            status_led_blue.set_high();
+        } 
+        else
+        {
+            status_led_blue.set_low();
+        }
+        Timer::after(Duration::from_millis(1000)).await;
         
     }
 }
