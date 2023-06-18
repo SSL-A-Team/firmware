@@ -18,6 +18,8 @@ use embassy_time::{Duration, Ticker, Timer};
 use ateam_kicker_board::{
     drivers::{breakbeam::Breakbeam}
 };
+use ateam_kicker_board::pins::{BlueStatusLedPin, GreenStatusLedPin, BreakbeamTxPin, BreakbeamRxPin};
+
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -25,7 +27,6 @@ async fn main(_spawner: Spawner) {
     info!("breakbeam startup!");
     
     let mut status_led_green = Output::new(p.PA11, Level::Low, Speed::Medium);
-    let mut status_led_red = Output::new(p.PA12, Level::Low, Speed::Medium);
     let mut status_led_blue = Output::new(p.PA8, Level::Low, Speed::Medium);
 
     // Breakbeam 
