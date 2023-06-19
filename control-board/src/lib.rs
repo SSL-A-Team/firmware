@@ -29,3 +29,11 @@ macro_rules! include_external_cpp_bin {
             = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../motor-controller/build/bin/", $bin_file));
     }
 }
+
+#[macro_export]
+macro_rules! include_kicker_bin {
+    ($var_name:ident, $bin_file:literal) => {
+        pub static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../kicker-board/target/thumbv6m-none-eabi/release/", $bin_file)).len()] 
+            = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../kicker-board/target/thumbv6m-none-eabi/release/", $bin_file));
+    }
+}

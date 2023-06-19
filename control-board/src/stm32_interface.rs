@@ -58,6 +58,8 @@ pub struct Stm32Interface<
     boot0_pin: Option<Output<'a, Boot0Pin>>,
     reset_pin: Option<Output<'a, ResetPin>>,
 
+    reset_pin_noninverted: bool,
+
     in_bootloader: bool,
 }
 
@@ -94,6 +96,32 @@ impl<
             writer: write_queue,
             boot0_pin,
             reset_pin,
+            reset_pin_noninverted: false,
+            in_bootloader: false,
+        }
+    }
+
+    pub fn new_noninverted_reset(        
+        read_queue: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
+        boot0_pin: Option<Output<'a, Boot0Pin>>,
+        reset_pin: Option<Output<'a, ResetPin>>
+    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin> {
+        // let the user set the initial state
+        // if boot0_pin.is_some() {
+        //     boot0_pin.as_mut().unwrap().set_low();
+        // }
+
+        // if reset_pin.is_some() {
+        //     reset_pin.as_mut().unwrap().set_high();
+        // }
+        
+        Stm32Interface {
+            reader: read_queue,
+            writer: write_queue,
+            boot0_pin,
+            reset_pin,
+            reset_pin_noninverted: true,
             in_bootloader: false,
         }
     }
@@ -107,7 +135,11 @@ impl<
             return Err(());
         }
 
-        self.reset_pin.as_mut().unwrap().set_low();
+        if self.reset_pin_noninverted {
+            self.reset_pin.as_mut().unwrap().set_high();
+        } else {
+            self.reset_pin.as_mut().unwrap().set_low();
+        }
         Timer::after(Duration::from_micros(100)).await;
         
         Ok(())
@@ -118,7 +150,11 @@ impl<
             return Err(());
         }
 
-        self.reset_pin.as_mut().unwrap().set_high();
+        if self.reset_pin_noninverted {
+            self.reset_pin.as_mut().unwrap().set_low();
+        } else {
+            self.reset_pin.as_mut().unwrap().set_high();
+        }
         Timer::after(Duration::from_micros(100)).await;
 
         Ok(())

@@ -75,6 +75,11 @@ test = false
 harness = false
 
 [[bin]]
+name = "hwtest-kicker"
+test = false
+harness = false
+
+[[bin]]
 name = "hwtest-motor"
 test = false
 harness = false
@@ -85,12 +90,12 @@ test = false
 harness = false
 
 [[bin]]
-name = "proto-drivetrain"
+name = "kicker"
 test = false
 harness = false
 
 [[bin]]
-name = "kicker"
+name = "proto-drivetrain"
 test = false
 harness = false
 
