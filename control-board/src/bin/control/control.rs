@@ -24,6 +24,7 @@ use nalgebra::{Vector3, Vector4};
 use crate::pins::*;
 
 include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
+// include_external_cpp_bin! {DRIB_FW_IMG, "wheel.bin"}
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 
 // motor pinout
@@ -239,7 +240,51 @@ impl Control {
         spawner
             .spawn(BACK_LEFT_QUEUE_RX.spawn_task(back_left_rx))
             .unwrap();
-        spawner
+        spawner                    // // // info!("{:?}", defmt::Debug2Format(&mrp.data.motion));
+        // // info!("\n");
+        // // // info!("vel set {:?}", mrp.data.motion.vel_setpoint + 0.);
+        // info!("vel enc {:?}", mrp.data.motion.vel_enc_estimate + 0.);
+        // // // info!("vel hall {:?}", mrp.data.motion.vel_hall_estimate +                    // // // info!("{:?}", defmt::Debug2Format(&mrp.data.motion));
+                    // // info!("\n");
+                    // // // info!("vel set {:?}", mrp.data.motion.vel_setpoint + 0.);
+                    // info!("vel enc {:?}", mrp.data.motion.vel_enc_estimate + 0.);
+                    // // // info!("vel hall {:?}", mrp.data.motion.vel_hall_estimate + 0.);
+                    // info!("master_error {:?}", mrp.data.motion.master_error());
+                    // info!("{:?}", &mrp.data.motion._bitfield_1.get(0, 32));
+                    // info!("hall_power_error {:?}", mrp.data.motion.hall_power_error());
+                    // info!("hall_disconnected_error {:?}", mrp.data.motion.hall_disconnected_error());
+                    // info!("bldc_transition_error {:?}", mrp.data.motion.bldc_transition_error());
+                    // info!("bldc_commutation_watchdog_error {:?}", mrp.data.motion.bldc_commutation_watchdog_error());
+                    // info!("enc_disconnected_error {:?}", mrp.data.motion.enc_disconnected_error());
+                    // info!("enc_decoding_error {:?}", mrp.data.motion.enc_decoding_error());
+                    // info!("hall_enc_vel_disagreement_error {:?}", mrp.data.motion.hall_enc_vel_disagreement_error());
+                    // info!("overcurrent_error {:?}", mrp.data.motion.overcurrent_error());
+                    // info!("undervoltage_error {:?}", mrp.data.motion.undervoltage_error());
+                    // info!("overvoltage_error {:?}", mrp.data.motion.overvoltage_error());
+                    // info!("torque_limited {:?}", mrp.data.motion.torque_limited());
+                    // info!("control_loop_time_error {:?}", mrp.data.motion.control_loop_time_error());
+                    // info!("reset_watchdog_independent {:?}", mrp.data.motion.reset_watchdog_independent());
+                    // info!("reset_watchdog_window {:?}", mrp.data.motion.reset_watchdog_window());
+                    // info!("reset_low_power {:?}", mrp.data.motion.reset_low_power());
+                    // info!("reset_software {:?}", mrp.data.motion.reset_software()); 0.);
+        // info!("master_error {:?}", mrp.data.motion.master_error());
+        // info!("{:?}", &mrp.data.motion._bitfield_1.get(0, 32));
+        // info!("hall_power_error {:?}", mrp.data.motion.hall_power_error());
+        // info!("hall_disconnected_error {:?}", mrp.data.motion.hall_disconnected_error());
+        // info!("bldc_transition_error {:?}", mrp.data.motion.bldc_transition_error());
+        // info!("bldc_commutation_watchdog_error {:?}", mrp.data.motion.bldc_commutation_watchdog_error());
+        // info!("enc_disconnected_error {:?}", mrp.data.motion.enc_disconnected_error());
+        // info!("enc_decoding_error {:?}", mrp.data.motion.enc_decoding_error());
+        // info!("hall_enc_vel_disagreement_error {:?}", mrp.data.motion.hall_enc_vel_disagreement_error());
+        // info!("overcurrent_error {:?}", mrp.data.motion.overcurrent_error());
+        // info!("undervoltage_error {:?}", mrp.data.motion.undervoltage_error());
+        // info!("overvoltage_error {:?}", mrp.data.motion.overvoltage_error());
+        // info!("torque_limited {:?}", mrp.data.motion.torque_limited());
+        // info!("control_loop_time_error {:?}", mrp.data.motion.control_loop_time_error());
+        // info!("reset_watchdog_independent {:?}", mrp.data.motion.reset_watchdog_independent());
+        // info!("reset_watchdog_window {:?}", mrp.data.motion.reset_watchdog_window());
+        // info!("reset_low_power {:?}", mrp.data.motion.reset_low_power());
+        // info!("reset_software {:?}", mrp.data.motion.reset_software());
             .spawn(BACK_LEFT_QUEUE_TX.spawn_task(back_left_tx))
             .unwrap();
         spawner
@@ -431,7 +476,9 @@ impl Control {
         self.back_left_motor.set_setpoint(wheel_vels[2]);
         self.back_right_motor.set_setpoint(wheel_vels[3]);
         // angle += core::f32::consts::FRAC_2_PI / 200.0;
-        let drib_dc = self.drib_vel / 1000.0;
+        let drib_dc = -1.0 * self.drib_vel / 1000.0;
+        // defmt::info!("Drib Duty Cycle: {}", drib_dc);
+        // let drib_dc = -0.1;
         self.drib_motor.set_setpoint(drib_dc);
 
         // let c_vel = 0.2;

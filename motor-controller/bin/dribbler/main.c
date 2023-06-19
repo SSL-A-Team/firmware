@@ -27,6 +27,13 @@ int main() {
     uint32_t rcc_csr = RCC->CSR;
     RCC->CSR |= RCC_CSR_RMVF;
 
+    // turn off LEDs
+    GPIOB->BSRR |= GPIO_BSRR_BR_6;
+    GPIOB->BSRR |= GPIO_BSRR_BR_7;
+
+    // turn on Red LED
+    GPIOB->BSRR |= GPIO_BSRR_BS_6;
+
     // Setups clocks
     setup();
 
@@ -38,15 +45,19 @@ int main() {
     while (IWDG->SR) {} // wait for value to take
     IWDG->KR = 0x0000AAAA; // feed the watchdog
 
-    GPIOB->BSRR |= GPIO_BSRR_BR_8;
-    GPIOB->BSRR |= GPIO_BSRR_BR_9;
+    GPIOB->BSRR |= GPIO_BSRR_BR_6;
+    GPIOB->BSRR |= GPIO_BSRR_BR_7;
+
+    GPIOB->BSRR |= GPIO_BSRR_BS_8;
 
     uint32_t ticks_since_last_command_packet = 0;
     bool telemetry_enabled = false;
 
+    // initialize current sensing setup
     ADC_Result_t res;
     currsen_setup(ADC_MODE, &res, ADC_NUM_CHANNELS, ADC_CH_MASK, ADC_SR_MASK);
 
+    // initialize motor driver
     pwm6step_setup();
     pwm6step_set_duty_cycle_f(0.0f);
 
@@ -83,6 +94,10 @@ int main() {
     pid_constants_initialize(&torque_pid_constants);
     Pid_t torque_pid;
     pid_initialize(&torque_pid, &torque_pid_constants);
+
+    // turn off Red turn on Green
+    GPIOB->BSRR |= GPIO_BSRR_BR_6;
+    GPIOB->BSRR |= GPIO_BSRR_BS_7;
 
     // toggle J1-1
     while (true) {
@@ -225,7 +240,19 @@ int main() {
             // timestamp
             response_packet.data.motion.timestamp = time_local_epoch_s();
 
-
+            // master error
+            response_packet.data.motion.master_error = response_packet.data.motion.hall_power_error
+                    || response_packet.data.motion.hall_power_error
+                    || response_packet.data.motion.hall_disconnected_error
+                    || response_packet.data.motion.bldc_transition_error
+                    || response_packet.data.motion.bldc_commutation_watchdog_error
+                    || response_packet.data.motion.enc_disconnected_error
+                    || response_packet.data.motion.enc_decoding_error
+                    || response_packet.data.motion.hall_enc_vel_disagreement_error
+                    || response_packet.data.motion.overcurrent_error
+                    || response_packet.data.motion.undervoltage_error
+                    || response_packet.data.motion.overvoltage_error
+                    || response_packet.data.motion.control_loop_time_error;
 
             // transmit packets
 #ifdef UART_ENABLED

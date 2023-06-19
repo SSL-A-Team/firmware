@@ -157,7 +157,7 @@ int main() {
 
     torque_pid_constants.kP = 1.0f;
 
-    // turn off LEDs
+    // turn off Red turn on Green
     GPIOB->BSRR |= GPIO_BSRR_BR_6;
     GPIOB->BSRR |= GPIO_BSRR_BS_7;
 
