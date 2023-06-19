@@ -5,7 +5,6 @@ use defmt::info;
 use embassy_executor::{raw::TaskStorage, SpawnToken};
 use embassy_stm32::{
     usart::{self, UartRx, UartTx},
-    Peripheral,
 };
 
 pub struct UartReadQueue<

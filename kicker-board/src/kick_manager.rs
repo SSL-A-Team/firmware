@@ -38,6 +38,7 @@ const MAX_SAFE_RAIL_VOLTAGE: f32 = 190.0;  // rail is rated for 200V, and should
 const VBATT_OVERVOLTAGE_LOCKOUT: f32 = 27.2;
 const VBATT_UNDERVOLTAGE_LOCKOUT: f32 = 17.2;
 
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum KickType {
     Kick,
     Chip,
