@@ -13,7 +13,6 @@
 #![feature(ptr_metadata)]
 #![feature(async_fn_in_trait)]
 
-pub mod fw_images;
 pub mod queue;
 pub mod robot_model;
 pub mod stm32_interface;

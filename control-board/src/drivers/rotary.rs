@@ -1,4 +1,4 @@
-use embassy_stm32::gpio::{Flex, Input, Speed, Pin, Pull};
+use embassy_stm32::gpio::{Flex, Speed, Pin, Pull};
 
 pub struct Rotary<'a, Pin0: Pin, Pin1: Pin, Pin2: Pin, Pin3: Pin> {
     pin0: Flex<'a, Pin0>,

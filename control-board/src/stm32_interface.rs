@@ -3,35 +3,33 @@ use core::cmp::min;
 use defmt_rtt as _;
 use defmt::*;
 
-use embassy_stm32::gpio::{Output, OutputOpenDrain, Pin};
+use embassy_stm32::gpio::{Output, Pin};
 use embassy_stm32::pac;
 use embassy_stm32::usart::{self, Parity, StopBits, Config};
 use embassy_time::{Duration, Timer};
-use embassy_stm32::pac::lpuart::regs;
-use embassy_stm32::interrupt::{Interrupt, InterruptExt};
 use embassy_time::with_timeout;
 
 use crate::queue::{DequeueRef, Error};
 use crate::uart_queue::{Reader, Writer, UartReadQueue, UartWriteQueue};
 
-const STM32_BOOTLOADER_MAX_BAUD_RATE: u32 = 115_200;
-const STM32_BOOTLOADER_ACK: u8 = 0x79;
-const STM32_BOOTLOADER_NACK: u8 = 0x1F;
-const STM32_BOOTLOADER_CODE_SEQUENCE_BYTE: u8 = 0x7F;
+pub const STM32_BOOTLOADER_MAX_BAUD_RATE: u32 = 115_200;
+pub const STM32_BOOTLOADER_ACK: u8 = 0x79;
+pub const STM32_BOOTLOADER_NACK: u8 = 0x1F;
+pub const STM32_BOOTLOADER_CODE_SEQUENCE_BYTE: u8 = 0x7F;
 
-const STM32_BOOTLOADER_CMD_GET: u8 = 0x00;
-const STM32_BOOTLOADER_CMD_GET_VERSION: u8 = 0x01;
-const STM32_BOOTLOADER_CMD_GET_ID: u8 = 0x02;
-const STM32_BOOTLOADER_CMD_READ_MEM: u8 = 0x11;
-const STM32_BOOTLOADER_CMD_GO: u8 = 0x21;
-const STM32_BOOTLOADER_CMD_WRITE_MEM: u8 = 0x31;
-const STM32_BOOTLOADER_CMD_ERASE: u8 = 0x43;
-const STM32_BOOTLOADER_CMD_EXTENDED_ERASE: u8 = 0x44;
-const STM32_BOOTLOADER_CMD_WRITE_PROT: u8 = 0x63;
-const STM32_BOOTLOADER_CMD_WRITE_UNPROT: u8 = 0x73;
-const STM32_BOOTLOADER_CMD_READ_PROT: u8 = 0x82;
-const STM32_BOOTLOADER_CMD_READ_UNPROT: u8 = 0x92;
-const STM32_BOOTLOADER_CMD_GET_CHECKSUM: u8 = 0xA1;
+pub const STM32_BOOTLOADER_CMD_GET: u8 = 0x00;
+pub const STM32_BOOTLOADER_CMD_GET_VERSION: u8 = 0x01;
+pub const STM32_BOOTLOADER_CMD_GET_ID: u8 = 0x02;
+pub const STM32_BOOTLOADER_CMD_READ_MEM: u8 = 0x11;
+pub const STM32_BOOTLOADER_CMD_GO: u8 = 0x21;
+pub const STM32_BOOTLOADER_CMD_WRITE_MEM: u8 = 0x31;
+pub const STM32_BOOTLOADER_CMD_ERASE: u8 = 0x43;
+pub const STM32_BOOTLOADER_CMD_EXTENDED_ERASE: u8 = 0x44;
+pub const STM32_BOOTLOADER_CMD_WRITE_PROT: u8 = 0x63;
+pub const STM32_BOOTLOADER_CMD_WRITE_UNPROT: u8 = 0x73;
+pub const STM32_BOOTLOADER_CMD_READ_PROT: u8 = 0x82;
+pub const STM32_BOOTLOADER_CMD_READ_UNPROT: u8 = 0x92;
+pub const STM32_BOOTLOADER_CMD_GET_CHECKSUM: u8 = 0xA1;
 
 pub fn get_bootloader_uart_config() -> Config {
     let mut config = usart::Config::default();
