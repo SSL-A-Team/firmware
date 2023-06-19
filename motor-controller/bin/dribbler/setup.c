@@ -155,9 +155,8 @@ inline void setup_io() {
     // enable ADC clock
     RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
 
-    GPIOB->MODER |= GPIO_MODER_MODER8_0;
-    GPIOB->MODER |= GPIO_MODER_MODER9_0;
-    //GPIOB->OTYPER &= ~GPIO_OTYPER_OT_8;
+    GPIOB->MODER |= GPIO_MODER_MODER6_0;  // set output, Red LED, Err
+    GPIOB->MODER |= GPIO_MODER_MODER7_0;  // set output, Green LED, Fw Ready
 }
 
 /**

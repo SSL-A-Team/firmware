@@ -122,14 +122,22 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     let rotary = Rotary::new(p.PG9, p.PG10, p.PG11, p.PG12);
     let mut shell_indicator = ShellIndicator::new(p.PD0, p.PD1, p.PD3, p.PD4);
-    let team_dip0 = Input::new(p.PD14, Pull::Down);
+    let kicker_det = Input::new(p.PG8, Pull::Down);
+    let dip1 = Input::new(p.PG7, Pull::Down);
+    let dip2 = Input::new(p.PG6, Pull::Down);
+    let dip3 = Input::new(p.PG5, Pull::Down);
+    let dip4 = Input::new(p.PG4, Pull::Down);
+    let dip5 = Input::new(p.PG3, Pull::Down);
+    let dip6 = Input::new(p.PG2, Pull::Down);
+    let dip7 = Input::new(p.PD15, Pull::Down);
+
 
     // let mut kicker = Output::new(p.PF9, Level::Low, Speed::High);
 
     let robot_id = rotary.read();
     info!("id: {}", robot_id);
     shell_indicator.set(robot_id);
-    let team = if team_dip0.is_high() {
+    let team = if dip7.is_high() {
         TeamColor::Blue
     } else {
         TeamColor::Yellow
