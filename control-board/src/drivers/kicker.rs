@@ -89,6 +89,8 @@ impl<
             if buf.len() != core::mem::size_of::<KickerTelemetry>() {
                 defmt::warn!("kicker interface - invalid packet of len {:?} data: {:?}", buf.len(), buf);
                 continue;
+            } else {
+                defmt::info!("kicker interface - got packet {:?}", buf);
             }
 
             // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
@@ -118,6 +120,7 @@ impl<
 
     pub fn set_telemetry_enabled(&mut self, telemetry_enabled: bool) {
         self.telemetry_enabled = telemetry_enabled;
+        self.command_state.set_telemetry_enabled(telemetry_enabled as u32);
     }
 
     pub fn request_kick(&mut self, request: u32) {

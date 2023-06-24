@@ -136,7 +136,10 @@ impl<
         async move {
             loop {
                 let buf = queue_tx.dequeue().await.unwrap();
-                tx.write(buf.data()).await.unwrap();
+                defmt::info!("invoking API write");
+                tx.write(buf.data()).await.unwrap(); // we are blocked here!
+                defmt::info!("passed API write");
+
                 drop(buf);
                 // unsafe {
                 //     // TODO: what does this do again?

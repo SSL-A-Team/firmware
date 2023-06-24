@@ -18,14 +18,15 @@ use embassy_stm32::{
     pac::Interrupt,
     gpio::{Level, Output, Speed},
     interrupt,
+    time::mhz,
     usart::{Uart, Parity, StopBits, Config}
 };
 use embassy_time::{Delay, Duration, Instant, Ticker};
 
 use ateam_kicker_board::{
-    adc_raw_to_mv,
-    adc_mv_to_battery_voltage,
-    adc_mv_to_rail_voltage,
+    adc_raw_to_v,
+    adc_v_to_battery_voltage,
+    adc_v_to_rail_voltage,
     kick_manager::{
         KickManager, 
         KickType},
@@ -48,14 +49,14 @@ const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 3;
 
 // control communications tx buffer
-#[link_section = ".axisram.buffers"]
+#[link_section = ".bss"]
 static mut COMS_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
     [Buffer::EMPTY; TX_BUF_DEPTH];
 static COMS_QUEUE_TX: UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
     UartWriteQueue::new(unsafe { &mut COMS_BUFFERS_TX });
 
 // control communications rx buffer
-#[link_section = ".axisram.buffers"]
+#[link_section = ".bss"]
 static mut COMS_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
     [Buffer::EMPTY; RX_BUF_DEPTH];
 static COMS_QUEUE_RX: UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
@@ -109,19 +110,27 @@ async fn high_pri_kick_task(
     let mut kicker_telemetry_packet: KickerTelemetry = get_empty_telem_packet();
 
     // loop rate control
-    let mut ticker = Ticker::every(Duration::from_millis(1));
+    let mut ticker = Ticker::every(Duration::from_millis(10));
     let mut last_packet_sent_time = Instant::now();
 
+    let mut ct = 0;
+
     loop {
-        let rail_voltage = adc_mv_to_rail_voltage(adc_raw_to_mv(adc.read(&mut rail_pin) as f32));
-        let battery_voltage = adc_mv_to_battery_voltage(adc_raw_to_mv(adc.read(&mut battery_voltage_pin) as f32));
+        let rail_voltage = adc_v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32));
+        let battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(adc.read(&mut battery_voltage_pin) as f32));
+        // let battery_voltage = adc_raw_to_v(adc.read(&mut battery_voltage_pin) as f32);
         // optionally pre-flag errors? 
+
+        defmt::info!("main loop {}, {}", rail_voltage, battery_voltage);
+
 
         /////////////////////////////////////
         //  process any available packets  //
         /////////////////////////////////////
         
         while let Ok(res) = coms_reader.try_dequeue() {
+            // defmt::info!("received packet");
+
             let buf = res.data();
 
             if buf.len() != core::mem::size_of::<KickerControl>() {
@@ -153,9 +162,11 @@ async fn high_pri_kick_task(
         let res = kick_manager.command(battery_voltage, rail_voltage, false, KickType::None, 0.0).await;
 
         // send telemetry packet
-        if telemetry_enabled {
-            let cur_time = Instant::now();
-            if Instant::checked_duration_since(&cur_time, last_packet_sent_time).unwrap().as_millis() > 20 {
+        if true {
+            // let cur_time = Instant::now();
+            // if Instant::checked_duration_since(&cur_time, last_packet_sent_time).unwrap().as_millis() > 20 {
+            // if ct > 500 {
+                ct = 0;
                 kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(0, 0, ball_detected as u32, res.is_err() as u32);
                 kicker_telemetry_packet.rail_voltage = rail_voltage;
                 kicker_telemetry_packet.battery_voltage = battery_voltage;
@@ -172,8 +183,20 @@ async fn high_pri_kick_task(
                     let _res = coms_writer.enqueue_copy(struct_bytes);
                 }
 
-                last_packet_sent_time = cur_time;
-            }
+                if ball_detected_led.is_set_high() {
+                    ball_detected_led.set_low();
+                } else {
+                    ball_detected_led.set_high();
+                }
+
+                // last_packet_sent_time = cur_time;
+            // } else {
+            //     ct += 1;
+            // }
+
+            // ball_detected_led.set_low();
+        } else {
+            // ball_detected_led.set_high();
         }
 
         // LEDs
@@ -183,17 +206,51 @@ async fn high_pri_kick_task(
             err_led.set_low();
         }
 
-        if ball_detected {
-            ball_detected_led.set_high();
-        } else {
-            ball_detected_led.set_low();
-        }
+        // if ball_detected {
+        //     ball_detected_led.set_high();
+        // } else {
+        //     ball_detected_led.set_low();
+        // }
         // TODO Dotstar
 
         // loop rate control @1KHz
         ticker.next().await;
     }
 
+}
+
+#[embassy_executor::task]
+async fn high_pri_tx_test(
+        coms_writer: &'static UartWriteQueue<'static, ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>,
+        charge_pin: ChargePin,
+        kick_pin: KickPin,
+        chip_pin: ChipPin) -> ! {
+
+    let mut ticker = Ticker::every(Duration::from_millis(100));
+    let mut kicker_telemetry_packet: KickerTelemetry = get_empty_telem_packet();
+
+    loop {
+        defmt::info!("writing uart");
+
+        kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(0, 0, 0, 0);
+        kicker_telemetry_packet.rail_voltage = 1.0;
+        kicker_telemetry_packet.battery_voltage = 1.0;
+
+        // raw interpretaion of a struct for wire transmission is unsafe
+        unsafe {
+            // get a slice to packet for transmission
+            let struct_bytes = core::slice::from_raw_parts(
+                (&kicker_telemetry_packet as *const KickerTelemetry) as *const u8,
+                core::mem::size_of::<KickerTelemetry>(),
+            );
+
+            // send the packet
+            let res = coms_writer.enqueue_copy(struct_bytes);
+            defmt::info!("{}", res);
+        }
+
+        ticker.next().await;    
+    }
 }
 
 static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
@@ -206,7 +263,10 @@ unsafe fn I2C1() {
 
 #[entry]
 fn main() -> ! {
-    // max out frequency?
+    let mut stm32_config: embassy_stm32::Config = Default::default();
+    stm32_config.rcc.sys_ck = Some(mhz(48));
+    stm32_config.rcc.hclk = Some(mhz(48));
+    stm32_config.rcc.pclk = Some(mhz(48));
 
     let p = embassy_stm32::init(Default::default());
     info!("kicker startup!");
@@ -222,14 +282,16 @@ fn main() -> ! {
     // TODO CHECK THIS IS THE HIGHEST PRIORITY
     unsafe { nvic.set_priority(Interrupt::I2C1, 6 << 4) };
     let spawner = EXECUTOR_HIGH.start(Interrupt::I2C1);
-    unwrap!(spawner.spawn(high_pri_kick_task(&COMS_QUEUE_RX, &COMS_QUEUE_TX, adc, p.PB3, p.PB0, p.PB1, p.PA0, p.PA1, p.PA12, p.PA8)));
+    // unwrap!(spawner.spawn(high_pri_kick_task(&COMS_QUEUE_RX, &COMS_QUEUE_TX, adc, p.PB3, p.PB0, p.PB1, p.PA0, p.PA1, p.PA12, p.PA8)));
+    unwrap!(spawner.spawn(high_pri_tx_test(&COMS_QUEUE_TX, p.PB3, p.PB0, p.PB1)));
+
 
     //////////////////////////////////
     //  COMMUNICATIONS TASKS SETUP  //
     //////////////////////////////////
 
     let mut coms_uart_config = Config::default();
-    coms_uart_config.baudrate = 2_000_000; // 1 Mbaud
+    coms_uart_config.baudrate = 2_000_000; // 2 Mbaud
     coms_uart_config.parity = Parity::ParityEven;
     coms_uart_config.stop_bits = StopBits::STOP0P5;
 
@@ -251,6 +313,6 @@ fn main() -> ! {
     let lp_executor = EXECUTOR_LOW.init(Executor::new());
     lp_executor.run(|spawner| {
         unwrap!(spawner.spawn(COMS_QUEUE_TX.spawn_task(coms_uart_tx)));
-        unwrap!(spawner.spawn(COMS_QUEUE_RX.spawn_task(coms_uart_rx)));
+        // unwrap!(spawner.spawn(COMS_QUEUE_RX.spawn_task(coms_uart_rx)));
     });
 }

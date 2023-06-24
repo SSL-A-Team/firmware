@@ -58,14 +58,14 @@ pub const CHARGED_THRESH_VOLTAGE: f32 = 170.0;
 pub const CHARGE_SAFE_VOLTAGE: f32 = 5.0;
 
 // control communications tx buffer
-#[link_section = ".axisram.buffers"]
+// #[link_section = ".axisram.buffers"]
 static mut COMS_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
     [Buffer::EMPTY; TX_BUF_DEPTH];
 static COMS_QUEUE_TX: UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
     UartWriteQueue::new(unsafe { &mut COMS_BUFFERS_TX });
 
 // control communications rx buffer
-#[link_section = ".axisram.buffers"]
+// #[link_section = ".axisram.buffers"]
 static mut COMS_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
     [Buffer::EMPTY; RX_BUF_DEPTH];
 static COMS_QUEUE_RX: UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =

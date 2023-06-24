@@ -385,7 +385,7 @@ impl<
                 defmt::debug!("read bootloader command list. (WITH CS).");
                 res = Ok(());
             } else {
-                defmt::error!("unknown command enumeration error.");
+                defmt::error!("unknown command enumeration error: {}", buf);
                 res = Err(());
             }
         }).await?;
@@ -616,8 +616,6 @@ impl<
                 return Err(err);
             }
         }
-
-        info!("here1");
         
         if let Err(err) = self.verify_bootloader().await {
             return Err(err);

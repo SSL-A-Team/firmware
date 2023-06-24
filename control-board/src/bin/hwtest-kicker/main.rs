@@ -30,11 +30,11 @@ use static_cell::StaticCell;
 
 mod pins;
 
-include_kicker_bin! {KICKER_FW_IMG, "hwtest-coms"}
+include_kicker_bin! {KICKER_FW_IMG, "hwtest-coms.bin"}
 
-const MAX_TX_PACKET_SIZE: usize = 12;
+const MAX_TX_PACKET_SIZE: usize = 16;
 const TX_BUF_DEPTH: usize = 3;
-const MAX_RX_PACKET_SIZE: usize = 12;
+const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 20;
 
 #[link_section = ".axisram.buffers"]
@@ -117,9 +117,14 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     let kicker_firmware_image = KICKER_FW_IMG;
     let mut kicker = Kicker::new(kicker_stm32_interface, kicker_firmware_image);
-    let _ = kicker.load_default_firmware_image().await;
+    let res = kicker.load_default_firmware_image().await;
 
-    info!("kicker flash complete");
+    if res.is_err() {
+        defmt::warn!("kicker flashing failed.");
+        loop {}
+    } else {
+        info!("kicker flash complete");
+    }
 
     kicker.set_telemetry_enabled(true);
 
@@ -130,6 +135,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         kicker.process_telemetry();
 
         // TODO print some telemetry or something
+        defmt::info!("high voltage: {}, battery voltage: {}", kicker.hv_rail_voltage(), kicker.battery_voltage());
 
         kicker.send_command();
 

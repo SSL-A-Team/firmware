@@ -5,12 +5,12 @@
 use defmt::*;
 use {defmt_rtt as _, panic_probe as _};
 
-use cortex_m::{peripheral::NVIC};
 use cortex_m_rt::entry;
 
 use embassy_executor::Executor;
 use embassy_stm32::{
     gpio::{Level, Output, Speed},
+    time::mhz,
 };
 use embassy_time::{Duration, Timer};
 
@@ -44,8 +44,15 @@ static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
 #[entry]
 fn main() -> ! {
+    let mut stm32_config: embassy_stm32::Config = Default::default();
+    stm32_config.rcc.sys_ck = Some(mhz(48));
+    stm32_config.rcc.hclk = Some(mhz(48));
+    stm32_config.rcc.pclk = Some(mhz(48));
+
     let p = embassy_stm32::init(Default::default());
+
     info!("kicker startup!");
+    
     // let mut nvic: NVIC = unsafe { mem::transmute(()) };
 
     // Low priority executor: runs in thread mode, using WFE/SEV

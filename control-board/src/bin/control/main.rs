@@ -134,7 +134,11 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // let mut kicker = Output::new(p.PF9, Level::Low, Speed::High);
 
-    let robot_id = rotary.read();
+    // let robot_id = rotary.read();
+    let robot_id = (dip1.is_high() as u8) << 3
+    | (dip2.is_high() as u8) << 2
+    | (dip3.is_high() as u8) << 1
+    | (dip4.is_high() as u8);
     info!("id: {}", robot_id);
     shell_indicator.set(robot_id);
     let team = if dip7.is_high() {
