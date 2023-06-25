@@ -49,7 +49,11 @@ fn main() -> ! {
     stm32_config.rcc.hclk = Some(mhz(48));
     stm32_config.rcc.pclk = Some(mhz(48));
 
-    let p = embassy_stm32::init(Default::default());
+    let p = embassy_stm32::init(stm32_config);
+
+    let _charge_pin = Output::new(charge_pin, Level::Low, Speed::Medium);
+    let _kick_pin = Output::new(kick_pin, Level::Low, Speed::Medium);
+    let _chip_pin = Output::new(chip_pin, Level::Low, Speed::Medium);
 
     info!("kicker startup!");
     

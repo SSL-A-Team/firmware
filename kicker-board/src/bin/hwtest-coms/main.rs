@@ -225,7 +225,9 @@ fn main() -> ! {
     stm32_config.rcc.pclk = Some(mhz(48));
 
     let p = embassy_stm32::init(stm32_config);
+
     info!("kicker startup!");
+    
     let mut nvic: NVIC = unsafe { mem::transmute(()) };
 
     let _status_led = Output::new(p.PA11, Level::High, Speed::Low);
@@ -249,7 +251,7 @@ fn main() -> ! {
     let mut coms_uart_config = Config::default();
     coms_uart_config.baudrate = 2_000_000; // 2 Mbaud
     coms_uart_config.parity = Parity::ParityEven;
-    coms_uart_config.stop_bits = StopBits::STOP0P5;
+    coms_uart_config.stop_bits = StopBits::STOP1;
 
     let coms_usart = Uart::new(
         p.USART1,

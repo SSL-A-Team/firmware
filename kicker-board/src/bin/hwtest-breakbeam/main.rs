@@ -23,7 +23,17 @@ use ateam_kicker_board::pins::{BlueStatusLedPin, GreenStatusLedPin, BreakbeamTxP
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    let p = embassy_stm32::init(Default::default());
+    let mut stm32_config: embassy_stm32::Config = Default::default();
+    stm32_config.rcc.sys_ck = Some(mhz(48));
+    stm32_config.rcc.hclk = Some(mhz(48));
+    stm32_config.rcc.pclk = Some(mhz(48));
+
+    let p = embassy_stm32::init(stm32_config);
+
+    let _charge_pin = Output::new(charge_pin, Level::Low, Speed::Medium);
+    let _kick_pin = Output::new(kick_pin, Level::Low, Speed::Medium);
+    let _chip_pin = Output::new(chip_pin, Level::Low, Speed::Medium);
+
     info!("breakbeam startup!");
     
     let mut status_led_green = Output::new(p.PA11, Level::Low, Speed::Medium);

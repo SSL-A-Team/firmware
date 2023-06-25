@@ -19,15 +19,16 @@ use embassy_stm32::{
     adc::{Adc, SampleTime},
     pac::Interrupt,
     gpio::{Level, Output, Speed},
-    interrupt,
-    usart::{Uart, Parity, StopBits, Config}
+    time::mhz,
+    usart::{Uart, Parity, StopBits, Config},
+    interrupt, bind_interrupts, peripherals, usart
 };
 use embassy_time::{Delay, Duration, Instant, Ticker};
 
 use ateam_kicker_board::{
-    adc_raw_to_mv,
-    adc_mv_to_battery_voltage,
-    adc_mv_to_rail_voltage,
+    adc_raw_to_v,
+    adc_v_to_battery_voltage,
+    adc_v_to_rail_voltage,
     kick_manager::{
         KickManager, 
         KickType},
@@ -132,8 +133,8 @@ async fn high_pri_kick_task(
     let mut last_packet_sent_time = Instant::now();
 
     loop {
-        let rail_voltage = adc_mv_to_rail_voltage(adc_raw_to_mv(adc.read(&mut rail_pin) as f32));
-        let battery_voltage = adc_mv_to_battery_voltage(adc_raw_to_mv(adc.read(&mut battery_voltage_pin) as f32));
+        let rail_voltage = adc_v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32));
+        let battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(adc.read(&mut battery_voltage_pin) as f32));
         // optionally pre-flag errors? 
 
         /////////////////////////////////////
@@ -280,9 +281,12 @@ async fn high_pri_kick_task(
             kick_manager.command(battery_voltage, rail_voltage, charge_hv_rail, kick_command, kick_strength).await
         };
 
-        if res.is_err() {
-            error_latched = true;
-        }
+        // this will permanently latch an error if the rail voltages are low
+        // which we probably don't want on boot up?
+        // maybe this error should be clearable and the HV rail OV should not be
+        // if res.is_err() {
+        //     error_latched = true;
+        // }
 
         // send telemetry packet
         if telemetry_enabled {
@@ -336,10 +340,21 @@ unsafe fn I2C1() {
     EXECUTOR_HIGH.on_interrupt();
 }
 
+bind_interrupts!(struct Irqs {
+    USART1 => usart::InterruptHandler<peripherals::USART1>;
+});
+
 #[entry]
 fn main() -> ! {
-    let p = embassy_stm32::init(Default::default());
+    let mut stm32_config: embassy_stm32::Config = Default::default();
+    stm32_config.rcc.sys_ck = Some(mhz(48));
+    stm32_config.rcc.hclk = Some(mhz(48));
+    stm32_config.rcc.pclk = Some(mhz(48));
+
+    let p = embassy_stm32::init(stm32_config);
+
     info!("kicker startup!");
+
     let mut nvic: NVIC = unsafe { mem::transmute(()) };
 
     let _status_led = Output::new(p.PA11, Level::High, Speed::Low);
@@ -359,16 +374,15 @@ fn main() -> ! {
     //////////////////////////////////
 
     let mut coms_uart_config = Config::default();
-    coms_uart_config.baudrate = 1_000_000; // 1 Mbaud
+    coms_uart_config.baudrate = 2_000_000; // 2 Mbaud
     coms_uart_config.parity = Parity::ParityEven;
-    coms_uart_config.stop_bits = StopBits::STOP0P5;
+    coms_uart_config.stop_bits = StopBits::STOP1;
 
-    let coms_usart_int = interrupt::take!(USART1);
     let coms_usart = Uart::new(
         p.USART1,
         p.PA10,
         p.PA9,
-        coms_usart_int,
+        Irqs,
         p.DMA1_CH2,
         p.DMA1_CH3,
         coms_uart_config,

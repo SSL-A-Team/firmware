@@ -28,12 +28,9 @@ use panic_probe as _;
 use smart_leds::{SmartLedsWrite, RGB8};
 use static_cell::StaticCell;
 
-use ateam_common_packets::bindings_kicker::KickRequest;
-
-
 mod pins;
 
-include_kicker_bin! {KICKER_FW_IMG, "kicker.bin"}
+include_kicker_bin! {KICKER_FW_IMG, "hwtest-coms.bin"}
 
 const MAX_TX_PACKET_SIZE: usize = 16;
 const TX_BUF_DEPTH: usize = 3;
@@ -83,14 +80,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     info!("booted");
 
-    let btn0 = Input::new(p.PD5, Pull::None);
-    let btn1 = Input::new(p.PD6, Pull::None);
-
-    let mut led0 = Output::new(p.PF3, Level::Low, Speed::Low);
-    let mut led1 = Output::new(p.PF2, Level::Low, Speed::Low);
-    let mut led2 = Output::new(p.PF1, Level::Low, Speed::Low);
-    let mut led3 = Output::new(p.PF0, Level::Low, Speed::Low);
-
     let kicker_det = Input::new(p.PG8, Pull::Up);
     if kicker_det.is_high() {
         defmt::warn!("kicker appears unplugged!");
@@ -138,7 +127,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
     }
 
     kicker.set_telemetry_enabled(true);
-    kicker.set_kick_strength(2.25);
 
     let _ = dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 10, b: 0 }].iter().cloned());
 
@@ -148,41 +136,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
         // TODO print some telemetry or something
         defmt::info!("high voltage: {}, battery voltage: {}", kicker.hv_rail_voltage(), kicker.battery_voltage());
-
-        if btn0.is_low() {
-            kicker.request_kick(KickRequest::KR_ARM);
-
-            led0.set_high();
-        } else {
-            kicker.request_kick(KickRequest::KR_DISABLE);
-
-            led0.set_low();
-        }
-
-        if btn1.is_low() {
-            kicker.request_kick(KickRequest::KR_KICK_NOW);
-
-            led1.set_high();
-        } else {
-            led1.set_low();
-        }
-
-        if btn0.is_low() && btn1.is_low() {
-            kicker.request_kick(KickRequest::KR_DISABLE);
-            kicker.request_shutdown();
-        }
-
-        if kicker.shutdown_acknowledge() {
-            led2.set_high();
-        } else {
-            led2.set_low();
-        }
-
-        if kicker.shutdown_completed() {
-            led3.set_high();
-        } else {
-            led2.set_low();
-        }
 
         kicker.send_command();
 

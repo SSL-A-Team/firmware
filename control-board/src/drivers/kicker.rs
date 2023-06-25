@@ -89,17 +89,12 @@ impl<
             if buf.len() != core::mem::size_of::<KickerTelemetry>() {
                 defmt::warn!("kicker interface - invalid packet of len {:?} data: {:?}", buf.len(), buf);
                 continue;
-            } else {
-                defmt::info!("kicker interface - got packet {:?}", buf);
             }
 
             // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
             unsafe {
-                // zero initialize a local response packet
-                let mut mrp: KickerTelemetry = { MaybeUninit::zeroed().assume_init() };
-
                 // copy receieved uart bytes into packet
-                let state = &mut mrp as *mut _ as *mut u8;
+                let state = &mut self.telemetry_state as *mut _ as *mut u8;
                 for i in 0..core::mem::size_of::<KickerTelemetry>() {
                     *state.offset(i as isize) = buf[i];
                 }
@@ -125,6 +120,10 @@ impl<
 
     pub fn request_kick(&mut self, request: u32) {
         self.command_state.kick_request = request;
+    }
+
+    pub fn set_kick_strength(&mut self, kick_str: f32) {
+        self.command_state.kick_speed = kick_str;
     }
 
     pub fn ball_detected(&self) -> bool {
