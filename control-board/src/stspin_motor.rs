@@ -1,6 +1,6 @@
 use core::{mem::MaybeUninit, f32::consts::PI};
 
-use defmt::info;
+use defmt::*;
 use embassy_stm32::{
     gpio::Pin,
     usart::{self, Parity},
@@ -190,8 +190,9 @@ impl<
                     // // // info!("vel set {:?}", mrp.data.motion.vel_setpoint + 0.);
                     // info!("vel enc {:?}", mrp.data.motion.vel_enc_estimate + 0.);
                     // // // info!("vel hall {:?}", mrp.data.motion.vel_hall_estimate + 0.);
-                    info!("master_error {:?}", mrp.data.motion.master_error());
-                    info!("{:?}", &mrp.data.motion._bitfield_1.get(0, 32));
+                    if mrp.data.motion.master_error() != 0 {
+                        error!("motor error: {:?}", &mrp.data.motion._bitfield_1.get(0, 32));
+                    }
                     // info!("hall_power_error {:?}", mrp.data.motion.hall_power_error());
                     // info!("hall_disconnected_error {:?}", mrp.data.motion.hall_disconnected_error());
                     // info!("bldc_transition_error {:?}", mrp.data.motion.bldc_transition_error());
@@ -464,6 +465,10 @@ impl<
                 // decode union type, and reinterpret subtype
                 if mrp.type_ == MRP_MOTION {
                     self.current_state = mrp.data.motion;
+
+                    if mrp.data.motion.master_error() != 0 {
+                        error!("drib error: {:?}", &mrp.data.motion._bitfield_1.get(0, 32));
+                    }
                  
                     // // // info!("{:?}", defmt::Debug2Format(&mrp.data.motion));
                     // // info!("\n");

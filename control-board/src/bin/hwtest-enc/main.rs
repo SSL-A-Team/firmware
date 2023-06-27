@@ -191,7 +191,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
         loop {
             main_loop_rate_ticker.next().await;
-            control.tick(ROBOT_VEL_ANGULAR, 0.);
+            control.tick(ROBOT_VEL_ANGULAR, 64.);
 
             let err_fr = control.front_right_motor.read_is_error();
             let err_fl = control.front_left_motor.read_is_error();
