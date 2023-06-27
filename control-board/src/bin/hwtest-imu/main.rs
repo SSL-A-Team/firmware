@@ -3,9 +3,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(const_mut_refs)]
 
-
 mod pins;
-
 
 use defmt::*;
 use defmt_rtt as _;
@@ -22,7 +20,6 @@ use embassy_time::{Duration, Timer};
 use apa102_spi::Apa102;
 use smart_leds::{SmartLedsWrite, RGB8};
 
-
 #[link_section = ".sram4"]
 static mut SPI6_BUF: [u8; 4] = [0x0; 4];
 
@@ -37,6 +34,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
     info!("system core initialized");
 
     let p = embassy_stm32::init(stm32_config);
+
+    // Delay so dotstar can turn on
+    Timer::after(Duration::from_millis(50)).await;
 
     let dot_spi = spi::Spi::new_txonly(
         p.SPI3,

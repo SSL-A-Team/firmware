@@ -50,6 +50,10 @@ async fn main(_spawner: embassy_executor::Spawner) {
     stm32_config.rcc.hclk = Some(mhz(200));
     stm32_config.rcc.pclk1 = Some(mhz(100));
     let p = embassy_stm32::init(stm32_config);
+
+    // Delay so dotstar can turn on
+    Timer::after(Duration::from_millis(50)).await;
+
     let config = usart::Config::default();
     let int = interrupt::take!(USART2);
     let usart = Uart::new(p.USART2, p.PD6, p.PD5, int, p.DMA1_CH0, p.DMA1_CH1, config);

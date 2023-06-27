@@ -344,7 +344,8 @@ int main() {
 
             // set the motor duty cycle
             if (motion_control_type == OPEN_LOOP) {
-                pwm6step_set_duty_cycle_f(r_motor_board);
+                float r_motor = mm_rads_to_dc(&df45_model, r_motor_board);
+                pwm6step_set_duty_cycle_f(r_motor);
             } else if (motion_control_type == VELOCITY) {
                 pwm6step_set_duty_cycle_f(u_vel_loop);
             } else {

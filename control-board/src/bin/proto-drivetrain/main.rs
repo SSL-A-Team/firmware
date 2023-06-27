@@ -109,6 +109,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
     stm32_config.rcc.pclk1 = Some(mhz(100));
     let p = embassy_stm32::init(stm32_config);
 
+    // Delay so dotstar and STSPIN can turn on
+    Timer::after(Duration::from_millis(50)).await;
+
     // place the stspins in reset as early as possible just in case we have lingering state
     // that wants to spin motors
     let front_right_reset_pin = OutputOpenDrain::new(p.PB2, Level::Low, Speed::Medium, Pull::None); // reset active

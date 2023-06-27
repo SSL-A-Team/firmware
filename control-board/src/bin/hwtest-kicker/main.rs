@@ -15,21 +15,20 @@ use defmt::info;
 use embassy_stm32::{
     dma::NoDma,
     executor::InterruptExecutor,
-    gpio::{Input, Level, Output, Speed, Pull},
+    gpio::{Input, Level, Output, Pull, Speed},
     interrupt::{self, InterruptExt},
     peripherals::{DMA2_CH4, DMA2_CH5, USART6},
     spi,
     time::{hz, mhz},
     usart::Uart,
 };
-use embassy_time::{Duration, Ticker};
+use embassy_time::{Duration, Ticker, Timer};
 use futures_util::StreamExt;
 use panic_probe as _;
 use smart_leds::{SmartLedsWrite, RGB8};
 use static_cell::StaticCell;
 
 use ateam_common_packets::bindings_kicker::KickRequest;
-
 
 mod pins;
 
@@ -63,6 +62,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
     stm32_config.rcc.pclk1 = Some(mhz(100));
 
     let p = embassy_stm32::init(stm32_config);
+
+    // Delay so dotstar can turn on
+    Timer::after(Duration::from_millis(50)).await;
 
     let irq = interrupt::take!(CEC);
     irq.set_priority(interrupt::Priority::P6);
@@ -140,14 +142,23 @@ async fn main(_spawner: embassy_executor::Spawner) {
     kicker.set_telemetry_enabled(true);
     kicker.set_kick_strength(2.25);
 
-    let _ = dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 10, b: 0 }].iter().cloned());
+    let _ = dotstar.write(
+        [RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 10, b: 0 }]
+            .iter()
+            .cloned(),
+    );
 
     let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
+    let mut last_kick_ticks = 0;
     loop {
         kicker.process_telemetry();
 
         // TODO print some telemetry or something
-        defmt::info!("high voltage: {}, battery voltage: {}", kicker.hv_rail_voltage(), kicker.battery_voltage());
+        defmt::info!(
+            "high voltage: {}, battery voltage: {}",
+            kicker.hv_rail_voltage(),
+            kicker.battery_voltage()
+        );
 
         if btn0.is_low() {
             kicker.request_kick(KickRequest::KR_ARM);

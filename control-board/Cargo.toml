@@ -70,6 +70,11 @@ test = false
 harness = false
 
 [[bin]]
+name = "hwtest-enc"
+test = false
+harness = false
+
+[[bin]]
 name = "hwtest-imu"
 test = false
 harness = false

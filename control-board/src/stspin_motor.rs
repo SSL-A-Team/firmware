@@ -274,6 +274,10 @@ impl<
         self.telemetry_enabled = telemetry_enabled;
     }
 
+    pub fn read_is_error(&self) -> bool {
+        return self.current_state.master_error() != 0;
+    }
+
     pub fn read_current(&self) -> f32 {
         return self.current_state.current_estimate;
     }
@@ -548,6 +552,10 @@ impl<
 
     pub fn set_telemetry_enabled(&mut self, telemetry_enabled: bool) {
         self.telemetry_enabled = telemetry_enabled;
+    }
+
+    pub fn read_is_error(&self) -> bool {
+        return self.current_state.master_error() != 0;
     }
 
     pub fn read_current(&self) -> f32 {

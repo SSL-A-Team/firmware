@@ -21,6 +21,16 @@ pub mod uart_queue;
 
 pub mod drivers;
 
+pub mod colors {
+    use smart_leds::RGB8;
+
+    pub const COLOR_OFF: RGB8 = RGB8 { r: 0, g: 0, b: 0};
+    pub const COLOR_RED: RGB8 = RGB8 { r: 10, g: 0, b: 0};
+    pub const COLOR_YELLOW: RGB8 = RGB8 { r: 10, g: 10, b: 0};
+    pub const COLOR_GREEN: RGB8 = RGB8 { r: 0, g: 10, b: 0};
+    pub const COLOR_BLUE: RGB8 = RGB8 { r: 0, g: 0, b: 10};
+}
+
 #[macro_export]
 macro_rules! include_external_cpp_bin {
     ($var_name:ident, $bin_file:literal) => {

@@ -86,6 +86,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     info!("system core initialized");
 
+    // Delay so dotstar can turn on
+    Timer::after(Duration::from_millis(50)).await;
+
     let irq = interrupt::take!(CEC);
     irq.set_priority(interrupt::Priority::P6);
     let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
