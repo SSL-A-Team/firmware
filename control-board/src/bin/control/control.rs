@@ -14,17 +14,27 @@ use embassy_time::{Duration, Timer};
 use ateam_control_board::{
     include_external_cpp_bin,
     queue::Buffer,
-    robot_model::{RobotConstants, RobotModel},
     stm32_interface::Stm32Interface,
     stspin_motor::{WheelMotor, DribblerMotor},
     uart_queue::{UartReadQueue, UartWriteQueue},
+    motion::{
+        robot_model::{RobotConstants, RobotModel},
+        constant_gain_kalman_filter::CgKalmanFilter,
+        params::{
+            body_vel_filter_params,
+            body_vel_pid_params,
+        }, robot_controller::BodyVelocityController
+    }
 };
 use nalgebra::{Vector3, Vector4};
 
+use embassy_sync::channel::Channel;
+use embassy_sync::pubsub::{PubSubChannel, Subscriber};
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use crate::pins::*;
 
+
 include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
-// include_external_cpp_bin! {DRIB_FW_IMG, "wheel.bin"}
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 
 // motor pinout
@@ -110,8 +120,9 @@ const WHEEL_ANGLES_DEG: Vector4<f32> = Vector4::new(30.0, 150.0, 225.0, 315.0);
 const WHEEL_RADIUS_M: f32 = 0.049 / 2.0; // wheel dia 49mm
 const WHEEL_DISTANCE_TO_ROBOT_CENTER_M: f32 = 0.085; // 85mm from center of wheel body to center of robot
 
-pub struct Control {
+pub struct Control<'a> {
     robot_model: RobotModel,
+    robot_controller: BodyVelocityController<'a>,
     cmd_vel: Vector3<f32>,
     drib_vel: f32,
     front_right_motor: WheelMotor<
@@ -175,11 +186,12 @@ pub struct Control {
         MotorDResetPin,
     >,
     ticks_since_packet: u16,
+    gyro_sub: Subscriber<'static, ThreadModeRawMutex, i16, 2, 2, 2>
 }
 
 // Uart<UART5, DMA1_CH0, DMA1_CH1>
 
-impl Control {
+impl<'a> Control<'a> {
     pub fn new(
         spawner: &SendSpawner,
         front_right_usart: Uart<'static, MotorFRUart, MotorFRDmaTx, MotorFRDmaRx>,
@@ -198,7 +210,8 @@ impl Control {
         back_right_reset_pin: MotorBRResetPin,
         drib_reset_pin: MotorDResetPin,
         ball_detected_thresh: f32,
-    ) -> Control {
+        gyro_sub: Subscriber<'static, ThreadModeRawMutex, i16, 2, 2, 2>
+    ) -> Control<'a> {
         let wheel_firmware_image = WHEEL_FW_IMG;
         let drib_firmware_image = DRIB_FW_IMG;
 
@@ -222,7 +235,7 @@ impl Control {
             Output::new(back_left_reset_pin, Level::Low, Speed::Medium); // reset active
         let back_right_reset_pin =
             Output::new(back_right_reset_pin, Level::Low, Speed::Medium); // reset active
-        let drib_reset_pin = 
+        let drib_reset_pin =
             Output::new(drib_reset_pin, Level::Low, Speed::Medium); // reset active
 
         spawner
@@ -298,7 +311,7 @@ impl Control {
             .unwrap();
         spawner
             .spawn(DRIB_QUEUE_TX.spawn_task(drib_tx))
-            .unwrap(); 
+            .unwrap();
 
         let front_right_stm32_interface = Stm32Interface::new(
             &FRONT_RIGHT_QUEUE_RX,
@@ -363,8 +376,11 @@ impl Control {
 
         let robot_model: RobotModel = RobotModel::new(robot_model_constants);
 
+        let body_velocity_controller = BodyVelocityController::new_from_global_params(1.0 / 120.0, robot_model);
+
         Control {
             robot_model,
+            robot_controller: body_velocity_controller,
             cmd_vel: Vector3::new(0., 0., 0.),
             drib_vel: 0.0,
             front_right_motor,
@@ -373,6 +389,7 @@ impl Control {
             back_right_motor,
             drib_motor,
             ticks_since_packet: 0,
+            gyro_sub,
         }
     }
 
@@ -430,12 +447,16 @@ impl Control {
         Timer::after(Duration::from_millis(10)).await;
     }
 
-    pub fn tick(&mut self, latest_control: Option<BasicControl>) -> Option<BasicTelemetry> {
+    fn process_mc_packets(&mut self) {
         self.front_right_motor.process_packets();
         self.front_left_motor.process_packets();
         self.back_left_motor.process_packets();
         self.back_right_motor.process_packets();
         self.drib_motor.process_packets();
+    }
+
+     pub async fn tick(&mut self, latest_control: Option<BasicControl>) -> Option<BasicTelemetry> {
+        self.process_mc_packets();
 
         self.front_right_motor.log_reset("FR");
         self.front_left_motor.log_reset("RL");
@@ -468,6 +489,29 @@ impl Control {
             }
         }
         let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel);
+
+        // now we have setpoint r(t) in self.cmd_vel
+
+        // TODO read from DIP swtich
+        let controls_enabled = false;
+        let wheel_vels = if controls_enabled {
+            // TODO check order
+            let wheel_vels = Vector4::new(
+                self.front_right_motor.read_rads(),
+                self.front_left_motor.read_rads(),
+                self.back_left_motor.read_rads(),
+                self.back_right_motor.read_rads()
+            );
+
+            // TODO read from channel or something
+            let gyro_rads = self.gyro_sub.next_message_pure().await as f32;
+            self.robot_controller.control_update(&self.cmd_vel, &wheel_vels, gyro_rads);
+
+            self.robot_controller.get_wheel_velocities()
+        } else {
+            self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel)
+        };
+
 
         // let c_vel = libm::sinf(angle) / 2.0;
         // let c_vel = 0.2;
