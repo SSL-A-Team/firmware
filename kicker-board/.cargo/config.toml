@@ -2,7 +2,7 @@
 target = "thumbv6m-none-eabi"
 
 [target.thumbv6m-none-eabi]
-runner = 'probe-run --chip STM32F030K6Tx --connect-under-reset'
+runner = 'probe-run --chip STM32F042K6Tx --connect-under-reset'
 
 [env]
 DEFMT_LOG = "trace"

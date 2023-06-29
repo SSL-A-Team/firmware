@@ -27,7 +27,7 @@ embassy-time = { version = "0.1.0", features = [
 embassy-stm32 = { version = "0.1.0", features = [
     "nightly",
     "defmt",
-    "stm32f030k6",
+    "stm32f042k6",
     "time-driver-any",
     "exti",
     "unstable-pac",
