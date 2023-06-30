@@ -376,7 +376,7 @@ impl<'a> Control<'a> {
 
         let robot_model: RobotModel = RobotModel::new(robot_model_constants);
 
-        let body_velocity_controller = BodyVelocityController::new_from_global_params(1.0 / 120.0, robot_model);
+        let body_velocity_controller = BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
 
         Control {
             robot_model,
@@ -492,8 +492,8 @@ impl<'a> Control<'a> {
 
         // now we have setpoint r(t) in self.cmd_vel
 
-        // TODO read from DIP swtich
-        let controls_enabled = false;
+        let controls_enabled = true;
+        let gyro_rads = (self.gyro_sub.next_message_pure().await as f32) * 2.0 * core::f32::consts::PI / 360.0;
         let wheel_vels = if controls_enabled {
             // TODO check order
             let wheel_vels = Vector4::new(
@@ -504,7 +504,7 @@ impl<'a> Control<'a> {
             );
 
             // TODO read from channel or something
-            let gyro_rads = self.gyro_sub.next_message_pure().await as f32;
+            
             self.robot_controller.control_update(&self.cmd_vel, &wheel_vels, gyro_rads);
 
             self.robot_controller.get_wheel_velocities()
@@ -541,7 +541,7 @@ impl<'a> Control<'a> {
             sequence_number: 0,
             robot_revision_major: 0,
             robot_revision_minor: 0,
-            battery_level: 0.,
+            battery_level: gyro_rads,
             battery_temperature: 0.,
             _bitfield_align_1: [],
             _bitfield_1: BasicTelemetry::new_bitfield_1(
