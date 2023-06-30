@@ -61,7 +61,7 @@ static RADIO_TEST: RadioTest<
 
 // pub sub channel for the gyro vals
 // CAP queue size, n_subs, n_pubs
-static GYRO_CHANNEL: PubSubChannel<ThreadModeRawMutex, i16, 2, 2, 2> = PubSubChannel::new();
+static GYRO_CHANNEL: PubSubChannel<ThreadModeRawMutex, f32, 2, 2, 2> = PubSubChannel::new();
 
 #[link_section = ".sram4"]
 static mut SPI6_BUF: [u8; 4] = [0x0; 4];
@@ -380,7 +380,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
             imu_cs2.set_high();
             let rate_z = (SPI6_BUF[2] as u16 * 256 + SPI6_BUF[1] as u16) as i16;
             // info!("z rate: {}", rate_z);
-            gyro_pub.publish_immediate(rate_z);
+            let gyro_conversion = 2000.0 / 32767.0;
+            gyro_pub.publish_immediate((rate_z as f32) * gyro_conversion);
         }
 
         // could just feed gyro in here but the comment in control said to use a channel

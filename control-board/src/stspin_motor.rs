@@ -246,7 +246,7 @@ impl<
                 .set_enable_telemetry(self.telemetry_enabled as u32);
             cmd.data.motion.motion_control_type = self.motion_type;
             cmd.data.motion.setpoint = self.setpoint;
-            // info!("setpoint: {:?}", cmd.data.motion.setpoint);
+            //info!("setpoint: {:?}", cmd.data.motion.setpoint);
 
             let struct_bytes = core::slice::from_raw_parts(
                 (&cmd as *const MotorCommandPacket) as *const u8,

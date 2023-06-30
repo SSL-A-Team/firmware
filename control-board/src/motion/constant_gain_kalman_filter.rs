@@ -46,13 +46,28 @@ impl<'a, const NUM_STATES: usize, const NUM_CONTROL_INPUTS: usize, const NUM_OBS
 
     pub fn update(&mut self, z: &SMatrix<f32, NUM_OBSERVATIONS, 1>) {
         // y = z - H*x_hat
-        // S = H*P*H' + R
-        // K = P*H'*S^-1
+        //let S: SMatrix<f32, NUM_OBSERVATIONS, NUM_OBSERVATIONS> = self.H_k * self.P_k * self.H_k.transpose() + self.R_k;
+        //let K: SMatrix<f32, NUM_STATES, NUM_OBSERVATIONS> = self.P_k * self.H_k.transpose() * S.try_inverse().unwrap();
         // x_hat += K*y
         // P = (I - K*H)*P
+
+        /*
+        defmt::info!("start K");
+        for r in 0..3 {
+            for c in 0..5 {
+                defmt::info!("{:?}, ", K.row(r)[c]);
+            }
+            defmt::info!("___________");
+        }
+        defmt::info!("end");
+        */
+        
+
         let z_hat: SMatrix<f32, NUM_OBSERVATIONS, 1> = self.H_k * self.x_hat;
         let y: SMatrix<f32, NUM_OBSERVATIONS, 1> = z - z_hat;
         self.x_hat += self.K_k * y;
+
+        defmt::info!("x predictor: {:?}, {:?}, {:?}", self.x_hat[0], self.x_hat[1], self.x_hat[2]);
     }
 
     pub fn read_state(&self, x_hat: &mut SMatrix<f32, NUM_STATES, 1>) {

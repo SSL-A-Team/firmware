@@ -186,7 +186,7 @@ pub struct Control<'a> {
         MotorDResetPin,
     >,
     ticks_since_packet: u16,
-    gyro_sub: Subscriber<'static, ThreadModeRawMutex, i16, 2, 2, 2>
+    gyro_sub: Subscriber<'static, ThreadModeRawMutex, f32, 2, 2, 2>
 }
 
 // Uart<UART5, DMA1_CH0, DMA1_CH1>
@@ -210,7 +210,7 @@ impl<'a> Control<'a> {
         back_right_reset_pin: MotorBRResetPin,
         drib_reset_pin: MotorDResetPin,
         ball_detected_thresh: f32,
-        gyro_sub: Subscriber<'static, ThreadModeRawMutex, i16, 2, 2, 2>
+        gyro_sub: Subscriber<'static, ThreadModeRawMutex, f32, 2, 2, 2>
     ) -> Control<'a> {
         let wheel_firmware_image = WHEEL_FW_IMG;
         let drib_firmware_image = DRIB_FW_IMG;
@@ -328,7 +328,7 @@ impl<'a> Control<'a> {
             Some(front_left_reset_pin),
         );
         let front_left_motor = WheelMotor::new(front_left_stm32_interface, wheel_firmware_image);
-
+        
         let back_left_stm32_interface = Stm32Interface::new(
             &BACK_LEFT_QUEUE_RX,
             &BACK_LEFT_QUEUE_TX,
@@ -547,10 +547,10 @@ impl<'a> Control<'a> {
             _bitfield_1: BasicTelemetry::new_bitfield_1(
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             ),
-            motor_0_temperature: 0.,
-            motor_1_temperature: 0.,
-            motor_2_temperature: 0.,
-            motor_3_temperature: 0.,
+            motor_0_temperature: self.front_right_motor.read_rads(),
+            motor_1_temperature: self.front_left_motor.read_rads(),
+            motor_2_temperature: self.back_left_motor.read_rads(),
+            motor_3_temperature: self.back_right_motor.read_rads(),
             motor_4_temperature: 0.,
             kicker_charge_level: 0.,
         })
