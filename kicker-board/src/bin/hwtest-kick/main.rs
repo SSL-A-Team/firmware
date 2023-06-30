@@ -27,7 +27,7 @@ use embassy_time::{Delay, Duration, Timer, Ticker};
 
 use static_cell::StaticCell;
 
-use ateam_kicker_board::{pins::{HighVoltageReadPin, BatteryVoltageReadPin, ChargePin, RegulatorDonePin, RegulatorFaultPin, RedStatusLedPin, GreenStatusLedPin, KickPin}, adc_mv_to_rail_voltage, adc_raw_to_mv, adc_mv_to_battery_voltage};
+use ateam_kicker_board::{pins::{HighVoltageReadPin, BatteryVoltageReadPin, ChargePin, RegulatorDonePin, RegulatorFaultPin, RedStatusLedPin, GreenStatusLedPin, KickPin}, adc_v_to_rail_voltage, adc_raw_to_v, adc_v_to_battery_voltage};
 
 // #[embassy_executor::task]
 // async fn run_critical_section_task(p: Peripherals) {
@@ -99,16 +99,36 @@ async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
     status_led_green.set_low();
     Timer::after(Duration::from_millis(500)).await;
 
+    let mut hv = adc.read(&mut hv_pin) as f32;
+    let mut bv = adc.read(&mut batt_pin) as f32;
+    info!("hv V: {}, batt mv: {}", adc_v_to_rail_voltage(adc_raw_to_v(hv)), adc_v_to_battery_voltage(adc_raw_to_v(bv)));
+
+    let start_up_battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(bv));
+    if start_up_battery_voltage < 18.0 {
+        status_led_red.set_high();
+        warn!("battery voltage is below 18.0 ({}), is the battery low or disconnected?", start_up_battery_voltage);
+        warn!("refusing to continue");
+        loop {
+            reg_charge.set_low();
+
+            kick.set_high();
+            Timer::after(Duration::from_micros(500)).await;
+            kick.set_low();
+        
+            Timer::after(Duration::from_millis(1000)).await;
+        }
+    }
+
     reg_charge.set_high();
     Timer::after(Duration::from_millis(600)).await;
     let reg_done_stat = reg_done.is_low();
     let reg_fault_stat = reg_fault.is_low();
     reg_charge.set_low();
 
-    let mut hv = adc.read(&mut hv_pin) as f32;
-    let mut bv = adc.read(&mut batt_pin) as f32;
+    hv = adc.read(&mut hv_pin) as f32;
+    bv = adc.read(&mut batt_pin) as f32;
     // info!("hv V: {}, batt mv: {}", ((hv * 200) * 8 / 10), (bv * 25000 / 1650 * (8 / 10))); // 8 / 10 for adc offset
-    info!("hv V: {}, batt mv: {}", adc_mv_to_rail_voltage(adc_raw_to_mv(hv)), adc_mv_to_battery_voltage(adc_raw_to_mv(bv)));
+    info!("hv V: {}, batt mv: {}", adc_v_to_rail_voltage(adc_raw_to_v(hv)), adc_v_to_battery_voltage(adc_raw_to_v(bv)));
 
     Timer::after(Duration::from_millis(1000)).await;
 
@@ -132,23 +152,23 @@ async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
 
 
         // info!("hv V: {}, batt mv: {}", (hv * 200) / 1000, bv);
-        info!("hv V: {}, batt mv: {}", adc_mv_to_rail_voltage(adc_raw_to_mv(hv)), adc_mv_to_battery_voltage(adc_raw_to_mv(bv)));
+        info!("hv V: {}, batt mv: {}", adc_v_to_rail_voltage(adc_raw_to_v(hv)), adc_v_to_battery_voltage(adc_raw_to_v(bv)));
 
 
         reg_charge.set_low();
         kick.set_low();
 
-        if reg_done_stat {
-            status_led_green.set_high();
-        } else {
-            status_led_green.set_low();
-        }
+        // if reg_done_stat {
+        //     status_led_green.set_high();
+        // } else {
+        //     status_led_green.set_low();
+        // }
 
-        if reg_fault_stat {
-            status_led_red.set_high();
-        } else {
-            status_led_red.set_low();
-        }
+        // if reg_fault_stat {
+        //     status_led_red.set_high();
+        // } else {
+        //     status_led_red.set_low();
+        // }
 
         ticker.next().await;
     }

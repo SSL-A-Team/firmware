@@ -27,6 +27,6 @@ impl<'a, PinTx: Pin, PinRx: Pin> Breakbeam<'a, PinTx, PinRx> {
 
     #[inline]
     pub fn read(&self) -> bool {
-        self.pin_rx.is_high()
+        self.pin_rx.is_low()
     }
 }
