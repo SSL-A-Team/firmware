@@ -171,7 +171,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     //////////////////
 
     let mut adc1 = Adc::new(p.ADC1, &mut Delay);
-    adc1.set_sample_time(SampleTime::Cycles64_5);
+    adc1.set_sample_time(SampleTime::Cycles32_5);
     let mut battery_pin = p.PF12;
     let mut vrefint_channel = adc1.enable_vrefint();
 
