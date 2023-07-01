@@ -12,6 +12,7 @@
 #![feature(adt_const_params)]
 #![feature(ptr_metadata)]
 #![feature(async_fn_in_trait)]
+#![feature(const_fn_floating_point_arithmetic)]
 
 // pub mod fw_images;
 pub mod queue;
@@ -47,3 +48,15 @@ macro_rules! include_kicker_bin {
             = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../kicker-board/target/thumbv6m-none-eabi/release/", $bin_file));
     }
 }
+pub const BATTERY_MIN_VOLTAGE: f32 = 19.0;
+
+pub const ADC_VREFINT_NOMINAL: f32 = 1230.0; // mV
+pub const fn adc_raw_to_v(adc_raw: f32) -> f32 {
+    adc_raw / ADC_VREFINT_NOMINAL
+}
+
+pub const fn adc_v_to_battery_voltage(adc_mv: f32) -> f32 {
+    (adc_mv / 1.65) * 25.2
+}
+
+
