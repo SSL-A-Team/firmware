@@ -44,6 +44,7 @@ use static_cell::StaticCell;
 use embassy_sync::channel::Channel;
 use embassy_sync::pubsub::{PubSubChannel, Subscriber};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_stm32::rcc::AdcClockSource;
 
 mod control;
 mod pins;
@@ -94,6 +95,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     stm32_config.rcc.sys_ck = Some(mhz(400));
     stm32_config.rcc.hclk = Some(mhz(200));
     stm32_config.rcc.pclk1 = Some(mhz(100));
+    stm32_config.rcc.adc_clock_source = AdcClockSource::PerCk;
     let p = embassy_stm32::init(stm32_config);
     let config = usart::Config::default();
 
