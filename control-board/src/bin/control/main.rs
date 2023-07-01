@@ -13,6 +13,7 @@ use ateam_control_board::{
     uart_queue::{UartReadQueue, UartWriteQueue},
     BATTERY_MIN_VOLTAGE,
     adc_v_to_battery_voltage,
+    adc_raw_to_v
 };
 use control::Control;
 use defmt::info;
@@ -173,7 +174,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let mut adc1 = Adc::new(p.ADC1, &mut Delay);
     adc1.set_sample_time(SampleTime::Cycles1_5);
     let mut battery_pin = p.PF12;
-    let mut vrefint_channel = adc1.enable_vrefint();
 
     let battery_pub = BATTERY_CHANNEL.publisher().unwrap();
 
@@ -409,8 +409,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         }
 
         // could just feed gyro in here but the comment in control said to use a channel
-        let vrefint = adc1.read_internal(&mut vrefint_channel) as f32;
-        let current_battery_v = adc_v_to_battery_voltage((adc1.read(&mut battery_pin) as f32)/vrefint);
+        let current_battery_v = adc_v_to_battery_voltage(adc_raw_to_v(adc1.read(&mut battery_pin) as f32));
 
         battery_pub.publish_immediate(current_battery_v);
         if current_battery_v < BATTERY_MIN_VOLTAGE
