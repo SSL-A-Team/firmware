@@ -171,9 +171,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // Battery voltage
     //////////////////
 
-    let mut adc1 = Adc::new(p.ADC1, &mut Delay);
-    adc1.set_sample_time(SampleTime::Cycles1_5);
-    let mut battery_pin = p.PF12;
+    let mut adc3 = Adc::new(p.ADC3, &mut Delay);
+    adc3.set_sample_time(SampleTime::Cycles1_5);
+    let mut battery_pin = p.PF5;
 
     let battery_pub = BATTERY_CHANNEL.publisher().unwrap();
 
@@ -409,7 +409,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         }
 
         // could just feed gyro in here but the comment in control said to use a channel
-        let current_battery_v = adc_v_to_battery_voltage(adc_raw_to_v(adc1.read(&mut battery_pin) as f32));
+        let current_battery_v = adc_v_to_battery_voltage(adc_raw_to_v(adc3.read(&mut battery_pin) as f32));
 
         battery_pub.publish_immediate(current_battery_v);
         if current_battery_v < BATTERY_MIN_VOLTAGE
