@@ -25,8 +25,6 @@ use ateam_control_board::{
             body_vel_pid_params,
         }, robot_controller::BodyVelocityController
     },
-    adc_v_to_battery_voltage,
-    adc_raw_to_v,
     BATTERY_MIN_VOLTAGE
 };
 use nalgebra::{Vector3, Vector4};
@@ -497,7 +495,7 @@ impl<'a> Control<'a> {
         let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel);
 
         // now we have setpoint r(t) in self.cmd_vel
-        let battery_v = adc_v_to_battery_voltage(adc_raw_to_v(self.battery_sub.next_message_pure().await as f32));
+        let battery_v = self.battery_sub.next_message_pure().await as f32;
         let controls_enabled = true;
         let gyro_rads = (self.gyro_sub.next_message_pure().await as f32) * 2.0 * core::f32::consts::PI / 360.0;
         let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
