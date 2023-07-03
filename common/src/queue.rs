@@ -4,7 +4,6 @@ use core::{
     mem::MaybeUninit,
     task::{Poll, Waker},
 };
-use ateam_common::transfer::{DataRefReadTrait, DataRefWriteTrait};
 use critical_section;
 
 pub struct Buffer<const LENGTH: usize> {
@@ -24,11 +23,11 @@ pub struct DequeueRef<'a, const LENGTH: usize, const DEPTH: usize> {
     data: &'a [u8],
 }
 
-impl<'a, const LENGTH: usize, const DEPTH: usize> DataRefReadTrait for DequeueRef<'a, LENGTH, DEPTH> {
-    fn data(&self) -> &[u8] {
+impl<'a, const LENGTH: usize, const DEPTH: usize> DequeueRef<'a, LENGTH, DEPTH> {
+    pub fn data(&self) -> &[u8] {
         self.data
     }
-    fn cancel(self) {
+    pub fn cancel(self) {
         self.queue.cancel_dequeue();
     }
 }
@@ -45,15 +44,15 @@ pub struct EnqueueRef<'a, const LENGTH: usize, const DEPTH: usize> {
     len: &'a mut usize,
 }
 
-impl<'a, const LENGTH: usize, const DEPTH: usize> DataRefWriteTrait for EnqueueRef<'a, LENGTH, DEPTH> {
-    fn data(&mut self) -> &mut [u8] {
+impl<'a, const LENGTH: usize, const DEPTH: usize> EnqueueRef<'a, LENGTH, DEPTH> {
+    pub fn data(&mut self) -> &mut [u8] {
         self.data
     }
 
-    fn len(&mut self) -> &mut usize {
+    pub fn len(&mut self) -> &mut usize {
         self.len
     }
-    fn cancel(self) {
+    pub fn cancel(self) {
         self.queue.cancel_enqueue();
     }
 }
@@ -64,7 +63,8 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Drop for EnqueueRef<'a, LENGTH
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug, defmt::Format)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Error {
     QueueFullEmpty,
     InProgress,

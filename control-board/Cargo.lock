@@ -37,6 +37,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ateam-common"
+version = "0.1.0"
+dependencies = [
+ "ateam-common-packets",
+ "critical-section 1.1.1",
+ "defmt",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync",
+ "embassy-time",
+ "futures-util",
+ "heapless",
+]
+
+[[package]]
 name = "ateam-common-packets"
 version = "1.0.0"
 dependencies = [
@@ -48,6 +63,7 @@ name = "ateam-control-board"
 version = "0.1.0"
 dependencies = [
  "apa102-spi",
+ "ateam-common",
  "ateam-common-packets",
  "const_format",
  "cortex-m",
@@ -631,6 +647,7 @@ dependencies = [
  "embassy-sync",
  "embedded-hal 0.2.7",
  "embedded-hal 1.0.0-alpha.9",
+ "embedded-hal-async",
  "futures-util",
  "heapless",
 ]

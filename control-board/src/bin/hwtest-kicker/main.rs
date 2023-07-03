@@ -20,7 +20,7 @@ use embassy_stm32::{
     peripherals::{DMA2_CH4, DMA2_CH5, USART6},
     spi,
     time::{hz, mhz},
-    usart::Uart,
+    usart::{Uart, Parity, StopBits, self},
 };
 use embassy_time::{Duration, Ticker, Timer};
 use futures_util::StreamExt;
@@ -32,7 +32,7 @@ use ateam_common_packets::bindings_kicker::KickRequest;
 
 mod pins;
 
-include_kicker_bin! {KICKER_FW_IMG, "kicker.bin"}
+include_kicker_bin! {KICKER_FW_IMG, "hwtest-breakbeam.bin"}
 
 const MAX_TX_PACKET_SIZE: usize = 16;
 const TX_BUF_DEPTH: usize = 3;
@@ -64,7 +64,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let p = embassy_stm32::init(stm32_config);
 
     // Delay so dotstar can turn on
-    Timer::after(Duration::from_millis(50)).await;
+    Timer::after(Duration::from_millis(100)).await;
 
     let irq = interrupt::take!(CEC);
     irq.set_priority(interrupt::Priority::P6);
@@ -99,6 +99,10 @@ async fn main(_spawner: embassy_executor::Spawner) {
     }
 
     let kicker_int = interrupt::take!(USART6);
+    let mut kicker_uart_config = usart::Config::default();
+    kicker_uart_config.baudrate = 2_000_000; // max officially support baudrate
+    kicker_uart_config.parity = Parity::ParityEven;
+    kicker_uart_config.stop_bits = StopBits::STOP1;
     let kicker_usart = Uart::new(
         p.USART6,
         p.PC7,
@@ -106,7 +110,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         kicker_int,
         p.DMA2_CH4,
         p.DMA2_CH5,
-        get_bootloader_uart_config(),
+        kicker_uart_config,
     );
     let (kicker_tx, kicker_rx) = kicker_usart.split();
     let kicker_boot0_pin = Output::new(p.PA8, Level::Low, Speed::Medium);
@@ -126,18 +130,18 @@ async fn main(_spawner: embassy_executor::Spawner) {
         Some(kicker_reset_pin),
     );
 
-    info!("flashing kicker...");
+    // info!("flashing kicker...");
 
     let kicker_firmware_image = KICKER_FW_IMG;
     let mut kicker = Kicker::new(kicker_stm32_interface, kicker_firmware_image);
-    let res = kicker.load_default_firmware_image().await;
+    // let res = kicker.load_default_firmware_image().await;
 
-    if res.is_err() {
-        defmt::warn!("kicker flashing failed.");
-        loop {}
-    } else {
-        info!("kicker flash complete");
-    }
+    // if res.is_err() {
+    //     defmt::warn!("kicker flashing failed.");
+    //     loop {}
+    // } else {
+    //     info!("kicker flash complete");
+    // }
 
     kicker.set_telemetry_enabled(true);
     kicker.set_kick_strength(2.25);
@@ -149,6 +153,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     );
 
     let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
+    let min_ticks_to_kick = 10;
     let mut last_kick_ticks = 0;
     loop {
         kicker.process_telemetry();
@@ -171,10 +176,15 @@ async fn main(_spawner: embassy_executor::Spawner) {
         }
 
         if btn1.is_low() {
-            kicker.request_kick(KickRequest::KR_KICK_NOW);
-
-            led1.set_high();
+            if last_kick_ticks >= min_ticks_to_kick {
+                kicker.request_kick(KickRequest::KR_KICK_NOW);
+                led1.set_high();
+                last_kick_ticks = 0;
+            }
         } else {
+            if last_kick_ticks < min_ticks_to_kick {
+                last_kick_ticks += 1;
+            }
             led1.set_low();
         }
 

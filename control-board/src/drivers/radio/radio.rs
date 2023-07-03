@@ -268,6 +268,7 @@ impl<
     pub async fn connect_peer(&self, url: &str) -> Result<PeerConnection, ()> {
         let mut str: String<64> = String::new();
         write!(str, "AT+UDCP={url}").or(Err(()))?;
+        defmt::info!("{}", str.as_str());
         self.send_command(str.as_str()).await?;
 
         let mut peer_id = None;
@@ -277,7 +278,10 @@ impl<
         while peer_id.is_none() || !peer_connected_ip || channel_ret.is_none() {
             self.reader
                 .dequeue(|buf| {
-                    match self.to_packet(buf)? {
+                    let packet =  self.to_packet(buf)?;
+                    defmt::info!("{:?}", packet);
+                    defmt::info!("{:?}", packet);
+                    match packet {
                         EdmPacket::ATEvent(ATEvent::PeerConnectedIP {
                             peer_handle: _,
                             is_ipv6: _,

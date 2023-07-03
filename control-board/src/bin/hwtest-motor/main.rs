@@ -10,7 +10,7 @@ use ateam_control_board::{
     include_external_cpp_bin,
     queue::Buffer,
     stm32_interface::{get_bootloader_uart_config, Stm32Interface},
-    uart_queue::{UartReadQueue, UartWriteQueue},
+    uart_queue::{UartReadQueue, UartWriteQueue}, pins::MotorFR,
 };
 use control::Control;
 use defmt::info;

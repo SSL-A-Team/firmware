@@ -10,6 +10,8 @@ use embassy_time::{Duration, Timer};
 use crate::stm32_interface::Stm32Interface;
 
 use ateam_common_packets::bindings_kicker::{KickerControl, KickerTelemetry, KickRequest};
+use ateam_common::transfer::DataRefReadTrait;
+use ateam_common::transfer::DataRefWriteTrait;
 
 pub struct Kicker<
     'a,
@@ -135,7 +137,7 @@ impl<
     ///////////////////////////
 
     pub fn request_shutdown(&mut self) {
-        self.command_state.request_power_down();
+        self.command_state.set_request_power_down(1);
     }
 
     pub fn shutdown_acknowledge(&self) -> bool {

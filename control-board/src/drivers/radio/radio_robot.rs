@@ -14,7 +14,7 @@ use embassy_stm32::Peripheral;
 use embassy_time::{Duration, Timer};
 use heapless::String;
 
-const MULTICAST_IP: &str = "224.4.20.69";
+const MULTICAST_IP: &str = "224.4.20.71";
 const MULTICAST_PORT: u16 = 42069;
 const LOCAL_PORT: u16 = 42069;
 const WIFI_SSID: &str = "A-Team Field";

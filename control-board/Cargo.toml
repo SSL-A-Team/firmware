@@ -42,6 +42,7 @@ heapless = "0.7.16"
 libm = "0.2.6"
 nalgebra = { version = "0.31.0", default-features = false, features = [ "libm" ] }
 ateam-common-packets = { path = "../software-communication/ateam-common-packets/rust-lib" }
+ateam-common = { path = "../common", default-features = false, features = ["defmt"] }
 
 [dev-dependencies]
 defmt-test = "0.3.0"
@@ -91,6 +92,11 @@ harness = false
 
 [[bin]]
 name = "hwtest-radio"
+test = false
+harness = false
+
+[[bin]]
+name = "hwtest-radio2"
 test = false
 harness = false
 

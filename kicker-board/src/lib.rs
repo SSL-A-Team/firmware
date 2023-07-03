@@ -1,4 +1,5 @@
 #![no_std]
+#![no_main]
 #![feature(const_mut_refs)]
 #![feature(const_fn_floating_point_arithmetic)]
 #![feature(async_fn_in_trait)]

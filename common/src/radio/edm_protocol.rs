@@ -26,10 +26,8 @@ impl EdmPacketRaw {
     const START_EVENT: u16 = 0x0071;
 
     fn new(data: &[u8]) -> Result<&EdmPacketRaw, ()> {
-        defmt::info!("aaa");
         if data.len() >= 2 && data[0] == Self::START && data[data.len() - 1] == Self::END {
             let packet = data_to_ref::<EdmPacketRaw, EdmPacketRaw<()>>(&data[1..data.len() - 1])?;
-            defmt::info!("{:?}", packet.payload_length);
             if (u16::from_be(packet.payload_length) & 0x0FFF) as usize == packet.payload.len() + 2 {
                 Ok(packet)
             } else {
@@ -82,7 +80,6 @@ impl EdmPacketRaw {
     }
 
     fn get_payload(&self) -> Result<EdmPacket, ()> {
-        defmt::info!("id {}", self.identifier);
         match u16::from_be(self.identifier) {
             Self::CONNECT_EVENT => {
                 let event = data_to_ref::<ConnectEvent, ConnectEvent<()>>(&self.payload)?;
@@ -129,7 +126,8 @@ impl EdmPacketRaw {
     }
 }
 
-#[derive(defmt::Format)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(core::fmt::Debug)]
 pub enum EdmPacket<'a> {
     ConnectEvent {
         channel: u8,
@@ -182,21 +180,23 @@ struct ConnectEvent<P: ?Sized = [u8]> {
     payload: P,
 }
 
-#[derive(defmt::Format)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(core::fmt::Debug)]
 pub enum ConnectEventType {
     // ConnectEventBluetooth(ConnectEventBluetooth),
     ConnectEventIPv4(ConnectEventIPv4),
     // ConnectEventIPv6(ConnectEventIPv6),
 }
 
-#[derive(defmt::Format)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[repr(C)]
 pub struct ConnectEventBluetooth {
     pub profile: u8,
     pub bd_address: [u8; 6],
     pub frame_size: u16,
 }
-#[derive(defmt::Format)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(core::fmt::Debug)]
 #[repr(C)]
 pub struct ConnectEventIPv4 {
     pub protocol: u8,
@@ -205,7 +205,7 @@ pub struct ConnectEventIPv4 {
     pub local_addr: [u8; 4],
     pub local_port: u16,
 }
-#[derive(defmt::Format)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[repr(C)]
 pub struct ConnectEventIPv6 {
     pub protocol: u8,

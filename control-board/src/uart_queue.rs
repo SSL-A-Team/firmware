@@ -1,4 +1,4 @@
-use crate::queue::{self, Buffer, DequeueRef, Error, Queue};
+use crate::queue::{self, Buffer, DequeueRef, Error, Queue, EnqueueRef};
 
 use core::future::Future;
 use defmt::info;
@@ -7,6 +7,8 @@ use embassy_stm32::{
     usart::{self, UartRx, UartTx},
     Peripheral,
 };
+use ateam_common::{transfer::DataRefReadTrait};
+use ateam_common::transfer::DataRefWriteTrait;
 
 pub struct UartReadQueue<
     'a,
@@ -59,12 +61,12 @@ impl<
     ) -> ReadTaskFuture<UART, DMA, LENGTH, DEPTH> {
         async move {
             loop {
+                // TODO: change back to await
+                // let mut buf = queue_rx.try_enqueue().unwrap();
                 let mut buf = queue_rx.enqueue().await.unwrap();
-                let len = rx
-                    .read_until_idle(buf.data())
-                    .await;
-                    // .unwrap();
-                    // TODO: this
+                let len = rx.read_until_idle(buf.data()).await;
+                // .unwrap();
+                // TODO: this
                 if let Ok(len) = len {
                     if len == 0 {
                         info!("uart zero");
@@ -80,10 +82,7 @@ impl<
         }
     }
 
-    pub fn spawn_task(
-        &'static self,
-        rx: UartRx<'a, UART, DMA>,
-    ) -> SpawnToken<impl Sized> {
+    pub fn spawn_task(&'static self, rx: UartRx<'a, UART, DMA>) -> SpawnToken<impl Sized> {
         self.task.spawn(|| Self::read_task(&self.queue_rx, rx))
     }
 
@@ -94,6 +93,10 @@ impl<
     pub async fn dequeue<RET>(&self, fn_write: impl FnOnce(&[u8]) -> RET) -> RET {
         let buf = self.queue_rx.dequeue().await.unwrap();
         fn_write(buf.data())
+    }
+
+    pub async fn dequeue2(&self) -> Result<DequeueRef<LENGTH, DEPTH>, ()> {
+        self.queue_rx.dequeue().await.or(Err(()))
     }
 }
 
@@ -159,6 +162,14 @@ impl<
         let len = fn_write(buf.data());
         *buf.len() = len;
         Ok(())
+    }
+
+    pub fn enqueue2(&self) -> Result<EnqueueRef<LENGTH, DEPTH>, ()> {
+        self.queue_tx.try_enqueue().or(Err(()))
+        // let mut buf = self.queue_tx.try_enqueue()?;
+        // let len = fn_write(buf.data());
+        // *buf.len() = len;
+        // Ok(())
     }
 
     pub fn enqueue_copy(&self, source: &[u8]) -> Result<(), queue::Error> {

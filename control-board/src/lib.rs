@@ -12,6 +12,7 @@
 #![feature(adt_const_params)]
 #![feature(ptr_metadata)]
 #![feature(async_fn_in_trait)]
+#![feature(inherent_associated_types)]
 
 pub mod queue;
 pub mod robot_model;
@@ -20,6 +21,7 @@ pub mod stspin_motor;
 pub mod uart_queue;
 
 pub mod drivers;
+pub mod pins;
 
 pub mod colors {
     use smart_leds::RGB8;

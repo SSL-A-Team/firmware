@@ -21,12 +21,12 @@ fn main() -> std::io::Result<()> {
     };
 
     socket.join_multicast_v4(
-        &Ipv4Addr::from_str("224.4.20.69").unwrap(),
+        &Ipv4Addr::from_str("224.4.20.71").unwrap(),
         &Ipv4Addr::UNSPECIFIED,
     )?;
 
     let mut buf = [0; size_of::<RadioPacket>()];
-    let src = loop {
+    let mut src = loop {
         let (len, src) = socket.recv_from(&mut buf)?;
         if len == size_of::<RadioPacket>() - size_of::<RadioPacket_Data>() + size_of::<HelloRequest>()
         {
@@ -95,7 +95,7 @@ fn main() -> std::io::Result<()> {
             )
         };
         socket.send_to(packet_bytes, src)?;
-        std::thread::sleep(Duration::from_millis(10));
+        std::thread::sleep(Duration::from_millis(500));
 
         if up {
             vel += max/200.;

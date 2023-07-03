@@ -6,7 +6,7 @@
 use apa102_spi::Apa102;
 use ateam_common_packets::bindings_radio::{BasicControl, KickRequest};
 use ateam_control_board::{
-    drivers::{radio::TeamColor, rotary::Rotary, shell_indicator::ShellIndicator},
+    drivers::{radio::TeamColor, rotary::Rotary, shell_indicator::ShellIndicator, kicker::Kicker},
     include_external_cpp_bin,
     queue::Buffer,
     stm32_interface::{get_bootloader_uart_config, Stm32Interface},
@@ -23,7 +23,7 @@ use embassy_stm32::{
     peripherals::{DMA2_CH4, DMA2_CH5, USART6},
     spi,
     time::{hz, mhz},
-    usart::{self, Uart},
+    usart::{self, Uart, Parity, StopBits},
 };
 use embassy_time::{Duration, Ticker, Timer};
 use futures_util::StreamExt;
@@ -134,6 +134,10 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let dip6 = Input::new(p.PG2, Pull::Down);
     let dip7 = Input::new(p.PD15, Pull::Down);
 
+    if kicker_det.is_high() {
+        defmt::warn!("kicker appears unplugged!");
+    }
+
 
     // let mut kicker = Output::new(p.PF9, Level::Low, Speed::High);
 
@@ -157,35 +161,44 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // loop {}
 
-    // let kicker_int = interrupt::take!(USART6);
-    // let kicker_usart = Uart::new(
-    //     p.USART6,
-    //     p.PC7,
-    //     p.PC6,
-    //     kicker_int,
-    //     p.DMA2_CH4,
-    //     p.DMA2_CH5,
-    //     get_bootloader_uart_config(),
-    // );
-    // let (kicker_tx, kicker_rx) = kicker_usart.split();
-    // let mut kicker_boot0_pin = Output::new(p.PA8, Level::Low, Speed::Medium);
-    // let mut kicker_reset_pin = Output::new(p.PA9, Level::Low, Speed::Medium);
-    // let kicker_reset_pin_bad = OutputOpenDrain::new(p.PA2, Level::Low, Speed::Medium, Pull::None);
+    let kicker_int = interrupt::take!(USART6);
+    let mut kicker_uart_config = usart::Config::default();
+    kicker_uart_config.baudrate = 2_000_000; // max officially support baudrate
+    kicker_uart_config.parity = Parity::ParityEven;
+    kicker_uart_config.stop_bits = StopBits::STOP1;
+    let kicker_usart = Uart::new(
+        p.USART6,
+        p.PC7,
+        p.PC6,
+        kicker_int,
+        p.DMA2_CH4,
+        p.DMA2_CH5,
+        kicker_uart_config,
+    );
+    let (kicker_tx, kicker_rx) = kicker_usart.split();
+    let mut kicker_boot0_pin = Output::new(p.PA8, Level::Low, Speed::Medium);
+    let mut kicker_reset_pin = Output::new(p.PA9, Level::Low, Speed::Medium);
 
-    // spawner
-    //     .spawn(KICKER_QUEUE_RX.spawn_task(kicker_rx))
-    //     .unwrap();
-    // spawner
-    //     .spawn(KICKER_QUEUE_TX.spawn_task(kicker_tx))
-    //     .unwrap();
+    spawner
+        .spawn(KICKER_QUEUE_RX.spawn_task(kicker_rx))
+        .unwrap();
+    spawner
+        .spawn(KICKER_QUEUE_TX.spawn_task(kicker_tx))
+        .unwrap();
 
-    // kicker_boot0_pin.set_high();
-    // let mut kicker_stm32_interface = Stm32Interface::new(
-    //     &KICKER_QUEUE_RX,
-    //     &KICKER_QUEUE_TX,
-    //     Some(kicker_boot0_pin),
-    //     Some(kicker_reset_pin_bad),
-    // );
+    let kicker_stm32_interface = Stm32Interface::new_noninverted_reset(
+        &KICKER_QUEUE_RX,
+        &KICKER_QUEUE_TX,
+        Some(kicker_boot0_pin),
+        Some(kicker_reset_pin),
+    );
+
+    let mut kicker = Kicker::new(kicker_stm32_interface, &[]);
+    // TODO: should this reset?
+    // kicker.reset();
+    kicker.set_telemetry_enabled(true);
+
+
     // info!("start program");
 
     // kicker_reset_pin.set_high();
@@ -338,7 +351,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     dotstar.write([RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
 
-    control.load_firmware().await;
+    // control.load_firmware().await;
 
     dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
 
@@ -375,17 +388,20 @@ async fn main(_spawner: embassy_executor::Spawner) {
         //     kick_request: 0,
         // });
         let telemetry = control.tick(latest);
-        if let Some(telemetry) = telemetry {
+        kicker.process_telemetry();
+        if let Some(mut telemetry) = telemetry {
             // info!("{:?}", defmt::Debug2Format(&telemetry));
             RADIO_TEST.send_telemetry(telemetry).await;
         }
         if let Some(latest) = &latest {
-            if last_kicked > 100 && latest.kick_request == KickRequest::KR_KICK_NOW {
-                // kicker.set_high();
-                // Timer::after(Duration::from_micros(3500)).await;
-                // kicker.set_low();
-                last_kicked = 0;
-            }
+            kicker.request_kick(latest.kick_request);
+            kicker.send_command();
+            // if last_kicked > 100 && latest.kick_request == KickRequest::KR_KICK_NOW {
+            //     // kicker.set_high();
+            //     // Timer::after(Duration::from_micros(3500)).await;
+            //     // kicker.set_low();
+            //     last_kicked = 0;
+            // }
         }
         last_kicked = core::cmp::min(last_kicked + 1, 1000);
 

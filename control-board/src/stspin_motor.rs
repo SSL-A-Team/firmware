@@ -17,6 +17,8 @@ use ateam_common_packets::bindings_stspin::{
     MotorResponsePacketType::{MRP_MOTION, MRP_PARAMS},
     MotorResponse_Motion_Packet, MotorResponse_Params_Packet,
 };
+use ateam_common::transfer::DataRefReadTrait;
+use ateam_common::transfer::DataRefWriteTrait;
 
 use crate::stm32_interface::Stm32Interface;
 

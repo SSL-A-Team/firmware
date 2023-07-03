@@ -76,6 +76,11 @@ test = false
 harness = false
 
 [[bin]]
+name = "hwtest-charge-kick"
+test = false
+harness = false
+
+[[bin]]
 name = "hwtest-coms"
 test = false
 harness = false

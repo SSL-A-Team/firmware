@@ -10,7 +10,7 @@ use embassy_time::{Duration, Ticker, Timer};
 use panic_probe as _;
 
 use apa102_spi::Apa102;
-use ateam_control_board::{colors::*, stm32_interface::get_bootloader_uart_config};
+use ateam_control_board::{colors::*, stm32_interface::get_bootloader_uart_config, pins::MotorFR};
 use embassy_stm32::{
     dma::NoDma,
     executor::InterruptExecutor,

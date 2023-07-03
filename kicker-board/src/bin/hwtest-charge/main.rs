@@ -18,7 +18,7 @@ use embassy_stm32::{
     Peripherals,
     gpio::{Input, Level, Output, Pull, Speed},
     gpio::low_level::Pin,
-    interrupt, adc::SampleTime,
+    interrupt, adc::SampleTime, pwm::{Channel1Pin, simple_pwm::PwmPin},
 };
 use embassy_sync::{pubsub::{PubSubChannel, Publisher}, blocking_mutex::raw::NoopRawMutex};
 use embassy_time::{Delay, Duration, Timer, Ticker};
