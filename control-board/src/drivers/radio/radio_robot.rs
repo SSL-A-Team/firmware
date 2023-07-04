@@ -1,4 +1,5 @@
 use super::radio::{PeerConnection, Radio, WifiAuth};
+use crate::stm32_interface::{configure_usart, Kind};
 use crate::uart_queue::{UartReadQueue, UartWriteQueue};
 use ateam_common_packets::bindings_radio::{
     self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data, BasicTelemetry,
@@ -100,22 +101,33 @@ impl<
         radio.set_echo(false).await?;
         radio.config_uart(baudrate, false, 8, true).await?;
 
-        let div = (UART::frequency().0 + (baudrate / 2)) / baudrate * UART::MULTIPLIER;
-        unsafe {
-            let r = UART::regs();
-            r.cr1().modify(|w| {
-                w.set_ue(false);
-            });
-            r.brr().modify(|w| {
-                w.set_brr(div);
-            });
-            r.cr1().modify(|w| {
-                w.set_ue(true);
-                w.set_m0(pac::lpuart::vals::M0::BIT9);
-                w.set_pce(true);
-                w.set_ps(pac::lpuart::vals::Ps::EVEN);
-            });
-        };
+        let r = UART::regs();
+        // disable the uart. Can't modify parity and baudrate while module is enabled
+        r.cr1().modify(|w| {
+            w.set_ue(false);
+        });
+
+        let mut config = usart::Config::default();
+        config.baudrate = baudrate;
+        config.parity = usart::Parity::ParityEven;
+        configure_usart(r, &config, UART::frequency(), Kind::Uart, true, true);
+
+        // let div = (UART::frequency().0 + (baudrate / 2)) / baudrate * UART::MULTIPLIER;
+        // unsafe {
+        //     let r = UART::regs();
+        //     r.cr1().modify(|w| {
+        //         w.set_ue(false);
+        //     });
+        //     r.brr().modify(|w| {
+        //         w.set_brr(div);
+        //     });
+        //     r.cr1().modify(|w| {
+        //         w.set_ue(true);
+        //         w.set_m0(pac::usart::vals::M0::BIT9);
+        //         w.set_pce(true);
+        //         w.set_ps(pac::usart::vals::Ps::EVEN);
+        //     });
+        // };
 
         // Datasheet says wait at least 40ms after UART config change
         Timer::after(Duration::from_millis(50)).await;

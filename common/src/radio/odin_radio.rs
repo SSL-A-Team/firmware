@@ -14,7 +14,7 @@ use heapless::String;
 use crate::{
     radio::radio::{Ipv4Addr, Radio, UdpSocket},
     task::Task,
-    transfer::{Reader, Writer, Reader2, Writer2},
+    transfer::{Reader, Reader2, Writer, Writer2},
 };
 
 use super::{
@@ -119,14 +119,13 @@ pub struct OdinRadio<'a, RadioInterface: RadioInterfaceControl> {
 
     // socket_read_wakers: UnsafeCell<[Option<Socket>; 1]>,
     // channels: Mutex<CriticalSectionRawMutex, [Option<Channel>; 1]>,
-    peers: Mutex<CriticalSectionRawMutex, heapless::LinearMap<u8, OpenPeerConnection, 1>>,
+    peers: Mutex<CriticalSectionRawMutex, heapless::LinearMap<u8, OpenPeerConnection, 2>>,
     // packet_waker: UnsafeCell<[Option<Waker>; WAKER_COUNT]>,
     // _phantom: PhantomData<&'a str>,
 }
 
 unsafe impl<'a, RadioInterface: RadioInterfaceControl> Sync for OdinRadio<'a, RadioInterface> {}
 unsafe impl<'a, RadioInterface: RadioInterfaceControl> Send for OdinRadio<'a, RadioInterface> {}
-
 
 pub struct OdinSocket<'a, RadioInterface: RadioInterfaceControl> {
     radio: &'a OdinRadio<'a, RadioInterface>,
@@ -162,7 +161,12 @@ impl<RadioInterface: RadioInterfaceControl> Radio for OdinRadio<'static, RadioIn
         info!("Netork {} Connected as {}", ssid, hostname.unwrap_or("?"));
         Ok(())
     }
-    async fn open_udp(&'static self, ipv4: Ipv4Addr, port: u16) -> Result<Self::UdpSocket, ()> {
+    async fn open_udp(
+        &'static self,
+        ipv4: Ipv4Addr,
+        port: u16,
+        local_port: Option<u16>,
+    ) -> Result<Self::UdpSocket, ()> {
         // let socket_index = critical_section::with(|_| unsafe {
         //     for (i, socket) in (*self.socket_read_wakers.get()).iter_mut().enumerate() {
         //         if let None = socket {
@@ -174,14 +178,16 @@ impl<RadioInterface: RadioInterfaceControl> Radio for OdinRadio<'static, RadioIn
         // })?;
 
         // TODO: is this right?
-        let local_port = port;
-        // or this?
-        let local_port = 42069;
+        // let local_port = port;
+        // // // or this?
+        // let local_port = 42070;
+        let local_port = local_port.unwrap_or(0);
 
         // TODO: flags conditional?
         let mut url = String::<50>::new();
         core::write!(
             &mut url,
+            // "udp://{}.{}.{}.{}:{}/?local_port={local_port}",
             "udp://{}.{}.{}.{}:{}/?flags=1&local_port={local_port}",
             ipv4.octets[0],
             ipv4.octets[1],
@@ -236,6 +242,8 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
 
         self.set_echo(false).await?;
         self.config_uart(5_250_000, false, 8, true).await?;
+        // Timer::after(Duration::from_millis(5)).await;
+        // info!("uart update");
         self.interface.config_uart(5_250_000, false, 8, true).await;
         // Datasheet says wait at least 40ms after UART config change
         Timer::after(Duration::from_millis(50)).await;
@@ -245,6 +253,13 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
         // Datasheet says wait at least 50ms after entering data mode
         Timer::after(Duration::from_millis(50)).await;
 
+        // self.send_command("AT+CGMR", |resp| {
+        //     info!("{:?}", resp);
+        // }).await;
+
+        // self.close_peer(0).await?;
+        // self.list_peers().await;
+
         self.initialized.signal(());
         info!("Radio Initialized");
         Ok(())
@@ -252,9 +267,11 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
 
     pub async fn read_packet(&self) -> Result<(), ()> {
         self.packet_complete.wait().await;
+        // info!("reading");
 
         // TODO: try adding wait
-        Timer::after(Duration::from_millis(3)).await;
+        // Timer::after(Duration::from_millis(10)).await;
+        // Timer::after(Duration::from_millis(150)).await;
 
         // self.interface
         //     .read(|buf| {
@@ -273,7 +290,9 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
         let len = data_ref.data().len();
         data[..len].clone_from_slice(data_ref.data());
         unsafe { *self.packet_buffer_len.get() = len };
-        let status = *self.status.lock().await;
+        let status = { *self.status.lock().await };
+        // let peers = { *self.peers.lock().await };
+        // info!("len {}", len);
         match status.mode {
             RadioMode::CommandMode => {
                 let event = ATEvent::new(&data[..len]);
@@ -291,7 +310,6 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
             }
             _ => return Err(()),
         }
-        drop(packet);
 
         critical_section::with(|_| unsafe {
             if let Some(waker) = &*self.response_waker.get() {
@@ -300,15 +318,25 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
         });
         let peers = self.peers.lock().await;
         for peer in &*peers {
+            if let Some(EdmPacket::DataEvent { channel, data: _ }) = &*packet {
+                if *channel == peer.1.channel_id && !peer.1.is_read {
+                    *packet = None;
+                    self.packet_complete.signal(());
+                    info!("reset");
+                    break;
+                }
+            }
+
             if let Some(waker) = &peer.1.waker {
                 waker.wake_by_ref();
             }
         }
         drop(peers);
-
-        self.packet_complete.reset();
-
-
+        
+        if let Some(_) = &*packet {
+            self.packet_complete.reset();
+        }
+        drop(packet);
 
         Ok(())
     }
@@ -341,7 +369,7 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
     }
 
     async fn _send_command(&self, cmd: &str) -> Result<(), ()> {
-        let status = *self.status.lock().await;
+        let status = { *self.status.lock().await };
         // Send at request
         let mut data_ref = self.interface.write().await?;
         let data = data_ref.data();
@@ -369,7 +397,7 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
                     *data_ref.len() = len;
                 } else {
                     data_ref.cancel();
-                    return Err(())
+                    return Err(());
                 }
                 Ok(())
             }
@@ -387,6 +415,7 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
         // Error if at command in progress
         let command_lock = self.command_mutex.try_lock().or(Err(()))?;
         self._send_command(cmd).await?;
+        // Timer::after(Duration::from_millis(2)).await;
 
         // Wait for at response
         let mut packet = poll_fn(|cx| {
@@ -420,7 +449,9 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
 
     pub async fn send_command_ok(&self, cmd: &str) -> Result<(), ()> {
         let mut command_error = Ok(());
+        // info!("send");
         self.send_command(cmd, |response| {
+            // info!("ok");
             if let ATResponse::Error = &response {
                 command_error = Err(());
             }
@@ -597,19 +628,21 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
         write!(cmd, "AT+UDCP={url}").or(Err(()))?;
         let command_lock = self.command_mutex.try_lock().or(Err(()))?;
         self._send_command(&cmd).await?;
+        Timer::after(Duration::from_millis(20)).await;
 
         let mut peer_id = None;
         let mut peer_connected_ip = false;
         let mut channel_id = None;
 
+        info!("cmd");
         poll_fn(|cx| {
             let lock = self.packet.try_lock();
             if let Ok(mut lock) = lock {
                 if let Some(packet) = &*lock {
-                    // info!("{:?}", packet);
-                    // info!("{:?}", packet);
-                    // info!("{:?}", packet);
-                    // info!("{:?}", packet);
+                    info!("{:?}", packet);
+                    info!("{:?}", packet);
+                    info!("{:?}", packet);
+                    info!("{:?}", packet);
                     match packet {
                         EdmPacket::ATResponse(response) => {
                             if let ATResponse::Ok(resp) = response {
@@ -649,6 +682,11 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
                             *lock = None;
                             self.packet_complete.signal(());
                         }
+                        // EdmPacket::DisconnectEvent { channel: _ } => {
+                        //     *lock = None;
+                        //     self.packet_complete.signal(());
+                        //     return Poll::Ready(Err(()))
+                        // }
                         _ => {}
                     }
                 }
@@ -663,6 +701,7 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
             Poll::Pending
         })
         .await?;
+        info!("cmd end");
 
         drop(command_lock);
 
@@ -674,18 +713,28 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
             if peers.contains_key(&peer_id) {
                 return Err(());
             }
-            let _ = peers.insert(peer_id, OpenPeerConnection {
-                channel_id,
-                is_read: false,
-                is_write: false,
-                waker: None,
-            });
+            let _ = peers.insert(
+                peer_id,
+                OpenPeerConnection {
+                    channel_id,
+                    is_read: false,
+                    is_write: false,
+                    waker: None,
+                },
+            );
         }
 
         Ok(PeerConnection {
             peer_id,
             channel_id,
         })
+    }
+
+    // pub async fn list_peers<const LEN: usize>(&self) -> heapless::Vec<, > {
+    pub async fn list_peers(&self) {
+        self.send_command("AT+UDLP?", |response| {
+            info!("{:?}", response);
+        }).await.unwrap();
     }
 
     pub async fn close_peer(&self, peer_id: u8) -> Result<(), ()> {
@@ -707,6 +756,7 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
         }
 
         self._send_command(&cmd).await?;
+        Timer::after(Duration::from_millis(1000)).await;
 
         let mut ok = false;
         let mut peer_disconnect = false;
@@ -733,13 +783,14 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
                             *lock = None;
                             self.packet_complete.signal(());
                         }
-                        EdmPacket::DataEvent { channel: _, data: _ } => {
+                        EdmPacket::DataEvent {
+                            channel: _,
+                            data: _,
+                        } => {
                             *lock = None;
                             self.packet_complete.signal(());
                         }
-                        EdmPacket::DisconnectEvent {
-                            channel: _,
-                        } => {
+                        EdmPacket::DisconnectEvent { channel: _ } => {
                             disconnect = true;
                             *lock = None;
                             self.packet_complete.signal(());
@@ -781,7 +832,8 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
         let len = EdmPacket::DataCommand {
             channel: channel_id,
             data: buf,
-        }.write(data_ref.data());
+        }
+        .write(data_ref.data());
         if let Ok(len) = len {
             *data_ref.len() = len;
         } else {
@@ -829,10 +881,15 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
                     if let Some(EdmPacket::DataEvent { channel, data }) = &*lock {
                         if *channel == channel_id {
                             let size = data.len();
+                            if buf.len() < size {
+                                *lock = None;
+                                self.packet_complete.signal(());
+                                return Poll::Ready(Err(()))
+                            }
                             buf[..size].copy_from_slice(data);
                             *lock = None;
                             self.packet_complete.signal(());
-                            return Poll::Ready(size);
+                            return Poll::Ready(Ok(size));
                         }
                     }
                 }
@@ -850,7 +907,7 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
 
             Poll::Pending
         })
-        .await;
+        .await?;
 
         {
             let mut peers = self.peers.lock().await;

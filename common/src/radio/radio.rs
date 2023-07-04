@@ -9,7 +9,7 @@ pub trait Radio {
     type UdpSocket: UdpSocket;
 
     async fn connect_to_network(&self, ssid: &str, pass: Option<&str>, hostname: Option<&str>) -> Result<(), ()>;
-    async fn open_udp(&'static self, addr: Ipv4Addr, port: u16) -> Result<Self::UdpSocket, ()>;
+    async fn open_udp(&'static self, addr: Ipv4Addr, port: u16, local_port: Option<u16>) -> Result<Self::UdpSocket, ()>;
 }
 
 pub trait UdpSocket {

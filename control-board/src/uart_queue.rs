@@ -65,6 +65,7 @@ impl<
                 // let mut buf = queue_rx.try_enqueue().unwrap();
                 let mut buf = queue_rx.enqueue().await.unwrap();
                 let len = rx.read_until_idle(buf.data()).await;
+                // info!("read len {}", len);
                 // .unwrap();
                 // TODO: this
                 if let Ok(len) = len {

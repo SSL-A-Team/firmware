@@ -106,12 +106,12 @@ impl<Robot: RobotRadio + 'static, R: Radio + 'static> Task for RobotRadioTask<Ro
                 .await.unwrap();
         }
 
-        // let mut local_port = 42069;
-        let multicast_socket = radio
-            .open_udp(Robot::MULTICAST_ADDR, Robot::MULTICAST_PORT, None)
-            .await.unwrap();
+        let mut local_port = 42070;
 
         loop {
+            let multicast_socket = radio
+                .open_udp(Robot::MULTICAST_ADDR, Robot::MULTICAST_PORT, local_port)
+                .await.unwrap();
 
             let ((addr, port), robot_id, robot_color) = {
                 let mut ticker = Ticker::every(Robot::HELLO_RATE);
@@ -145,10 +145,10 @@ impl<Robot: RobotRadio + 'static, R: Radio + 'static> Task for RobotRadioTask<Ro
                 }
             };
 
-            // multicast_socket.disconnect().await;
-            // drop(multicast_socket);
+            multicast_socket.disconnect().await;
+            drop(multicast_socket);
 
-            let unicast_socket = radio.open_udp(addr, port, None).await.unwrap();
+            let unicast_socket = radio.open_udp(addr, port, local_port).await.unwrap();
 
             let either = select::select4(
                 data.shutdown.wait(),
@@ -179,7 +179,7 @@ impl<Robot: RobotRadio + 'static, R: Radio + 'static> Task for RobotRadioTask<Ro
                     loop {
                         let mut buf = [0; size_of::<RadioHeader>() + size_of::<BasicControl>()];
                         let res =
-                            with_timeout(Robot::CONTROL_TIMEOUT, multicast_socket.recv(&mut buf))
+                            with_timeout(Robot::CONTROL_TIMEOUT, unicast_socket.recv(&mut buf))
                                 .await;
                         let now = Instant::now();
                         if let Ok(Ok(size)) = res {
@@ -231,7 +231,7 @@ impl<Robot: RobotRadio + 'static, R: Radio + 'static> Task for RobotRadioTask<Ro
             unicast_socket.disconnect().await;
             drop(unicast_socket);
 
-            // local_port += 1;
+            local_port += 1;
 
             match either {
                 select::Either4::First(_) => return,

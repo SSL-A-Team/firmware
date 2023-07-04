@@ -12,31 +12,33 @@ use ateam_common::{
     radio::{
         odin_radio::{OdinRadio, RadioInterfaceControl},
         radio::{Ipv4Addr, Radio},
-        robot_radio::{RobotRadio, RobotRadioTask, TeamColor},
+        robot_radio::{RobotRadio, RobotRadioTask, TeamColor}, self,
     },
     task::TaskStorage,
     transfer::{Reader, Writer, Reader2, Writer2},
 };
 use ateam_control_board::{
     queue::{self, EnqueueRef, DequeueRef},
-    uart_queue::{UartReadQueue, UartWriteQueue},
+    uart_queue::{UartReadQueue, UartWriteQueue}, stm32_interface::{configure_usart, Kind},
 };
+// use cortex_m::interrupt;
 use defmt::*;
 use defmt_rtt as _;
-use embassy_executor::SpawnToken;
+use embassy_executor::{SpawnToken, InterruptExecutor};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use panic_probe as _;
 
-use embassy_stm32::pac;
+use embassy_stm32::{pac::{self, Interrupt}, bind_interrupts, peripherals};
 use embassy_stm32::{
     self as _,
-    executor::InterruptExecutor,
+    // executor::InterruptExecutor,
     gpio::{Level, Output, Pin, Speed},
-    interrupt::{self, InterruptExt},
+    interrupt,
     peripherals::{DMA1_CH0, DMA1_CH1, DMA2_CH0, DMA2_CH1, PC13, USART10, USART2},
     time::mhz,
     usart::{self, Uart, UartRx, UartTx},
 };
+use embassy_stm32::interrupt::InterruptExt;
 use embassy_time::{Duration, Ticker, Timer};
 // use futures_util::stream::stream::StreamExt;
 use futures_util::StreamExt;
@@ -237,26 +239,34 @@ impl<
         reset_pin.set_low();
     }
     async fn config_uart(&self, baudrate: u32, flow_control: bool, data_bits: u8, parity: bool) {
-        let div = (UART::frequency().0 + (baudrate / 2)) / baudrate * UART::MULTIPLIER;
-        unsafe {
-            let r = UART::regs();
-            r.cr1().modify(|w| {
-                w.set_ue(false);
-            });
-            r.brr().modify(|w| {
-                w.set_brr(div);
-            });
-            r.cr1().modify(|w| {
-                w.set_ue(true);
-                w.set_m0(if parity {
-                    pac::lpuart::vals::M0::BIT9
-                } else {
-                    pac::lpuart::vals::M0::BIT8
-                });
-                w.set_pce(parity);
-                w.set_ps(pac::lpuart::vals::Ps::EVEN);
-            });
-        };
+        let r = UART::regs();
+        // disable the uart. Can't modify parity and baudrate while module is enabled
+
+        let mut config = usart::Config::default();
+        config.baudrate = baudrate;
+        config.parity = if parity { usart::Parity::ParityEven } else { usart::Parity::ParityNone };
+        configure_usart(r, &config, UART::frequency(), Kind::Uart, true, true)
+
+        // let div = (UART::frequency().0 + (baudrate / 2)) / baudrate * UART::MULTIPLIER;
+        // unsafe {
+        //     let r = UART::regs();
+        //     r.cr1().modify(|w| {
+        //         w.set_ue(false);
+        //     });
+        //     r.brr().modify(|w| {
+        //         w.set_brr(div);
+        //     });
+        //     r.cr1().modify(|w| {
+        //         w.set_ue(true);
+        //         w.set_m0(if parity {
+        //             pac::usart::vals::M0::BIT9
+        //         } else {
+        //             pac::usart::vals::M0::BIT8
+        //         });
+        //         w.set_pce(parity);
+        //         w.set_ps(pac::usart::vals::Ps::EVEN);
+        //     });
+        // };
     }
 }
 
@@ -265,8 +275,8 @@ impl<
 // #[link_section = ".axisram.buffers"]
 // static mut BUFFERS_RX: [u8; 256] = [0; 256];
 
-static EXECUTOR_UART_QUEUE: StaticCell<InterruptExecutor<interrupt::CEC>> = StaticCell::new();
-static EXECUTOR_OTHER: StaticCell<InterruptExecutor<interrupt::FMC>> = StaticCell::new();
+// static EXECUTOR_UART_QUEUE: StaticCell<InterruptExecutor<Interrupt::CEC>> = StaticCell::new();
+// static EXECUTOR_OTHER: StaticCell<InterruptExecutor<Interrupt::FMC>> = StaticCell::new();
 
 #[link_section = ".axisram.buffers"]
 static mut BUFFERS_TX: [queue::Buffer<256>; 10] = [queue::Buffer::EMPTY; 10];
@@ -283,10 +293,11 @@ type RadioInterfaceUartValue =
 static ODIN_TASK: TaskStorage<OdinRadio<'static, RadioInterfaceUartValue>> = TaskStorage::new();
 
 struct RobotMock;
-// 2ehbp9vcvdee
 impl RobotRadio for RobotMock {
     const WIFI_SSID: &'static str = "A-Team Field";
     const WIFI_PASS: Option<&'static str> = Some("plancomestogether");
+    // const WIFI_SSID: &'static str = "Evan iPhone";
+    // const WIFI_PASS: Option<&'static str> = Some("2ehbp9vcvdee");
     const MULTICAST_ADDR: Ipv4Addr = Ipv4Addr {
         octets: [224, 4, 20, 71],
     };
@@ -303,10 +314,27 @@ impl RobotRadio for RobotMock {
     }
 }
 
+bind_interrupts!(struct Irqs {
+    USART10 => usart::InterruptHandler<peripherals::USART10>;
+});
+
 static ROBOT: RobotMock = RobotMock;
 static RADIO_TASK: TaskStorage<
     RobotRadioTask<RobotMock, OdinRadio<'static, RadioInterfaceUartValue>>,
 > = TaskStorage::new();
+
+static EXECUTOR_UART_QUEUE: InterruptExecutor = InterruptExecutor::new();
+static EXECUTOR_OTHER: InterruptExecutor = InterruptExecutor::new();
+
+#[interrupt]
+unsafe fn CEC() {
+    EXECUTOR_UART_QUEUE.on_interrupt()
+}
+
+#[interrupt]
+unsafe fn FMC() {
+    EXECUTOR_OTHER.on_interrupt()
+}
 
 #[embassy_executor::main]
 async fn main(_spawner: embassy_executor::Spawner) {
@@ -322,28 +350,28 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // Delay so dotstar can turn on
     Timer::after(Duration::from_millis(50)).await;
 
-    let radio_int = interrupt::take!(USART10);
+    let mut radio_config = usart::Config::default();
+    radio_config.stop_bits = usart::StopBits::STOP1;
+    radio_config.detect_previous_overrun = true;
     let radio_usart = Uart::new(
         p.USART10,
         p.PE2,
         p.PE3,
-        radio_int,
+        Irqs,
         p.DMA2_CH0,
         p.DMA2_CH1,
-        usart::Config::default(),
+        radio_config,
     );
     let radio_reset = p.PC13;
 
     let (tx, rx) = radio_usart.split();
 
     {
-        let irq = interrupt::take!(CEC);
-        irq.set_priority(interrupt::Priority::P6);
-        let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
-        let spawner = executor.start();
+        interrupt::CEC.set_priority(interrupt::Priority::P6);
+        let spawner = EXECUTOR_UART_QUEUE.start(Interrupt::CEC);
 
+        spawner.spawn(QUEUE_TX.spawn_task(tx)).unwrap(); // TODO: make low priority?
         spawner.spawn(QUEUE_RX.spawn_task(rx)).unwrap();
-        spawner.spawn(QUEUE_TX.spawn_task(tx)).unwrap();
     }
 
     let interface = RadioInterfaceUart::new(
@@ -356,20 +384,18 @@ async fn main(_spawner: embassy_executor::Spawner) {
     );
     let interface = unsafe { core::mem::transmute(&interface) };
     let odin_radio = OdinRadio::<'static, RadioInterfaceUartValue>::new(interface);
-    let odin_radio = unsafe { core::mem::transmute(&odin_radio) };
+    let odin_radio: &OdinRadio<_> = unsafe { core::mem::transmute(&odin_radio) };
 
     {
-        let irq = interrupt::take!(FMC);
-        irq.set_priority(interrupt::Priority::P8);
-        let executor = EXECUTOR_OTHER.init(InterruptExecutor::new(irq));
-        let spawner = executor.start();
+        interrupt::FMC.set_priority(interrupt::Priority::P6);
+        let spawner = EXECUTOR_OTHER.start(Interrupt::FMC);
 
         spawner.spawn(ODIN_TASK.spawn(odin_radio)).unwrap();
         let robot_radio = RobotRadioTask::new(&ROBOT, odin_radio);
-        let token = RADIO_TASK.spawn(robot_radio);
+        // let token = RADIO_TASK.spawn(robot_radio);
         spawner
-            // .spawn(RADIO_TASK.spawn(robot_radio))
-            .spawn(token)
+            .spawn(RADIO_TASK.spawn(robot_radio))
+            // .spawn(token)
             .unwrap();
     }
 
@@ -384,8 +410,14 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // let multicast_addr = Ipv4Addr {
     //     octets: [224, 4, 20, 71],
     // };
-    // let multicast_socket = odin_radio.open_udp(multicast_addr, 42069).await.unwrap();
+    // let multicast_socket = odin_radio.open_udp(multicast_addr, 42069, 42069).await.unwrap();
     // info!("multicast open");
+    // let unicast_addr = Ipv4Addr {
+    //     octets: [172, 16, 1, 171],
+    // };
+    // let unicast_socket = odin_radio.open_udp(unicast_addr, 42069, 42069).await.unwrap();
+    // Timer::after(Duration::from_millis(500)).await;
+    // odin_radio.list_peers().await;
 
     let mut ticker = Ticker::every(Duration::from_millis(1000));
     loop {

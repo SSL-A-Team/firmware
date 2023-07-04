@@ -324,6 +324,7 @@ impl<'b> ATResponse<'b> {
 
     pub fn new<'a>(buf: &'a [u8]) -> Result<ATResponse<'a>, ()> {
         let s = core::str::from_utf8(buf).or(Err(()))?;
+        // info!("{:?}", s);
         let i_echo = s.find(Self::CR_LF).ok_or(())?;
         let _echo = &s[..i_echo];
         let s = &s[i_echo + Self::CR_LF.len()..];

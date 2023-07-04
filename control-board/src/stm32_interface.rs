@@ -1,16 +1,16 @@
 use core::cmp::min;
 
-use defmt_rtt as _;
 use defmt::*;
+use defmt_rtt as _;
 
 use embassy_stm32::gpio::{Output, Pin};
 use embassy_stm32::pac;
-use embassy_stm32::usart::{self, Parity, StopBits, Config};
-use embassy_time::{Duration, Timer};
+use embassy_stm32::usart::{self, Config, Parity, StopBits};
 use embassy_time::with_timeout;
+use embassy_time::{Duration, Timer};
 
 use crate::queue::{DequeueRef, Error};
-use crate::uart_queue::{Reader, Writer, UartReadQueue, UartWriteQueue};
+use crate::uart_queue::{Reader, UartReadQueue, UartWriteQueue, Writer};
 
 pub const STM32_BOOTLOADER_MAX_BAUD_RATE: u32 = 115_200;
 pub const STM32_BOOTLOADER_ACK: u8 = 0x79;
@@ -39,17 +39,163 @@ pub fn get_bootloader_uart_config() -> Config {
     config
 }
 
+#[cfg(any(usart_v1, usart_v2))]
+use crate::pac::usart::Usart as Regs;
+use embassy_stm32::time::Hertz;
+#[cfg(not(any(usart_v1, usart_v2)))]
+use pac::usart::Lpuart as Regs;
+use pac::usart::{regs, vals};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Uart,
+    // #[cfg(any(usart_v3, usart_v4))]
+    Lpuart,
+}
+
+pub fn configure_usart(
+    r: Regs,
+    config: &Config,
+    pclk_freq: Hertz,
+    kind: Kind,
+    enable_rx: bool,
+    enable_tx: bool,
+) {
+    if !enable_rx && !enable_tx {
+        defmt::panic!("USART: At least one of RX or TX should be enabled");
+    }
+
+    r.cr1().modify(|w| {
+        w.set_ue(false);
+    });
+
+    // #[cfg(not(usart_v4))]
+    // static DIVS: [(u16, ()); 1] = [(1, ())];
+
+    // #[cfg(usart_v4)]
+    static DIVS: [(u16, vals::Presc); 12] = [
+        (1, vals::Presc::DIV1),
+        (2, vals::Presc::DIV2),
+        (4, vals::Presc::DIV4),
+        (6, vals::Presc::DIV6),
+        (8, vals::Presc::DIV8),
+        (10, vals::Presc::DIV10),
+        (12, vals::Presc::DIV12),
+        (16, vals::Presc::DIV16),
+        (32, vals::Presc::DIV32),
+        (64, vals::Presc::DIV64),
+        (128, vals::Presc::DIV128),
+        (256, vals::Presc::DIV256),
+    ];
+
+    let (mul, brr_min, brr_max) = match kind {
+        // #[cfg(any(usart_v3, usart_v4))]
+        Kind::Lpuart => (256, 0x300, 0x10_0000),
+        Kind::Uart => (1, 0x10, 0x1_0000),
+    };
+
+    #[cfg(not(usart_v1))]
+    let mut over8 = false;
+    // let mut found = None;
+    for &(presc, _presc_val) in &DIVS {
+        let denom = (config.baudrate * presc as u32) as u64;
+        let div = (pclk_freq.0 as u64 * mul + (denom / 2)) / denom;
+        // trace!(
+        //     "USART: presc={}, div=0x{:08x} (mantissa = {}, fraction = {})",
+        //     presc,
+        //     div,
+        //     div >> 4,
+        //     div & 0x0F
+        // );
+
+        // if div < brr_min {
+        //     #[cfg(not(usart_v1))]
+        //     if div * 2 >= brr_min && kind == Kind::Uart && !cfg!(usart_v1) {
+        //         over8 = true;
+        //         let div = div as u32;
+        //         r.brr()
+        //             .write_value(regs::Brr(((div << 1) & !0xF) | (div & 0x07)));
+        //         // #[cfg(usart_v4)]
+        //         r.presc().write(|w| w.set_prescaler(_presc_val));
+        //         found = Some(div);
+        //         break;
+        //     }
+        //     self::panic!("USART: baudrate too high");
+        // }
+
+        // if div < brr_max {
+            let div = div as u16;
+            r.brr().modify(|w| w.set_brr(div));
+            // #[cfg(usart_v4)]
+            // r.presc().write(|w| w.set_prescaler(_presc_val));
+            // r.presc().modify(|w| w.set_prescaler(_presc_val));
+            // found = Some(div as u32);
+            break;
+        // }
+    }
+
+    // let div = found.expect("USART: baudrate too low");
+
+    // #[cfg(not(usart_v1))]
+    // let oversampling = if over8 { "8 bit" } else { "16 bit" };
+    // #[cfg(usart_v1)]
+    // let oversampling = "default";
+    // trace!(
+    //     "Using {} oversampling, desired baudrate: {}, actual baudrate: {}",
+    //     oversampling,
+    //     config.baudrate,
+    //     pclk_freq.0 / div
+    // );
+
+    // r.cr2().modify(|w| {
+    //     w.set_stop(match config.stop_bits {
+    //         StopBits::STOP0P5 => vals::Stop::STOP0P5,
+    //         StopBits::STOP1 => vals::Stop::STOP1,
+    //         StopBits::STOP1P5 => vals::Stop::STOP1P5,
+    //         StopBits::STOP2 => vals::Stop::STOP2,
+    //     });
+    // });
+    r.cr1().modify(|w| {
+        // enable uart
+        w.set_ue(true);
+        // enable transceiver
+        // w.set_te(enable_tx);
+        // // enable receiver
+        // w.set_re(enable_rx);
+        // configure word size
+        w.set_m0(if config.parity != Parity::ParityNone {
+            vals::M0::BIT9
+        } else {
+            vals::M0::BIT8
+        });
+        // configure parity
+        w.set_pce(config.parity != Parity::ParityNone);
+        w.set_ps(match config.parity {
+            Parity::ParityOdd => vals::Ps::ODD,
+            Parity::ParityEven => vals::Ps::EVEN,
+            _ => vals::Ps::EVEN,
+        });
+        // #[cfg(not(usart_v1))]
+        // w.set_over8(vals::Over8::from_bits(over8 as _));
+    });
+
+    // #[cfg(not(usart_v1))]
+    // r.cr3().modify(|w| {
+    //     w.set_onebit(config.assume_noise_free);
+    // });
+}
+
 pub struct Stm32Interface<
-        'a,
-        UART: usart::BasicInstance,
-        DmaRx: usart::RxDma<UART>,
-        DmaTx: usart::TxDma<UART>,
-        const LEN_RX: usize,
-        const LEN_TX: usize,
-        const DEPTH_RX: usize, 
-        const DEPTH_TX: usize,
-        Boot0Pin: Pin, 
-        ResetPin: Pin
+    'a,
+    UART: usart::BasicInstance,
+    DmaRx: usart::RxDma<UART>,
+    DmaTx: usart::TxDma<UART>,
+    const LEN_RX: usize,
+    const LEN_TX: usize,
+    const DEPTH_RX: usize,
+    const DEPTH_TX: usize,
+    Boot0Pin: Pin,
+    ResetPin: Pin,
 > {
     reader: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
     writer: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
@@ -68,18 +214,30 @@ impl<
         DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
         const LEN_TX: usize,
-        const DEPTH_RX: usize, 
+        const DEPTH_RX: usize,
         const DEPTH_TX: usize,
-        Boot0Pin: Pin, 
-        ResetPin: Pin
-    > Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin>
+        Boot0Pin: Pin,
+        ResetPin: Pin,
+    >
+    Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin>
 {
-    pub fn new(        
+    pub fn new(
         read_queue: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
         write_queue: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
         boot0_pin: Option<Output<'a, Boot0Pin>>,
-        reset_pin: Option<Output<'a, ResetPin>>
-    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin> {
+        reset_pin: Option<Output<'a, ResetPin>>,
+    ) -> Stm32Interface<
+        'a,
+        UART,
+        DmaRx,
+        DmaTx,
+        LEN_RX,
+        LEN_TX,
+        DEPTH_RX,
+        DEPTH_TX,
+        Boot0Pin,
+        ResetPin,
+    > {
         // let the user set the initial state
         // if boot0_pin.is_some() {
         //     boot0_pin.as_mut().unwrap().set_low();
@@ -88,7 +246,7 @@ impl<
         // if reset_pin.is_some() {
         //     reset_pin.as_mut().unwrap().set_high();
         // }
-        
+
         Stm32Interface {
             reader: read_queue,
             writer: write_queue,
@@ -99,12 +257,23 @@ impl<
         }
     }
 
-    pub fn new_noninverted_reset(        
+    pub fn new_noninverted_reset(
         read_queue: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
         write_queue: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
         boot0_pin: Option<Output<'a, Boot0Pin>>,
-        reset_pin: Option<Output<'a, ResetPin>>
-    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin> {
+        reset_pin: Option<Output<'a, ResetPin>>,
+    ) -> Stm32Interface<
+        'a,
+        UART,
+        DmaRx,
+        DmaTx,
+        LEN_RX,
+        LEN_TX,
+        DEPTH_RX,
+        DEPTH_TX,
+        Boot0Pin,
+        ResetPin,
+    > {
         // let the user set the initial state
         // if boot0_pin.is_some() {
         //     boot0_pin.as_mut().unwrap().set_low();
@@ -113,7 +282,7 @@ impl<
         // if reset_pin.is_some() {
         //     reset_pin.as_mut().unwrap().set_high();
         // }
-        
+
         Stm32Interface {
             reader: read_queue,
             writer: write_queue,
@@ -139,7 +308,7 @@ impl<
             self.reset_pin.as_mut().unwrap().set_low();
         }
         Timer::after(Duration::from_micros(100)).await;
-        
+
         Ok(())
     }
 
@@ -187,32 +356,38 @@ impl<
         // ensure UART is in the expected config for the bootloader
         // this operation is unsafe because it takes the uart module offline
         // when the executor may be relying on rx interrupts to unblock a thread
-        unsafe { self.update_uart_config(STM32_BOOTLOADER_MAX_BAUD_RATE, Parity::ParityEven); }
+        unsafe {
+            self.update_uart_config(STM32_BOOTLOADER_MAX_BAUD_RATE, Parity::ParityEven);
+        }
 
         defmt::debug!("sending the bootloader baud calibration command...");
         self.writer
-        .write(|buf| {
-            buf[0] = STM32_BOOTLOADER_CODE_SEQUENCE_BYTE;
-            1
-        })
-        .await?;
+            .write(|buf| {
+                buf[0] = STM32_BOOTLOADER_CODE_SEQUENCE_BYTE;
+                1
+            })
+            .await?;
 
         let mut res = Err(());
-        let sync_res = with_timeout(Duration::from_millis(100), self.reader.read(|buf| {
-            if buf.len() >= 1 {
-                if buf[0] == STM32_BOOTLOADER_ACK {
-                    defmt::info!("bootloader replied with ACK after calibration.");
-                    self.in_bootloader = true;
-                    res = Ok(());
-                } else {
-                    defmt::error!("bootloader replied with NACK after calibration.");
+        let sync_res = with_timeout(
+            Duration::from_millis(100),
+            self.reader.read(|buf| {
+                if buf.len() >= 1 {
+                    if buf[0] == STM32_BOOTLOADER_ACK {
+                        defmt::info!("bootloader replied with ACK after calibration.");
+                        self.in_bootloader = true;
+                        res = Ok(());
+                    } else {
+                        defmt::error!("bootloader replied with NACK after calibration.");
+                    }
                 }
-            }
-        })).await;
+            }),
+        )
+        .await;
 
         if sync_res.is_err() {
             defmt::warn!("*** HARDWARE CHECK *** - bootloader baud calibration timed out.");
-            return Err(())
+            return Err(());
         }
 
         res
@@ -239,46 +414,57 @@ impl<
     }
 
     pub unsafe fn update_uart_config(&self, baudrate: u32, parity: Parity) {
-        let div = (UART::frequency().0 + (baudrate / 2)) / baudrate * UART::MULTIPLIER;
-
-        // let irq = UART::Interrupt::steal();
-        // irq.disable();
-
         let r = UART::regs();
         // disable the uart. Can't modify parity and baudrate while module is enabled
         r.cr1().modify(|w| {
             w.set_ue(false);
         });
 
-        // set the baudrate
-        r.brr().modify(|w| {
-            w.set_brr(div);
-        });
+        let mut config = usart::Config::default();
+        config.baudrate = baudrate;
+        config.parity = parity;
+        configure_usart(r, &config, UART::frequency(), Kind::Uart, true, true)
 
-        // set parity 
-        r.cr1().modify(|w| {
-            if parity != Parity::ParityNone {
-                // configure 9 bit transmission and enable parity control
-                w.set_m0(pac::lpuart::vals::M0::BIT9);
-                w.set_pce(true);
+        // let div = (UART::frequency().0 + (baudrate / 2)) / baudrate * UART::MULTIPLIER;
 
-                // set polarity type
-                if parity == Parity::ParityEven {
-                    w.set_ps(pac::lpuart::vals::Ps::EVEN);
-                } else {
-                    w.set_ps(pac::lpuart::vals::Ps::ODD);
-                }
-            } else {
-                // disable parity (1 byte transmissions)
-                w.set_m0(pac::lpuart::vals::M0::BIT8);
-                w.set_pce(false);
-            }
-        });
+        // // let irq = UART::Interrupt::steal();
+        // // irq.disable();
 
-        // reenable UART
-        r.cr1().modify(|w| {
-            w.set_ue(true);
-        });
+        // let r = UART::regs();
+        // // disable the uart. Can't modify parity and baudrate while module is enabled
+        // r.cr1().modify(|w| {
+        //     w.set_ue(false);
+        // });
+
+        // // set the baudrate
+        // r.brr().modify(|w| {
+        //     w.set_brr(div);
+        // });
+
+        // // set parity
+        // r.cr1().modify(|w| {
+        //     if parity != Parity::ParityNone {
+        //         // configure 9 bit transmission and enable parity control
+        //         w.set_m0(pac::usart::vals::M0::BIT9);
+        //         w.set_pce(true);
+
+        //         // set polarity type
+        //         if parity == Parity::ParityEven {
+        //             w.set_ps(pac::usart::vals::Ps::EVEN);
+        //         } else {
+        //             w.set_ps(pac::usart::vals::Ps::ODD);
+        //         }
+        //     } else {
+        //         // disable parity (1 byte transmissions)
+        //         w.set_m0(pac::usart::vals::M0::BIT8);
+        //         w.set_pce(false);
+        //     }
+        // });
+
+        // // reenable UART
+        // r.cr1().modify(|w| {
+        //     w.set_ue(true);
+        // });
 
         // let div = (pclk_freq.0 + (config.baudrate / 2)) / config.baudrate * multiplier;
 
@@ -365,30 +551,38 @@ impl<
         }
 
         self.writer
-        .write(|buf| {
-            buf[0] = STM32_BOOTLOADER_CMD_GET;
-            buf[1] = !STM32_BOOTLOADER_CMD_GET;
-            2
-        })
-        .await?;
+            .write(|buf| {
+                buf[0] = STM32_BOOTLOADER_CMD_GET;
+                buf[1] = !STM32_BOOTLOADER_CMD_GET;
+                2
+            })
+            .await?;
 
         let mut res = Err(());
-        self.reader.read(|buf| {
-            // TODO discovery and return checksum capability and erase/ext erase capability
-            if buf.len() == 1 && buf[0] == STM32_BOOTLOADER_NACK {
-                defmt::error!("failed to read bootloader command list. (NACK).");
-                res = Err(());
-            } else if buf.len() == 15 && buf[0] == STM32_BOOTLOADER_ACK && buf[14] == STM32_BOOTLOADER_ACK {
-                defmt::debug!("read bootloader command list. (NO AUTO CS).");
-                res = Ok(());
-            } else if buf.len() == 16 && buf[0] == STM32_BOOTLOADER_ACK && buf[15] == STM32_BOOTLOADER_ACK {
-                defmt::debug!("read bootloader command list. (WITH CS).");
-                res = Ok(());
-            } else {
-                defmt::error!("unknown command enumeration error: {}", buf);
-                res = Err(());
-            }
-        }).await?;
+        self.reader
+            .read(|buf| {
+                // TODO discovery and return checksum capability and erase/ext erase capability
+                if buf.len() == 1 && buf[0] == STM32_BOOTLOADER_NACK {
+                    defmt::error!("failed to read bootloader command list. (NACK).");
+                    res = Err(());
+                } else if buf.len() == 15
+                    && buf[0] == STM32_BOOTLOADER_ACK
+                    && buf[14] == STM32_BOOTLOADER_ACK
+                {
+                    defmt::debug!("read bootloader command list. (NO AUTO CS).");
+                    res = Ok(());
+                } else if buf.len() == 16
+                    && buf[0] == STM32_BOOTLOADER_ACK
+                    && buf[15] == STM32_BOOTLOADER_ACK
+                {
+                    defmt::debug!("read bootloader command list. (WITH CS).");
+                    res = Ok(());
+                } else {
+                    defmt::error!("unknown command enumeration error: {}", buf);
+                    res = Err(());
+                }
+            })
+            .await?;
 
         res
     }
@@ -404,31 +598,33 @@ impl<
         }
 
         self.writer
-        .write(|buf| {
-            buf[0] = STM32_BOOTLOADER_CMD_GET_ID;
-            buf[1] = !STM32_BOOTLOADER_CMD_GET_ID;
-            2
-        })
-        .await?;
+            .write(|buf| {
+                buf[0] = STM32_BOOTLOADER_CMD_GET_ID;
+                buf[1] = !STM32_BOOTLOADER_CMD_GET_ID;
+                2
+            })
+            .await?;
 
         let mut res = Err(());
-        self.reader.read(|buf| {
-            if buf.len() == 1 && buf[0] == STM32_BOOTLOADER_NACK {
-                defmt::error!("could not read device ID.");
-                res = Err(());
-            } else if buf.len() == 5 && buf[1] == 1 && buf[4] == STM32_BOOTLOADER_ACK {
-                let pid: u16 = buf[3] as u16;
-                defmt::info!("found 1 byte pid {:?}", pid);
-                res = Ok(pid);
-            } else if buf.len() == 5 && buf[1] == 2 && buf[4] == STM32_BOOTLOADER_ACK {
-                let pid: u16 = ((buf[2] as u16) << 8) | (buf[3] as u16);
-                defmt::info!("found 2 byte pid {:?}", pid);
-                res = Ok(pid);
-            } else {
-                defmt::error!("malformed response in device ID read.");
-                res = Err(());
-            }
-        }).await?;
+        self.reader
+            .read(|buf| {
+                if buf.len() == 1 && buf[0] == STM32_BOOTLOADER_NACK {
+                    defmt::error!("could not read device ID.");
+                    res = Err(());
+                } else if buf.len() == 5 && buf[1] == 1 && buf[4] == STM32_BOOTLOADER_ACK {
+                    let pid: u16 = buf[3] as u16;
+                    defmt::info!("found 1 byte pid {:?}", pid);
+                    res = Ok(pid);
+                } else if buf.len() == 5 && buf[1] == 2 && buf[4] == STM32_BOOTLOADER_ACK {
+                    let pid: u16 = ((buf[2] as u16) << 8) | (buf[3] as u16);
+                    defmt::info!("found 2 byte pid {:?}", pid);
+                    res = Ok(pid);
+                } else {
+                    defmt::error!("malformed response in device ID read.");
+                    res = Err(());
+                }
+            })
+            .await?;
 
         res
     }
@@ -443,7 +639,7 @@ impl<
             return Err(());
         }
 
-        // stm bl can only support 256 byte data payloads, right now we don't automatically handle 
+        // stm bl can only support 256 byte data payloads, right now we don't automatically handle
         // larger chunks than the tx buffer
         if data.len() > 256 || data.len() + 1 > LEN_TX {
             return Err(());
@@ -451,24 +647,26 @@ impl<
 
         // defmt::debug!("sending the write command...");
         self.writer
-        .write(|buf| {
-            buf[0] = STM32_BOOTLOADER_CMD_WRITE_MEM;
-            buf[1] = !STM32_BOOTLOADER_CMD_WRITE_MEM;
-            2
-        })
-        .await?;
+            .write(|buf| {
+                buf[0] = STM32_BOOTLOADER_CMD_WRITE_MEM;
+                buf[1] = !STM32_BOOTLOADER_CMD_WRITE_MEM;
+                2
+            })
+            .await?;
 
         let mut res = Err(());
-        self.reader.read(|buf| {
-            // defmt::info!("go cmd reply {:?}", buf);
-            if buf.len() >= 1 {
-                if buf[0] == STM32_BOOTLOADER_ACK {
-                    res = Ok(());
-                } else {
-                    defmt::error!("write mem replied with NACK");
+        self.reader
+            .read(|buf| {
+                // defmt::info!("go cmd reply {:?}", buf);
+                if buf.len() >= 1 {
+                    if buf[0] == STM32_BOOTLOADER_ACK {
+                        res = Ok(());
+                    } else {
+                        defmt::error!("write mem replied with NACK");
+                    }
                 }
-            }
-        }).await?;
+            })
+            .await?;
 
         if res.is_err() {
             return res;
@@ -476,62 +674,70 @@ impl<
 
         // defmt::debug!("sending the load address {:?}...", write_base_addr);
         self.writer
-        .write(|buf| {
-            let sa_bytes: [u8; 4] = write_base_addr.to_be_bytes();
-            let cs = Self::bootloader_checksum_u32(write_base_addr);
-            buf[0] = sa_bytes[0];
-            buf[1] = sa_bytes[1];
-            buf[2] = sa_bytes[2];
-            buf[3] = sa_bytes[3];
-            buf[4] = cs;
-            // defmt::debug!("send buffer {:?}", buf);
-            5
-        })
-        .await?;
+            .write(|buf| {
+                let sa_bytes: [u8; 4] = write_base_addr.to_be_bytes();
+                let cs = Self::bootloader_checksum_u32(write_base_addr);
+                buf[0] = sa_bytes[0];
+                buf[1] = sa_bytes[1];
+                buf[2] = sa_bytes[2];
+                buf[3] = sa_bytes[3];
+                buf[4] = cs;
+                // defmt::debug!("send buffer {:?}", buf);
+                5
+            })
+            .await?;
 
         // defmt::debug!("wait for load address reply");
-        self.reader.read(|buf| {
-            // defmt::info!("load address reply {:?}", buf);
-            if buf.len() >= 1 {
-                if buf[0] == STM32_BOOTLOADER_ACK {
-                    res = Ok(());
-                    // defmt::info!("load address accepted.");
-                } else {
-                    defmt::error!("load address rejected (NACK)");
+        self.reader
+            .read(|buf| {
+                // defmt::info!("load address reply {:?}", buf);
+                if buf.len() >= 1 {
+                    if buf[0] == STM32_BOOTLOADER_ACK {
+                        res = Ok(());
+                        // defmt::info!("load address accepted.");
+                    } else {
+                        defmt::error!("load address rejected (NACK)");
+                    }
                 }
-            }
-        }).await?;
+            })
+            .await?;
 
         // defmt::debug!("sending the data...");
         self.writer
-        .write(|buf| {
-            let cs = Self::bootloader_checksum_buf(data);
-            let data_len = data.len();
-            buf[0] = data_len as u8 - 1;
-            buf[1..(data_len + 1)].copy_from_slice(data);
-            buf[data_len + 1] = cs;
-            // defmt::debug!("send data buffer {:?}", buf);
-            data.len() + 2
-        })
-        .await?;
+            .write(|buf| {
+                let cs = Self::bootloader_checksum_buf(data);
+                let data_len = data.len();
+                buf[0] = data_len as u8 - 1;
+                buf[1..(data_len + 1)].copy_from_slice(data);
+                buf[data_len + 1] = cs;
+                // defmt::debug!("send data buffer {:?}", buf);
+                data.len() + 2
+            })
+            .await?;
 
         // defmt::debug!("wait send data reply");
-        self.reader.read(|buf| {
-            // defmt::info!("send data reply {:?}", buf);
-            if buf.len() >= 1 {
-                if buf[0] == STM32_BOOTLOADER_ACK {
-                    res = Ok(());
-                    // defmt::info!("data accepted.");
-                } else {
-                    defmt::error!("data rejected (NACK)");
+        self.reader
+            .read(|buf| {
+                // defmt::info!("send data reply {:?}", buf);
+                if buf.len() >= 1 {
+                    if buf[0] == STM32_BOOTLOADER_ACK {
+                        res = Ok(());
+                        // defmt::info!("data accepted.");
+                    } else {
+                        defmt::error!("data rejected (NACK)");
+                    }
                 }
-            }
-        }).await?;
+            })
+            .await?;
 
         Ok(())
     }
 
-    pub async fn write_device_memory(&self, buf: &[u8], write_base_addr: Option<u32>) -> Result<(), ()> {
+    pub async fn write_device_memory(
+        &self,
+        buf: &[u8],
+        write_base_addr: Option<u32>,
+    ) -> Result<(), ()> {
         if !self.in_bootloader {
             defmt::error!("called bootloader operation when not in bootloader context.");
             return Err(());
@@ -548,7 +754,8 @@ impl<
 
         for start in (0..buf.len()).step_by(step_size) {
             let end = core::cmp::min(start + step_size, buf.len());
-            self.write_device_memory_chunk( &buf[start..end], addr).await?;
+            self.write_device_memory_chunk(&buf[start..end], addr)
+                .await?;
             addr += step_size as u32;
         }
 
@@ -565,47 +772,51 @@ impl<
 
         defmt::debug!("sending the erase command...");
         self.writer
-        .write(|buf| {
-            buf[0] = STM32_BOOTLOADER_CMD_EXTENDED_ERASE;
-            buf[1] = !STM32_BOOTLOADER_CMD_EXTENDED_ERASE;
-            2
-        })
-        .await?;
+            .write(|buf| {
+                buf[0] = STM32_BOOTLOADER_CMD_EXTENDED_ERASE;
+                buf[1] = !STM32_BOOTLOADER_CMD_EXTENDED_ERASE;
+                2
+            })
+            .await?;
 
         let mut res = Err(());
-        self.reader.read(|buf| {
-            defmt::info!("extended erase reply {:?}", buf);
-            if buf.len() >= 1 {
-                if buf[0] == STM32_BOOTLOADER_ACK {
-                    res = Ok(());
-                } else {
-                    defmt::error!("bootloader replied with NACK");
+        self.reader
+            .read(|buf| {
+                defmt::info!("extended erase reply {:?}", buf);
+                if buf.len() >= 1 {
+                    if buf[0] == STM32_BOOTLOADER_ACK {
+                        res = Ok(());
+                    } else {
+                        defmt::error!("bootloader replied with NACK");
+                    }
                 }
-            }
-        }).await?;
+            })
+            .await?;
 
         defmt::debug!("sending erase type...");
         self.writer
-        .write(|buf| {
-            buf[0] = 0xFF;
-            buf[1] = 0xFF;
-            buf[2] = 0x00;
-            3
-        })
-        .await?;
+            .write(|buf| {
+                buf[0] = 0xFF;
+                buf[1] = 0xFF;
+                buf[2] = 0x00;
+                3
+            })
+            .await?;
 
         let mut res = Err(());
-        self.reader.read(|buf| {
-            defmt::info!("erase reply {:?}", buf);
-            if buf.len() >= 1 {
-                if buf[0] == STM32_BOOTLOADER_ACK {
-                    defmt::info!("flash erased");
-                    res = Ok(());
-                } else {
-                    defmt::error!("bootloader replied with NACK");
+        self.reader
+            .read(|buf| {
+                defmt::info!("erase reply {:?}", buf);
+                if buf.len() >= 1 {
+                    if buf[0] == STM32_BOOTLOADER_ACK {
+                        defmt::info!("flash erased");
+                        res = Ok(());
+                    } else {
+                        defmt::error!("bootloader replied with NACK");
+                    }
                 }
-            }
-        }).await?;
+            })
+            .await?;
 
         Ok(())
     }
@@ -616,17 +827,21 @@ impl<
                 return Err(err);
             }
         }
-        
+
         if let Err(err) = self.verify_bootloader().await {
             return Err(err);
         }
-    
+
         // let device_id = self.get_device_id().await;
         match self.get_device_id().await {
             Err(err) => return Err(err),
-            Ok(device_id) => if device_id != 68 { return Err(()) } 
+            Ok(device_id) => {
+                if device_id != 68 {
+                    return Err(());
+                }
+            }
         };
-    
+
         // erase part
         if let Err(err) = self.erase_flash_memory().await {
             return Err(err);
@@ -644,7 +859,7 @@ impl<
         }
 
         info!("after reset");
-        
+
         Ok(())
     }
 
@@ -661,31 +876,32 @@ impl<
         let start_address = start_address.unwrap_or(0x0800_0000);
         // let start_address = start_address.unwrap_or(0x20002000);
 
-
         // set the boot0 line low to disable startup bootloader
         // not needed for command, but makes sense on principle
         self.boot0_pin.as_mut().unwrap().set_low();
 
         defmt::debug!("sending the go command...");
         self.writer
-        .write(|buf| {
-            buf[0] = STM32_BOOTLOADER_CMD_GO;
-            buf[1] = !STM32_BOOTLOADER_CMD_GO;
-            2
-        })
-        .await?;
+            .write(|buf| {
+                buf[0] = STM32_BOOTLOADER_CMD_GO;
+                buf[1] = !STM32_BOOTLOADER_CMD_GO;
+                2
+            })
+            .await?;
 
         let mut res = Err(());
-        self.reader.read(|buf| {
-            defmt::info!("go cmd reply {:?}", buf);
-            if buf.len() >= 1 {
-                if buf[0] == STM32_BOOTLOADER_ACK {
-                    res = Ok(());
-                } else {
-                    defmt::error!("bootloader replied with NACK");
+        self.reader
+            .read(|buf| {
+                defmt::info!("go cmd reply {:?}", buf);
+                if buf.len() >= 1 {
+                    if buf[0] == STM32_BOOTLOADER_ACK {
+                        res = Ok(());
+                    } else {
+                        defmt::error!("bootloader replied with NACK");
+                    }
                 }
-            }
-        }).await?;
+            })
+            .await?;
 
         if res.is_err() {
             return res;
@@ -693,32 +909,34 @@ impl<
 
         defmt::debug!("sending the start address {:?}...", start_address);
         self.writer
-        .write(|buf| {
-            let sa_bytes: [u8; 4] = start_address.to_be_bytes();
-            let cs = Self::bootloader_checksum_u32(start_address);
-            buf[0] = sa_bytes[0];
-            buf[1] = sa_bytes[1];
-            buf[2] = sa_bytes[2];
-            buf[3] = sa_bytes[3];
-            buf[4] = cs;
-            // defmt::debug!("send buffer {:?}", buf);
-            5
-        })
-        .await?;
+            .write(|buf| {
+                let sa_bytes: [u8; 4] = start_address.to_be_bytes();
+                let cs = Self::bootloader_checksum_u32(start_address);
+                buf[0] = sa_bytes[0];
+                buf[1] = sa_bytes[1];
+                buf[2] = sa_bytes[2];
+                buf[3] = sa_bytes[3];
+                buf[4] = cs;
+                // defmt::debug!("send buffer {:?}", buf);
+                5
+            })
+            .await?;
 
         defmt::debug!("wait for sa reply");
-        self.reader.read(|buf| {
-            defmt::info!("sa reply {:?}", buf);
-            if buf.len() >= 1 {
-                if buf[0] == STM32_BOOTLOADER_ACK {
-                    res = Ok(());
-                    self.in_bootloader = false;
-                    defmt::info!("program started.");
-                } else {
-                    defmt::error!("bootloader replied with NACK");
+        self.reader
+            .read(|buf| {
+                defmt::info!("sa reply {:?}", buf);
+                if buf.len() >= 1 {
+                    if buf[0] == STM32_BOOTLOADER_ACK {
+                        res = Ok(());
+                        self.in_bootloader = false;
+                        defmt::info!("program started.");
+                    } else {
+                        defmt::error!("bootloader replied with NACK");
+                    }
                 }
-            }
-        }).await?;
+            })
+            .await?;
 
         res
     }
