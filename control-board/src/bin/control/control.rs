@@ -564,10 +564,10 @@ impl<'a> Control<'a> {
             _bitfield_1: BasicTelemetry::new_bitfield_1(
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             ),
-            motor_0_temperature: self.front_right_motor.read_rads(),
-            motor_1_temperature: self.front_left_motor.read_rads(),
-            motor_2_temperature: self.back_left_motor.read_rads(),
-            motor_3_temperature: self.back_right_motor.read_rads(),
+            motor_0_temperature: 0.,
+            motor_1_temperature: 0.,
+            motor_2_temperature: 0.,
+            motor_3_temperature: 0.,
             motor_4_temperature: 0.,
             kicker_charge_level: 0.,
         })
