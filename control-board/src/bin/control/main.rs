@@ -12,6 +12,8 @@ use ateam_control_board::{
     stm32_interface::{get_bootloader_uart_config, Stm32Interface},
     uart_queue::{UartReadQueue, UartWriteQueue},
     BATTERY_MIN_VOLTAGE,
+    BATTERY_MAX_VOLTAGE,
+    BATTERY_BUFFER_SIZE,
     adc_v_to_battery_voltage,
     adc_raw_to_v
 };
@@ -175,7 +177,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let mut adc3 = Adc::new(p.ADC3, &mut Delay);
     adc3.set_sample_time(SampleTime::Cycles1_5);
     let mut battery_pin = p.PF5;
-
+    let mut battery_voltage_buffer: [f32; BATTERY_BUFFER_SIZE] = [BATTERY_MAX_VOLTAGE; BATTERY_BUFFER_SIZE];
     let battery_pub = BATTERY_CHANNEL.publisher().unwrap();
 
 
@@ -410,14 +412,32 @@ async fn main(_spawner: embassy_executor::Spawner) {
         }
 
         // could just feed gyro in here but the comment in control said to use a channel
-        let current_battery_v = adc_v_to_battery_voltage(adc_raw_to_v(adc3.read(&mut battery_pin) as f32));
 
-        battery_pub.publish_immediate(current_battery_v);
-        if current_battery_v < BATTERY_MIN_VOLTAGE
+        //
+        // Battery reading
+        //
+
+        let current_battery_v = adc_v_to_battery_voltage(adc_raw_to_v(adc3.read(&mut battery_pin) as f32));
+        // Shift buffer through
+        for i in (BATTERY_BUFFER_SIZE-2)..0
+        {
+            battery_voltage_buffer[i+1] = battery_voltage_buffer[i];
+        }
+        // Add new battery read
+        battery_voltage_buffer[0] = current_battery_v;
+        let battery_voltage_sum: f32 = battery_voltage_buffer.iter().sum();
+        let filter_battery_v = battery_voltage_sum/(BATTERY_BUFFER_SIZE as f32);
+        battery_pub.publish_immediate(filter_battery_v);
+
+        if filter_battery_v < BATTERY_MIN_VOLTAGE
         {
             dotstar.write([RGB8 { r: 10, g: 0, b: 0 }, RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
+            defmt::panic!("Error filtered battery voltage too low")
         }
         
+        //
+        // Telemtry
+        //
 
         let telemetry = control.tick(latest);
         if let Some(telemetry) = telemetry.await {
