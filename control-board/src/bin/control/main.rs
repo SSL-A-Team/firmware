@@ -97,6 +97,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     stm32_config.rcc.sys_ck = Some(mhz(400));
     stm32_config.rcc.hclk = Some(mhz(200));
     stm32_config.rcc.pclk1 = Some(mhz(100));
+    stm32_config.rcc.per_ck = Some(mhz(64));
     stm32_config.rcc.adc_clock_source = AdcClockSource::PerCk;
     let p = embassy_stm32::init(stm32_config);
     let config = usart::Config::default();
