@@ -24,7 +24,8 @@ use ateam_control_board::{
             body_vel_filter_params,
             body_vel_pid_params,
         }, robot_controller::BodyVelocityController
-    }
+    },
+    BATTERY_MIN_VOLTAGE
 };
 use nalgebra::{Vector3, Vector4};
 
@@ -186,7 +187,8 @@ pub struct Control<'a> {
         MotorDResetPin,
     >,
     ticks_since_packet: u16,
-    gyro_sub: Subscriber<'static, ThreadModeRawMutex, f32, 2, 2, 2>
+    gyro_sub: Subscriber<'static, ThreadModeRawMutex, f32, 2, 2, 2>,
+    battery_sub: Subscriber<'static, ThreadModeRawMutex, f32, 2, 2, 2>
 }
 
 // Uart<UART5, DMA1_CH0, DMA1_CH1>
@@ -210,7 +212,8 @@ impl<'a> Control<'a> {
         back_right_reset_pin: MotorBRResetPin,
         drib_reset_pin: MotorDResetPin,
         ball_detected_thresh: f32,
-        gyro_sub: Subscriber<'static, ThreadModeRawMutex, f32, 2, 2, 2>
+        gyro_sub: Subscriber<'static, ThreadModeRawMutex, f32, 2, 2, 2>,
+        battery_sub: Subscriber<'static, ThreadModeRawMutex, f32, 2, 2, 2>
     ) -> Control<'a> {
         let wheel_firmware_image = WHEEL_FW_IMG;
         let drib_firmware_image = DRIB_FW_IMG;
@@ -390,6 +393,7 @@ impl<'a> Control<'a> {
             drib_motor,
             ticks_since_packet: 0,
             gyro_sub,
+            battery_sub
         }
     }
 
@@ -491,27 +495,40 @@ impl<'a> Control<'a> {
         let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel);
 
         // now we have setpoint r(t) in self.cmd_vel
-
+        let battery_v = self.battery_sub.next_message_pure().await as f32;
         let controls_enabled = true;
         let gyro_rads = (self.gyro_sub.next_message_pure().await as f32) * 2.0 * core::f32::consts::PI / 360.0;
-        let wheel_vels = if controls_enabled {
-            // TODO check order
-            let wheel_vels = Vector4::new(
-                self.front_right_motor.read_rads(),
-                self.front_left_motor.read_rads(),
-                self.back_left_motor.read_rads(),
-                self.back_right_motor.read_rads()
-            );
-
-            // TODO read from channel or something
+        let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
+            if controls_enabled 
+            {
+                // TODO check order
+                let wheel_vels = Vector4::new(
+                    self.front_right_motor.read_rads(),
+                    self.front_left_motor.read_rads(),
+                    self.back_left_motor.read_rads(),
+                    self.back_right_motor.read_rads()
+                );
             
-            self.robot_controller.control_update(&self.cmd_vel, &wheel_vels, gyro_rads);
+                // TODO read from channel or something
 
-            self.robot_controller.get_wheel_velocities()
-        } else {
-            self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel)
+                self.robot_controller.control_update(&self.cmd_vel, &wheel_vels, gyro_rads);
+            
+                self.robot_controller.get_wheel_velocities()
+            } 
+            else 
+            {
+                self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel)
+            }
+        }
+        else
+        {
+            // Battery is too low, set velocity to zero
+            Vector4::new(
+                0.0,
+                0.0,
+                0.0,
+                0.0)
         };
-
 
         // let c_vel = libm::sinf(angle) / 2.0;
         // let c_vel = 0.2;
@@ -541,7 +558,7 @@ impl<'a> Control<'a> {
             sequence_number: 0,
             robot_revision_major: 0,
             robot_revision_minor: 0,
-            battery_level: 0.,
+            battery_level: battery_v,
             battery_temperature: 0.,
             _bitfield_align_1: [],
             _bitfield_1: BasicTelemetry::new_bitfield_1(

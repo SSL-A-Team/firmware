@@ -11,10 +11,14 @@ use ateam_control_board::{
     queue::Buffer,
     stm32_interface::{get_bootloader_uart_config, Stm32Interface},
     uart_queue::{UartReadQueue, UartWriteQueue},
+    BATTERY_MIN_VOLTAGE,
+    adc_v_to_battery_voltage,
+    adc_raw_to_v
 };
 use control::Control;
 use defmt::info;
 use embassy_stm32::{
+    adc::{SampleTime, Adc, AdcPin, InternalChannel, Temperature},
     dma::NoDma,
     executor::InterruptExecutor,
     exti::ExtiInput,
@@ -23,9 +27,9 @@ use embassy_stm32::{
     peripherals::{DMA2_CH4, DMA2_CH5, USART6},
     spi,
     time::{hz, mhz},
-    usart::{self, Uart},
+    usart::{self, Uart}
 };
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Delay, Duration, Ticker, Timer};
 use futures_util::StreamExt;
 use panic_probe as _;
 use pins::{
@@ -42,6 +46,7 @@ use static_cell::StaticCell;
 use embassy_sync::channel::Channel;
 use embassy_sync::pubsub::{PubSubChannel, Subscriber};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_stm32::rcc::AdcClockSource;
 
 mod control;
 mod pins;
@@ -62,6 +67,10 @@ static RADIO_TEST: RadioTest<
 // pub sub channel for the gyro vals
 // CAP queue size, n_subs, n_pubs
 static GYRO_CHANNEL: PubSubChannel<ThreadModeRawMutex, f32, 2, 2, 2> = PubSubChannel::new();
+
+// pub sub channel for the battery raw adc vals
+// CAP queue size, n_subs, n_pubs
+static BATTERY_CHANNEL: PubSubChannel<ThreadModeRawMutex, f32, 2, 2, 2> = PubSubChannel::new();
 
 #[link_section = ".sram4"]
 static mut SPI6_BUF: [u8; 4] = [0x0; 4];
@@ -88,6 +97,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
     stm32_config.rcc.sys_ck = Some(mhz(400));
     stm32_config.rcc.hclk = Some(mhz(200));
     stm32_config.rcc.pclk1 = Some(mhz(100));
+    stm32_config.rcc.per_ck = Some(mhz(64));
+    stm32_config.rcc.adc_clock_source = AdcClockSource::PerCk;
     let p = embassy_stm32::init(stm32_config);
     let config = usart::Config::default();
 
@@ -99,7 +110,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
     let spawner = executor.start();
 
-    let mut imu_spi = spi::Spi::new_txonly(
+    let dotstar_spi = spi::Spi::new_txonly(
         p.SPI3,
         p.PB3,
         p.PB5,
@@ -109,7 +120,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         spi::Config::default(),
     );
 
-    let mut dotstar = Apa102::new(imu_spi);
+    let mut dotstar = Apa102::new(dotstar_spi);
     dotstar.write([RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
 
     info!("booted");
@@ -156,6 +167,17 @@ async fn main(_spawner: embassy_executor::Spawner) {
     } else {
         TeamColor::Yellow
     };
+
+    //////////////////
+    // Battery voltage
+    //////////////////
+
+    let mut adc3 = Adc::new(p.ADC3, &mut Delay);
+    adc3.set_sample_time(SampleTime::Cycles1_5);
+    let mut battery_pin = p.PF5;
+
+    let battery_pub = BATTERY_CHANNEL.publisher().unwrap();
+
 
     // let mut test = Output::new(p.PA8, Level::High, Speed::Medium);
     // let mut test2 = Output::new(p.PA9, Level::High, Speed::Medium);
@@ -312,6 +334,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
     );
 
     let gyro_sub = GYRO_CHANNEL.subscriber().unwrap();
+    let battery_sub = BATTERY_CHANNEL.subscriber().unwrap();
+
     let ball_detected_thresh = 1.0;
     let mut control = Control::new(
         &spawner,
@@ -331,7 +355,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.PB8,
         p.PD12,
         ball_detected_thresh,
-        gyro_sub
+        gyro_sub,
+        battery_sub
     );
 
     dotstar.write([RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
@@ -385,7 +410,14 @@ async fn main(_spawner: embassy_executor::Spawner) {
         }
 
         // could just feed gyro in here but the comment in control said to use a channel
+        let current_battery_v = adc_v_to_battery_voltage(adc_raw_to_v(adc3.read(&mut battery_pin) as f32));
 
+        battery_pub.publish_immediate(current_battery_v);
+        if current_battery_v < BATTERY_MIN_VOLTAGE
+        {
+            dotstar.write([RGB8 { r: 10, g: 0, b: 0 }, RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
+        }
+        
 
         let telemetry = control.tick(latest);
         if let Some(telemetry) = telemetry.await {
