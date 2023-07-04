@@ -11,10 +11,14 @@ use ateam_control_board::{
     queue::Buffer,
     stm32_interface::{get_bootloader_uart_config, Stm32Interface},
     uart_queue::{UartReadQueue, UartWriteQueue},
+    BATTERY_MIN_VOLTAGE,
+    adc_v_to_battery_voltage,
+    adc_raw_to_v
 };
 use control::Control;
 use defmt::info;
 use embassy_stm32::{
+    adc::{SampleTime, Adc, AdcPin, InternalChannel, Temperature},
     dma::NoDma,
     executor::InterruptExecutor,
     exti::ExtiInput,
@@ -25,7 +29,7 @@ use embassy_stm32::{
     time::{hz, mhz},
     usart::{self, Uart, Parity, StopBits},
 };
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Delay, Duration, Ticker, Timer};
 use futures_util::StreamExt;
 use panic_probe as _;
 use pins::{
@@ -38,6 +42,11 @@ use radio::{
 };
 use smart_leds::{SmartLedsWrite, RGB8};
 use static_cell::StaticCell;
+
+use embassy_sync::channel::Channel;
+use embassy_sync::pubsub::{PubSubChannel, Subscriber};
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_stm32::rcc::AdcClockSource;
 
 mod control;
 mod pins;
@@ -53,8 +62,15 @@ static RADIO_TEST: RadioTest<
     RadioTxDMA,
     RadioReset,
 > = RadioTest::new(unsafe { &mut BUFFERS_TX }, unsafe { &mut BUFFERS_RX });
-
 // include_external_cpp_bin! {KICKER_FW_IMG, "kicker.bin"}
+
+// pub sub channel for the gyro vals
+// CAP queue size, n_subs, n_pubs
+static GYRO_CHANNEL: PubSubChannel<ThreadModeRawMutex, f32, 2, 2, 2> = PubSubChannel::new();
+
+// pub sub channel for the battery raw adc vals
+// CAP queue size, n_subs, n_pubs
+static BATTERY_CHANNEL: PubSubChannel<ThreadModeRawMutex, f32, 2, 2, 2> = PubSubChannel::new();
 
 #[link_section = ".sram4"]
 static mut SPI6_BUF: [u8; 4] = [0x0; 4];
@@ -81,6 +97,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
     stm32_config.rcc.sys_ck = Some(mhz(400));
     stm32_config.rcc.hclk = Some(mhz(200));
     stm32_config.rcc.pclk1 = Some(mhz(100));
+    stm32_config.rcc.per_ck = Some(mhz(64));
+    stm32_config.rcc.adc_clock_source = AdcClockSource::PerCk;
     let p = embassy_stm32::init(stm32_config);
     let config = usart::Config::default();
 
@@ -92,7 +110,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
     let spawner = executor.start();
 
-    let mut imu_spi = spi::Spi::new_txonly(
+    let dotstar_spi = spi::Spi::new_txonly(
         p.SPI3,
         p.PB3,
         p.PB5,
@@ -102,7 +120,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         spi::Config::default(),
     );
 
-    let mut dotstar = Apa102::new(imu_spi);
+    let mut dotstar = Apa102::new(dotstar_spi);
     dotstar.write([RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
 
     info!("booted");
@@ -153,6 +171,17 @@ async fn main(_spawner: embassy_executor::Spawner) {
     } else {
         TeamColor::Yellow
     };
+
+    //////////////////
+    // Battery voltage
+    //////////////////
+
+    let mut adc3 = Adc::new(p.ADC3, &mut Delay);
+    adc3.set_sample_time(SampleTime::Cycles1_5);
+    let mut battery_pin = p.PF5;
+
+    let battery_pub = BATTERY_CHANNEL.publisher().unwrap();
+
 
     // let mut test = Output::new(p.PA8, Level::High, Speed::Medium);
     // let mut test2 = Output::new(p.PA9, Level::High, Speed::Medium);
@@ -214,52 +243,41 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // loop {}
 
-    // let mut imu_spi = spi::Spi::new(
-    //     p.SPI6,
-    //     p.PA5,
-    //     p.PA7,
-    //     p.PA6,
-    //     p.BDMA_CH0,
-    //     p.BDMA_CH1,
-    //     hz(1_000_000),
-    //     spi::Config::default(),
-    // );
+    let mut imu_spi = spi::Spi::new(
+        p.SPI6,
+        p.PA5,
+        p.PA7,
+        p.PA6,
+        p.BDMA_CH0,
+        p.BDMA_CH1,
+        hz(1_000_000),
+        spi::Config::default(),
+    );
 
-    // // acceleromter
-    // let mut imu_cs1 = Output::new(p.PC4, Level::High, Speed::VeryHigh);
-    // // gyro
-    // let mut imu_cs2 = Output::new(p.PC5, Level::High, Speed::VeryHigh);
+    // acceleromter
+    let mut imu_cs1 = Output::new(p.PC4, Level::High, Speed::VeryHigh);
+    // gyro
+    let mut imu_cs2 = Output::new(p.PC5, Level::High, Speed::VeryHigh);
 
-    // Timer::after(Duration::from_millis(1)).await;
+    Timer::after(Duration::from_millis(1)).await;
 
-    // // let mut buf = [0u8, 2];
+    let gyro_pub = GYRO_CHANNEL.publisher().unwrap();
+    unsafe {
+        SPI6_BUF[0] = 0x80;
+        // info!("xfer {=[u8]:x}", SPI6_BUF[0..1]);
+        imu_cs1.set_low();
+        imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
+        imu_cs1.set_high();
+        let accel_id = SPI6_BUF[1];
+        info!("accelerometer id: 0x{:x}", accel_id);
 
-    // unsafe {
-    //     SPI6_BUF[0] = 0x80;
-    //     // info!("xfer {=[u8]:x}", SPI6_BUF[0..1]);
-    //     imu_cs1.set_low();
-    //     imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
-    //     imu_cs1.set_high();
-    //     let accel_id = SPI6_BUF[1];
-    //     info!("accelerometer id: 0x{:x}", accel_id);
-
-    //     SPI6_BUF[0] = 0x80;
-    //     imu_cs2.set_low();
-    //     imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
-    //     imu_cs2.set_high();
-    //     let gyro_id = SPI6_BUF[1];
-    //     info!("gyro id: 0x{:x}", gyro_id);
-
-    //     loop {
-    //         SPI6_BUF[0] = 0x86;
-    //         // SPI6_BUF[0] = 0x86;
-    //         imu_cs2.set_low();
-    //         imu_spi.transfer_in_place(&mut SPI6_BUF[0..3]).await;
-    //         imu_cs2.set_high();
-    //         let rate_z = (SPI6_BUF[2] as u16 * 256 + SPI6_BUF[1] as u16) as i16;
-    //         info!("z rate: {}", rate_z);
-    //     }
-    // }
+        SPI6_BUF[0] = 0x80;
+        imu_cs2.set_low();
+        imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
+        imu_cs2.set_high();
+        let gyro_id = SPI6_BUF[1];
+        info!("gyro id: 0x{:x}", gyro_id);
+    }
 
     // loop {}
 
@@ -328,6 +346,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
         get_bootloader_uart_config(),
     );
 
+    let gyro_sub = GYRO_CHANNEL.subscriber().unwrap();
+    let battery_sub = BATTERY_CHANNEL.subscriber().unwrap();
+
     let ball_detected_thresh = 1.0;
     let mut control = Control::new(
         &spawner,
@@ -347,6 +368,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.PB8,
         p.PD12,
         ball_detected_thresh,
+        gyro_sub,
+        battery_sub
     );
 
     dotstar.write([RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
@@ -387,7 +410,29 @@ async fn main(_spawner: embassy_executor::Spawner) {
         //     dribbler_speed: 0.2,
         //     kick_request: 0,
         // });
-        let telemetry = control.tick(latest);
+        unsafe {
+            SPI6_BUF[0] = 0x86;
+            // SPI6_BUF[0] = 0x86;
+            imu_cs2.set_low();
+            imu_spi.transfer_in_place(&mut SPI6_BUF[0..3]).await;
+            imu_cs2.set_high();
+            let rate_z = (SPI6_BUF[2] as u16 * 256 + SPI6_BUF[1] as u16) as i16;
+            // info!("z rate: {}", rate_z);
+            let gyro_conversion = 2000.0 / 32767.0;
+            gyro_pub.publish_immediate((rate_z as f32) * gyro_conversion);
+        }
+
+        // could just feed gyro in here but the comment in control said to use a channel
+        let current_battery_v = adc_v_to_battery_voltage(adc_raw_to_v(adc3.read(&mut battery_pin) as f32));
+
+        battery_pub.publish_immediate(current_battery_v);
+        if current_battery_v < BATTERY_MIN_VOLTAGE
+        {
+            dotstar.write([RGB8 { r: 10, g: 0, b: 0 }, RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
+        }
+        
+
+        let telemetry = control.tick(latest).await;
         kicker.process_telemetry();
         if let Some(mut telemetry) = telemetry {
             // info!("{:?}", defmt::Debug2Format(&telemetry));

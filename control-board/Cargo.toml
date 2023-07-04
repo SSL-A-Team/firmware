@@ -43,7 +43,10 @@ critical-section = "1.1.1"
 const_format = "0.2.30"
 heapless = "0.7.16"
 libm = "0.2.6"
-nalgebra = { version = "0.31.0", default-features = false, features = [ "libm" ] }
+nalgebra = { version = "0.32.2", default-features = false, features = [
+        "libm",
+        "macros",
+] }
 ateam-common-packets = { path = "../software-communication/ateam-common-packets/rust-lib" }
 ateam-common = { path = "../common", default-features = false, features = ["defmt"] }
 

@@ -13,9 +13,11 @@
 #![feature(ptr_metadata)]
 #![feature(async_fn_in_trait)]
 #![feature(inherent_associated_types)]
+#![feature(const_fn_floating_point_arithmetic)]
 
+// pub mod fw_images;
 pub mod queue;
-pub mod robot_model;
+pub mod motion;
 pub mod stm32_interface;
 pub mod stspin_motor;
 pub mod uart_queue;
@@ -37,7 +39,7 @@ pub mod colors {
 #[macro_export]
 macro_rules! include_external_cpp_bin {
     ($var_name:ident, $bin_file:literal) => {
-        pub static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../motor-controller/build/bin/", $bin_file)).len()] 
+        pub static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../motor-controller/build/bin/", $bin_file)).len()]
             = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../motor-controller/build/bin/", $bin_file));
     }
 }
@@ -45,7 +47,19 @@ macro_rules! include_external_cpp_bin {
 #[macro_export]
 macro_rules! include_kicker_bin {
     ($var_name:ident, $bin_file:literal) => {
-        pub static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../kicker-board/target/thumbv6m-none-eabi/release/", $bin_file)).len()] 
+        pub static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../kicker-board/target/thumbv6m-none-eabi/release/", $bin_file)).len()]
             = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../kicker-board/target/thumbv6m-none-eabi/release/", $bin_file));
     }
 }
+pub const BATTERY_MIN_VOLTAGE: f32 = 19.0;
+pub const ADC_VREFINT_NOMINAL: f32 = 1050.0; // mV
+
+pub const fn adc_raw_to_v(adc_raw: f32) -> f32 {
+    adc_raw / ADC_VREFINT_NOMINAL
+}
+
+pub const fn adc_v_to_battery_voltage(adc_mv: f32) -> f32 {
+    (adc_mv / 2.762) * 25.2
+}
+
+

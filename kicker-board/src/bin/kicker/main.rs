@@ -51,7 +51,7 @@ const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 3;
 
 const MAX_KICK_SPEED: f32 = 5.5;
-const SHUTDOWN_KICK_DUTY: f32 = 0.2;
+const SHUTDOWN_KICK_DUTY: f32 = 0.20;
 
 pub const CHARGE_TARGET_VOLTAGE: f32 = 182.0;
 pub const CHARGE_OVERVOLT_THRESH_VOLTAGE: f32 = 190.0;

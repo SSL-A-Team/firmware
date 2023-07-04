@@ -94,6 +94,20 @@ async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
     status_led_green.set_low();
     Timer::after(Duration::from_millis(500)).await;
 
+    let mut hv = adc.read(&mut hv_pin) as f32;
+    let mut bv = adc.read(&mut batt_pin) as f32;
+    info!("hv V: {}, batt mv: {}", adc_v_to_rail_voltage(adc_raw_to_v(hv)), adc_v_to_battery_voltage(adc_raw_to_v(bv)));
+
+    let start_up_battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(bv));
+    if start_up_battery_voltage < 18.0 {
+        status_led_red.set_high();
+        warn!("battery voltage is below 18.0 ({}), is the battery low or disconnected?", start_up_battery_voltage);
+        warn!("refusing to continue");
+        loop {
+            reg_charge.set_low();
+        }
+    }
+
     reg_charge.set_high();
     Timer::after(Duration::from_millis(400)).await;
     let reg_done_stat = reg_done.is_low();
@@ -101,9 +115,9 @@ async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
     reg_charge.set_low();
 
     loop {
-        let hv = adc.read(&mut hv_pin) as u32;
+        hv = adc.read(&mut hv_pin) as u32;
         // let bv = (adc.read(&mut batt_pin) as u32 * 10) / 12;
-        let bv = adc.read(&mut batt_pin) as u32;
+        bv = adc.read(&mut batt_pin) as u32;
 
 
         info!("hv V: {}, batt mv: {}", (hv * 200) / 1000, bv);
