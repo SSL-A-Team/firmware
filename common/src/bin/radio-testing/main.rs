@@ -14,11 +14,13 @@ use local_ip_address::local_ip;
 fn main() -> std::io::Result<()> {
     let socket = UdpSocket::bind("0.0.0.0:42069")?;
 
-    let local_ip = if let IpAddr::V4(ip) = local_ip().unwrap() {
-        ip
-    } else {
-        panic!("ipv6");
-    };
+    // let local_ip = if let IpAddr::V4(ip) = local_ip().unwrap() {
+    //     ip
+    // } else {
+    //     panic!("ipv6");
+    // };
+
+    let local_ip = Ipv4Addr::new(172, 16, 1, 240);
 
     socket.join_multicast_v4(
         &Ipv4Addr::from_str("224.4.20.71").unwrap(),
@@ -95,7 +97,7 @@ fn main() -> std::io::Result<()> {
             )
         };
         socket.send_to(packet_bytes, src)?;
-        std::thread::sleep(Duration::from_millis(500));
+        std::thread::sleep(Duration::from_millis(100));
 
         if up {
             vel += max/200.;

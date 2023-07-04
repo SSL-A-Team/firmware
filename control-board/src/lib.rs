@@ -19,6 +19,7 @@ pub mod robot_model;
 pub mod stm32_interface;
 pub mod stspin_motor;
 pub mod uart_queue;
+pub mod radio;
 
 pub mod drivers;
 pub mod pins;

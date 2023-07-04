@@ -100,6 +100,29 @@ struct OpenPeerConnection {
     waker: Option<Waker>,
 }
 
+struct PeerDrop<'a, const LEN: usize> {
+    // peers: &'a Mutex<CriticalSectionRawMutex, heapless::LinearMap<u8, OpenPeerConnection, LEN>>,
+    // index: u8,
+    // peer: &'a OpenPeerConnection,
+    // is_read: bool,
+    peers: &'a mut heapless::LinearMap<u8, OpenPeerConnection, LEN>,
+    index: u8,
+    is_read: bool,
+}
+
+impl<'a, const LEN: usize> Drop for PeerDrop<'a, LEN> {
+    fn drop(&mut self) {
+        critical_section::with(|_| {
+            let peer = unsafe { self.peers.get_mut(&self.index).unwrap() };
+            if self.is_read {
+                peer.is_read = false;
+            } else {
+                peer.is_write = false;
+            }
+        });
+    }
+}
+
 pub struct OdinRadio<'a, RadioInterface: RadioInterfaceControl> {
     interface: &'a RadioInterface,
     initialized: Signal<CriticalSectionRawMutex, ()>,
@@ -119,7 +142,8 @@ pub struct OdinRadio<'a, RadioInterface: RadioInterfaceControl> {
 
     // socket_read_wakers: UnsafeCell<[Option<Socket>; 1]>,
     // channels: Mutex<CriticalSectionRawMutex, [Option<Channel>; 1]>,
-    peers: Mutex<CriticalSectionRawMutex, heapless::LinearMap<u8, OpenPeerConnection, 2>>,
+    // peers: Mutex<CriticalSectionRawMutex, heapless::LinearMap<u8, OpenPeerConnection, 2>>,
+    peers: UnsafeCell<heapless::LinearMap<u8, OpenPeerConnection, 2>>,
     // packet_waker: UnsafeCell<[Option<Waker>; WAKER_COUNT]>,
     // _phantom: PhantomData<&'a str>,
 }
@@ -198,7 +222,6 @@ impl<RadioInterface: RadioInterfaceControl> Radio for OdinRadio<'static, RadioIn
         .unwrap();
 
         let peer_connection = self.connect_peer(&url).await?;
-        info!("{:?}", peer_connection);
 
         Ok(OdinSocket {
             radio: self,
@@ -224,7 +247,8 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
             packet: Mutex::new(None),
             packet_complete,
             response_waker: UnsafeCell::new(None),
-            peers: Mutex::new(heapless::LinearMap::new()),
+            // peers: Mutex::new(heapless::LinearMap::new()),
+            peers: UnsafeCell::new(heapless::LinearMap::new()),
             // channels: Mutex::new([None; 1]),
             // channel_wakers: [Mutex::new(None)],
             // socket_read_wakers: UnsafeCell::new([None; 1]),
@@ -285,14 +309,15 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
         //     .await?;
 
         let data_ref = self.interface.read().await?;
+        // info!("read from buffer");
         let mut packet = self.packet.lock().await;
         let data = unsafe { MaybeUninit::slice_assume_init_mut(&mut *self.packet_buffer.get()) };
         let len = data_ref.data().len();
         data[..len].clone_from_slice(data_ref.data());
+        drop(data_ref);
         unsafe { *self.packet_buffer_len.get() = len };
         let status = { *self.status.lock().await };
         // let peers = { *self.peers.lock().await };
-        // info!("len {}", len);
         match status.mode {
             RadioMode::CommandMode => {
                 let event = ATEvent::new(&data[..len]);
@@ -316,23 +341,23 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
                 waker.wake_by_ref();
             };
         });
-        let peers = self.peers.lock().await;
-        for peer in &*peers {
-            if let Some(EdmPacket::DataEvent { channel, data: _ }) = &*packet {
-                if *channel == peer.1.channel_id && !peer.1.is_read {
-                    *packet = None;
-                    self.packet_complete.signal(());
-                    info!("reset");
-                    break;
+        critical_section::with(|cs| {
+            let peers = unsafe { &*self.peers.get() };
+            for peer in &*peers {
+                if let Some(EdmPacket::DataEvent { channel, data: _ }) = &*packet {
+                    if *channel == peer.1.channel_id && !peer.1.is_read {
+                        *packet = None;
+                        self.packet_complete.signal(());
+                        break;
+                    }
+                }
+
+                if let Some(waker) = &peer.1.waker {
+                    waker.wake_by_ref();
                 }
             }
+        });
 
-            if let Some(waker) = &peer.1.waker {
-                waker.wake_by_ref();
-            }
-        }
-        drop(peers);
-        
         if let Some(_) = &*packet {
             self.packet_complete.reset();
         }
@@ -628,21 +653,14 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
         write!(cmd, "AT+UDCP={url}").or(Err(()))?;
         let command_lock = self.command_mutex.try_lock().or(Err(()))?;
         self._send_command(&cmd).await?;
-        Timer::after(Duration::from_millis(20)).await;
 
         let mut peer_id = None;
         let mut peer_connected_ip = false;
         let mut channel_id = None;
-
-        info!("cmd");
         poll_fn(|cx| {
             let lock = self.packet.try_lock();
             if let Ok(mut lock) = lock {
                 if let Some(packet) = &*lock {
-                    info!("{:?}", packet);
-                    info!("{:?}", packet);
-                    info!("{:?}", packet);
-                    info!("{:?}", packet);
                     match packet {
                         EdmPacket::ATResponse(response) => {
                             if let ATResponse::Ok(resp) = response {
@@ -701,15 +719,14 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
             Poll::Pending
         })
         .await?;
-        info!("cmd end");
 
         drop(command_lock);
 
         let channel_id = channel_id.unwrap();
         let peer_id = peer_id.unwrap();
 
-        {
-            let mut peers = self.peers.lock().await;
+        critical_section::with(|cs| {
+            let peers = unsafe { &mut *self.peers.get() };
             if peers.contains_key(&peer_id) {
                 return Err(());
             }
@@ -722,7 +739,8 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
                     waker: None,
                 },
             );
-        }
+            Ok(())
+        })?;
 
         Ok(PeerConnection {
             peer_id,
@@ -730,20 +748,13 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
         })
     }
 
-    // pub async fn list_peers<const LEN: usize>(&self) -> heapless::Vec<, > {
-    pub async fn list_peers(&self) {
-        self.send_command("AT+UDLP?", |response| {
-            info!("{:?}", response);
-        }).await.unwrap();
-    }
-
     pub async fn close_peer(&self, peer_id: u8) -> Result<(), ()> {
         let mut cmd: String<12> = String::new();
         write!(cmd, "AT+UDCPC={peer_id}").or(Err(()))?;
         let command_lock = self.command_mutex.try_lock().or(Err(()))?;
 
-        {
-            let mut peers = self.peers.lock().await;
+        critical_section::with(|cs| {
+            let peers = unsafe { &mut *self.peers.get() };
             let peer = peers.get(&peer_id);
             if let Some(peer) = peer {
                 if peer.is_read || peer.is_write {
@@ -753,7 +764,8 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
                 return Err(());
             }
             peers.remove(&peer_id);
-        }
+            Ok(())
+        })?;
 
         self._send_command(&cmd).await?;
         Timer::after(Duration::from_millis(1000)).await;
@@ -818,15 +830,37 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
     }
 
     pub async fn write_data(&self, peer_id: u8, buf: &[u8]) -> Result<(), ()> {
-        let channel_id = {
-            let mut peers = self.peers.lock().await;
-            let peer = peers.get_mut(&peer_id).ok_or(())?;
-            if peer.is_write {
-                return Err(());
-            };
+        // let peer = {
+        //     let mut peers = self.peers.lock().await;
+        //     let peer = peers.get_mut(&peer_id).ok_or(())?;
+        //     peer
+        //     // if peer.is_write {
+        //     //     return Err(());
+        //     // };
+        //     // peer.is_write = true;
+        //     // peer.channel_id
+        // };
+
+        let (channel_id, peer) = critical_section::with(|_| {
+            let peers = unsafe { &mut *self.peers.get() };
+            let peer = peers.get_mut(&peer_id).unwrap();
             peer.is_write = true;
-            peer.channel_id
-        };
+            (peer.channel_id, PeerDrop {
+                peers: peers,
+                index: peer_id,
+                is_read: false,
+            })
+        });
+
+        // let channel_id = {
+        //     let mut peers = self.peers.lock().await;
+        //     let peer = peers.get_mut(&peer_id).ok_or(())?;
+        //     if peer.is_write {
+        //         return Err(());
+        //     };
+        //     peer.is_write = true;
+        //     peer.channel_id
+        // };
 
         let mut data_ref = self.interface.write().await?;
         let len = EdmPacket::DataCommand {
@@ -842,6 +876,7 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
         }
 
         drop(data_ref);
+        drop(peer);
 
         // self.interface
         //     .write(|b| {
@@ -853,26 +888,40 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
         //     })
         //     .await?;
 
-        {
-            let mut peers = self.peers.lock().await;
-            let peer = peers.get_mut(&peer_id).unwrap();
-            peer.is_write = false;
-        }
+// TODO
+        // {
+        //     let mut peers = self.peers.lock().await;
+        //     let peer = peers.get_mut(&peer_id).unwrap();
+        //     peer.is_write = false;
+        // }
 
         Ok(())
     }
 
     pub async fn read_data(&self, peer_id: u8, buf: &mut [u8]) -> Result<usize, ()> {
-        let channel_id = {
-            let mut peers = self.peers.lock().await;
-            let peer = peers.get_mut(&peer_id).ok_or(())?;
-            // TODO: set is_read = false on dropped future
-            // if peer.is_read {
-            //     return Err(());
-            // };
+        // TODO
+        // let channel_id = {
+        //     let mut peers = self.peers.lock().await;
+        //     let peer = peers.get_mut(&peer_id).ok_or(())?;
+        //     // TODO: set is_read = false on dropped future
+        //     // if peer.is_read {
+        //     //     return Err(());
+        //     // };
+        //     peer.is_read = true;
+        //     peer.channel_id
+        // };
+        // let channel_id = 0;
+
+        let (channel_id, peer) = critical_section::with(|_| {
+            let peers = unsafe { &mut *self.peers.get() };
+            let peer = peers.get_mut(&peer_id).unwrap();
             peer.is_read = true;
-            peer.channel_id
-        };
+            (peer.channel_id, PeerDrop {
+                peers: peers,
+                index: peer_id,
+                is_read: true,
+            })
+        });
 
         let size = poll_fn(|cx| {
             let lock = self.packet.try_lock();
@@ -884,7 +933,7 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
                             if buf.len() < size {
                                 *lock = None;
                                 self.packet_complete.signal(());
-                                return Poll::Ready(Err(()))
+                                return Poll::Ready(Err(()));
                             }
                             buf[..size].copy_from_slice(data);
                             *lock = None;
@@ -896,24 +945,33 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
                 Err(_) => {}
             }
 
-            {
-                let peers = self.peers.try_lock();
-                if let Ok(mut peers) = peers {
-                    let peer = peers.get_mut(&peer_id).unwrap();
-                    peer.waker = Some(cx.waker().clone());
-                }
-                // TODO: else?
-            }
+            critical_section::with(|_| {
+                let peers = unsafe { &mut *self.peers.get() };
+                let peer = peers.get_mut(&peer_id).unwrap();
+                peer.waker = Some(cx.waker().clone());
+            });
+// TODO
+            // {
+            //     let peers = self.peers.try_lock();
+            //     if let Ok(mut peers) = peers {
+            //         let peer = peers.get_mut(&peer_id).unwrap();
+            //         peer.waker = Some(cx.waker().clone());
+            //     }
+            //     // TODO: else?
+            // }
 
             Poll::Pending
         })
         .await?;
 
-        {
-            let mut peers = self.peers.lock().await;
-            let peer = peers.get_mut(&peer_id).unwrap();
-            peer.is_read = false;
-        }
+        drop(peer);
+
+// TODO
+        // {
+        //     let mut peers = self.peers.lock().await;
+        //     let peer = peers.get_mut(&peer_id).unwrap();
+        //     peer.is_read = false;
+        // }
 
         Ok(size)
     }

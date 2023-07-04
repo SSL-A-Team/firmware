@@ -19,7 +19,7 @@ use ateam_common::{
 };
 use ateam_control_board::{
     queue::{self, EnqueueRef, DequeueRef},
-    uart_queue::{UartReadQueue, UartWriteQueue}, stm32_interface::{configure_usart, Kind},
+    uart_queue::{UartReadQueue, UartWriteQueue}, stm32_interface::{update_usart, Kind},
 };
 // use cortex_m::interrupt;
 use defmt::*;
@@ -154,7 +154,7 @@ impl<
 {
     type DataRefWrite = EnqueueRef<'static, LEN_TX, DEPTH_TX> ;
 
-    async fn write<'a>(&'a self) -> Result<Self::DataRefWrite, ()> {
+    async fn write(&self) -> Result<Self::DataRefWrite, ()> {
         self.write_queue.enqueue2()
     }
 
@@ -194,7 +194,7 @@ impl<
 {
     type DataRefRead = DequeueRef<'static, LEN_RX, DEPTH_RX> ;
 
-    async fn read<'a>(&'a self) -> Result<Self::DataRefRead, ()> {
+    async fn read(&self) -> Result<Self::DataRefRead, ()> {
         self.read_queue.dequeue2().await
     }
 //     async fn read<RET, FN: FnOnce(&[u8]) -> Result<RET, ()>>(
@@ -245,7 +245,7 @@ impl<
         let mut config = usart::Config::default();
         config.baudrate = baudrate;
         config.parity = if parity { usart::Parity::ParityEven } else { usart::Parity::ParityNone };
-        configure_usart(r, &config, UART::frequency(), Kind::Uart, true, true)
+        update_usart(r, &config, UART::frequency(), Kind::Uart, true, true)
 
         // let div = (UART::frequency().0 + (baudrate / 2)) / baudrate * UART::MULTIPLIER;
         // unsafe {
@@ -311,6 +311,10 @@ impl RobotRadio for RobotMock {
     }
     fn get_robot_color(&self) -> TeamColor {
         TeamColor::Blue
+    }
+
+    fn get_robot_name(&self) -> Option<heapless::String<30>> {
+        Some("Robot Test".into())
     }
 }
 

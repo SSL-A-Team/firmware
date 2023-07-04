@@ -53,7 +53,8 @@ pub enum Kind {
     Lpuart,
 }
 
-pub fn configure_usart(
+// TODO: this whole thing
+pub fn update_usart(
     r: Regs,
     config: &Config,
     pclk_freq: Hertz,
@@ -423,7 +424,7 @@ impl<
         let mut config = usart::Config::default();
         config.baudrate = baudrate;
         config.parity = parity;
-        configure_usart(r, &config, UART::frequency(), Kind::Uart, true, true)
+        update_usart(r, &config, UART::frequency(), Kind::Uart, true, true)
 
         // let div = (UART::frequency().0 + (baudrate / 2)) / baudrate * UART::MULTIPLIER;
 

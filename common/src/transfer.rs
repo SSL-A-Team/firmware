@@ -67,13 +67,13 @@ pub trait DataRefWriteTrait {
 pub trait Reader2 {
     type DataRefRead: DataRefReadTrait;
 
-    async fn read<'a>(&'a self) -> Result<Self::DataRefRead, ()>;
+    async fn read(&self) -> Result<Self::DataRefRead, ()>;
 }
 
 pub trait Writer2 {
     type DataRefWrite: DataRefWriteTrait;
 
-    async fn write<'a>(&'a self) -> Result<Self::DataRefWrite, ()>;
+    async fn write(&self) -> Result<Self::DataRefWrite, ()>;
 }
 
 

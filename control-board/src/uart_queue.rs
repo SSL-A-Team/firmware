@@ -5,7 +5,7 @@ use defmt::info;
 use embassy_executor::{raw::TaskStorage, SpawnToken};
 use embassy_stm32::{
     usart::{self, UartRx, UartTx},
-    Peripheral,
+    Peripheral, pac::GPIOA, peripherals, gpio::Output,
 };
 use ateam_common::{transfer::DataRefReadTrait};
 use ateam_common::transfer::DataRefWriteTrait;
@@ -59,12 +59,17 @@ impl<
         mut rx: UartRx<'a, UART, DMA>,
         // mut int: UART::Interrupt,
     ) -> ReadTaskFuture<UART, DMA, LENGTH, DEPTH> {
+        // let pin = unsafe { peripherals::PF3::steal() };
+        // let mut pin = Output::new(pin, embassy_stm32::gpio::Level::Low, embassy_stm32::gpio::Speed::High);
+
         async move {
             loop {
                 // TODO: change back to await
                 // let mut buf = queue_rx.try_enqueue().unwrap();
                 let mut buf = queue_rx.enqueue().await.unwrap();
+                // pin.set_high();
                 let len = rx.read_until_idle(buf.data()).await;
+                // pin.set_low();
                 // info!("read len {}", len);
                 // .unwrap();
                 // TODO: this
@@ -145,7 +150,7 @@ impl<
                 drop(buf);
                 // unsafe {
                 //     // TODO: what does this do again?
-                //     while !UART::regs().isr().read().tc() {}
+                    while !UART::regs().isr().read().tc() {}
                 //     UART::regs().cr1().modify(|w| w.set_te(false));
                 //     while UART::regs().isr().read().teack() {}
                 //     UART::regs().cr1().modify(|w| w.set_te(true));

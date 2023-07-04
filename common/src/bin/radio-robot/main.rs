@@ -42,7 +42,7 @@ impl Radio for RadioMock {
     ) -> Result<(), ()> {
         Ok(())
     }
-    async fn open_udp(&self, addr: Ipv4Addr, port: u16) -> Result<UdpSockermMock, ()> {
+    async fn open_udp(&self, addr: Ipv4Addr, port: u16, local_port: Option<u16>) -> Result<UdpSockermMock, ()> {
         let addr_local = net::SocketAddr::from(([0, 0, 0, 0], 42070));
         let addr = net::SocketAddr::from((addr.octets, port));
         println!("{}", addr);

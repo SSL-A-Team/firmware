@@ -108,7 +108,7 @@ impl<Robot: RobotRadio + 'static, R: Radio + 'static> Task for RobotRadioTask<Ro
 
         // let mut local_port = 42069;
         let multicast_socket = radio
-            .open_udp(Robot::MULTICAST_ADDR, Robot::MULTICAST_PORT, None)
+            .open_udp(Robot::MULTICAST_ADDR, Robot::MULTICAST_PORT, Some(42069))
             .await.unwrap();
 
         loop {
