@@ -21,7 +21,7 @@ use embassy_stm32::{
 };
 use embassy_time::Duration;
 
-use ateam_control_board::drivers::radio::{RobotRadio, TeamColor};
+use ateam_control_board::drivers::radio::{RobotRadio, TeamColor, WifiNetwork};
 use ateam_control_board::queue;
 use ateam_control_board::uart_queue::{UartReadQueue, UartWriteQueue};
 
@@ -72,8 +72,24 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // let reset = p.PC0;
     let reset = p.PA3;
     let mut radio = RobotRadio::new(&QUEUE_RX, &QUEUE_TX, reset).await.unwrap();
+
+
+    /////////////////////
+    // Dip Switch Inputs
+    /////////////////////
+    let dip5 = Input::new(p.PG3, Pull::Down);
+    let dip6 = Input::new(p.PG3, Pull::Down);
+
+    let wifi_network = if dip5.is_high() & dip6.is_high() {
+        WifiNetwork::Team
+    } else if dip5.is_low() & dip6.is_high() {
+        WifiNetwork::CompMain
+    } else if dip5.is_high() & dip6.is_low() {
+        WifiNetwork::CompPractice
+    };
+    
     info!("radio created");
-    radio.connect_to_network().await.unwrap();
+    radio.connect_to_network(wifi_network).await.unwrap();
     info!("radio connected");
 
     radio.open_multicast().await.unwrap();

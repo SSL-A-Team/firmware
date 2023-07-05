@@ -6,7 +6,7 @@
 use apa102_spi::Apa102;
 use ateam_common_packets::bindings_radio::{BasicControl, KickRequest};
 use ateam_control_board::{
-    drivers::{radio::TeamColor, rotary::Rotary, shell_indicator::ShellIndicator},
+    drivers::{radio::TeamColor, radio::WifiNetwork, rotary::Rotary, shell_indicator::ShellIndicator},
     include_external_cpp_bin,
     queue::Buffer,
     stm32_interface::{get_bootloader_uart_config, Stm32Interface},
