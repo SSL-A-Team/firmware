@@ -260,18 +260,22 @@ where
                     if let Ok(control) = control {
                         let mut latest_control = latest_control.lock().await;
                         *latest_control = Some(control);
-                        let mut last_control = last_control.lock().await;
-                        *last_control = true;
+                        {
+                            let mut last_control = last_control.lock().await;
+                            *last_control = true;
+                        }
                     }
                 })(),
                 (async || {
                     let mut no_packet_timeout = Ticker::every(Duration::from_millis(1000));
                     loop {
-                        let mut last_control = last_control.lock().await;
-                        if !*last_control {
-                            cortex_m::peripheral::SCB::sys_reset();
+                        {
+                            let mut last_control = last_control.lock().await;
+                            if !*last_control {
+                                cortex_m::peripheral::SCB::sys_reset();
+                            }
+                            *last_control = false;
                         }
-                        *last_control = false;
                         no_packet_timeout.next().await;
                     }
                 })(),
