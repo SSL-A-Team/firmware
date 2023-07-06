@@ -7,7 +7,7 @@ use const_format::formatcp;
 use core::fmt::Write;
 use core::mem::size_of;
 use embassy_futures::select::{select, Either};
-use embassy_stm32::gpio::{Level, OutputOpenDrain, Pin, Pull, Speed};
+use embassy_stm32::gpio::{Level, OutputOpenDrain, Pin, Pull, Speed, Output};
 use embassy_stm32::pac;
 use embassy_stm32::usart;
 use embassy_stm32::Peripheral;

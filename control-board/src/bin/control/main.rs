@@ -173,6 +173,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
         WifiNetwork::CompMain
     } else if dip5.is_high() & dip6.is_low() {
         WifiNetwork::CompPractice
+    } else {
+        WifiNetwork::Team
     };
 
     let team = if dip7.is_high() {
