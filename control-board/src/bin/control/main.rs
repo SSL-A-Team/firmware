@@ -7,19 +7,20 @@
 use apa102_spi::Apa102;
 use ateam_common_packets::bindings_radio::{BasicControl, KickRequest};
 use ateam_control_board::{
-    drivers::{radio::TeamColor, radio::WifiNetwork,rotary::Rotary, shell_indicator::ShellIndicator},
+    adc_raw_to_v, adc_v_to_battery_voltage,
+    drivers::{
+        radio::TeamColor, radio::WifiNetwork, rotary::Rotary, shell_indicator::ShellIndicator,
+    },
     include_external_cpp_bin,
     queue::Buffer,
     stm32_interface::{get_bootloader_uart_config, Stm32Interface},
     uart_queue::{UartReadQueue, UartWriteQueue},
     BATTERY_MIN_VOLTAGE,
-    adc_v_to_battery_voltage,
-    adc_raw_to_v
 };
 use control::Control;
 use defmt::info;
 use embassy_stm32::{
-    adc::{SampleTime, Adc, AdcPin, InternalChannel, Temperature},
+    adc::{Adc, AdcPin, InternalChannel, SampleTime, Temperature},
     dma::NoDma,
     executor::InterruptExecutor,
     exti::ExtiInput,
@@ -28,11 +29,11 @@ use embassy_stm32::{
     peripherals::{DMA2_CH4, DMA2_CH5, USART6},
     spi,
     time::{hz, mhz},
-    usart::{self, Uart}
+    usart::{self, Uart},
+    wdg::IndependentWatchdog,
 };
 use embassy_time::{Delay, Duration, Ticker, Timer};
 use futures_util::StreamExt;
-use panic_probe as _;
 use pins::{
     PowerStateExti, PowerStatePin, RadioReset, RadioRxDMA, RadioTxDMA, RadioUART,
     ShutdownCompletePin,
@@ -44,14 +45,25 @@ use radio::{
 use smart_leds::{SmartLedsWrite, RGB8};
 use static_cell::StaticCell;
 
+use embassy_stm32::rcc::AdcClockSource;
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::pubsub::{PubSubChannel, Subscriber};
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_stm32::rcc::AdcClockSource;
 
 mod control;
 mod pins;
 mod radio;
+
+// Uncomment for testing:
+// use panic_probe as _;
+
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    defmt::error!("{}", defmt::Display2Format(info));
+    // Delay to give it a change to print
+    cortex_m::asm::delay(10_000_000);
+    cortex_m::peripheral::SCB::sys_reset();
+}
 
 static RADIO_TEST: RadioTest<
     MAX_TX_PACKET_SIZE,
@@ -153,7 +165,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let dip6 = Input::new(p.PG2, Pull::Down);
     let dip7 = Input::new(p.PD15, Pull::Down);
 
-
     // let mut kicker = Output::new(p.PF9, Level::Low, Speed::High);
 
     // let robot_id = rotary.read();
@@ -162,9 +173,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // Dip Switch Inputs
     /////////////////////
     let robot_id = (dip1.is_high() as u8) << 3
-    | (dip2.is_high() as u8) << 2
-    | (dip3.is_high() as u8) << 1
-    | (dip4.is_high() as u8);
+        | (dip2.is_high() as u8) << 2
+        | (dip3.is_high() as u8) << 1
+        | (dip4.is_high() as u8);
     info!("id: {}", robot_id);
     shell_indicator.set(robot_id);
 
@@ -193,7 +204,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let mut battery_pin = p.PF5;
 
     let battery_pub = BATTERY_CHANNEL.publisher().unwrap();
-
 
     // let mut test = Output::new(p.PA8, Level::High, Speed::Medium);
     // let mut test2 = Output::new(p.PA9, Level::High, Speed::Medium);
@@ -372,14 +382,18 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.PD12,
         ball_detected_thresh,
         gyro_sub,
-        battery_sub
+        battery_sub,
     );
 
     dotstar.write([RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
 
     control.load_firmware().await;
 
-    dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
+    dotstar.write(
+        [RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 0, b: 10 }]
+            .iter()
+            .cloned(),
+    );
 
     let token = unsafe {
         (&mut *(&RADIO_TEST as *const _
@@ -398,12 +412,20 @@ async fn main(_spawner: embassy_executor::Spawner) {
     };
     spawner.spawn(token).unwrap();
 
-    dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 10, b: 0 }].iter().cloned());
+    dotstar.write(
+        [RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 10, b: 0 }]
+            .iter()
+            .cloned(),
+    );
+
+    let mut wdg = IndependentWatchdog::new(p.IWDG1, 1_000_000);
+    unsafe { wdg.unleash() }
 
     let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
 
     let mut last_kicked = 1000;
     loop {
+        unsafe { wdg.pet() };
         let latest = RADIO_TEST.get_latest_control();
         // let latest = Some(BasicControl{
         //     vel_x_linear: 0.,
@@ -426,14 +448,17 @@ async fn main(_spawner: embassy_executor::Spawner) {
         }
 
         // could just feed gyro in here but the comment in control said to use a channel
-        let current_battery_v = adc_v_to_battery_voltage(adc_raw_to_v(adc3.read(&mut battery_pin) as f32));
+        let current_battery_v =
+            adc_v_to_battery_voltage(adc_raw_to_v(adc3.read(&mut battery_pin) as f32));
 
         battery_pub.publish_immediate(current_battery_v);
-        if current_battery_v < BATTERY_MIN_VOLTAGE
-        {
-            dotstar.write([RGB8 { r: 10, g: 0, b: 0 }, RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
+        if current_battery_v < BATTERY_MIN_VOLTAGE {
+            dotstar.write(
+                [RGB8 { r: 10, g: 0, b: 0 }, RGB8 { r: 10, g: 0, b: 0 }]
+                    .iter()
+                    .cloned(),
+            );
         }
-        
 
         let telemetry = control.tick(latest);
         if let Some(telemetry) = telemetry.await {
