@@ -267,7 +267,7 @@ where
                     }
                 })(),
                 (async || {
-                    let mut no_packet_timeout = Ticker::every(Duration::from_millis(1000));
+                    let mut no_packet_timeout = Ticker::every(Duration::from_millis(3000));
                     loop {
                         {
                             let mut last_control = last_control.lock().await;
