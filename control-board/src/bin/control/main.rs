@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 #![feature(const_mut_refs)]
+#![feature(async_closure)]
 
 use apa102_spi::Apa102;
 use ateam_common_packets::bindings_radio::{BasicControl, KickRequest};
