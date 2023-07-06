@@ -49,6 +49,8 @@ macro_rules! include_kicker_bin {
     }
 }
 pub const BATTERY_MIN_VOLTAGE: f32 = 19.0;
+pub const BATTERY_MAX_VOLTAGE: f32 = 25.2;
+pub const BATTERY_BUFFER_SIZE: usize = 10;
 pub const ADC_VREFINT_NOMINAL: f32 = 1050.0; // mV
 
 pub const fn adc_raw_to_v(adc_raw: f32) -> f32 {
@@ -56,7 +58,7 @@ pub const fn adc_raw_to_v(adc_raw: f32) -> f32 {
 }
 
 pub const fn adc_v_to_battery_voltage(adc_mv: f32) -> f32 {
-    (adc_mv / 2.762) * 25.2
+    (adc_mv / 2.762) * BATTERY_MAX_VOLTAGE
 }
 
 
