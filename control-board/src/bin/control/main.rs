@@ -471,7 +471,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
         if filter_battery_v < BATTERY_MIN_VOLTAGE
         {
             dotstar.write([RGB8 { r: 10, g: 0, b: 0 }, RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
-            defmt::panic!("Error filtered battery voltage too low")
+            defmt::error!("Error filtered battery voltage too low");
+            critical_section::with(|_| {
+                loop {
+                    cortex_m::asm::delay(1_000_000);
+                    unsafe{ wdg.pet() };
+                }
+            });
         }
         
         //
