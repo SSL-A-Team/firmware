@@ -13,8 +13,8 @@ pub type RegulatorFaultPin = PB5;
 
 pub type HighVoltageReadPin = PA0;
 pub type BatteryVoltageReadPin = PA1;
-pub type BreakbeamTxPin = PA2;
-pub type BreakbeamRxPin = PA3;
+pub type BreakbeamTxPin = PA3;
+pub type BreakbeamRxPin = PA2;
 
 pub type BlueStatusLedPin = PA8;
 pub type GreenStatusLedPin = PA11;

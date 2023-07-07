@@ -33,10 +33,10 @@ use ateam_kicker_board::{
     kick_manager::{KickManager, KickType},
     pins::{
         BatteryVoltageReadPin, BlueStatusLedPin, ChargePin, ChipPin, ComsUartModule, ComsUartRxDma,
-        ComsUartTxDma, HighVoltageReadPin, KickPin, RedStatusLedPin,
+        ComsUartTxDma, HighVoltageReadPin, KickPin, RedStatusLedPin, BreakbeamTxPin, BreakbeamRxPin,
     },
     queue::Buffer,
-    uart_queue::{UartReadQueue, UartWriteQueue},
+    uart_queue::{UartReadQueue, UartWriteQueue}, drivers::breakbeam::Breakbeam,
 };
 
 use ateam_common_packets::bindings_kicker::{
@@ -117,6 +117,8 @@ async fn high_pri_kick_task(
     charge_pin: ChargePin,
     kick_pin: KickPin,
     chip_pin: ChipPin,
+    breakbeam_tx: BreakbeamTxPin,
+    breakbeam_rx: BreakbeamRxPin,
     mut rail_pin: HighVoltageReadPin,
     mut battery_voltage_pin: BatteryVoltageReadPin,
     err_led_pin: RedStatusLedPin,
@@ -132,6 +134,8 @@ async fn high_pri_kick_task(
     let mut err_led = Output::new(err_led_pin, Level::Low, Speed::Low);
     let mut ball_detected_led = Output::new(ball_detected_led_pin, Level::Low, Speed::Low);
     // TODO dotstars
+
+    let mut breakbeam = Breakbeam::new(breakbeam_tx, breakbeam_rx);
 
     // coms buffers
     let mut telemetry_enabled: bool; //  = false;
@@ -152,6 +156,7 @@ async fn high_pri_kick_task(
     let mut ticker = Ticker::every(Duration::from_millis(1));
     let mut last_packet_sent_time = Instant::now();
 
+    breakbeam.enable_tx();
     loop {
         let rail_voltage = adc_v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32));
         let battery_voltage =
@@ -181,7 +186,7 @@ async fn high_pri_kick_task(
         }
 
         // TODO: read breakbeam
-        let ball_detected = false;
+        let ball_detected = breakbeam.read();
 
         ///////////////////////////////////////////////
         //  manage repetitive kick commands + state  //
@@ -421,6 +426,8 @@ fn main() -> ! {
         p.PB3,
         p.PB0,
         p.PB1,
+        p.PA3,
+        p.PA2,
         p.PA0,
         p.PA1,
         p.PA12,
