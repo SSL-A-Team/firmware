@@ -28,7 +28,8 @@ fn main() -> std::io::Result<()> {
     let mut buf = [0; size_of::<RadioPacket>()];
     let src = loop {
         let (len, src) = socket.recv_from(&mut buf)?;
-        if len == size_of::<RadioPacket>() - size_of::<RadioPacket_Data>() + size_of::<HelloRequest>()
+        if len
+            == size_of::<RadioPacket>() - size_of::<RadioPacket_Data>() + size_of::<HelloRequest>()
         {
             let packet = unsafe { &*(buf.as_ptr() as *const RadioPacket) };
             if packet.command_code == CommandCode::CC_HELLO_REQ {
@@ -74,33 +75,57 @@ fn main() -> std::io::Result<()> {
                 vel_z_angular: 0.,
                 kick_vel: 0.,
                 dribbler_speed: 0.,
-                kick_request: KickRequest::KR_DISABLE,
+                kick_request: KickRequest::KR_ARM,
             },
         },
     };
-// 0.001
+    let packet_bytes = unsafe {
+        core::slice::from_raw_parts(
+            &packet as *const _ as *const u8,
+            core::mem::size_of::<RadioPacket>() - core::mem::size_of::<RadioPacket_Data>()
+                + core::mem::size_of::<BasicControl>(),
+        )
+    };
+
+    // std::thread::sleep(Duration::from_millis(500));
+
+    // for _ in 0..5 {
+    //     packet.data.control.kick_request = KickRequest::KR_ARM;
+    //     socket.send_to(packet_bytes, src)?;
+    //     std::thread::sleep(Duration::from_millis(100));
+    // }
+
+    // std::thread::sleep(Duration::from_millis(1000));
+
+    // // packet.data.control.kick_request = KickRequest::KR_KICK_NOW;
+    // // packet.data.control.kick_vel = 0.5;
+    // // socket.send_to(packet_bytes, src)?;
+
+    // // std::thread::sleep(Duration::from_millis(1000));
+
+    // loop {
+    //     packet.data.control.kick_vel = 0.5;
+    //     packet.data.control.kick_request = KickRequest::KR_KICK_TOUCH;
+    //     // packet.data.control.vel_z_angular = 0.1;
+    //     socket.send_to(packet_bytes, src)?;
+    //     std::thread::sleep(Duration::from_millis(1000));
+    // }
+
+    // 0.001
     let mut vel = 0.;
     // let max = 0.001;
     let max = 1.0;
     let mut up = true;
     loop {
         // packet.data.control.vel_x_linear = vel;
-        packet.data.control.vel_z_angular = vel;
-
-        let packet_bytes = unsafe {
-            core::slice::from_raw_parts(
-                &packet as *const _ as *const u8,
-                core::mem::size_of::<RadioPacket>() - core::mem::size_of::<RadioPacket_Data>()
-                    + core::mem::size_of::<BasicControl>(),
-            )
-        };
+        packet.data.control.vel_z_angular = 0.0;
         socket.send_to(packet_bytes, src)?;
         std::thread::sleep(Duration::from_millis(10));
 
         if up {
-            vel += max/200.;
+            vel += max / 200.;
         } else {
-            vel -= max/200.;
+            vel -= max / 200.;
         }
         if vel >= max {
             up = false;
