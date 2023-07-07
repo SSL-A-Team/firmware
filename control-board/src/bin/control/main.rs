@@ -438,7 +438,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         let current_battery_v =
             adc_v_to_battery_voltage(adc_raw_to_v(adc3.read(&mut battery_pin) as f32));
         // Shift buffer through
-        for i in (BATTERY_BUFFER_SIZE - 2)..0 {
+        for i in (0..(BATTERY_BUFFER_SIZE - 1)).rev() {
             battery_voltage_buffer[i + 1] = battery_voltage_buffer[i];
         }
         // Add new battery read
