@@ -6,7 +6,7 @@
 use apa102_spi::Apa102;
 use ateam_common_packets::bindings_radio::{BasicControl, KickRequest};
 use ateam_control_board::{
-    drivers::{radio::TeamColor, rotary::Rotary, shell_indicator::ShellIndicator},
+    drivers::{radio::TeamColor, radio::WifiNetwork, rotary::Rotary, shell_indicator::ShellIndicator},
     include_external_cpp_bin,
     queue::Buffer,
     stm32_interface::{get_bootloader_uart_config, Stm32Interface},
@@ -144,6 +144,15 @@ async fn main(_spawner: embassy_executor::Spawner) {
     | (dip4.is_high() as u8);
     info!("id: {}", robot_id);
     shell_indicator.set(robot_id);
+
+    let wifi_network = if dip5.is_high() & dip6.is_high() {
+        WifiNetwork::Team
+    } else if dip5.is_low() & dip6.is_high() {
+        WifiNetwork::CompMain
+    } else if dip5.is_high() & dip6.is_low() {
+        WifiNetwork::CompPractice
+    };
+
     let team = if dip7.is_high() {
         TeamColor::Blue
     } else {
@@ -354,7 +363,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
                 RadioTxDMA,
                 RadioReset,
             >))
-            .setup(&spawner, radio_usart, p.PC13, robot_id, team)
+            .setup(&spawner, radio_usart, p.PC13, robot_id, team, wifi_network)
             .await
     };
     spawner.spawn(token).unwrap();

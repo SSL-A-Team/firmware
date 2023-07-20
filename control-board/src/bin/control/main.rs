@@ -2,19 +2,27 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 #![feature(const_mut_refs)]
+#![feature(async_closure)]
+
+use core::future::pending;
 
 use apa102_spi::Apa102;
 use ateam_common_packets::bindings_radio::{BasicControl, KickRequest};
 use ateam_control_board::{
-    drivers::{radio::TeamColor, rotary::Rotary, shell_indicator::ShellIndicator},
+    adc_raw_to_v, adc_v_to_battery_voltage,
+    drivers::{
+        radio::TeamColor, radio::WifiNetwork, rotary::Rotary, shell_indicator::ShellIndicator, kicker::Kicker,
+    },
     include_external_cpp_bin,
     queue::Buffer,
     stm32_interface::{get_bootloader_uart_config, Stm32Interface},
     uart_queue::{UartReadQueue, UartWriteQueue},
+    BATTERY_BUFFER_SIZE, BATTERY_MAX_VOLTAGE, BATTERY_MIN_VOLTAGE, include_kicker_bin,
 };
 use control::Control;
 use defmt::info;
 use embassy_stm32::{
+    adc::{Adc, AdcPin, InternalChannel, SampleTime, Temperature},
     dma::NoDma,
     executor::InterruptExecutor,
     exti::ExtiInput,
@@ -24,10 +32,10 @@ use embassy_stm32::{
     spi,
     time::{hz, mhz},
     usart::{self, Uart},
+    wdg::IndependentWatchdog,
 };
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Delay, Duration, Ticker, Timer};
 use futures_util::StreamExt;
-use panic_probe as _;
 use pins::{
     PowerStateExti, PowerStatePin, RadioReset, RadioRxDMA, RadioTxDMA, RadioUART,
     ShutdownCompletePin,
@@ -39,13 +47,27 @@ use radio::{
 use smart_leds::{SmartLedsWrite, RGB8};
 use static_cell::StaticCell;
 
+use embassy_stm32::rcc::AdcClockSource;
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::pubsub::{PubSubChannel, Subscriber};
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 
 mod control;
 mod pins;
 mod radio;
+
+// Uncomment for testing:
+// use panic_probe as _;
+
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    defmt::error!("{}", defmt::Display2Format(info));
+    // Delay to give it a change to print
+    cortex_m::asm::delay(10_000_000);
+    cortex_m::peripheral::SCB::sys_reset();
+}
+
+include_kicker_bin! {KICKER_FW_IMG, "kicker.bin"}
 
 static RADIO_TEST: RadioTest<
     MAX_TX_PACKET_SIZE,
@@ -57,11 +79,14 @@ static RADIO_TEST: RadioTest<
     RadioTxDMA,
     RadioReset,
 > = RadioTest::new(unsafe { &mut BUFFERS_TX }, unsafe { &mut BUFFERS_RX });
-// include_external_cpp_bin! {KICKER_FW_IMG, "kicker.bin"}
 
 // pub sub channel for the gyro vals
 // CAP queue size, n_subs, n_pubs
 static GYRO_CHANNEL: PubSubChannel<ThreadModeRawMutex, f32, 2, 2, 2> = PubSubChannel::new();
+
+// pub sub channel for the battery raw adc vals
+// CAP queue size, n_subs, n_pubs
+static BATTERY_CHANNEL: PubSubChannel<ThreadModeRawMutex, f32, 2, 2, 2> = PubSubChannel::new();
 
 #[link_section = ".sram4"]
 static mut SPI6_BUF: [u8; 4] = [0x0; 4];
@@ -88,6 +113,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
     stm32_config.rcc.sys_ck = Some(mhz(400));
     stm32_config.rcc.hclk = Some(mhz(200));
     stm32_config.rcc.pclk1 = Some(mhz(100));
+    stm32_config.rcc.per_ck = Some(mhz(64));
+    stm32_config.rcc.adc_clock_source = AdcClockSource::PerCk;
     let p = embassy_stm32::init(stm32_config);
     let config = usart::Config::default();
 
@@ -99,7 +126,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
     let spawner = executor.start();
 
-    let mut imu_spi = spi::Spi::new_txonly(
+    let dotstar_spi = spi::Spi::new_txonly(
         p.SPI3,
         p.PB3,
         p.PB5,
@@ -109,7 +136,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         spi::Config::default(),
     );
 
-    let mut dotstar = Apa102::new(imu_spi);
+    let mut dotstar = Apa102::new(dotstar_spi);
     dotstar.write([RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
 
     info!("booted");
@@ -141,72 +168,44 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let dip6 = Input::new(p.PG2, Pull::Down);
     let dip7 = Input::new(p.PD15, Pull::Down);
 
-
-    // let mut kicker = Output::new(p.PF9, Level::Low, Speed::High);
-
     // let robot_id = rotary.read();
+
+    /////////////////////
+    // Dip Switch Inputs
+    /////////////////////
     let robot_id = (dip1.is_high() as u8) << 3
-    | (dip2.is_high() as u8) << 2
-    | (dip3.is_high() as u8) << 1
-    | (dip4.is_high() as u8);
+        | (dip2.is_high() as u8) << 2
+        | (dip3.is_high() as u8) << 1
+        | (dip4.is_high() as u8);
     info!("id: {}", robot_id);
     shell_indicator.set(robot_id);
+
+    let wifi_network = if dip5.is_high() & dip6.is_high() {
+        WifiNetwork::Team
+    } else if dip5.is_low() & dip6.is_high() {
+        WifiNetwork::CompMain
+    } else if dip5.is_high() & dip6.is_low() {
+        WifiNetwork::CompPractice
+    } else {
+        WifiNetwork::Team
+    };
+
     let team = if dip7.is_high() {
         TeamColor::Blue
     } else {
         TeamColor::Yellow
     };
 
-    // let mut test = Output::new(p.PA8, Level::High, Speed::Medium);
-    // let mut test2 = Output::new(p.PA9, Level::High, Speed::Medium);
-    // // let mut kicker_boot0_pin = Output::new(p.PA8, Level::High, Speed::Medium);
-    // // let mut kicker_reset_pin = Output::new(p.PA9, Level::High, Speed::Medium);
+    //////////////////
+    // Battery voltage
+    //////////////////
 
-    // loop {}
-
-    // let kicker_int = interrupt::take!(USART6);
-    // let kicker_usart = Uart::new(
-    //     p.USART6,
-    //     p.PC7,
-    //     p.PC6,
-    //     kicker_int,
-    //     p.DMA2_CH4,
-    //     p.DMA2_CH5,
-    //     get_bootloader_uart_config(),
-    // );
-    // let (kicker_tx, kicker_rx) = kicker_usart.split();
-    // let mut kicker_boot0_pin = Output::new(p.PA8, Level::Low, Speed::Medium);
-    // let mut kicker_reset_pin = Output::new(p.PA9, Level::Low, Speed::Medium);
-    // let kicker_reset_pin_bad = OutputOpenDrain::new(p.PA2, Level::Low, Speed::Medium, Pull::None);
-
-    // spawner
-    //     .spawn(KICKER_QUEUE_RX.spawn_task(kicker_rx))
-    //     .unwrap();
-    // spawner
-    //     .spawn(KICKER_QUEUE_TX.spawn_task(kicker_tx))
-    //     .unwrap();
-
-    // kicker_boot0_pin.set_high();
-    // let mut kicker_stm32_interface = Stm32Interface::new(
-    //     &KICKER_QUEUE_RX,
-    //     &KICKER_QUEUE_TX,
-    //     Some(kicker_boot0_pin),
-    //     Some(kicker_reset_pin_bad),
-    // );
-    // info!("start program");
-
-    // kicker_reset_pin.set_high();
-    // Timer::after(Duration::from_micros(100)).await;
-    // kicker_reset_pin.set_low();
-
-    // kicker_stm32_interface.load_firmware_image(KICKER_FW_IMG).await;
-    // kicker_reset_pin.set_high();
-    // Timer::after(Duration::from_micros(100)).await;
-    // kicker_reset_pin.set_low();
-
-    // info!("programmed");
-
-    // loop {}
+    let mut adc3 = Adc::new(p.ADC3, &mut Delay);
+    adc3.set_sample_time(SampleTime::Cycles1_5);
+    let mut battery_pin = p.PF5;
+    let mut battery_voltage_buffer: [f32; BATTERY_BUFFER_SIZE] =
+        [BATTERY_MAX_VOLTAGE; BATTERY_BUFFER_SIZE];
+    let battery_pub = BATTERY_CHANNEL.publisher().unwrap();
 
     let mut imu_spi = spi::Spi::new(
         p.SPI6,
@@ -243,21 +242,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
         let gyro_id = SPI6_BUF[1];
         info!("gyro id: 0x{:x}", gyro_id);
     }
-
-    // loop {}
-
-    // // loop {
-    //     let mut buf = [0x00u8; 4];
-    //     buf[0] = 0x86;
-    //     buf[2] = 0x87;
-    //     imu_cs2.set_low();
-    //     imu_spi.blocking_transfer_in_place(&mut buf);
-    //     imu_cs2.set_high();
-    //     // info!("xfer {=[u8]:x}", buf);
-    //     info!("xfer {}", (buf[3] << 8 + buf[1]) as i16);
-    // // }
-
-    // loop {}
 
     let front_right_int = interrupt::take!(USART1);
     let front_left_int = interrupt::take!(UART4);
@@ -312,6 +296,31 @@ async fn main(_spawner: embassy_executor::Spawner) {
     );
 
     let gyro_sub = GYRO_CHANNEL.subscriber().unwrap();
+    let battery_sub = BATTERY_CHANNEL.subscriber().unwrap();
+
+    if kicker_det.is_high() {
+        defmt::warn!("kicker appears unplugged!");
+    }
+
+    let kicker_int = interrupt::take!(USART6);
+    let kicker_usart = Uart::new(
+        p.USART6,
+        p.PC7,
+        p.PC6,
+        kicker_int,
+        p.DMA2_CH4,
+        p.DMA2_CH5,
+        get_bootloader_uart_config(),
+    );
+
+    let (kicker_tx, kicker_rx) = kicker_usart.split();
+    spawner
+        .spawn(KICKER_QUEUE_RX.spawn_task(kicker_rx))
+        .unwrap();
+    spawner
+        .spawn(KICKER_QUEUE_TX.spawn_task(kicker_tx))
+        .unwrap();
+
     let ball_detected_thresh = 1.0;
     let mut control = Control::new(
         &spawner,
@@ -331,14 +340,40 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.PB8,
         p.PD12,
         ball_detected_thresh,
-        gyro_sub
+        gyro_sub,
+        battery_sub,
     );
 
     dotstar.write([RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
 
     control.load_firmware().await;
 
-    dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
+    info!("flashing kicker...");
+
+    let kicker_boot0_pin = Output::new(p.PA8, Level::Low, Speed::Medium);
+    let kicker_reset_pin = Output::new(p.PA9, Level::Low, Speed::Medium);
+    let kicker_stm32_interface = Stm32Interface::new_noninverted_reset(
+        &KICKER_QUEUE_RX,
+        &KICKER_QUEUE_TX,
+        Some(kicker_boot0_pin),
+        Some(kicker_reset_pin),
+    );
+    let kicker_firmware_image = KICKER_FW_IMG;
+    let mut kicker = Kicker::new(kicker_stm32_interface, kicker_firmware_image);
+    let res = kicker.load_default_firmware_image().await;
+
+    if res.is_err() {
+        defmt::warn!("kicker flashing failed.");
+        loop {}
+    } else {
+        info!("kicker flash complete");
+    }
+
+    dotstar.write(
+        [RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 0, b: 10 }]
+            .iter()
+            .cloned(),
+    );
 
     let token = unsafe {
         (&mut *(&RADIO_TEST as *const _
@@ -352,17 +387,27 @@ async fn main(_spawner: embassy_executor::Spawner) {
                 RadioTxDMA,
                 RadioReset,
             >))
-            .setup(&spawner, radio_usart, p.PC13, robot_id, team)
+            .setup(&spawner, radio_usart, p.PC13, robot_id, team, wifi_network)
             .await
     };
     spawner.spawn(token).unwrap();
 
-    dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 10, b: 0 }].iter().cloned());
+    dotstar.write(
+        [RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 10, b: 0 }]
+            .iter()
+            .cloned(),
+    );
+
+    let mut wdg = IndependentWatchdog::new(p.IWDG1, 1_000_000);
+    unsafe { wdg.unleash() }
 
     let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
 
-    let mut last_kicked = 1000;
+    kicker.set_telemetry_enabled(true);
+    kicker.send_command();
+
     loop {
+        unsafe { wdg.pet() };
         let latest = RADIO_TEST.get_latest_control();
         // let latest = Some(BasicControl{
         //     vel_x_linear: 0.,
@@ -386,21 +431,52 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
         // could just feed gyro in here but the comment in control said to use a channel
 
+        //
+        // Battery reading
+        //
+
+        let current_battery_v =
+            adc_v_to_battery_voltage(adc_raw_to_v(adc3.read(&mut battery_pin) as f32));
+        // Shift buffer through
+        for i in (0..(BATTERY_BUFFER_SIZE - 1)).rev() {
+            battery_voltage_buffer[i + 1] = battery_voltage_buffer[i];
+        }
+        // Add new battery read
+        battery_voltage_buffer[0] = current_battery_v;
+        let battery_voltage_sum: f32 = battery_voltage_buffer.iter().sum();
+        let filter_battery_v = battery_voltage_sum / (BATTERY_BUFFER_SIZE as f32);
+        battery_pub.publish_immediate(filter_battery_v);
+
+        if filter_battery_v < BATTERY_MIN_VOLTAGE {
+            dotstar.write(
+                [RGB8 { r: 10, g: 0, b: 0 }, RGB8 { r: 10, g: 0, b: 0 }]
+                    .iter()
+                    .cloned(),
+            );
+            defmt::error!("Error filtered battery voltage too low");
+            critical_section::with(|_| loop {
+                cortex_m::asm::delay(1_000_000);
+                unsafe { wdg.pet() };
+            });
+        }
+
+        //
+        // Telemtry
+        //
 
         let telemetry = control.tick(latest);
         if let Some(telemetry) = telemetry.await {
             // info!("{:?}", defmt::Debug2Format(&telemetry));
             RADIO_TEST.send_telemetry(telemetry).await;
         }
-        if let Some(latest) = &latest {
-            if last_kicked > 100 && latest.kick_request == KickRequest::KR_KICK_NOW {
-                // kicker.set_high();
-                // Timer::after(Duration::from_micros(3500)).await;
-                // kicker.set_low();
-                last_kicked = 0;
-            }
+
+        kicker.process_telemetry();
+
+        if let Some(control) = latest {
+            kicker.set_kick_strength(control.kick_vel);
+            kicker.request_kick(control.kick_request);
+            kicker.send_command();
         }
-        last_kicked = core::cmp::min(last_kicked + 1, 1000);
 
         main_loop_rate_ticker.next().await;
     }

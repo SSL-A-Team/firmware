@@ -1,17 +1,19 @@
 use core::cell::RefCell;
 
 use ateam_common_packets::bindings_radio::{BasicControl, BasicTelemetry};
-use core::future::Future;
-use defmt::*;
-use embassy_executor::{raw::TaskStorage, SendSpawner, SpawnToken};
-use embassy_stm32::{gpio::Pin, interrupt::Interrupt, usart, Peripheral};
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-use embassy_time::Duration;
 use ateam_control_board::{
-    drivers::radio::{RobotRadio, TeamColor},
+    drivers::radio::{RobotRadio, TeamColor, WifiNetwork},
     queue,
     uart_queue::{UartReadQueue, UartWriteQueue},
 };
+use core::future::Future;
+use defmt::*;
+use embassy_executor::{raw::TaskStorage, SendSpawner, SpawnToken};
+use embassy_futures::join::join;
+use embassy_stm32::{gpio::Pin, interrupt::Interrupt, usart, Peripheral};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embassy_time::{Duration, Ticker};
+use futures_util::StreamExt;
 
 pub const MAX_TX_PACKET_SIZE: usize = 256;
 pub const TX_BUF_DEPTH: usize = 4;
@@ -125,7 +127,7 @@ pub struct RadioTest<
         ControlTaskFuture<UART, RxDma, TxDma, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, ResetPin>,
     >,
     latest_control: Mutex<CriticalSectionRawMutex, Option<BasicControl>>,
-    radio:  Option<
+    radio: Option<
         RobotRadio<'static, UART, RxDma, TxDma, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, ResetPin>,
     >,
 }
@@ -180,6 +182,7 @@ where
         reset_pin: impl Peripheral<P = ResetPin> + 'static,
         id: u8,
         team: TeamColor,
+        wifi_network: WifiNetwork,
     ) -> SpawnToken<impl Sized> {
         let (tx, rx) = uart.split();
 
@@ -191,7 +194,7 @@ where
             .unwrap();
 
         info!("radio created");
-        radio.connect_to_network().await.unwrap();
+        radio.connect_to_network(wifi_network).await.unwrap();
         info!("radio connected");
 
         radio.open_multicast().await.unwrap();
@@ -224,11 +227,10 @@ where
             // *radio_self = Some(radio);
         }
 
-
         // self.task.spawn(|| self.control_task())
-        self.task.spawn(|| Self::control_task(self.radio.as_ref().unwrap(), &self.latest_control))
+        self.task
+            .spawn(|| Self::control_task(self.radio.as_ref().unwrap(), &self.latest_control))
         // spawner.spawn(token).unwrap();
-
     }
 
     // fn spawn_task(&'static self, ) -> SpawnToken<impl Sized> {
@@ -250,14 +252,35 @@ where
         >,
         latest_control: &'static Mutex<CriticalSectionRawMutex, Option<BasicControl>>,
     ) -> ControlTaskFuture<UART, RxDma, TxDma, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, ResetPin> {
+        let last_control: Mutex<CriticalSectionRawMutex, bool> = Mutex::new(true);
         async move {
-            loop {
-                let control = radio.read_control().await;
-                if let Ok(control) = control {
-                    let mut latest_control = latest_control.lock().await;
-                    *latest_control = Some(control);
-                }
-            }
+            join(
+                (async || loop {
+                    let control = radio.read_control().await;
+                    if let Ok(control) = control {
+                        let mut latest_control = latest_control.lock().await;
+                        *latest_control = Some(control);
+                        {
+                            let mut last_control = last_control.lock().await;
+                            *last_control = true;
+                        }
+                    }
+                })(),
+                (async || {
+                    let mut no_packet_timeout = Ticker::every(Duration::from_millis(3000));
+                    loop {
+                        {
+                            let mut last_control = last_control.lock().await;
+                            if !*last_control {
+                                cortex_m::peripheral::SCB::sys_reset();
+                            }
+                            *last_control = false;
+                        }
+                        no_packet_timeout.next().await;
+                    }
+                })(),
+            )
+            .await;
         }
     }
 
@@ -276,7 +299,12 @@ where
 
     // write telemetry to queue
     pub async fn send_telemetry(&self, telemetry: BasicTelemetry) {
-        self.radio.as_ref().unwrap().send_telemetry(telemetry).await.unwrap();
+        self.radio
+            .as_ref()
+            .unwrap()
+            .send_telemetry(telemetry)
+            .await
+            .unwrap();
     }
 
     // fetch latest stored control value

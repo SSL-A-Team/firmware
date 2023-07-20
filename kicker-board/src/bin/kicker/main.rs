@@ -12,38 +12,37 @@ use {defmt_rtt as _, panic_probe as _};
 use cortex_m::peripheral::NVIC;
 use cortex_m_rt::entry;
 
-use libm::{fminf, fmaxf};
+use libm::{fmaxf, fminf};
 
 use embassy_executor::{Executor, InterruptExecutor};
 use embassy_stm32::{
     adc::{Adc, SampleTime},
-    pac::Interrupt,
+    bind_interrupts,
     gpio::{Level, Output, Speed},
+    interrupt,
+    pac::Interrupt,
+    peripherals,
     time::mhz,
-    usart::{Uart, Parity, StopBits, Config},
-    interrupt, bind_interrupts, peripherals, usart
+    usart,
+    usart::{Config, Parity, StopBits, Uart},
 };
 use embassy_time::{Delay, Duration, Instant, Ticker};
 
 use ateam_kicker_board::{
-    adc_raw_to_v,
-    adc_v_to_battery_voltage,
-    adc_v_to_rail_voltage,
-    kick_manager::{
-        KickManager, 
-        KickType},
+    adc_raw_to_v, adc_v_to_battery_voltage, adc_v_to_rail_voltage,
+    kick_manager::{KickManager, KickType},
     pins::{
-        HighVoltageReadPin, BatteryVoltageReadPin,
-        ChargePin, KickPin, ChipPin,
-        ComsUartModule, ComsUartRxDma, ComsUartTxDma, RedStatusLedPin, BlueStatusLedPin},
+        BatteryVoltageReadPin, BlueStatusLedPin, ChargePin, ChipPin, ComsUartModule, ComsUartRxDma,
+        ComsUartTxDma, HighVoltageReadPin, KickPin, RedStatusLedPin, BreakbeamTxPin, BreakbeamRxPin,
+    },
     queue::Buffer,
-    uart_queue::{
-        UartReadQueue,
-        UartWriteQueue,
-    }
+    uart_queue::{UartReadQueue, UartWriteQueue}, drivers::breakbeam::Breakbeam,
 };
 
-use ateam_common_packets::bindings_kicker::{KickerControl, KickerTelemetry, KickRequest::{self, KR_ARM, KR_DISABLE}};
+use ateam_common_packets::bindings_kicker::{
+    KickRequest::{self, KR_ARM, KR_DISABLE},
+    KickerControl, KickerTelemetry,
+};
 
 const MAX_TX_PACKET_SIZE: usize = 16;
 const TX_BUF_DEPTH: usize = 3;
@@ -51,7 +50,7 @@ const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 3;
 
 const MAX_KICK_SPEED: f32 = 5.5;
-const SHUTDOWN_KICK_DUTY: f32 = 0.05;
+const SHUTDOWN_KICK_DUTY: f32 = 0.20;
 
 pub const CHARGE_TARGET_VOLTAGE: f32 = 182.0;
 pub const CHARGE_OVERVOLT_THRESH_VOLTAGE: f32 = 190.0;
@@ -62,15 +61,23 @@ pub const CHARGE_SAFE_VOLTAGE: f32 = 5.0;
 // #[link_section = ".axisram.buffers"]
 static mut COMS_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
     [Buffer::EMPTY; TX_BUF_DEPTH];
-static COMS_QUEUE_TX: UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
-    UartWriteQueue::new(unsafe { &mut COMS_BUFFERS_TX });
+static COMS_QUEUE_TX: UartWriteQueue<
+    ComsUartModule,
+    ComsUartTxDma,
+    MAX_TX_PACKET_SIZE,
+    TX_BUF_DEPTH,
+> = UartWriteQueue::new(unsafe { &mut COMS_BUFFERS_TX });
 
 // control communications rx buffer
 // #[link_section = ".axisram.buffers"]
 static mut COMS_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
     [Buffer::EMPTY; RX_BUF_DEPTH];
-static COMS_QUEUE_RX: UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
-    UartReadQueue::new(unsafe { &mut COMS_BUFFERS_RX });
+static COMS_QUEUE_RX: UartReadQueue<
+    ComsUartModule,
+    ComsUartRxDma,
+    MAX_RX_PACKET_SIZE,
+    RX_BUF_DEPTH,
+> = UartReadQueue::new(unsafe { &mut COMS_BUFFERS_RX });
 
 fn get_empty_control_packet() -> KickerControl {
     KickerControl {
@@ -92,17 +99,31 @@ fn get_empty_telem_packet() -> KickerTelemetry {
 
 #[embassy_executor::task]
 async fn high_pri_kick_task(
-        coms_reader: &'static UartReadQueue<'static, ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>,
-        coms_writer: &'static UartWriteQueue<'static, ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>,
-        mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
-        charge_pin: ChargePin,
-        kick_pin: KickPin,
-        chip_pin: ChipPin,
-        mut rail_pin: HighVoltageReadPin,
-        mut battery_voltage_pin: BatteryVoltageReadPin,
-        err_led_pin: RedStatusLedPin,
-        ball_detected_led_pin: BlueStatusLedPin) -> ! {
-
+    coms_reader: &'static UartReadQueue<
+        'static,
+        ComsUartModule,
+        ComsUartRxDma,
+        MAX_RX_PACKET_SIZE,
+        RX_BUF_DEPTH,
+    >,
+    coms_writer: &'static UartWriteQueue<
+        'static,
+        ComsUartModule,
+        ComsUartTxDma,
+        MAX_TX_PACKET_SIZE,
+        TX_BUF_DEPTH,
+    >,
+    mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
+    charge_pin: ChargePin,
+    kick_pin: KickPin,
+    chip_pin: ChipPin,
+    breakbeam_tx: BreakbeamTxPin,
+    breakbeam_rx: BreakbeamRxPin,
+    mut rail_pin: HighVoltageReadPin,
+    mut battery_voltage_pin: BatteryVoltageReadPin,
+    err_led_pin: RedStatusLedPin,
+    ball_detected_led_pin: BlueStatusLedPin,
+) -> ! {
     // pins/safety management
     let charge_pin = Output::new(charge_pin, Level::Low, Speed::Medium);
     let kick_pin = Output::new(kick_pin, Level::Low, Speed::Medium);
@@ -114,6 +135,8 @@ async fn high_pri_kick_task(
     let mut ball_detected_led = Output::new(ball_detected_led_pin, Level::Low, Speed::Low);
     // TODO dotstars
 
+    let mut breakbeam = Breakbeam::new(breakbeam_tx, breakbeam_rx);
+
     // coms buffers
     let mut telemetry_enabled: bool; //  = false;
     let mut kicker_control_packet: KickerControl = get_empty_control_packet();
@@ -123,6 +146,7 @@ async fn high_pri_kick_task(
     let mut kick_command_cleared: bool = false;
     let mut latched_command = KickRequest::KR_DISABLE;
     let mut error_latched: bool = false;
+    let mut charge_hv_rail: bool = false;
 
     // power down status
     let mut shutdown_requested: bool = false;
@@ -132,15 +156,20 @@ async fn high_pri_kick_task(
     let mut ticker = Ticker::every(Duration::from_millis(1));
     let mut last_packet_sent_time = Instant::now();
 
+    breakbeam.enable_tx();
     loop {
-        let rail_voltage = adc_v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32));
-        let battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(adc.read(&mut battery_voltage_pin) as f32));
-        // optionally pre-flag errors? 
+        let mut vrefint = adc.enable_vref(&mut Delay);
+        let vrefint_sample = adc.read_internal(&mut vrefint);
+
+        let rail_voltage = adc_v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32, vrefint_sample as f32));
+        let battery_voltage =
+            adc_v_to_battery_voltage(adc_raw_to_v(adc.read(&mut battery_voltage_pin) as f32, vrefint_sample as f32));
+        // optionally pre-flag errors?
 
         /////////////////////////////////////
         //  process any available packets  //
         /////////////////////////////////////
-        
+
         while let Ok(res) = coms_reader.try_dequeue() {
             let buf = res.data();
 
@@ -155,12 +184,12 @@ async fn high_pri_kick_task(
                 let state = &mut kicker_control_packet as *mut _ as *mut u8;
                 for i in 0..core::mem::size_of::<KickerControl>() {
                     *state.offset(i as isize) = buf[i];
-                }                
+                }
             }
         }
 
         // TODO: read breakbeam
-        let ball_detected = false;
+        let ball_detected = breakbeam.read();
 
         ///////////////////////////////////////////////
         //  manage repetitive kick commands + state  //
@@ -183,26 +212,38 @@ async fn high_pri_kick_task(
             error_latched = true;
         }
 
-        // charge if were not in shutdown mode AND the control board has requested any state but "DISABLE" 
-        let charge_hv_rail = if shutdown_requested || shutdown_completed {
+        // charge if were not in shutdown mode AND the control board has requested any state but "DISABLE"
+        charge_hv_rail = if shutdown_requested || shutdown_completed {
             false
         } else {
-            kicker_control_packet.kick_request != KickRequest::KR_DISABLE
+            match kicker_control_packet.kick_request {
+                KickRequest::KR_ARM => true,
+                KickRequest::KR_DISABLE => false,
+                KickRequest::KR_KICK_NOW
+                | KickRequest::KR_KICK_CAPTURED
+                | KickRequest::KR_KICK_TOUCH
+                | KickRequest::KR_CHIP_NOW
+                | KickRequest::KR_CHIP_CAPTURED
+                | KickRequest::KR_CHIP_TOUCH => charge_hv_rail,
+                _ => false,
+            }
         };
 
         // scale kick strength from m/s to duty for the critical section
         // if shutdown is requested and not complete, set kick discharge kick strength to 5%
         let kick_strength = if shutdown_completed {
             0.0
-        }else if shutdown_requested { 
+        } else if shutdown_requested {
             SHUTDOWN_KICK_DUTY
         } else {
-            fmaxf(0.0, fminf(MAX_KICK_SPEED, kicker_control_packet.kick_speed)) / MAX_KICK_SPEED 
+            fmaxf(0.0, fminf(MAX_KICK_SPEED, kicker_control_packet.kick_speed)) / MAX_KICK_SPEED
         };
 
         // if control requests only an ARM or DISABLE, clear the active command
         // software/joystick is not asserting a kick event, so any future kick event is a unique request
-        if kicker_control_packet.kick_request == KR_ARM || kicker_control_packet.kick_request == KR_DISABLE {
+        if kicker_control_packet.kick_request == KR_ARM
+            || kicker_control_packet.kick_request == KR_DISABLE
+        {
             kick_command_cleared = true;
         }
 
@@ -214,55 +255,45 @@ async fn high_pri_kick_task(
         // determine if the latched command is actionable
         // if a shutdown is requested and not completed, always request a kick
         let kick_command = if shutdown_completed {
-            KickType::None 
+            KickType::None
         } else if shutdown_requested {
-            KickType::Kick 
-        } else { 
+            KickType::Kick
+        } else {
             match latched_command {
-                KickRequest::KR_DISABLE => {
-                    KickType::None
-                },
-                KickRequest::KR_ARM => {
-                    KickType::None
-                },
-                KickRequest::KR_KICK_NOW => {
-                    KickType::Kick
-                },
+                KickRequest::KR_DISABLE => KickType::None,
+                KickRequest::KR_ARM => KickType::None,
+                KickRequest::KR_KICK_NOW => KickType::Kick,
                 KickRequest::KR_KICK_TOUCH => {
                     if ball_detected {
                         KickType::Kick
                     } else {
                         KickType::None
                     }
-                },
+                }
                 KickRequest::KR_KICK_CAPTURED => {
                     if ball_detected && rail_voltage > CHARGED_THRESH_VOLTAGE {
                         KickType::Kick
                     } else {
                         KickType::None
                     }
-                },
-                KickRequest::KR_CHIP_NOW => {
-                    KickType::Chip
-                },
+                }
+                KickRequest::KR_CHIP_NOW => KickType::Chip,
                 KickRequest::KR_CHIP_TOUCH => {
                     if ball_detected {
                         KickType::Chip
                     } else {
                         KickType::None
                     }
-                },
+                }
                 KickRequest::KR_CHIP_CAPTURED => {
                     if ball_detected && rail_voltage > CHARGED_THRESH_VOLTAGE {
                         KickType::Chip
                     } else {
                         KickType::None
                     }
-                },
-                // possible if packet decoding has corrupted enum val
-                _ => {
-                    KickType::None
                 }
+                // possible if packet decoding has corrupted enum val
+                _ => KickType::None,
             }
         };
 
@@ -276,9 +307,25 @@ async fn high_pri_kick_task(
         // perform charge/kick actions. this function handles elec/mechanical safety
         // if telemetry isn't enabled, the control board doesn't want to talk to us, don't permit any actions
         let res = if !telemetry_enabled || error_latched {
-            kick_manager.command(battery_voltage, rail_voltage, false, KickType::None, 0.0).await
+            kick_manager
+                .command(battery_voltage, rail_voltage, false, KickType::None, 0.0)
+                .await
         } else {
-            kick_manager.command(battery_voltage, rail_voltage, charge_hv_rail, kick_command, kick_strength).await
+            if kick_command == KickType::Kick || kick_command == KickType::Chip {
+                kicker_control_packet.kick_request = match charge_hv_rail {
+                    true => KickRequest::KR_ARM,
+                    false => KickRequest::KR_DISABLE,
+                }
+            }
+            kick_manager
+                .command(
+                    battery_voltage,
+                    rail_voltage,
+                    charge_hv_rail,
+                    kick_command,
+                    kick_strength,
+                )
+                .await
         };
 
         // this will permanently latch an error if the rail voltages are low
@@ -291,8 +338,17 @@ async fn high_pri_kick_task(
         // send telemetry packet
         if telemetry_enabled {
             let cur_time = Instant::now();
-            if Instant::checked_duration_since(&cur_time, last_packet_sent_time).unwrap().as_millis() > 20 {
-                kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(shutdown_requested as u32, shutdown_completed as u32, ball_detected as u32, res.is_err() as u32);
+            if Instant::checked_duration_since(&cur_time, last_packet_sent_time)
+                .unwrap()
+                .as_millis()
+                > 20
+            {
+                kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(
+                    shutdown_requested as u32,
+                    shutdown_completed as u32,
+                    ball_detected as u32,
+                    res.is_err() as u32,
+                );
                 kicker_telemetry_packet.rail_voltage = rail_voltage;
                 kicker_telemetry_packet.battery_voltage = battery_voltage;
 
@@ -303,7 +359,7 @@ async fn high_pri_kick_task(
                         (&kicker_telemetry_packet as *const KickerTelemetry) as *const u8,
                         core::mem::size_of::<KickerTelemetry>(),
                     );
-        
+
                     // send the packet
                     let _res = coms_writer.enqueue_copy(struct_bytes);
                 }
@@ -329,7 +385,6 @@ async fn high_pri_kick_task(
         // loop rate control @1KHz
         ticker.next().await;
     }
-
 }
 
 static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
@@ -367,7 +422,20 @@ fn main() -> ! {
     // TODO CHECK THIS IS THE HIGHEST PRIORITY
     unsafe { nvic.set_priority(Interrupt::I2C1, 6 << 4) };
     let spawner = EXECUTOR_HIGH.start(Interrupt::I2C1);
-    unwrap!(spawner.spawn(high_pri_kick_task(&COMS_QUEUE_RX, &COMS_QUEUE_TX, adc, p.PB3, p.PB0, p.PB1, p.PA0, p.PA1, p.PA12, p.PA8)));
+    unwrap!(spawner.spawn(high_pri_kick_task(
+        &COMS_QUEUE_RX,
+        &COMS_QUEUE_TX,
+        adc,
+        p.PB3,
+        p.PB0,
+        p.PB1,
+        p.PA3,
+        p.PA2,
+        p.PA0,
+        p.PA1,
+        p.PA12,
+        p.PA8
+    )));
 
     //////////////////////////////////
     //  COMMUNICATIONS TASKS SETUP  //

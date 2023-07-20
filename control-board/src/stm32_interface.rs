@@ -35,7 +35,6 @@ pub fn get_bootloader_uart_config() -> Config {
     let mut config = usart::Config::default();
     config.baudrate = 115_200; // max officially support baudrate
     config.parity = Parity::ParityEven;
-    config.stop_bits = StopBits::STOP0P5;
     config
 }
 

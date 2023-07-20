@@ -15,8 +15,8 @@ pub mod drivers;
 
 pub const ADC_VREFINT_NOMINAL: f32 = 1230.0; // mV
 
-pub const fn adc_raw_to_v(adc_raw: f32) -> f32 {
-    adc_raw / ADC_VREFINT_NOMINAL
+pub const fn adc_raw_to_v(adc_raw: f32, vrefint_sample: f32) -> f32 {
+    adc_raw * ADC_VREFINT_NOMINAL / vrefint_sample / 1000.
 }
 
 pub const fn adc_v_to_battery_voltage(adc_mv: f32) -> f32 {
