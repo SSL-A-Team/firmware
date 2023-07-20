@@ -1,0 +1,21 @@
+{
+    "cmake.configureOnOpen": false,
+
+    ///////////////////
+    //  RUST CONFIG  //
+    ///////////////////
+    // choose the shim script as the rust-analyzer server. By default the VSCode extension
+    // uses an internal analyzer which doesn't support some nightly features and ABIs, and
+    // doesn't support the way Nix sets up the dev environment
+    "rust-analyzer.server.path": "${workspaceFolder}/util/rust-analyzer-shim.bash",
+    // stops the incorrect expansion of some embassy macros
+    "rust-analyzer.procMacro.server": null,
+    // tell RA not to check compilation against all targets. This would attempt to analyze
+    // embassy code against unsupported ABI targets, which always failes. Each sub-create
+    // specifies the targets ABI via that create's settings.json using the 
+    // "rust-analyzer.cargo.target": "thumbv7em-none-eabihf" key.
+    "rust-analyzer.check.allTargets": false,
+    // don't show notifications for unlinked Cargo.toml files. This is misleads folks into
+    // including projects under incorrect ABIs.
+    "rust-analyzer.showUnlinkedFileNotification": false
+}
