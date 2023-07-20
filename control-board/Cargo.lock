@@ -41,6 +41,7 @@ name = "ateam-common-packets"
 version = "1.0.0"
 dependencies = [
  "bindgen",
+ "which",
 ]
 
 [[package]]
@@ -49,6 +50,7 @@ version = "0.1.0"
 dependencies = [
  "apa102-spi",
  "ateam-common-packets",
+ "ateam-credentials",
  "const_format",
  "cortex-m",
  "cortex-m-rt",
@@ -66,9 +68,14 @@ dependencies = [
  "libm",
  "nalgebra",
  "panic-probe",
+ "public-ateam-credentials",
  "smart-leds",
  "static_cell",
 ]
+
+[[package]]
+name = "ateam-credentials"
+version = "1.0.0"
 
 [[package]]
 name = "atomic-polyfill"
@@ -830,9 +837,9 @@ dependencies = [
 
 [[package]]
 name = "heck"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2540771e65fc8cb83cd6e8a237f70c319bd5c29f78ed1084ba5d50eeac86f7f9"
+checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
 
 [[package]]
 name = "hermit-abi"
@@ -1130,18 +1137,22 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.43"
+version = "1.0.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a2ca2c61bc9f3d74d2886294ab7b9853abd9c1ad903a3ac7815c58989bb7bab"
+checksum = "18fb31db3f9bddb2ea821cde30a9f70117e3f119938b5ee630b7403aa6e2ead9"
 dependencies = [
  "unicode-ident",
 ]
 
 [[package]]
+name = "public-ateam-credentials"
+version = "1.0.0"
+
+[[package]]
 name = "quote"
-version = "1.0.21"
+version = "1.0.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbe448f377a7d6961e30f5955f9b8d106c3f5e449d493ee1b125c1d43c2b5179"
+checksum = "5fe8a65d69dd0808184ebb5f836ab526bb259db23c657efa38711b1072ee47f0"
 dependencies = [
  "proc-macro2",
 ]
@@ -1541,9 +1552,9 @@ dependencies = [
 
 [[package]]
 name = "which"
-version = "4.3.0"
+version = "4.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c831fbbee9e129a8cf93e7747a82da9d95ba8e16621cae60ec2cdc849bacb7b"
+checksum = "2441c784c52b289a054b7201fc93253e288f094e2f4be9058343127c4226a269"
 dependencies = [
  "either",
  "libc",

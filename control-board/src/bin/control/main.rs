@@ -56,6 +56,11 @@ mod control;
 mod pins;
 mod radio;
 
+#[cfg(not(feature = "no-private-credentials"))]
+use ateam_credentials::wifi_credentials;
+#[cfg(feature = "no-private-credentials")]
+use public_ateam_credentials::wifi_credentials;
+
 // Uncomment for testing:
 // use panic_probe as _;
 
@@ -405,6 +410,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     kicker.set_telemetry_enabled(true);
     kicker.send_command();
+
+    defmt::info!("using SSID: {}", wifi_credentials[0].get_ssid());
 
     loop {
         unsafe { wdg.pet() };
