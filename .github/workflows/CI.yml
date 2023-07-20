@@ -9,13 +9,21 @@ jobs:
   test-firmware-build:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v3
+      - name: Fetch Submodules
+        uses: webfactory/ssh-agent@v0.7.0
         with:
-          submodules: recursive
+          ssh-private-key: |
+            ${{ secrets.ROBOT_PRIVATE_DATA_PRIVATE_SSH_KEY }}
+      - run: get submodule update --init --recursive
+
+        # with:
+        #   submodules: recursive
       - uses: cachix/install-nix-action@v16
         with:
           extra_nix_config:
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+            
       - name: Validate Nix Envoirnment
         shell: bash
         run: |
