@@ -21,7 +21,7 @@ Clone the firmware repository into your system.
 If you are a member of the A-Team:
 `git submodule update --init --recursive`
 If you are not a member of the A-Team (you will not be able clone our Wifi credentials):
-`git -c submodule."SSL-A-Team/robot-private-data".update=none submodule update --init --recursive`
+`git -c submodule."ateam-private-credentials".update=none submodule update --init --recursive`
 `export NO_ATEAM_WIFI_CREDENTIALS=true`
 
 For Windows users, you must clone the repository from within the WSL2 shell into a WSL2 directory. Do

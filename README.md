@@ -8,7 +8,7 @@ Follow the [first time setup guide](SETUP.md).
 
 If you are not a member of the A-Team, you will not have access to the private repository that store our Wifi credentials.
 Please set `export NO_ATEAM_WIFI_CREDENTIALS=true` in your shell, so the build system will load dummy credentials. You can
-set them in `public-ateam-credentials/src/lib.rs`.
+set them in `ateam-credentials/src/public_credentials/wifi.rs`.
 
 ## Building Firmware
 

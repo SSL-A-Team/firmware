@@ -1,0 +1,13 @@
+[package]
+name = "ateam-credentials"
+version = "1.0.0"
+description = "Containes WiFi credentials our bots use to connect."
+repository = "https://github.com/SSL-A-Team/firmware"
+
+[lib]
+bench = false
+path = "src/lib.rs"
+
+[features]
+default = []
+no-private-credentials = []

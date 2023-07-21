@@ -68,7 +68,6 @@ dependencies = [
  "libm",
  "nalgebra",
  "panic-probe",
- "public-ateam-credentials",
  "smart-leds",
  "static_cell",
 ]
@@ -1143,10 +1142,6 @@ checksum = "18fb31db3f9bddb2ea821cde30a9f70117e3f119938b5ee630b7403aa6e2ead9"
 dependencies = [
  "unicode-ident",
 ]
-
-[[package]]
-name = "public-ateam-credentials"
-version = "1.0.0"
 
 [[package]]
 name = "quote"

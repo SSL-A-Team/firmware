@@ -3,7 +3,7 @@
 ifdef NO_ATEAM_WIFI_CREDENTIALS
 ifeq ($(NO_ATEAM_WIFI_CREDENTIALS),true)
 $(warning "Building without A-Team Wifi credentials.")
-additional_control_cargo_flags := --no-default-features --features=no-private-credentials
+additional_control_cargo_flags := --features=no-private-credentials
 else
 $(info "Building with A-Team Wifi credentials.")
 additional_control_cargo_flags :=

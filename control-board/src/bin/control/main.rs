@@ -57,9 +57,9 @@ mod pins;
 mod radio;
 
 #[cfg(not(feature = "no-private-credentials"))]
-use ateam_credentials::wifi_credentials;
+use ateam_credentials::private_credentials::wifi::wifi_credentials;
 #[cfg(feature = "no-private-credentials")]
-use public_ateam_credentials::wifi_credentials;
+use ateam_credentials::public_credentials::wifi::wifi_credentials;
 
 // Uncomment for testing:
 // use panic_probe as _;
