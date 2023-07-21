@@ -2,88 +2,44 @@
 
 This is the unified firmware repository for the A-Team.
 
-## Environment Setup
+## Setup
 
-We use the [Nix package manager](https://nixos.org/) to handle dependencies. Install options are below:
-- Linux Auto-Setup: `./util/linux_setup.sh`.
-- Linux Manual: `sh <(curl -L https://nixos.org/nix/install) --daemon`
-- Windows Subsystem for Linux (WSL) Manual: `sh <(curl -L https://nixos.org/nix/install) --no-daemon`
-- OSX Manual: `sh <(curl -L https://nixos.org/nix/install)`
+Follow the [first time setup guide](SETUP.md).
 
-Enable flakes by adding the following to `/etc/nix/nix.conf`:
-```
-experimental-features = nix-command flakes
-```
-
-### Enter the Development Environment
-
-Run `nix develop` to enter a shell with all required dependencies on the path.
-
-Run `exit` to leave the shell.
-
-### Adding Dependencies
-
-Edit flake.nix and run `nix flake update`. You should commit both flake.nix and flake.lock.
-
-### Supported Platforms
-
-We support the following platforms that have a valid Nix install:
-- "aarch64-darwin"
-- "aarch64-linux"
-- "x86\_64-darwin"
-- "x86\_64-linux"
-
-### Configuring VS Code Rust Analyzer 
-
-By default the rust-analyzer targets the host system, which is wrong since our targets are cross compiled. The following snippet
-correctly sets the target. You'll need to run vscode from the `nix develop` shell so it can find the correct cross target
-analyser.
-
-```
-{
-    "rust-analyzer.cargo.target": "thumbv7em-none-eabihf",
-    "rust-analyzer.checkOnSave.allTargets": false,
-    "rust-analyzer.server.path": "/nix/store/gghbkcpaqzrs0hysswi88s1l4slc8cbd-rust-analyzer-2022-06-13/bin/rust-analyzer",
-    "rust-analyzer.procMacro.server": null,
-}
-```
-
-This should probably somehow be included in the repo directly in a settings.json file but I'm haven't looked up how to do it.
+If you are not a member of the A-Team, you will not have access to the private repository that store our Wifi credentials.
+Please set `export NO_ATEAM_WIFI_CREDENTIALS=true` in your shell, so the build system will load dummy credentials. You can
+set them in `public-ateam-credentials/src/lib.rs`.
 
 ## Building Firmware
 
-Run `make <target>` to build an ELF and flat bin of each target. This wraps both CMake C/C++ targets and Rust targets. Suggest tab autocomplete to enumerate all targets.
+Begin by entering the Nix environment `nix develop`. If you use a shell other than bash, you can try `nix develop -c $SHELL` 
+to stay in your preferred shell.
 
-Most targets have several variants:
- - `<name>` build the target in release mode
- - `<name>-prog` build the target in release mode, write to flash
- - `<name>-debug` build the target in debug mode
- - `<name>-debug-gdb` build the target in debug mode, write to flash, attach gdb under phy target reset
- - `<name>-debug-mon` build the target in debug mode, attach a monitor to the output of `hprintln!` macros
- - `<name>-debug-prog` build the target in debug mode, write to flash
+A top level Makefile is provided for all targets. Targets in the form `<module>--<binary>--<action>`.
 
-## Passing Through a USB Device
+The primary command `make control-board--control--run` will build all robot firmware, flash hardware, and run the image.
 
-[Microsoft USB Passthrough Documentation](https://learn.microsoft.com/en-us/windows/wsl/connect-usb)
+### List of Modules
 
-Above link for the passthrough on Win11/WSL2 works fine except for one tweak:
-```
-sudo apt install linux-tools-5.4.0-77-generic hwdata
-sudo update-alternatives --install /usr/local/bin/usbip usbip /usr/lib/linux-tools/5.4.0-77-generic/usbip 20```
-```
+| Module                  | Description                                                                           |
+|-------------------------|---------------------------------------------------------------------------------------|
+| common                  | common libraries shared across modules                                                |
+| software\-communication | packet defintitions used for communication with software and between hardware modules |
+| motor-controller        | firmware binaries for stspin32 motor controllers (wheels, dribbler, tests)            |
+| kicker-board            | fimrware binaries for the kicker board                                                |
+| control-board           | firwmare binaries for the control board                                               |
 
-should be
+### List of Binaries
 
-```
-sudo apt install linux-tools-5.15.0-52-generic hwdata
-sudo update-alternatives --install /usr/local/bin/usbip usbip /usr/lib/linux-tools/5.15.0-52-generic/usbip 20
-```
+| Binaries                | Description                                                       |
+|-------------------------|-------------------------------------------------------------------|
+| Varied.                 | See README.md files in subfolders or use tab complete suggestion. |
 
-TODO: script kernel version so this always work
+### List of Actions
 
-After passing the device through you need to edit the permissions for the device in your udev rules such that a user who is not root can read/write for the tests to work.
-
-In order to do this you need to add a file named `50-usb-stm32.rules` to `etc/udev/rules.d` that contains the following line:
-`SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374e", MODE="0666"`
-Then run the command `sudo udevadm test $(udevadm info -q path -n /dev/bus/usb/<bus #>/<device #>)`. You can find the bus # and the device # by running `lsusb` in your wsl window.
-You may need to restart your computer or relog into wsl for the tests to begin working. (Restarting will require you  to re-pass the usb)
+| Actions                       | Descrption                                                                                     |
+|-------------------------------|------------------------------------------------------------------------------------------------|
+| <module>\-\-all               | Builds all binaries for the module                                                             |
+| <module>\-\-<binary>          | Builds the binary for the module                                                               |
+| <module>\-\-<binary>\-\-run   | Flashes the binary to the hardware target, runs the binary, print messages appear in the shell |
+| <module>\-\-<binary>\-\-debug | Flashes the binary to the hardware target, attaches gdb, halts the processor at reset_vector   |

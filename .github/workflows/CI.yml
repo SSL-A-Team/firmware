@@ -16,9 +16,6 @@ jobs:
           ssh-private-key: |
             ${{ secrets.ROBOT_PRIVATE_DATA_PRIVATE_SSH_KEY }}
       - run: git submodule update --init --recursive
-
-        # with:
-        #   submodules: recursive
       - uses: cachix/install-nix-action@v16
         with:
           extra_nix_config:
@@ -33,38 +30,38 @@ jobs:
       - name: Build Common Libraries
         shell: bash
         run: |
-          nix develop -c make common-clean
-          nix develop -c make common-all
+          nix develop -c make common--clean
+          nix develop -c make common--all
       - name: Test Common Libraries
         shell: bash
         run: |
-          nix develop -c make common-test
+          nix develop -c make common--test
       - name: Build Common Packets
         shell: bash
         run: |
-          nix develop -c make software-communication-clean
-          nix develop -c make software-communication-build
+          nix develop -c make software-communication--clean
+          nix develop -c make software-communication--build
       - name: Test Common Packets
         shell: bash
         run: |
-          nix develop -c make software-communication-test
+          nix develop -c make software-communication--test
       - name: Build Kicker Firmware
         shell: bash
         run: |
           nix develop -c make clean
-          nix develop -c make kicker-board-all
+          nix develop -c make kicker-board--all
       - name: Build Motor Controller Firmware
         shell: bash
         run: |
           nix develop -c make clean
-          nix develop -c make motor-controller-all
+          nix develop -c make motor-controller--all
       - name: Build Control Board Firmware
         shell: bash
         run: |
           nix develop -c make clean
-          nix develop -c make control-board-all
+          nix develop -c make control-board--all
       - name: Build Control Board Firmware - Public Wifi Credentials
         shell: bash
         run: |
           nix develop -c make clean
-          nix develop -c make NO_ATEAM_WIFI_CREDENTIALS=true control-board-all
+          nix develop -c make NO_ATEAM_WIFI_CREDENTIALS=true control-board--all
