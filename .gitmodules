@@ -4,5 +4,4 @@
 	# url = git@github.com:SSL-A-Team/software-communication.git
 [submodule "robot-private-data"]
 	path = robot-private-data
-	url = ../robot-private-data.git
-	# url = git@github.com:SSL-A-Team/robot-private-data.git
+	url = git@github.com:SSL-A-Team/robot-private-data.git
