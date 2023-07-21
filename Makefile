@@ -1,5 +1,18 @@
 .PHONY: test
 
+ifdef NO_ATEAM_WIFI_CREDENTIALS
+ifeq ($(NO_ATEAM_WIFI_CREDENTIALS),true)
+$(warning "Building without A-Team Wifi credentials.")
+additional_control_cargo_flags := --no-default-features --features=no-private-credentials
+else
+$(info "Building with A-Team Wifi credentials.")
+additional_control_cargo_flags :=
+endif
+else
+$(info "Building with A-Team Wifi credentials.")
+additional_control_cargo_flags :=
+endif
+
 ############################
 #  software communication  #
 ############################
@@ -127,17 +140,17 @@ control_openocd_cfg_file := board/st_nucleo_h743zi.cfg
 define create-control-board-rust-targets
 $1-$2: kicker-board-all motor-controller-all
 	cd $1 && \
-	cargo build --release --bin $2 && \
+	cargo build $(additional_control_cargo_flags) --release --bin $2 && \
 	arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin
 control-board-all:: $1-$2
 
 $1-$2-run: kicker-board-all motor-controller-all
 	cd $1 && \
-	cargo run --release --bin $2
+	cargo run $(additional_control_cargo_flags) --release --bin $2
 
 $1-$2-debug-prog: kicker-board-all motor-controller-all
 	cd $1 && \
-	cargo build --release --bin $2 && \
+	cargo build $(additional_control_cargo_flags) --release --bin $2 && \
 	../util/program.sh $3 target/thumbv7em-none-eabihf/release/$2
 endef
 $(foreach element,$(control_binaries),$(eval $(call create-control-board-rust-targets,control-board,$(element),$(control_openocd_cfg_file))))
