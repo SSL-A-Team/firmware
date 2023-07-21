@@ -12,6 +12,9 @@ elif grep -q "Ubuntu" /etc/lsb-release; then
 elif [[ $OSTYPE == 'darwin'* ]]; then
 	echo "DETECTED PLATFORM - MacOS"
 	PLATFORM="MacOS"
+else
+	echo "UNKNOWN PLATFORM"
+	exit 1
 fi
 
 if [[ $PLATFORM == 'WSL' ]] || [[ $PLATFORM == "Ubuntu" ]]; then

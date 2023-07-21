@@ -23,8 +23,11 @@ if grep -qi microsoft /proc/version; then
     apt install linux-tools-$KERNEL_VERSION hwdata
     update-alternatives --install /usr/local/bin/usbip usbip /usr/lib/linux-tools/$KERNEL_VERSION/usbip 20
     echo "WSL - platform specific setup complete."
-else
+elif grep -q "Ubuntu" /etc/lsb-release; then
     echo "DETECTED PLATFORM - Native Linux"
+else
+    echo "UNKNOWN PLATFORM. Nothing to do."
+    exit 0
 fi
 
 UDEV_RULE_FILES_LOCATION=/etc/udev/rules.d
