@@ -47,10 +47,10 @@
             clang
 
             # Rust Embedded
-            (rust-bin.nightly.latest.default.override {
+            (rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override {
               extensions = [ "rust-src" ];
               targets = [ "thumbv7em-none-eabihf" "thumbv6m-none-eabi" ];
-            })
+            }))
             rust-analyzer
             probe-run
 
