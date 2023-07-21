@@ -6,13 +6,6 @@ pub mod public_credentials;
 pub mod private_credentials;
 
 #[derive(Clone, Copy)]
-pub enum WifiCredentialIndices {
-    DummyField = 0,
-    DummyDevelopmentNetwork = 1,
-    COUNT = 2,
-}
-
-#[derive(Clone, Copy)]
 pub struct WifiCredential {
     ssid: &'static str,
     password: &'static str,

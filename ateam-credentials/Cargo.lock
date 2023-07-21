@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "public-ateam-credentials"
+name = "ateam-credentials"
 version = "1.0.0"
