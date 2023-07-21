@@ -45,13 +45,13 @@ if ! command -v nix > /dev/null; then
 
 	# nix should be installed now (either previous installed and not sourced, or newly installed)
 	# look for it and source it
-	if [ -e "~/.nix-profile/etc/profile.d/nix.sh" ]; then
+	if [ -e ~/.nix-profile/etc/profile.d/nix.sh ]; then
 		echo "Found Nix installed as single-user mode."
-		. '~/.nix-profile/etc/profile.d/nix.sh'
+		. ~/.nix-profile/etc/profile.d/nix.sh
 		echo "Loaded Nix to current shell."
-	elif [ -e '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh' ]; then
+	elif [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
 		echo "Found Nix installed as multi-user mode."
-		. '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh'
+		. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
 		echo "Loaded Nix to current shell."
 	else
 		echo "Some nix elements exist, but the entry points could not be found."

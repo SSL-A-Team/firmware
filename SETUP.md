@@ -3,13 +3,13 @@
 This document will guide you through the first time environment setup of the firmware repository. We
 currently support:
 
-| Operating System | Architecture         | Method |
-|------------------|----------------------|--------|
-| Ubuntu 20.04 LTS | x64, aarch64         | Native |
-| Ubuntu 22.04 LTS | x64, aarch64         | Native |
-| MacOS 12 Darwin  | x64, M1/M2 (aarch64) | Native |
-| MacOS 13 Darwin  | x64, M1/M2 (aarch64) | Native |
-| Windows 10/11    | x64                  | WSL2   |
+| Operating System | Architecture         | Method                     |
+|------------------|----------------------|----------------------------|
+| Ubuntu 20.04 LTS | x64, aarch64         | Native                     |
+| Ubuntu 22.04 LTS | x64, aarch64         | Native                     |
+| MacOS 12 Darwin  | x64, M1/M2 (aarch64) | Native                     |
+| MacOS 13 Darwin  | x64, M1/M2 (aarch64) | Native                     |
+| Windows 11       | x64                  | WSL2 (Ubuntu 20.04, 22.04) |
 
 If you are using Windows, this guide assumes you have already [setup WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and can enter the Ubuntu shell. 
 
@@ -18,8 +18,12 @@ If you are using Windows, this guide assumes you have already [setup WSL2](https
 Clone the firmware repository into your system.
 
 `git clone https://github.com/SSL-A-Team/firmware.git`
+
+
 If you are a member of the A-Team:
 `git submodule update --init --recursive`
+
+
 If you are not a member of the A-Team (you will not be able clone our Wifi credentials):
 `git -c submodule."ateam-private-credentials".update=none submodule update --init --recursive`
 `export NO_ATEAM_WIFI_CREDENTIALS=true`
@@ -79,9 +83,10 @@ You will need to enable USB passthrough to program the robot from WSL2 shell.
 
 ```
 apt update
-KERNEL_VERSION=$(uname -r)
-apt install linux-tools-$KERNEL_VERSION hwdata
-update-alternatives --install /usr/local/bin/usbip usbip /usr/lib/linux-tools/$KERNEL_VERSION/usbip 20
+apt install linux-tools-generic hwdata
+update-alternatives --install /usr/local/bin/usbip usbip /usr/lib/linux-tools/*-generic/usbip 20
 ```
+
+TODO: automate `usbipd wsl attach --busid <busid>`
 
 Additional information is available at [Microsoft USB passthrough documentation](https://learn.microsoft.com/en-us/windows/wsl/connect-usb).

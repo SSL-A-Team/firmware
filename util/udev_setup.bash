@@ -14,14 +14,9 @@ if grep -qi microsoft /proc/version; then
     echo "DETECTED PLATFORM - WSL"
     
     echo "WSL - setup USB passthrough"
-    
-    KERNEL_VERSION=$(uname -r)
-    echo "WSL - found kernel version $KERNEL_VERSION"
-
-    echo "WSL - install usbip..."
     apt update
-    apt install linux-tools-$KERNEL_VERSION hwdata
-    update-alternatives --install /usr/local/bin/usbip usbip /usr/lib/linux-tools/$KERNEL_VERSION/usbip 20
+    apt install -y linux-tools-generic hwdata
+    update-alternatives --install /usr/local/bin/usbip usbip /usr/lib/linux-tools/*-generic/usbip 20
     echo "WSL - platform specific setup complete."
 elif grep -q "Ubuntu" /etc/lsb-release; then
     echo "DETECTED PLATFORM - Native Linux"
