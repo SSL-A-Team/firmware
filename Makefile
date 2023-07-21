@@ -125,24 +125,24 @@ control_binaries := ${shell cd control-board/src/bin && ls -d * && cd ../../..}
 control_openocd_cfg_file := board/st_nucleo_h743zi.cfg
 
 define create-control-board-rust-targets
-$1-$2: motor-controller-all
+$1-$2: kicker-board-all motor-controller-all
 	cd $1 && \
 	cargo build --release --bin $2 && \
 	arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin
 control-board-all:: $1-$2
 
-$1-$2-run: motor-controller-all
+$1-$2-run: kicker-board-all motor-controller-all
 	cd $1 && \
 	cargo run --release --bin $2
 
-$1-$2-debug-prog: motor-controller-all
+$1-$2-debug-prog: kicker-board-all motor-controller-all
 	cd $1 && \
 	cargo build --release --bin $2 && \
 	../util/program.sh $3 target/thumbv7em-none-eabihf/release/$2
 endef
 $(foreach element,$(control_binaries),$(eval $(call create-control-board-rust-targets,control-board,$(element),$(control_openocd_cfg_file))))
 
-control-board-clean: motor-controller-clean
+control-board-clean: kicker-board-clean motor-controller-clean
 	cd control-board && \
 	cargo clean
 
