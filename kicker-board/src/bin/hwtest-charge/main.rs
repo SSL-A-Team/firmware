@@ -25,7 +25,7 @@ use embassy_time::{Delay, Duration, Timer, Ticker};
 
 use static_cell::StaticCell;
 
-use ateam_kicker_board::pins::{HighVoltageReadPin, BatteryVoltageReadPin, ChargePin, RegulatorDonePin, RegulatorFaultPin, RedStatusLedPin, GreenStatusLedPin};
+use ateam_kicker_board::{pins::{HighVoltageReadPin, BatteryVoltageReadPin, ChargePin, RegulatorDonePin, RegulatorFaultPin, RedStatusLedPin, GreenStatusLedPin}, adc_v_to_rail_voltage, adc_raw_to_v, adc_v_to_battery_voltage};
 
 // #[embassy_executor::task]
 // async fn run_critical_section_task(p: Peripherals) {
@@ -94,11 +94,14 @@ async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
     status_led_green.set_low();
     Timer::after(Duration::from_millis(500)).await;
 
+    let mut vrefint = adc.enable_vref(&mut Delay);
+    let vrefint_sample = adc.read_internal(&mut vrefint) as f32;
+
     let mut hv = adc.read(&mut hv_pin) as f32;
     let mut bv = adc.read(&mut batt_pin) as f32;
-    info!("hv V: {}, batt mv: {}", adc_v_to_rail_voltage(adc_raw_to_v(hv)), adc_v_to_battery_voltage(adc_raw_to_v(bv)));
+    info!("hv V: {}, batt mv: {}", adc_v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)), adc_v_to_battery_voltage(adc_raw_to_v(bv, vrefint_sample)));
 
-    let start_up_battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(bv));
+    let start_up_battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(bv, vrefint_sample));
     if start_up_battery_voltage < 18.0 {
         status_led_red.set_high();
         warn!("battery voltage is below 18.0 ({}), is the battery low or disconnected?", start_up_battery_voltage);
@@ -115,12 +118,13 @@ async fn sample_adc(mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
     reg_charge.set_low();
 
     loop {
-        hv = adc.read(&mut hv_pin) as u32;
-        // let bv = (adc.read(&mut batt_pin) as u32 * 10) / 12;
-        bv = adc.read(&mut batt_pin) as u32;
+        let mut vrefint = adc.enable_vref(&mut Delay);
+        let vrefint_sample = adc.read_internal(&mut vrefint) as f32;
 
+        hv = adc.read(&mut hv_pin) as f32;
+        bv = adc.read(&mut batt_pin) as f32;
 
-        info!("hv V: {}, batt mv: {}", (hv * 200) / 1000, bv);
+        info!("hv V: {}, batt mv: {}", adc_v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)), adc_v_to_battery_voltage(adc_raw_to_v(bv, vrefint_sample)));
 
         reg_charge.set_low();
 

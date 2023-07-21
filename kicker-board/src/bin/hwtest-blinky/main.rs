@@ -51,9 +51,8 @@ fn main() -> ! {
 
     let p = embassy_stm32::init(stm32_config);
 
-    let _charge_pin = Output::new(charge_pin, Level::Low, Speed::Medium);
-    let _kick_pin = Output::new(kick_pin, Level::Low, Speed::Medium);
-    let _chip_pin = Output::new(chip_pin, Level::Low, Speed::Medium);
+    let _kick_pin = Output::new(p.PB0, Level::Low, Speed::Medium);
+    let _chip_pin = Output::new(p.PB1, Level::Low, Speed::Medium);
 
     info!("kicker startup!");
     

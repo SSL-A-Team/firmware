@@ -17,9 +17,9 @@ use embassy_stm32::{
     interrupt::{self, InterruptExt},
     peripherals::{DMA1_CH0, DMA1_CH1, USART2},
     usart::{self, Uart},
-    time::mhz
+    time::mhz, gpio::{Input, Pull}
 };
-use embassy_time::Duration;
+use embassy_time::{Duration, Timer};
 
 use ateam_control_board::drivers::radio::{RobotRadio, TeamColor, WifiNetwork};
 use ateam_control_board::queue;
@@ -78,7 +78,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // Dip Switch Inputs
     /////////////////////
     let dip5 = Input::new(p.PG3, Pull::Down);
-    let dip6 = Input::new(p.PG3, Pull::Down);
+    let dip6 = Input::new(p.PG4, Pull::Down);
 
     let wifi_network = if dip5.is_high() & dip6.is_high() {
         WifiNetwork::Team
@@ -86,6 +86,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
         WifiNetwork::CompMain
     } else if dip5.is_high() & dip6.is_low() {
         WifiNetwork::CompPractice
+    } else {
+        WifiNetwork::Team
     };
     
     info!("radio created");

@@ -14,7 +14,7 @@ use embassy_time::{Duration, Timer};
 use ateam_control_board::{
     include_external_cpp_bin,
     queue::Buffer,
-    robot_model::{RobotConstants, RobotModel},
+    motion::robot_model::{RobotConstants, RobotModel},
     stm32_interface::Stm32Interface,
     stspin_motor::{WheelMotor, DribblerMotor},
     uart_queue::{UartReadQueue, UartWriteQueue},

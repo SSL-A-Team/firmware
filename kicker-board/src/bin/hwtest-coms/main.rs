@@ -116,8 +116,11 @@ async fn high_pri_kick_task(
     let mut last_packet_sent_time = Instant::now();
 
     loop {
-        let rail_voltage = adc_v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32));
-        let battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(adc.read(&mut battery_voltage_pin) as f32));
+        let mut vrefint = adc.enable_vref(&mut Delay);
+        let vrefint_sample = adc.read_internal(&mut vrefint) as f32;
+
+        let rail_voltage = adc_v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32, vrefint_sample));
+        let battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(adc.read(&mut battery_voltage_pin) as f32, vrefint_sample));
         // optionally pre-flag errors? 
 
         /////////////////////////////////////

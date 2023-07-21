@@ -22,7 +22,7 @@ use embassy_stm32::{
     time::{hz, mhz},
     usart::Uart,
 };
-use embassy_time::{Duration, Ticker};
+use embassy_time::{Duration, Ticker, Timer};
 use futures_util::StreamExt;
 use panic_probe as _;
 use smart_leds::{SmartLedsWrite, RGB8};
