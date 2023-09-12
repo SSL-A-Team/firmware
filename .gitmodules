@@ -1,6 +1,3 @@
 [submodule "software-communication"]
 	path = software-communication
 	url = https://github.com/SSL-A-Team/software-communication.git
-[submodule "ateam-credentials/src/private_credentials"]
-	path = ateam-credentials/src/private_credentials
-	url = git@github.com:SSL-A-Team/ateam-private-credentials.git
