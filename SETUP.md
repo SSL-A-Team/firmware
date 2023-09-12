@@ -17,16 +17,14 @@ If you are using Windows, this guide assumes you have already [setup WSL2](https
 
 Clone the firmware repository into your system.
 
-`git clone https://github.com/SSL-A-Team/firmware.git`
+ - `git clone https://github.com/SSL-A-Team/firmware.git`
+ - `git submodule update --init --recursive`
 
+If you are a member of the A-Team, clone our credentials repo:
+ - `./util/ateam-credentials-setup.bash`
 
-If you are a member of the A-Team:
-`git submodule update --init --recursive`
-
-
-If you are not a member of the A-Team (you will not be able clone our Wifi credentials):
-`git -c submodule."ateam-private-credentials".update=none submodule update --init --recursive`
-`export NO_ATEAM_WIFI_CREDENTIALS=true`
+If you are not a member of the A-Team, disable the private credentials feature:
+ - `export NO_ATEAM_WIFI_CREDENTIALS=true`
 
 For Windows users, you must clone the repository from within the WSL2 shell into a WSL2 directory. Do
 not use filesystem passthrough. The build tools expect a Linux/Unix environment and Windows paths break
@@ -59,7 +57,7 @@ Enable flakes by adding the following to `/etc/nix/nix.conf`, creating the file 
 experimental-features = nix-command flakes
 ```
 
-#### Manual Install - Ubnuntu/WSL2 Udev Rules
+#### Manual Install - Ubuntu/WSL2 Udev Rules
 
 Run these steps if you are using a manual install and you are on the Ubuntu or WSL2 platforms.
 
