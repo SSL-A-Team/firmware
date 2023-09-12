@@ -15,7 +15,9 @@ jobs:
         with:
           ssh-private-key: |
             ${{ secrets.ROBOT_PRIVATE_DATA_PRIVATE_SSH_KEY }}
-      - run: git submodule update --init --recursive
+      - run: |
+          git submodule update --init --recursive
+          ./util/ateam-credentials-setup.bash
       - uses: cachix/install-nix-action@v16
         with:
           extra_nix_config:
