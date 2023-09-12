@@ -15,6 +15,8 @@ set them in `ateam-credentials/src/public_credentials/wifi.rs`.
 Begin by entering the Nix environment `nix develop`. If you use a shell other than bash, you can try `nix develop -c $SHELL` 
 to stay in your preferred shell.
 
+WSL users should launch VS Code from the nix environment in the Ubuntu shell.
+
 A top level Makefile is provided for all targets. Targets in the form `<module>--<binary>--<action>`.
 
 The primary command `make control-board--control--run` will build all robot firmware, flash hardware, and run the image.
