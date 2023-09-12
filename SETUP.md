@@ -3,13 +3,13 @@
 This document will guide you through the first time environment setup of the firmware repository. We
 currently support:
 
-| Operating System | Architecture         | Method                     |
-|------------------|----------------------|----------------------------|
-| Ubuntu 20.04 LTS | x64, aarch64         | Native                     |
-| Ubuntu 22.04 LTS | x64, aarch64         | Native                     |
-| MacOS 12 Darwin  | x64, M1/M2 (aarch64) | Native                     |
-| MacOS 13 Darwin  | x64, M1/M2 (aarch64) | Native                     |
-| Windows 11       | x64                  | WSL2 (Ubuntu 20.04, 22.04) |
+| Operating System | Architecture         | Method                       |
+|------------------|----------------------|------------------------------|
+| Ubuntu 20.04 LTS | x64, aarch64         | Native                       |
+| Ubuntu 22.04 LTS | x64, aarch64         | Native                       |
+| MacOS 12 Darwin  | x64, M1/M2 (aarch64) | Native                       |
+| MacOS 13 Darwin  | x64, M1/M2 (aarch64) | Native                       |
+| Windows 11       | x64                  | WSL2 (LK 5.10.60.1 or later) |
 
 If you are using Windows, this guide assumes you have already [setup WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and can enter the Ubuntu shell. 
 

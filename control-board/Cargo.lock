@@ -50,10 +50,10 @@ version = "0.1.0"
 dependencies = [
  "apa102-spi",
  "ateam-common-packets",
- "ateam-credentials",
  "const_format",
  "cortex-m",
  "cortex-m-rt",
+ "credentials",
  "critical-section 1.1.1",
  "defmt",
  "defmt-rtt",
@@ -71,10 +71,6 @@ dependencies = [
  "smart-leds",
  "static_cell",
 ]
-
-[[package]]
-name = "ateam-credentials"
-version = "1.0.0"
 
 [[package]]
 name = "atomic-polyfill"
@@ -327,6 +323,10 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "credentials"
+version = "1.0.0"
 
 [[package]]
 name = "critical-section"

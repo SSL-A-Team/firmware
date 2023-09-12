@@ -45,11 +45,11 @@ nalgebra = { version = "0.32.2", default-features = false, features = [
         "macros",
 ] }
 ateam-common-packets = { path = "../software-communication/ateam-common-packets/rust-lib" }
-ateam-credentials = { path = "../ateam-credentials" }
+credentials = { path = "../credentials" }
 
 [features]
 default = []
-no-private-credentials = ["ateam-credentials/no-private-credentials"]
+no-private-credentials = ["credentials/no-private-credentials"]
 
 [dev-dependencies]
 defmt-test = "0.3.0"
