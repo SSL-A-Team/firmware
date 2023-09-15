@@ -136,10 +136,10 @@ impl<
     }
 
     pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
-        let res = self
+        self
             .stm32_uart_interface
             .load_firmware_image(fw_image_bytes)
-            .await;
+            .await?;
 
         // this is safe because load firmware image call will reset the target device
         // it will begin issueing telemetry updates
@@ -154,7 +154,7 @@ impl<
         // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
         self.stm32_uart_interface.leave_reset().await?;
 
-        return res;
+        return Ok(());
     }
 
     pub async fn load_default_firmware_image(&mut self) -> Result<(), ()> {

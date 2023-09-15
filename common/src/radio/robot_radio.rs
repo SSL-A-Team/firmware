@@ -93,7 +93,7 @@ impl<Robot: RobotRadio + 'static, R: Radio + 'static> RobotRadioTask<Robot, R> {
 
 //     async fn task((robot, radio): Self::Data) {
 impl<Robot: RobotRadio + 'static, R: Radio + 'static> Task for RobotRadioTask<Robot, R> {
-    type Data = RobotRadioTask<Robot, R>;
+    type Data = &'static RobotRadioTask<Robot, R>;
 
     async fn task(data: Self::Data) {
         let robot = data.robot;

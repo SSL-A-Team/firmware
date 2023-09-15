@@ -1,7 +1,7 @@
 use crate::queue::{self, Buffer, DequeueRef, Error, Queue, EnqueueRef};
 
 use core::future::Future;
-use defmt::info;
+use defmt::*;
 use embassy_executor::{raw::TaskStorage, SpawnToken};
 use embassy_stm32::{
     usart::{self, UartRx, UartTx},
@@ -75,13 +75,13 @@ impl<
                 // TODO: this
                 if let Ok(len) = len {
                     if len == 0 {
-                        info!("uart zero");
+                        debug!("uart zero");
                         buf.cancel();
                     } else {
                         *buf.len() = len;
                     }
                 } else {
-                    info!("{}", len);
+                    warn!("{}", len);
                     buf.cancel();
                 }
             }
@@ -150,7 +150,7 @@ impl<
                 drop(buf);
                 // unsafe {
                 //     // TODO: what does this do again?
-                    while !UART::regs().isr().read().tc() {}
+                    // while !UART::regs().isr().read().tc() {}
                 //     UART::regs().cr1().modify(|w| w.set_te(false));
                 //     while UART::regs().isr().read().teack() {}
                 //     UART::regs().cr1().modify(|w| w.set_te(true));
@@ -218,4 +218,22 @@ impl<
     async fn write<FN: FnOnce(&mut [u8]) -> usize>(&self, fn_write: FN) -> Result<(), ()> {
         self.enqueue(|buf| fn_write(buf)).or(Err(()))
     }
+}
+
+#[macro_export]
+macro_rules! usart_buffer {
+    ($name:ident, $uart:ty, $dma_rx:ty, $dma_tx:ty, $size_rx:expr, $count_rx:expr, $size_tx:expr, $count_tx:expr) => {
+        pub mod $name {
+            use super::*;
+            #[link_section = ".axisram.buffers"]
+            static mut BUFFER_RX: [queue::Buffer<$size_rx>; $count_rx] = [queue::Buffer::EMPTY; $count_rx];
+            pub static QUEUE_RX: UartReadQueue<$uart, $dma_rx, $size_rx, $count_rx> =
+                UartReadQueue::new(unsafe { &mut BUFFER_RX });
+
+            #[link_section = ".axisram.buffers"]
+            static mut BUFFER_TX: [queue::Buffer<$size_tx>; $count_tx] = [queue::Buffer::EMPTY; $count_tx];
+            pub static QUEUE_TX: UartWriteQueue<$uart, $dma_tx, $size_tx, $count_tx> =
+                UartWriteQueue::new(unsafe { &mut BUFFER_TX });
+        }
+    };
 }

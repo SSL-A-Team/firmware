@@ -67,7 +67,7 @@ impl<'a, const NUM_STATES: usize, const NUM_CONTROL_INPUTS: usize, const NUM_OBS
         let y: SMatrix<f32, NUM_OBSERVATIONS, 1> = z - z_hat;
         self.x_hat += self.K_k * y;
 
-        defmt::info!("x predictor: {:?}, {:?}, {:?}", self.x_hat[0], self.x_hat[1], self.x_hat[2]);
+        // defmt::info!("x predictor: {:?}, {:?}, {:?}", self.x_hat[0], self.x_hat[1], self.x_hat[2]);
     }
 
     pub fn read_state(&self, x_hat: &mut SMatrix<f32, NUM_STATES, 1>) {

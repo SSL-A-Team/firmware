@@ -35,7 +35,6 @@ pub fn get_bootloader_uart_config() -> Config {
     let mut config = usart::Config::default();
     config.baudrate = 115_200; // max officially support baudrate
     config.parity = Parity::ParityEven;
-    config.stop_bits = StopBits::STOP0P5;
     config
 }
 
@@ -109,30 +108,32 @@ pub fn update_usart(
         //     div & 0x0F
         // );
 
-        // if div < brr_min {
-        //     #[cfg(not(usart_v1))]
-        //     if div * 2 >= brr_min && kind == Kind::Uart && !cfg!(usart_v1) {
-        //         over8 = true;
-        //         let div = div as u32;
-        //         r.brr()
-        //             .write_value(regs::Brr(((div << 1) & !0xF) | (div & 0x07)));
-        //         // #[cfg(usart_v4)]
-        //         r.presc().write(|w| w.set_prescaler(_presc_val));
-        //         found = Some(div);
-        //         break;
-        //     }
-        //     self::panic!("USART: baudrate too high");
-        // }
+        if div < brr_min {
+            #[cfg(not(usart_v1))]
+            if div * 2 >= brr_min && kind == Kind::Uart && !cfg!(usart_v1) {
+                over8 = true;
+                let div = div as u32;
+                r.brr()
+                    .write_value(regs::Brr(((div << 1) & !0xF) | (div & 0x07)));
+                // #[cfg(usart_v4)]
+                r.presc().write(|w| w.set_prescaler(_presc_val));
+                // found = Some(div);
+                break;
+            }
+            self::panic!("USART: baudrate too high");
+        }
 
-        // if div < brr_max {
+        info!("div {}", div);
+
+        if div < brr_max {
             let div = div as u16;
             r.brr().modify(|w| w.set_brr(div));
             // #[cfg(usart_v4)]
             // r.presc().write(|w| w.set_prescaler(_presc_val));
-            // r.presc().modify(|w| w.set_prescaler(_presc_val));
+            r.presc().modify(|w| w.set_prescaler(_presc_val));
             // found = Some(div as u32);
             break;
-        // }
+        }
     }
 
     // let div = found.expect("USART: baudrate too low");

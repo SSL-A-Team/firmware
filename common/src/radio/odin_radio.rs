@@ -624,9 +624,17 @@ impl<'a, RadioInterface: RadioInterfaceControl> OdinRadio<'a, RadioInterface> {
                                 *lock = None;
                                 self.packet_complete.signal(());
                             }
-                            _ => {}
+                            _ => {
+                                warn!("Unknown connect wifi connect AT event {:?}", packet);
+                                wifi_connected = true;
+                                *lock = None;
+                            }
                         },
-                        _ => {}
+                        _ => {
+                            warn!("Unknown connect wifi packet {:?}", packet);
+                            wifi_connected = true;
+                            *lock = None;
+                        }
                     }
                 }
             }

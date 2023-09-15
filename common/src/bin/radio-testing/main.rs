@@ -86,8 +86,8 @@ fn main() -> std::io::Result<()> {
     let max = 1.0;
     let mut up = true;
     loop {
-        // packet.data.control.vel_x_linear = vel;
         packet.data.control.vel_z_angular = vel;
+        // packet.data.control.dribbler_speed = 200.;
 
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(

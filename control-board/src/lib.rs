@@ -24,7 +24,9 @@ pub mod uart_queue;
 pub mod radio;
 
 pub mod drivers;
+pub mod control;
 pub mod pins;
+pub mod state;
 
 pub mod colors {
     use smart_leds::RGB8;
