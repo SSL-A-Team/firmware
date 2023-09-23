@@ -3,40 +3,38 @@ use core::cmp::min;
 use defmt_rtt as _;
 use defmt::*;
 
-use embassy_stm32::gpio::{Output, OutputOpenDrain, Pin};
+use embassy_stm32::gpio::{Output, Pin};
 use embassy_stm32::pac;
 use embassy_stm32::usart::{self, Parity, StopBits, Config};
 use embassy_time::{Duration, Timer};
-use embassy_stm32::pac::lpuart::regs;
-use embassy_stm32::interrupt::{Interrupt, InterruptExt};
+use embassy_time::with_timeout;
 
 use crate::queue::{DequeueRef, Error};
 use crate::uart_queue::{Reader, Writer, UartReadQueue, UartWriteQueue};
 
-const STM32_BOOTLOADER_MAX_BAUD_RATE: u32 = 115_200;
-const STM32_BOOTLOADER_ACK: u8 = 0x79;
-const STM32_BOOTLOADER_NACK: u8 = 0x1F;
-const STM32_BOOTLOADER_CODE_SEQUENCE_BYTE: u8 = 0x7F;
+pub const STM32_BOOTLOADER_MAX_BAUD_RATE: u32 = 115_200;
+pub const STM32_BOOTLOADER_ACK: u8 = 0x79;
+pub const STM32_BOOTLOADER_NACK: u8 = 0x1F;
+pub const STM32_BOOTLOADER_CODE_SEQUENCE_BYTE: u8 = 0x7F;
 
-const STM32_BOOTLOADER_CMD_GET: u8 = 0x00;
-const STM32_BOOTLOADER_CMD_GET_VERSION: u8 = 0x01;
-const STM32_BOOTLOADER_CMD_GET_ID: u8 = 0x02;
-const STM32_BOOTLOADER_CMD_READ_MEM: u8 = 0x11;
-const STM32_BOOTLOADER_CMD_GO: u8 = 0x21;
-const STM32_BOOTLOADER_CMD_WRITE_MEM: u8 = 0x31;
-const STM32_BOOTLOADER_CMD_ERASE: u8 = 0x43;
-const STM32_BOOTLOADER_CMD_EXTENDED_ERASE: u8 = 0x44;
-const STM32_BOOTLOADER_CMD_WRITE_PROT: u8 = 0x63;
-const STM32_BOOTLOADER_CMD_WRITE_UNPROT: u8 = 0x73;
-const STM32_BOOTLOADER_CMD_READ_PROT: u8 = 0x82;
-const STM32_BOOTLOADER_CMD_READ_UNPROT: u8 = 0x92;
-const STM32_BOOTLOADER_CMD_GET_CHECKSUM: u8 = 0xA1;
+pub const STM32_BOOTLOADER_CMD_GET: u8 = 0x00;
+pub const STM32_BOOTLOADER_CMD_GET_VERSION: u8 = 0x01;
+pub const STM32_BOOTLOADER_CMD_GET_ID: u8 = 0x02;
+pub const STM32_BOOTLOADER_CMD_READ_MEM: u8 = 0x11;
+pub const STM32_BOOTLOADER_CMD_GO: u8 = 0x21;
+pub const STM32_BOOTLOADER_CMD_WRITE_MEM: u8 = 0x31;
+pub const STM32_BOOTLOADER_CMD_ERASE: u8 = 0x43;
+pub const STM32_BOOTLOADER_CMD_EXTENDED_ERASE: u8 = 0x44;
+pub const STM32_BOOTLOADER_CMD_WRITE_PROT: u8 = 0x63;
+pub const STM32_BOOTLOADER_CMD_WRITE_UNPROT: u8 = 0x73;
+pub const STM32_BOOTLOADER_CMD_READ_PROT: u8 = 0x82;
+pub const STM32_BOOTLOADER_CMD_READ_UNPROT: u8 = 0x92;
+pub const STM32_BOOTLOADER_CMD_GET_CHECKSUM: u8 = 0xA1;
 
 pub fn get_bootloader_uart_config() -> Config {
     let mut config = usart::Config::default();
     config.baudrate = 115_200; // max officially support baudrate
     config.parity = Parity::ParityEven;
-    config.stop_bits = StopBits::STOP0P5;
     config
 }
 
@@ -55,7 +53,9 @@ pub struct Stm32Interface<
     reader: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
     writer: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
     boot0_pin: Option<Output<'a, Boot0Pin>>,
-    reset_pin: Option<OutputOpenDrain<'a, ResetPin>>,
+    reset_pin: Option<Output<'a, ResetPin>>,
+
+    reset_pin_noninverted: bool,
 
     in_bootloader: bool,
 }
@@ -76,8 +76,8 @@ impl<
     pub fn new(        
         read_queue: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
         write_queue: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
-        mut boot0_pin: Option<Output<'a, Boot0Pin>>,
-        mut reset_pin: Option<OutputOpenDrain<'a, ResetPin>>
+        boot0_pin: Option<Output<'a, Boot0Pin>>,
+        reset_pin: Option<Output<'a, ResetPin>>
     ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin> {
         // let the user set the initial state
         // if boot0_pin.is_some() {
@@ -93,6 +93,32 @@ impl<
             writer: write_queue,
             boot0_pin,
             reset_pin,
+            reset_pin_noninverted: false,
+            in_bootloader: false,
+        }
+    }
+
+    pub fn new_noninverted_reset(        
+        read_queue: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
+        boot0_pin: Option<Output<'a, Boot0Pin>>,
+        reset_pin: Option<Output<'a, ResetPin>>
+    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin> {
+        // let the user set the initial state
+        // if boot0_pin.is_some() {
+        //     boot0_pin.as_mut().unwrap().set_low();
+        // }
+
+        // if reset_pin.is_some() {
+        //     reset_pin.as_mut().unwrap().set_high();
+        // }
+        
+        Stm32Interface {
+            reader: read_queue,
+            writer: write_queue,
+            boot0_pin,
+            reset_pin,
+            reset_pin_noninverted: true,
             in_bootloader: false,
         }
     }
@@ -106,7 +132,11 @@ impl<
             return Err(());
         }
 
-        self.reset_pin.as_mut().unwrap().set_low();
+        if self.reset_pin_noninverted {
+            self.reset_pin.as_mut().unwrap().set_high();
+        } else {
+            self.reset_pin.as_mut().unwrap().set_low();
+        }
         Timer::after(Duration::from_micros(100)).await;
         
         Ok(())
@@ -117,7 +147,11 @@ impl<
             return Err(());
         }
 
-        self.reset_pin.as_mut().unwrap().set_high();
+        if self.reset_pin_noninverted {
+            self.reset_pin.as_mut().unwrap().set_low();
+        } else {
+            self.reset_pin.as_mut().unwrap().set_high();
+        }
         Timer::after(Duration::from_micros(100)).await;
 
         Ok(())
@@ -163,7 +197,7 @@ impl<
         .await?;
 
         let mut res = Err(());
-        self.reader.read(|buf| {
+        let sync_res = with_timeout(Duration::from_millis(100), self.reader.read(|buf| {
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
                     defmt::info!("bootloader replied with ACK after calibration.");
@@ -173,7 +207,12 @@ impl<
                     defmt::error!("bootloader replied with NACK after calibration.");
                 }
             }
-        }).await?;
+        })).await;
+
+        if sync_res.is_err() {
+            defmt::warn!("*** HARDWARE CHECK *** - bootloader baud calibration timed out.");
+            return Err(())
+        }
 
         res
     }
@@ -345,7 +384,7 @@ impl<
                 defmt::debug!("read bootloader command list. (WITH CS).");
                 res = Ok(());
             } else {
-                defmt::error!("unknown command enumeration error.");
+                defmt::error!("unknown command enumeration error: {}", buf);
                 res = Err(());
             }
         }).await?;

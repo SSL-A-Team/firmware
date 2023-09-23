@@ -51,6 +51,7 @@ impl TryFrom<u8> for PeerConnectedProfile {
     }
 }
 
+#[allow(dead_code)]
 #[derive(defmt::Format)]
 pub enum ATEvent<'a> {
     DataAvailable {

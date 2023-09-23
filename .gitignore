@@ -1,4 +1,4 @@
-# nix aritfacts
+# nix artifacts
 result
 result/
 
@@ -17,3 +17,5 @@ build/
 
 # Odin Firmware
 private_binary_blobs/
+
+.DS_Store

@@ -9,10 +9,9 @@
 
   outputs = { self, nixpkgs, rust-overlay, flake-utils }:
     flake-utils.lib.eachSystem [
-        # "aarch64-linux" # TODO unsupported for clang_multi, find pkgsCross package
-        # "aarch64-darwin" # TODO same as above ^^^
-        # "i686-linux" # gcc10 doesn't seem to have support in the Nix repos
-        # "x86_64-darwin"
+        "aarch64-linux"
+        "aarch64-darwin"
+        "x86_64-darwin"
         "x86_64-linux" ]
     (system: 
       let 
@@ -38,28 +37,27 @@
             # C/C++ build utils
             gnumake
             cmake
-            gcc-arm-embedded-10
+            gcc-arm-embedded-12
 
             # programmers
             openocd
             probe-run
 
             # userpsace clang and link vars for bindgen subtargets
-            clang_multi
+            clang
 
             # Rust Embedded
-            (rust-bin.nightly.latest.default.override {
+            (rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override {
               extensions = [ "rust-src" ];
               targets = [ "thumbv7em-none-eabihf" "thumbv6m-none-eabi" ];
-            })
+            }))
             rust-analyzer
             probe-run
 
             # Python
             (pkgs.${python}.withPackages
               (ps: with ps; [ numpy matplotlib ]))
-          ] ++ (if system == "x86-64_linux" then
-          [ clang_multi ] else [ clang ]);
+          ];
         };
       }
     );

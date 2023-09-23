@@ -1,0 +1,11 @@
+{
+    "recommendations": [
+        "bbenoist.nix",
+        "ms-vscode.makefile-tools",
+        "ms-vscode.cmake-tools",
+        "github.vscode-github-actions",
+        "rust-lang.rust-analyzer",
+        "ms-vscode.cpptools-extension-pack",
+        "tamasfe.even-better-toml"
+    ]
+}

@@ -72,7 +72,7 @@ pub struct Radio<
     reader: &'a UartReadQueue<'a, UART, RxDma, LEN_RX, DEPTH_RX>,
     writer: &'a UartWriteQueue<'a, UART, TxDma, LEN_TX, DEPTH_TX>,
     mode: RadioMode,
-    wifiConnected: bool,
+    wifi_connected: bool,
 }
 
 impl<
@@ -94,7 +94,7 @@ impl<
             reader,
             writer,
             mode: RadioMode::CommandMode,
-            wifiConnected: false,
+            wifi_connected: false,
         }
     }
 

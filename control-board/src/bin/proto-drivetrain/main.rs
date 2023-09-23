@@ -27,7 +27,7 @@ use ateam_control_board::{
     stm32_interface::{Stm32Interface, self},
     queue::Buffer,
     uart_queue::{UartReadQueue, UartWriteQueue},
-    include_external_cpp_bin, stspin_motor::WheelMotor, robot_model::{RobotConstants, self, RobotModel},
+    include_external_cpp_bin, stspin_motor::WheelMotor, motion::robot_model::{RobotConstants, self, RobotModel},
 };
 
 // include_external_cpp_bin!{STEVAL3204_DRIB_POTCTRL_FW_IMG, "dev3204-drib-potctrl.bin"}
@@ -109,12 +109,19 @@ async fn main(_spawner: embassy_executor::Spawner) {
     stm32_config.rcc.pclk1 = Some(mhz(100));
     let p = embassy_stm32::init(stm32_config);
 
+    // Delay so dotstar and STSPIN can turn on
+    Timer::after(Duration::from_millis(50)).await;
+
     // place the stspins in reset as early as possible just in case we have lingering state
     // that wants to spin motors
-    let front_right_reset_pin = OutputOpenDrain::new(p.PB2, Level::Low, Speed::Medium, Pull::None); // reset active
-    let front_left_reset_pin = OutputOpenDrain::new(p.PG3, Level::Low, Speed::Medium, Pull::None); // reset active
-    let back_left_reset_pin = OutputOpenDrain::new(p.PG1, Level::Low, Speed::Medium, Pull::None); // reset active
-    let back_right_reset_pin = OutputOpenDrain::new(p.PA3, Level::Low, Speed::Medium, Pull::None); // reset active
+    let front_right_reset_pin =
+    Output::new(p.PB2, Level::Low, Speed::Medium); // reset active
+let front_left_reset_pin =
+    Output::new(p.PG3, Level::Low, Speed::Medium); // reset active
+let back_left_reset_pin =
+    Output::new(p.PG1, Level::Low, Speed::Medium); // reset active
+let back_right_reset_pin =
+    Output::new(p.PA3, Level::Low, Speed::Medium); // reset active
 
     // setup the async executor
     let irq = interrupt::take!(CEC);

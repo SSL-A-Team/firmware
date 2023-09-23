@@ -78,6 +78,12 @@ int main() {
     quadenc_setup();
     quadenc_reset_encoder_delta();
 
+    // pwm6step_set_duty_cycle_f(0.05f);
+
+    // while (1) {
+    //     IWDG->KR = 0x0000AAAA; // feed the watchdog
+    // }
+
     MotorCommandPacket motor_command_packet;
     memset(&motor_command_packet, 0, sizeof(MotorCommandPacket));
 
@@ -151,7 +157,7 @@ int main() {
 
     torque_pid_constants.kP = 1.0f;
 
-    // turn off LEDs
+    // turn off Red turn on Green
     GPIOB->BSRR |= GPIO_BSRR_BR_6;
     GPIOB->BSRR |= GPIO_BSRR_BS_7;
 
@@ -334,11 +340,12 @@ int main() {
 
         if (run_torque_loop || run_vel_loop) {
             // detect if the encoder is not pulling the detect pin down
-            bool encoder_disconnected = (GPIOB->IDR | GPIO_IDR_5) != 0;
+            bool encoder_disconnected = (GPIOA->IDR & GPIO_IDR_5) != 0;
 
             // set the motor duty cycle
             if (motion_control_type == OPEN_LOOP) {
-                pwm6step_set_duty_cycle_f(r_motor_board);
+                float r_motor = mm_rads_to_dc(&df45_model, r_motor_board);
+                pwm6step_set_duty_cycle_f(r_motor);
             } else if (motion_control_type == VELOCITY) {
                 pwm6step_set_duty_cycle_f(u_vel_loop);
             } else {

@@ -7,7 +7,7 @@ use const_format::formatcp;
 use core::fmt::Write;
 use core::mem::size_of;
 use embassy_futures::select::{select, Either};
-use embassy_stm32::gpio::{Level, OutputOpenDrain, Pin, Pull, Speed};
+use embassy_stm32::gpio::{Level, OutputOpenDrain, Pin, Pull, Speed, Output};
 use embassy_stm32::pac;
 use embassy_stm32::usart;
 use embassy_stm32::Peripheral;
@@ -17,8 +17,22 @@ use heapless::String;
 const MULTICAST_IP: &str = "224.4.20.69";
 const MULTICAST_PORT: u16 = 42069;
 const LOCAL_PORT: u16 = 42069;
-const WIFI_SSID: &str = "A-Team Field";
-const WIFI_PASS: &str = "plancomestogether";
+const TEAM_WIFI_SSID: &str = "A-Team Field";
+const COMP_MAIN_WIFI_SSID: &str = "T3_SSL_RBC23";
+const COMP_PRACTICE_WIFI_SSID: &str = "T1_SSL_RBC23";
+// const WIFI_SSID: &str = "PROMISED_LAN_DC_DEVEL";
+
+const TEAM_WIFI_PASS: &str = "plancomestogether";
+const COMP_MAIN_WIFI_PASS: &str = "1fNrzxtSHG5o9";
+const COMP_PRACTICE_WIFI_PASS: &str = "e568Cwg0PjwcI";
+// const WIFI_PASS: &str = "plddevel";
+
+#[derive(Copy, Clone)]
+pub enum WifiNetwork {
+    Team,
+    CompMain,
+    CompPractice
+}
 
 #[derive(Copy, Clone)]
 pub enum TeamColor {
@@ -65,7 +79,7 @@ pub struct RobotRadio<
         DEPTH_TX,
         DEPTH_RX,
     >,
-    reset_pin: OutputOpenDrain<'a, PIN>,
+    reset_pin: Output<'a, PIN>,
     peer: Option<PeerConnection>,
 }
 
@@ -87,9 +101,9 @@ impl<
         reset_pin: impl Peripheral<P = PIN> + 'a,
     ) -> Result<RobotRadio<'a, UART, DmaRx, DmaTx, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, PIN>, ()>
     {
-        let mut reset_pin = OutputOpenDrain::new(reset_pin, Level::Low, Speed::Medium, Pull::None);
+        let mut reset_pin = Output::new(reset_pin, Level::High, Speed::Medium);
         Timer::after(Duration::from_micros(100)).await;
-        reset_pin.set_high();
+        reset_pin.set_low();
 
         let mut radio = Radio::new(read_queue, write_queue);
         radio.wait_startup().await?;
@@ -130,16 +144,28 @@ impl<
         })
     }
 
-    pub async fn connect_to_network(&mut self) -> Result<(), ()> {
+    pub async fn connect_to_network(&mut self, wifi_network: WifiNetwork) -> Result<(), ()> {
         let mut s = String::<17>::new();
         core::write!(&mut s, "A-Team Robot {:04X}", get_uuid()).unwrap();
         self.radio.set_host_name(s.as_str()).await?;
+        let wifi_ssid = match wifi_network {
+            WifiNetwork::Team => TEAM_WIFI_SSID,
+            WifiNetwork::CompMain => COMP_MAIN_WIFI_SSID,
+            WifiNetwork::CompPractice => COMP_PRACTICE_WIFI_SSID
+        };
+
+        let wifi_pass = match wifi_network {
+            WifiNetwork::Team => TEAM_WIFI_PASS,
+            WifiNetwork::CompMain => COMP_MAIN_WIFI_PASS,
+            WifiNetwork::CompPractice => COMP_PRACTICE_WIFI_PASS
+        };
+
         self.radio
             .config_wifi(
                 1,
-                WIFI_SSID,
+                wifi_ssid,
                 WifiAuth::WPA {
-                    passphrase: WIFI_PASS,
+                    passphrase: wifi_pass,
                 },
             )
             .await?;

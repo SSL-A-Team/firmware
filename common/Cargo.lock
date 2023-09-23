@@ -24,6 +24,7 @@ name = "ateam-common-packets"
 version = "1.0.0"
 dependencies = [
  "bindgen",
+ "which",
 ]
 
 [[package]]

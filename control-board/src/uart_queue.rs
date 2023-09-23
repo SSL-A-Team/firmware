@@ -67,13 +67,13 @@ impl<
                     // TODO: this
                 if let Ok(len) = len {
                     if len == 0 {
-                        info!("uart zero");
+                        // info!("uart zero");
                         buf.cancel();
                     } else {
                         *buf.len() = len;
                     }
                 } else {
-                    info!("{}", len);
+                    // info!("{}", len);
                     buf.cancel();
                 }
             }
