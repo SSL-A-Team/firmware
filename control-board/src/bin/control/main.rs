@@ -142,7 +142,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     );
 
     let mut dotstar = Apa102::new(dotstar_spi);
-    dotstar.write([RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
+    let _ = dotstar.write([RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
 
     info!("booted");
 
@@ -185,15 +185,18 @@ async fn main(_spawner: embassy_executor::Spawner) {
     info!("id: {}", robot_id);
     shell_indicator.set(robot_id);
 
-    let wifi_network = if dip5.is_high() & dip6.is_high() {
-        WifiNetwork::Team
-    } else if dip5.is_low() & dip6.is_high() {
-        WifiNetwork::CompMain
-    } else if dip5.is_high() & dip6.is_low() {
-        WifiNetwork::CompPractice
-    } else {
-        WifiNetwork::Team
-    };
+    let wifi_network = WifiNetwork::Team;
+    // let wifi_network = if dip5.is_high() & dip6.is_high() {
+    //     WifiNetwork::Team
+    // } else if dip5.is_low() & dip6.is_high() {
+    //     WifiNetwork::CompMain
+    // } else if dip5.is_high() & dip6.is_low() {
+    //     WifiNetwork::CompPractice
+    // } else {
+    //     WifiNetwork::Team
+    // };
+
+    let control_debug_telemetry_enabled = dip5.is_high();
 
     let team = if dip7.is_high() {
         TeamColor::Blue
@@ -235,14 +238,14 @@ async fn main(_spawner: embassy_executor::Spawner) {
         SPI6_BUF[0] = 0x80;
         // info!("xfer {=[u8]:x}", SPI6_BUF[0..1]);
         imu_cs1.set_low();
-        imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
+        let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
         imu_cs1.set_high();
         let accel_id = SPI6_BUF[1];
         info!("accelerometer id: 0x{:x}", accel_id);
 
         SPI6_BUF[0] = 0x80;
         imu_cs2.set_low();
-        imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
+        let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
         imu_cs2.set_high();
         let gyro_id = SPI6_BUF[1];
         info!("gyro id: 0x{:x}", gyro_id);
@@ -349,7 +352,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         battery_sub,
     );
 
-    dotstar.write([RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
+    let _ = dotstar.write([RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
 
     control.load_firmware().await;
 
@@ -374,7 +377,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         info!("kicker flash complete");
     }
 
-    dotstar.write(
+    let _ = dotstar.write(
         [RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 0, b: 10 }]
             .iter()
             .cloned(),
@@ -397,7 +400,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     };
     spawner.spawn(token).unwrap();
 
-    dotstar.write(
+    let _ = dotstar.write(
         [RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 10, b: 0 }]
             .iter()
             .cloned(),
@@ -428,7 +431,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
             SPI6_BUF[0] = 0x86;
             // SPI6_BUF[0] = 0x86;
             imu_cs2.set_low();
-            imu_spi.transfer_in_place(&mut SPI6_BUF[0..3]).await;
+            let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..3]).await;
             imu_cs2.set_high();
             let rate_z = (SPI6_BUF[2] as u16 * 256 + SPI6_BUF[1] as u16) as i16;
             // info!("z rate: {}", rate_z);
@@ -455,7 +458,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         battery_pub.publish_immediate(filter_battery_v);
 
         if filter_battery_v < BATTERY_MIN_VOLTAGE {
-            dotstar.write(
+            let _ = dotstar.write(
                 [RGB8 { r: 10, g: 0, b: 0 }, RGB8 { r: 10, g: 0, b: 0 }]
                     .iter()
                     .cloned(),
@@ -472,10 +475,16 @@ async fn main(_spawner: embassy_executor::Spawner) {
         //
 
         let telemetry = control.tick(latest);
-        if let Some(telemetry) = telemetry.await {
+        if let (Some(telemetry), control_debug_telem) = telemetry.await {
             // info!("{:?}", defmt::Debug2Format(&telemetry));
             RADIO_TEST.send_telemetry(telemetry).await;
+
+            if control_debug_telemetry_enabled {
+                RADIO_TEST.send_control_debug_telemetry(control_debug_telem).await;
+            }
         }
+
+
 
         kicker.process_telemetry();
 

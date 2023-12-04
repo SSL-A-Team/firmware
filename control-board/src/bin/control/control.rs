@@ -1,13 +1,8 @@
-use ateam_common_packets::{bindings_radio::{BasicControl, BasicTelemetry}, bindings_stspin::MotorResponse_Motion_Packet};
+use ateam_common_packets::{bindings_radio::{BasicControl, BasicTelemetry, ControlDebugTelemetry}, bindings_stspin::MotorResponse_Motion_Packet};
 use defmt::info;
 use embassy_executor::SendSpawner;
 use embassy_stm32::{
-    gpio::{Level, Output, OutputOpenDrain, Pull, Speed},
-    peripherals::{
-        DMA1_CH0, DMA1_CH1, DMA1_CH2, DMA1_CH3, DMA1_CH4, DMA1_CH5, DMA1_CH6, DMA1_CH7,
-        DMA2_CH2, DMA2_CH3,
-        UART4, UART5, UART7, USART3, USART6,
-    },
+    gpio::{Level, Output, Speed},
     usart::Uart,
 };
 use embassy_time::{Duration, Timer};
@@ -19,11 +14,7 @@ use ateam_control_board::{
     uart_queue::{UartReadQueue, UartWriteQueue},
     motion::{
         robot_model::{RobotConstants, RobotModel},
-        constant_gain_kalman_filter::CgKalmanFilter,
-        params::{
-            body_vel_filter_params,
-            body_vel_pid_params,
-        }, robot_controller::BodyVelocityController
+        robot_controller::BodyVelocityController
     },
     BATTERY_MIN_VOLTAGE
 };
@@ -459,7 +450,7 @@ impl<'a> Control<'a> {
         self.drib_motor.process_packets();
     }
 
-     pub async fn tick(&mut self, latest_control: Option<BasicControl>) -> Option<BasicTelemetry> {
+    pub async fn tick(&mut self, latest_control: Option<BasicControl>) -> (Option<BasicTelemetry>, ControlDebugTelemetry) {
         self.process_mc_packets();
 
         self.front_right_motor.log_reset("FR");
@@ -492,7 +483,7 @@ impl<'a> Control<'a> {
                 self.ticks_since_packet = 0;
             }
         }
-        let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel);
+        // let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel);
 
         // now we have setpoint r(t) in self.cmd_vel
         let battery_v = self.battery_sub.next_message_pure().await as f32;
@@ -554,7 +545,7 @@ impl<'a> Control<'a> {
         self.back_right_motor.send_motion_command();
         self.drib_motor.send_motion_command();
 
-        Some(BasicTelemetry {
+        (Some(BasicTelemetry {
             sequence_number: 0,
             robot_revision_major: 0,
             robot_revision_minor: 0,
@@ -570,6 +561,7 @@ impl<'a> Control<'a> {
             motor_3_temperature: 0.,
             motor_4_temperature: 0.,
             kicker_charge_level: 0.,
-        })
+        }),
+        self.robot_controller.get_control_debug_telem())
     }
 }
