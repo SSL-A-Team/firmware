@@ -78,7 +78,9 @@ impl<'a> BodyVelocityController<'a> {
                     wheel_setpoint: 0.0,
                     wheel_velocity: 0.0,
                     wheel_torque: 0.0
-                }, 
+                },
+                imu_gyro: [0.0, 0.0, 0.0],
+                imu_accel: [0.0, 0.0, 0.0],
                 commanded_body_velocity: [0.0, 0.0, 0.0],
                 clamped_commanded_body_velocity: [0.0, 0.0, 0.0],
                 cgkf_body_velocity_state_estimate: [0.0, 0.0, 0.0],
@@ -134,7 +136,9 @@ impl<'a> BodyVelocityController<'a> {
                     wheel_setpoint: 0.0,
                     wheel_velocity: 0.0,
                     wheel_torque: 0.0
-                }, 
+                },
+                imu_gyro: [0.0, 0.0, 0.0],
+                imu_accel: [0.0, 0.0, 0.0],
                 commanded_body_velocity: [0.0, 0.0, 0.0],
                 clamped_commanded_body_velocity: [0.0, 0.0, 0.0],
                 cgkf_body_velocity_state_estimate: [0.0, 0.0, 0.0],
@@ -154,6 +158,17 @@ impl<'a> BodyVelocityController<'a> {
     pub fn control_update_z(&mut self, setpoint: &Vector3<f32>, z: Vector5<f32>) {
         // TODO there are a few discrete time intergrals and derivatives in here
         // these should probably be genericized/templated some how
+
+        // Firmware does FR, FL, BL, BR ordering like graph quadrants
+        // Software does FL, FR, BR, BL ordering "clockwise"
+        // we'll do the mapping here for now
+        // FIX ME
+        self.debug_telemetry.motor_fl.wheel_velocity = z[1];
+        self.debug_telemetry.motor_fr.wheel_velocity = z[0];
+        self.debug_telemetry.motor_br.wheel_velocity = z[3];
+        self.debug_telemetry.motor_bl.wheel_velocity = z[2];
+
+        self.debug_telemetry.imu_gyro[2] = z[4];
 
         // clamp/scale setpoint vel
         let setpoint = clamp_scale_vector(setpoint, &BODY_VEL_LIM);

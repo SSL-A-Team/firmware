@@ -478,8 +478,11 @@ async fn main(_spawner: embassy_executor::Spawner) {
         //
 
         let telemetry = control.tick(latest);
-        if let (Some(telemetry), control_debug_telem) = telemetry.await {
+        if let (Some(mut telemetry), control_debug_telem) = telemetry.await {
             // info!("{:?}", defmt::Debug2Format(&telemetry));
+
+            telemetry.kicker_charge_level = kicker.hv_rail_voltage();
+
             RADIO_TEST.send_telemetry(telemetry).await;
 
             if control_debug_telemetry_enabled {
