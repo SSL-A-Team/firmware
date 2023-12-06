@@ -197,6 +197,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // };
 
     let control_debug_telemetry_enabled = dip5.is_high();
+    if control_debug_telemetry_enabled {
+        info!("Debug control telemetry transmission enabled");
+    }
 
     let team = if dip7.is_high() {
         TeamColor::Blue
