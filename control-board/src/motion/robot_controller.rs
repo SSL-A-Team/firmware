@@ -79,6 +79,8 @@ impl<'a> BodyVelocityController<'a> {
                     wheel_velocity: 0.0,
                     wheel_torque: 0.0
                 }, 
+                imu_gyro: [0.0, 0.0, 0.0],
+                imu_accel: [0.0, 0.0, 0.0], 
                 commanded_body_velocity: [0.0, 0.0, 0.0],
                 clamped_commanded_body_velocity: [0.0, 0.0, 0.0],
                 cgkf_body_velocity_state_estimate: [0.0, 0.0, 0.0],
@@ -134,7 +136,9 @@ impl<'a> BodyVelocityController<'a> {
                     wheel_setpoint: 0.0,
                     wheel_velocity: 0.0,
                     wheel_torque: 0.0
-                }, 
+                },
+                imu_gyro: [0.0, 0.0, 0.0],
+                imu_accel: [0.0, 0.0, 0.0], 
                 commanded_body_velocity: [0.0, 0.0, 0.0],
                 clamped_commanded_body_velocity: [0.0, 0.0, 0.0],
                 cgkf_body_velocity_state_estimate: [0.0, 0.0, 0.0],
@@ -158,6 +162,12 @@ impl<'a> BodyVelocityController<'a> {
         // clamp/scale setpoint vel
         let setpoint = clamp_scale_vector(setpoint, &BODY_VEL_LIM);
         self.debug_telemetry.commanded_body_velocity.copy_from_slice(setpoint.as_slice());
+
+        self.debug_telemetry.imu_gyro[2] = z.a;
+        self.debug_telemetry.motor_fr.wheel_velocity = z[1];
+        self.debug_telemetry.motor_fl.wheel_velocity = z[0];
+        self.debug_telemetry.motor_bl.wheel_velocity = z[3];
+        self.debug_telemetry.motor_br.wheel_velocity = z[2];
 
         // determine commanded body accleration, and clamp-scale the the control input
         let sp_body_acc = (setpoint - self.prev_setpoint) / self.loop_dt_s;
