@@ -159,21 +159,16 @@ impl<'a> BodyVelocityController<'a> {
         // TODO there are a few discrete time intergrals and derivatives in here
         // these should probably be genericized/templated some how
 
-        // Firmware does FR, FL, BL, BR ordering like graph quadrants
-        // Software does FL, FR, BR, BL ordering "clockwise"
-        // we'll do the mapping here for now
-        // FIX ME
-        self.debug_telemetry.motor_fl.wheel_velocity = z[1];
-        self.debug_telemetry.motor_fr.wheel_velocity = z[0];
-        self.debug_telemetry.motor_br.wheel_velocity = z[3];
-        self.debug_telemetry.motor_bl.wheel_velocity = z[2];
 
-        self.debug_telemetry.imu_gyro[2] = z[4];
 
         // clamp/scale setpoint vel
         let setpoint = clamp_scale_vector(setpoint, &BODY_VEL_LIM);
         self.debug_telemetry.commanded_body_velocity.copy_from_slice(setpoint.as_slice());
 
+        // Firmware does FR, FL, BL, BR ordering like graph quadrants
+        // Software does FL, FR, BR, BL ordering "clockwise"
+        // we'll do the mapping here for now
+        // FIX ME
         self.debug_telemetry.imu_gyro[2] = z.a;
         self.debug_telemetry.motor_fr.wheel_velocity = z[1];
         self.debug_telemetry.motor_fl.wheel_velocity = z[0];
