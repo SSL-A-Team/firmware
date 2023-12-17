@@ -1,8 +1,9 @@
 use super::radio::{PeerConnection, Radio, WifiAuth};
 use crate::uart_queue::{UartReadQueue, UartWriteQueue};
 use ateam_common_packets::bindings_radio::{
-    self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data, BasicTelemetry, ControlDebugTelemetry,
+    self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data, BasicTelemetry, ControlDebugTelemetry, ParameterCommand,
 };
+use ateam_common_packets::radio::DataPacket;
 use const_format::formatcp;
 use core::fmt::Write;
 use core::mem::size_of;
@@ -377,24 +378,38 @@ impl<
         }
     }
 
-    pub async fn read_control(&self) -> Result<BasicControl, ()> {
+    pub async fn read_packet(&self) -> Result<DataPacket, ()> {
         self.read_data(|data| {
-            const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+            const CONTROL_PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
                 + size_of::<BasicControl>();
-            if data.len() != PACKET_SIZE {
+            const PARAMERTER_PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                + size_of::<ParameterCommand>();
+
+            if data.len() == CONTROL_PACKET_SIZE {
+                let mut data_copy = [0u8; CONTROL_PACKET_SIZE];
+                data_copy.clone_from_slice(&data[0..CONTROL_PACKET_SIZE]);
+    
+                let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
+    
+                if packet.command_code != CommandCode::CC_CONTROL {
+                    return Err(());
+                }
+    
+                Ok(unsafe { DataPacket::BasicControl(packet.data.control) })
+            } else if data.len() == PARAMERTER_PACKET_SIZE {
+                let mut data_copy = [0u8; PARAMERTER_PACKET_SIZE];
+                data_copy.clone_from_slice(&data[0..PARAMERTER_PACKET_SIZE]);
+    
+                let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
+    
+                if packet.command_code != CommandCode::CC_ROBOT_PARAMETER_COMMAND {
+                    return Err(());
+                }
+    
+                Ok(unsafe { DataPacket::ParameterCommand(packet.data.robot_parameter_command) })
+            } else {
                 return Err(());
             }
-
-            let mut data_copy = [0u8; PACKET_SIZE];
-            data_copy.clone_from_slice(&data[0..PACKET_SIZE]);
-
-            let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
-
-            if packet.command_code != CommandCode::CC_CONTROL {
-                return Err(());
-            }
-
-            Ok(unsafe { packet.data.control })
         })
         .await?
     }

@@ -7,7 +7,7 @@
 use core::future::pending;
 
 use apa102_spi::Apa102;
-use ateam_common_packets::bindings_radio::{BasicControl, KickRequest};
+use ateam_common_packets::bindings_radio::{BasicControl, KickRequest, ParameterCommand};
 use ateam_control_board::{
     adc_raw_to_v, adc_v_to_battery_voltage,
     drivers::{
@@ -175,9 +175,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // let robot_id = rotary.read();
 
-    /////////////////////
-    // Dip Switch Inputs
-    /////////////////////
+    ////////////////////////
+    // Dip Switch Inputs  //
+    ////////////////////////
     let robot_id = (dip1.is_high() as u8) << 3
         | (dip2.is_high() as u8) << 2
         | (dip3.is_high() as u8) << 1
@@ -207,9 +207,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
         TeamColor::Yellow
     };
 
-    //////////////////
-    // Battery voltage
-    //////////////////
+    //////////////////////
+    // Battery Voltage  //
+    //////////////////////
 
     let mut adc3 = Adc::new(p.ADC3, &mut Delay);
     adc3.set_sample_time(SampleTime::Cycles1_5);
@@ -421,18 +421,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     loop {
         unsafe { wdg.pet() };
-        let latest = RADIO_TEST.get_latest_control();
-        // let latest = Some(BasicControl{
-        //     vel_x_linear: 0.,
-        //     vel_y_linear: 0.,
-        //     vel_z_angular: 0.05,
-        //     kick_vel: 0.,
-        //     dribbler_speed: 0.2,
-        //     kick_request: 0,
-        // });
+
         unsafe {
             SPI6_BUF[0] = 0x86;
-            // SPI6_BUF[0] = 0x86;
             imu_cs2.set_low();
             let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..3]).await;
             imu_cs2.set_high();
@@ -444,9 +435,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
         // could just feed gyro in here but the comment in control said to use a channel
 
-        //
-        // Battery reading
-        //
+        ///////////////////////
+        //  Battery reading  //
+        ///////////////////////
 
         let current_battery_v =
             adc_v_to_battery_voltage(adc_raw_to_v(adc3.read(&mut battery_pin) as f32));
@@ -473,11 +464,28 @@ async fn main(_spawner: embassy_executor::Spawner) {
             });
         }
 
-        //
-        // Telemtry
-        //
+        /////////////////////////
+        //  Parameter Updates  //
+        /////////////////////////
+        
+        let latest_param_cmd = RADIO_TEST.get_latest_params_cmd();
 
-        let telemetry = control.tick(latest);
+        if let Some(latest_param_cmd) = latest_param_cmd {
+            let param_cmd_resp = control.update_parameters(latest_param_cmd);
+            // if param_cmd_resp is None, then the requested parameter update had no submodule acceping the
+            // field, and so it's not supported by this platform
+            // if param_cmd_resp is Some, then it could be successful or failed, but the requested data field
+            // was at least recognized by a submodule
+        }
+
+        ////////////////
+        //  Telemtry  //
+        ////////////////
+
+        let latest_control_cmd = RADIO_TEST.get_latest_control();
+
+
+        let telemetry = control.tick(latest_control_cmd);
         if let (Some(mut telemetry), control_debug_telem) = telemetry.await {
             // info!("{:?}", defmt::Debug2Format(&telemetry));
 
@@ -490,11 +498,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
             }
         }
 
-
-
         kicker.process_telemetry();
 
-        if let Some(control) = latest {
+        if let Some(control) = latest_control_cmd {
             kicker.set_kick_strength(control.kick_vel);
             kicker.request_kick(control.kick_request);
             kicker.send_command();

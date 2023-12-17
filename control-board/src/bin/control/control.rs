@@ -1,4 +1,4 @@
-use ateam_common_packets::{bindings_radio::{BasicControl, BasicTelemetry, ControlDebugTelemetry}, bindings_stspin::MotorResponse_Motion_Packet};
+use ateam_common_packets::{bindings_radio::{BasicControl, BasicTelemetry, ControlDebugTelemetry, ParameterCommand}, bindings_stspin::MotorResponse_Motion_Packet};
 use defmt::info;
 use embassy_executor::SendSpawner;
 use embassy_stm32::{
@@ -563,5 +563,9 @@ impl<'a> Control<'a> {
             kicker_charge_level: 0.,
         }),
         self.robot_controller.get_control_debug_telem())
+    }
+
+    pub fn update_parameters(&mut self, param_cmd: ParameterCommand) -> Option<ParameterCommand> {        
+        return self.robot_controller.update_parameters(param_cmd);
     }
 }

@@ -1,3 +1,6 @@
+use ateam_common_packets::bindings_radio::ParameterCommandCode::*;
+use ateam_common_packets::bindings_radio::ParameterDataFormat::{PID_LIMITED_INTEGRAL_F32, VEC3_F32};
+use ateam_common_packets::bindings_radio::ParameterName::VEL_PID_X;
 use nalgebra::{SVector, Vector3, Vector4, Vector5};
 
 use super::constant_gain_kalman_filter::CgKalmanFilter;
@@ -16,7 +19,7 @@ use super::params::body_vel_pid_params::{
 
 use ateam_common_packets::bindings_radio::{
     ControlDebugTelemetry,
-    MotorDebugTelemetry
+    MotorDebugTelemetry, ParameterCommand
 };
 
 // TODO find some general numeric type trait(s) for D
@@ -29,7 +32,7 @@ pub struct BodyVelocityController<'a> {
     loop_dt_s: f32,
     robot_model: RobotModel,
     body_vel_filter: CgKalmanFilter<'a, 3, 4, 5>,
-    body_vel_controller: PidController<'a, 3>,
+    body_vel_controller: PidController<3>,
     body_velocity_limit: Vector3<f32>,
     body_acceleration_limit: Vector3<f32>,
     wheel_acceleration_limits: Vector4<f32>,
@@ -100,7 +103,7 @@ impl<'a> BodyVelocityController<'a> {
     pub fn new(loop_dt_s: f32,
             robot_model: RobotModel,
             body_vel_filter: CgKalmanFilter<'a, 3, 4, 5>,
-            pid_controller: PidController<'a, 3>,
+            pid_controller: PidController<3>,
             bv_limit: Vector3<f32>,
             ba_limit: Vector3<f32>,
             wa_limit: Vector4<f32>
@@ -228,5 +231,62 @@ impl<'a> BodyVelocityController<'a> {
 
     pub fn get_control_debug_telem(&self) -> ControlDebugTelemetry {
         self.debug_telemetry
+    }
+
+    pub fn update_parameters(&mut self, param_cmd: ParameterCommand) -> Option<ParameterCommand> {
+        // if we haven't been given an actionable command code, ignore the call
+        if !(param_cmd.command_code == PCC_READ || param_cmd.command_code == PCC_WRITE) {
+            return None;
+        }
+        
+        let mut param_resp = param_cmd;
+
+        return match param_cmd.parameter_name {
+            RC_BODY_VEL_LIMIT => {
+                if param_cmd.data_format == VEC3_F32 {
+                    // if commanded to write, do the write
+                    if param_cmd.command_code == PCC_WRITE {
+                        self.body_velocity_limit.as_mut_slice().copy_from_slice(&param_cmd.data.vec3_f32);
+                    }
+
+                    // write back
+                    param_cmd.data.vec3_f32.copy_from_slice(self.body_velocity_limit.as_slice());
+
+                    param_resp.command_code = PCC_ACK;
+                } else {
+                    param_resp.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                }
+
+                Some(param_resp)
+            },
+            VEL_PID_X => {
+                if param_cmd.data_format == PID_LIMITED_INTEGRAL_F32 {
+                    let mut current_K = self.body_vel_controller.get_K();
+
+                    // if commanded to write, do the write
+                    if param_cmd.command_code == PCC_WRITE {
+                        current_K.row_mut(0).copy_from_slice(&param_cmd.data.pidii_f32);
+                    }
+
+                    // can't slice copy b/c backing storage is column-major
+                    // so a row slice isn't contiguous in backing memory and
+                    // therefore you can't do a slice copy
+                    param_resp.data.pidii_f32[0] = current_K.row(0)[0];
+                    param_resp.data.pidii_f32[1] = current_K.row(0)[1];
+                    param_resp.data.pidii_f32[2] = current_K.row(0)[2];
+                    param_resp.data.pidii_f32[3] = current_K.row(0)[3];
+                    param_resp.data.pidii_f32[4] = current_K.row(0)[4];
+
+                    param_resp.command_code = PCC_ACK;
+                } else {
+                    param_resp.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                }
+
+                Some(param_resp)
+            },
+            _ => {
+                None
+            }
+        }
     }
 }
