@@ -1,7 +1,7 @@
 use super::radio::{PeerConnection, Radio, WifiAuth};
 use crate::uart_queue::{UartReadQueue, UartWriteQueue};
 use ateam_common_packets::bindings_radio::{
-    self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data, BasicTelemetry,
+    self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data, BasicTelemetry, ControlDebugTelemetry,
 };
 use const_format::formatcp;
 use core::fmt::Write;
@@ -318,6 +318,29 @@ impl<
                 &packet as *const _ as *const u8,
                 size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
                     + size_of::<BasicTelemetry>(),
+            )
+        };
+        self.send_data(packet_bytes).await?;
+
+        Ok(())
+    }
+
+    pub async fn send_control_debug_telemetry(&self, telemetry: ControlDebugTelemetry) -> Result<(), ()> {
+        let packet = RadioPacket {
+            crc32: 0,
+            major_version: bindings_radio::kProtocolVersionMajor,
+            minor_version: bindings_radio::kProtocolVersionMinor,
+            command_code: CommandCode::CC_CONTROL_DEBUG_TELEMETRY,
+            data_length: size_of::<ControlDebugTelemetry>() as u16,
+            data: RadioPacket_Data {
+                control_debug_telemetry: telemetry
+            },
+        };
+        let packet_bytes = unsafe {
+            core::slice::from_raw_parts(
+                &packet as *const _ as *const u8,
+                size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                    + size_of::<ControlDebugTelemetry>(),
             )
         };
         self.send_data(packet_bytes).await?;

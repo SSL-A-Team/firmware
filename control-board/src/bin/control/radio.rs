@@ -1,6 +1,6 @@
 use core::cell::RefCell;
 
-use ateam_common_packets::bindings_radio::{BasicControl, BasicTelemetry};
+use ateam_common_packets::bindings_radio::{BasicControl, BasicTelemetry, ControlDebugTelemetry};
 use ateam_control_board::{
     drivers::radio::{RobotRadio, TeamColor, WifiNetwork},
     queue,
@@ -303,6 +303,15 @@ where
             .as_ref()
             .unwrap()
             .send_telemetry(telemetry)
+            .await
+            .unwrap();
+    }
+
+    pub async fn send_control_debug_telemetry(&self, control_debug_telemetry: ControlDebugTelemetry) {
+        self.radio
+            .as_ref()
+            .unwrap()
+            .send_control_debug_telemetry(control_debug_telemetry)
             .await
             .unwrap();
     }
