@@ -13,7 +13,7 @@ pub struct PidController<const NUM_STATES: usize> {
 impl<'a, const NUM_STATES: usize> PidController<NUM_STATES> {
     pub fn from_gains_matrix(K: &'a SMatrix<f32, NUM_STATES, 5>) -> PidController<NUM_STATES> {
         PidController {
-            K: SMatrix::<f32, NUM_STATES, 5>::from_array_storage(K), 
+            K: K.clone(), 
             u: SVector::<f32, NUM_STATES>::zeros(),
             prev_error: SVector::<f32, NUM_STATES>::zeros(),
             integrated_error: SVector::<f32, NUM_STATES>::zeros(),
@@ -48,7 +48,7 @@ impl<'a, const NUM_STATES: usize> PidController<NUM_STATES> {
     }
 
     pub fn get_K(&self) -> SMatrix<f32, NUM_STATES, 5> {
-        return *self.K;
+        return self.K;
     }
 
     pub fn set_K(&mut self, new_K: SMatrix<f32, NUM_STATES, 5>) {

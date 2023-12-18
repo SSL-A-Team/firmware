@@ -1,6 +1,6 @@
 use ateam_common_packets::bindings_radio::ParameterCommandCode::*;
 use ateam_common_packets::bindings_radio::ParameterDataFormat::{PID_LIMITED_INTEGRAL_F32, VEC3_F32};
-use ateam_common_packets::bindings_radio::ParameterName::VEL_PID_X;
+use ateam_common_packets::bindings_radio::ParameterName::{VEL_PID_X, RC_BODY_VEL_LIMIT};
 use nalgebra::{SVector, Vector3, Vector4, Vector5};
 
 use super::constant_gain_kalman_filter::CgKalmanFilter;
@@ -246,11 +246,11 @@ impl<'a> BodyVelocityController<'a> {
                 if param_cmd.data_format == VEC3_F32 {
                     // if commanded to write, do the write
                     if param_cmd.command_code == PCC_WRITE {
-                        self.body_velocity_limit.as_mut_slice().copy_from_slice(&param_cmd.data.vec3_f32);
+                        self.body_velocity_limit.as_mut_slice().copy_from_slice(unsafe { &param_cmd.data.vec3_f32 });
                     }
 
                     // write back
-                    param_cmd.data.vec3_f32.copy_from_slice(self.body_velocity_limit.as_slice());
+                    unsafe { param_resp.data.vec3_f32.copy_from_slice(self.body_velocity_limit.as_slice()); }
 
                     param_resp.command_code = PCC_ACK;
                 } else {
@@ -265,17 +265,19 @@ impl<'a> BodyVelocityController<'a> {
 
                     // if commanded to write, do the write
                     if param_cmd.command_code == PCC_WRITE {
-                        current_K.row_mut(0).copy_from_slice(&param_cmd.data.pidii_f32);
+                        current_K.row_mut(0).copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
                     }
 
                     // can't slice copy b/c backing storage is column-major
                     // so a row slice isn't contiguous in backing memory and
                     // therefore you can't do a slice copy
-                    param_resp.data.pidii_f32[0] = current_K.row(0)[0];
-                    param_resp.data.pidii_f32[1] = current_K.row(0)[1];
-                    param_resp.data.pidii_f32[2] = current_K.row(0)[2];
-                    param_resp.data.pidii_f32[3] = current_K.row(0)[3];
-                    param_resp.data.pidii_f32[4] = current_K.row(0)[4];
+                    unsafe {
+                        param_resp.data.pidii_f32[0] = current_K.row(0)[0];
+                        param_resp.data.pidii_f32[1] = current_K.row(0)[1];
+                        param_resp.data.pidii_f32[2] = current_K.row(0)[2];
+                        param_resp.data.pidii_f32[3] = current_K.row(0)[3];
+                        param_resp.data.pidii_f32[4] = current_K.row(0)[4];
+                    }
 
                     param_resp.command_code = PCC_ACK;
                 } else {
