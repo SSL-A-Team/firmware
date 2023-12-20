@@ -1,7 +1,9 @@
-use ateam_common_packets::bindings_radio::ParameterCommandCode::*;
+use ateam_common_packets::bindings_radio::{ParameterCommandCode::*, ParameterName};
 use ateam_common_packets::bindings_radio::ParameterDataFormat::{PID_LIMITED_INTEGRAL_F32, VEC3_F32};
-use ateam_common_packets::bindings_radio::ParameterName::{VEL_PID_X, RC_BODY_VEL_LIMIT};
+use ateam_common_packets::bindings_radio::ParameterName::{VEL_PID_X, RC_BODY_VEL_LIMIT, RC_BODY_ACC_LIMIT, VEL_PID_Y, ANGULAR_VEL_PID_Z, VEL_CGKF_ENCODER_NOISE, VEL_CGKF_PROCESS_NOISE, VEL_CGKF_GYRO_NOISE, VEL_CGFK_INITIAL_COVARIANCE, VEL_CGKF_K_MATRIX, RC_WHEEL_ACC_LIMIT};
 use nalgebra::{SVector, Vector3, Vector4, Vector5};
+
+use crate::parameter_interface::ParameterInterface;
 
 use super::constant_gain_kalman_filter::CgKalmanFilter;
 use super::pid::PidController;
@@ -232,16 +234,39 @@ impl<'a> BodyVelocityController<'a> {
     pub fn get_control_debug_telem(&self) -> ControlDebugTelemetry {
         self.debug_telemetry
     }
+}
 
-    pub fn update_parameters(&mut self, param_cmd: ParameterCommand) -> Option<ParameterCommand> {
+impl<'a> ParameterInterface for BodyVelocityController<'a> {
+    fn processes_cmd(&self, param_cmd: &ParameterCommand) -> bool {
+        return self.has_name(param_cmd.parameter_name);
+    }
+
+    fn has_name(&self, param_name: ParameterName::Type) -> bool {
+        return match param_name {
+            RC_BODY_VEL_LIMIT | RC_BODY_ACC_LIMIT | RC_WHEEL_ACC_LIMIT => true,
+            VEL_PID_X | VEL_PID_Y | ANGULAR_VEL_PID_Z => true,
+            VEL_CGKF_ENCODER_NOISE | VEL_CGKF_PROCESS_NOISE | VEL_CGKF_GYRO_NOISE | VEL_CGFK_INITIAL_COVARIANCE | VEL_CGKF_K_MATRIX => true,
+            _ => false,
+        }
+    }
+
+
+    fn apply_command(&mut self, param_cmd: &ParameterCommand) -> Result<ParameterCommand, ParameterCommand> {
+        let mut reply_cmd = param_cmd.clone();
+
         // if we haven't been given an actionable command code, ignore the call
         if !(param_cmd.command_code == PCC_READ || param_cmd.command_code == PCC_WRITE) {
-            return None;
+            return Err(reply_cmd);
         }
-        
-        let mut param_resp = param_cmd;
 
-        return match param_cmd.parameter_name {
+        // if we've been asked to apply a command we don't have a key for it
+        // error out
+        if !self.has_name(param_cmd.parameter_name) {
+            reply_cmd.command_code = PCC_NACK_INVALID_NAME;
+            return Err(*param_cmd);
+        }
+
+        match param_cmd.parameter_name {
             RC_BODY_VEL_LIMIT => {
                 if param_cmd.data_format == VEC3_F32 {
                     // if commanded to write, do the write
@@ -250,17 +275,17 @@ impl<'a> BodyVelocityController<'a> {
                     }
 
                     // write back
-                    unsafe { param_resp.data.vec3_f32.copy_from_slice(self.body_velocity_limit.as_slice()); }
+                    unsafe { reply_cmd.data.vec3_f32.copy_from_slice(self.body_velocity_limit.as_slice()); }
 
-                    param_resp.command_code = PCC_ACK;
+                    reply_cmd.command_code = PCC_ACK;
                 } else {
-                    param_resp.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                    reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                    return Err(reply_cmd);
                 }
-
-                Some(param_resp)
             },
             VEL_PID_X => {
                 if param_cmd.data_format == PID_LIMITED_INTEGRAL_F32 {
+                    #[allow(non_snake_case)] // K is the mathematical symbol for this matrix
                     let mut current_K = self.body_vel_controller.get_K();
 
                     // if commanded to write, do the write
@@ -272,23 +297,26 @@ impl<'a> BodyVelocityController<'a> {
                     // so a row slice isn't contiguous in backing memory and
                     // therefore you can't do a slice copy
                     unsafe {
-                        param_resp.data.pidii_f32[0] = current_K.row(0)[0];
-                        param_resp.data.pidii_f32[1] = current_K.row(0)[1];
-                        param_resp.data.pidii_f32[2] = current_K.row(0)[2];
-                        param_resp.data.pidii_f32[3] = current_K.row(0)[3];
-                        param_resp.data.pidii_f32[4] = current_K.row(0)[4];
+                        reply_cmd.data.pidii_f32[0] = current_K.row(0)[0];
+                        reply_cmd.data.pidii_f32[1] = current_K.row(0)[1];
+                        reply_cmd.data.pidii_f32[2] = current_K.row(0)[2];
+                        reply_cmd.data.pidii_f32[3] = current_K.row(0)[3];
+                        reply_cmd.data.pidii_f32[4] = current_K.row(0)[4];
                     }
 
-                    param_resp.command_code = PCC_ACK;
+                    reply_cmd.command_code = PCC_ACK;
                 } else {
-                    param_resp.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                    reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                    return Err(reply_cmd);
                 }
-
-                Some(param_resp)
             },
             _ => {
-                None
+                defmt::debug!("unimplement key update in RobotController");
+                reply_cmd.command_code = PCC_NACK_INVALID_NAME;
+                return Err(reply_cmd);
             }
         }
+
+        return Ok(*param_cmd);
     }
 }

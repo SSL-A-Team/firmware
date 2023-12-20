@@ -20,6 +20,7 @@ pub mod motion;
 pub mod stm32_interface;
 pub mod stspin_motor;
 pub mod uart_queue;
+pub mod parameter_interface;
 
 pub mod drivers;
 

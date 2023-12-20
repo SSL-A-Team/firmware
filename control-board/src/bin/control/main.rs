@@ -4,29 +4,25 @@
 #![feature(const_mut_refs)]
 #![feature(async_closure)]
 
-use core::future::pending;
-
 use apa102_spi::Apa102;
-use ateam_common_packets::bindings_radio::{BasicControl, KickRequest, ParameterCommand};
 use ateam_control_board::{
     adc_raw_to_v, adc_v_to_battery_voltage,
     drivers::{
         radio::TeamColor, radio::WifiNetwork, rotary::Rotary, shell_indicator::ShellIndicator, kicker::Kicker,
     },
-    include_external_cpp_bin,
     queue::Buffer,
     stm32_interface::{get_bootloader_uart_config, Stm32Interface},
     uart_queue::{UartReadQueue, UartWriteQueue},
-    BATTERY_BUFFER_SIZE, BATTERY_MAX_VOLTAGE, BATTERY_MIN_VOLTAGE, include_kicker_bin,
+    BATTERY_BUFFER_SIZE, BATTERY_MAX_VOLTAGE, BATTERY_MIN_VOLTAGE, include_kicker_bin, parameter_interface::ParameterInterface,
 };
 use control::Control;
 use defmt::info;
 use embassy_stm32::{
-    adc::{Adc, AdcPin, InternalChannel, SampleTime, Temperature},
+    adc::{Adc, SampleTime},
     dma::NoDma,
     executor::InterruptExecutor,
     exti::ExtiInput,
-    gpio::{Input, Level, Output, OutputOpenDrain, Pull, Speed},
+    gpio::{Input, Level, Output, Pull, Speed},
     interrupt::{self, InterruptExt},
     peripherals::{DMA2_CH4, DMA2_CH5, USART6},
     spi,
@@ -49,8 +45,7 @@ use static_cell::StaticCell;
 
 use embassy_stm32::rcc::AdcClockSource;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::channel::Channel;
-use embassy_sync::pubsub::{PubSubChannel, Subscriber};
+use embassy_sync::pubsub::{PubSubChannel};
 
 mod control;
 mod pins;
@@ -146,23 +141,12 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     info!("booted");
 
-    // let mut led0 = Output::new(p.PF3, Level::Low, Speed::High);
-
-    // loop {
-    //     Timer::after(Duration::from_millis(1000)).await;
-    //     led0.toggle();
-    // };
-
-    // spawner
-    //     .spawn(power_off_task(p.PF5, p.EXTI5, p.PF4))
-    //     .unwrap();
-
     let radio_int = interrupt::take!(USART10);
     let radio_usart = Uart::new(
         p.USART10, p.PE2, p.PE3, radio_int, p.DMA2_CH0, p.DMA2_CH1, config,
     );
 
-    let rotary = Rotary::new(p.PG9, p.PG10, p.PG11, p.PG12);
+    let _rotary = Rotary::new(p.PG9, p.PG10, p.PG11, p.PG12);
     let mut shell_indicator = ShellIndicator::new(p.PD0, p.PD1, p.PD3, p.PD4);
     let kicker_det = Input::new(p.PG8, Pull::Down);
     let dip1 = Input::new(p.PG7, Pull::Down);
@@ -170,7 +154,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let dip3 = Input::new(p.PG5, Pull::Down);
     let dip4 = Input::new(p.PG4, Pull::Down);
     let dip5 = Input::new(p.PG3, Pull::Down);
-    let dip6 = Input::new(p.PG2, Pull::Down);
+    let _dip6 = Input::new(p.PG2, Pull::Down);
     let dip7 = Input::new(p.PD15, Pull::Down);
 
     // let robot_id = rotary.read();
@@ -471,11 +455,18 @@ async fn main(_spawner: embassy_executor::Spawner) {
         let latest_param_cmd = RADIO_TEST.get_latest_params_cmd();
 
         if let Some(latest_param_cmd) = latest_param_cmd {
-            let param_cmd_resp = control.update_parameters(latest_param_cmd);
-            // if param_cmd_resp is None, then the requested parameter update had no submodule acceping the
-            // field, and so it's not supported by this platform
-            // if param_cmd_resp is Some, then it could be successful or failed, but the requested data field
-            // was at least recognized by a submodule
+            let param_cmd_resp = control.apply_command(&latest_param_cmd);
+            
+            // if param_cmd_resp is Err, then the requested parameter update had no submodule acceping the
+            // field, or the type was invalid, or the update code is unimplemented
+            // if param_cmd_resp is Ok, then the read/write was successful
+            if let Ok(resp) = param_cmd_resp {
+                defmt::info!("sending successful parameter update command response");
+                RADIO_TEST.send_parameter_response(resp).await;
+            } else if let Err(resp) = param_cmd_resp {
+                defmt::warn!("sending failed parameter updated command response");
+                RADIO_TEST.send_parameter_response(resp).await;
+            }
         }
 
         ////////////////

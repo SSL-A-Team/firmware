@@ -20,7 +20,7 @@ impl<'a, const NUM_STATES: usize> PidController<NUM_STATES> {
         }
     }
 
-    pub fn calculate(&mut self, r: SVector<f32, NUM_STATES>, y: SVector<f32, NUM_STATES>, dt: f32) {
+    pub fn calculate(&mut self, r: SVector<f32, NUM_STATES>, y: SVector<f32, NUM_STATES>, _dt: f32) {
         let error = r - y;
 
         // calculate integrated error
@@ -47,10 +47,12 @@ impl<'a, const NUM_STATES: usize> PidController<NUM_STATES> {
         self.u
     }
 
+    #[allow(non_snake_case)]
     pub fn get_K(&self) -> SMatrix<f32, NUM_STATES, 5> {
         return self.K;
     }
 
+    #[allow(non_snake_case)]
     pub fn set_K(&mut self, new_K: SMatrix<f32, NUM_STATES, 5>) {
         self.K.copy_from(&new_K)
     }

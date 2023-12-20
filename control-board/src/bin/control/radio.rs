@@ -242,6 +242,15 @@ where
             .unwrap();
     }
 
+    pub async fn send_parameter_response(&self, parameter_command: ParameterCommand) {
+        self.radio
+        .as_ref()
+        .unwrap()
+        .send_parameter_response(parameter_command)
+        .await
+        .unwrap();
+    }
+
     // fetch latest stored control value
     pub fn get_latest_control(&self) -> Option<BasicControl> {
         let mut latest_control = self.latest_control.try_lock();

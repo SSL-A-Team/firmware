@@ -1,5 +1,4 @@
-use ateam_common_packets::{bindings_radio::{BasicControl, BasicTelemetry, ControlDebugTelemetry, ParameterCommand}, bindings_stspin::MotorResponse_Motion_Packet};
-use defmt::info;
+use ateam_common_packets::{bindings_radio::{BasicControl, BasicTelemetry, ControlDebugTelemetry, ParameterCommand, ParameterName}};
 use embassy_executor::SendSpawner;
 use embassy_stm32::{
     gpio::{Level, Output, Speed},
@@ -16,12 +15,11 @@ use ateam_control_board::{
         robot_model::{RobotConstants, RobotModel},
         robot_controller::BodyVelocityController
     },
-    BATTERY_MIN_VOLTAGE
+    BATTERY_MIN_VOLTAGE, parameter_interface::ParameterInterface
 };
 use nalgebra::{Vector3, Vector4};
 
-use embassy_sync::channel::Channel;
-use embassy_sync::pubsub::{PubSubChannel, Subscriber};
+use embassy_sync::pubsub::Subscriber;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use crate::pins::*;
 
@@ -565,7 +563,19 @@ impl<'a> Control<'a> {
         self.robot_controller.get_control_debug_telem())
     }
 
-    pub fn update_parameters(&mut self, param_cmd: ParameterCommand) -> Option<ParameterCommand> {        
-        return self.robot_controller.update_parameters(param_cmd);
+
+}
+
+impl<'a> ParameterInterface for Control<'a> {
+    fn processes_cmd(&self, param_cmd: &ParameterCommand) -> bool {
+        return self.robot_controller.processes_cmd(param_cmd);
+    }
+
+    fn has_name(&self, param_name: ParameterName::Type) -> bool {
+        return self.robot_controller.has_name(param_name);
+    }
+
+    fn apply_command(&mut self, param_cmd: &ParameterCommand) -> Result<ParameterCommand, ParameterCommand> {
+        return self.robot_controller.apply_command(param_cmd);
     }
 }

@@ -351,6 +351,29 @@ impl<
         Ok(())
     }
 
+    pub async fn send_parameter_response(&self, parameter_cmd: ParameterCommand) -> Result<(), ()> {
+        let packet = RadioPacket {
+            crc32: 0,
+            major_version: bindings_radio::kProtocolVersionMajor,
+            minor_version: bindings_radio::kProtocolVersionMinor,
+            command_code: CommandCode::CC_ROBOT_PARAMETER_COMMAND,
+            data_length: size_of::<ParameterCommand>() as u16,
+            data: RadioPacket_Data {
+                robot_parameter_command: parameter_cmd
+            },
+        };
+        let packet_bytes = unsafe {
+            core::slice::from_raw_parts(
+                &packet as *const _ as *const u8,
+                size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                    + size_of::<ParameterCommand>(),
+            )
+        };
+        self.send_data(packet_bytes).await?;
+
+        Ok(())
+    }
+
     pub async fn wait_hello(&self, timeout: Duration) -> Result<HelloResponse, ()> {
         let read_fut = self.read_data(|data| {
             const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
