@@ -293,7 +293,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let gyro_sub = GYRO_CHANNEL.subscriber().unwrap();
     let battery_sub = BATTERY_CHANNEL.subscriber().unwrap();
 
-    if kicker_det.is_high() {
+    if kicker_det.is_low() {
         defmt::warn!("kicker appears unplugged!");
     }
 

@@ -256,12 +256,14 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
 
         // if we haven't been given an actionable command code, ignore the call
         if !(param_cmd.command_code == PCC_READ || param_cmd.command_code == PCC_WRITE) {
+            defmt::warn!("asked to apply a command with out and actional command code");
             return Err(reply_cmd);
         }
 
         // if we've been asked to apply a command we don't have a key for it
         // error out
         if !self.has_name(param_cmd.parameter_name) {
+            defmt::warn!("asked to apply a command with a parameter name not managed by this module");
             reply_cmd.command_code = PCC_NACK_INVALID_NAME;
             return Err(*param_cmd);
         }
@@ -285,11 +287,13 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
             },
             VEL_PID_X => {
                 if param_cmd.data_format == PID_LIMITED_INTEGRAL_F32 {
+                    defmt::trace!("hit VEL_PID_X update block");
                     #[allow(non_snake_case)] // K is the mathematical symbol for this matrix
                     let mut current_K = self.body_vel_controller.get_K();
 
                     // if commanded to write, do the write
                     if param_cmd.command_code == PCC_WRITE {
+                        defmt::trace!("hit VEL_PID_X write update block");
                         current_K.row_mut(0).copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
                     }
 
@@ -317,6 +321,6 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
             }
         }
 
-        return Ok(*param_cmd);
+        return Ok(reply_cmd);
     }
 }
