@@ -1,13 +1,7 @@
-use ateam_common_packets::{bindings_radio::{BasicControl, BasicTelemetry}, bindings_stspin::MotorResponse_Motion_Packet};
-use defmt::info;
+use ateam_common_packets::bindings_radio::{BasicControl, BasicTelemetry};
 use embassy_executor::SendSpawner;
 use embassy_stm32::{
-    gpio::{Level, Output, OutputOpenDrain, Pull, Speed},
-    peripherals::{
-        DMA1_CH0, DMA1_CH1, DMA1_CH2, DMA1_CH3, DMA1_CH4, DMA1_CH5, DMA1_CH6, DMA1_CH7,
-        DMA2_CH2, DMA2_CH3,
-        UART4, UART5, UART7, USART3, USART6,
-    },
+    gpio::{Level, Output, Speed},
     usart::Uart,
 };
 use embassy_time::{Duration, Timer};

@@ -1,7 +1,3 @@
-use ateam_common_packets::{
-    bindings_radio::{BasicControl, BasicTelemetry},
-    bindings_stspin::MotorResponse_Motion_Packet,
-};
 use ateam_control_board::{
     include_external_cpp_bin,
     queue::Buffer,
@@ -10,14 +6,9 @@ use ateam_control_board::{
     stspin_motor::{DribblerMotor, WheelMotor},
     uart_queue::{UartReadQueue, UartWriteQueue},
 };
-use defmt::info;
 use embassy_executor::SendSpawner;
 use embassy_stm32::{
-    gpio::{Level, Output, OutputOpenDrain, Pull, Speed},
-    peripherals::{
-        DMA1_CH0, DMA1_CH1, DMA1_CH2, DMA1_CH3, DMA1_CH4, DMA1_CH5, DMA1_CH6, DMA1_CH7, DMA2_CH2,
-        DMA2_CH3, UART4, UART5, UART7, USART3, USART6,
-    },
+    gpio::{Level, Output, Speed},
     usart::Uart,
 };
 use embassy_time::{Duration, Timer};
@@ -39,8 +30,6 @@ const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 64;
 const RX_BUF_DEPTH: usize = 20;
-
-const TICKS_WITHOUT_PACKET_STOP: u16 = 25;
 
 // buffers for front right
 #[link_section = ".axisram.buffers"]
@@ -144,11 +133,11 @@ const WHEEL_RADIUS_M: f32 = 0.049 / 2.0; // wheel dia 49mm
 const WHEEL_DISTANCE_TO_ROBOT_CENTER_M: f32 = 0.085; // 85mm from center of wheel body to center of robot
 
 pub struct MotorsError<T> {
-    pub FR: T,
-    pub FL: T,
-    pub BR: T,
-    pub BL: T,
-    pub Drib: T,
+    pub front_right: T,
+    pub front_left: T,
+    pub back_right: T,
+    pub back_left: T,
+    pub drib: T,
 }
 
 pub struct Control {
@@ -376,11 +365,11 @@ impl Control {
 
         if ret.0.is_err() || ret.1.is_err() || ret.2.is_err() || ret.3.is_err() || ret.4.is_err() {
             return Err(MotorsError {
-                FR: ret.0.is_err(),
-                FL: ret.1.is_err(),
-                BL: ret.2.is_err(),
-                BR: ret.3.is_err(),
-                Drib: ret.4.is_err(),
+                front_right: ret.0.is_err(),
+                front_left: ret.1.is_err(),
+                back_left: ret.2.is_err(),
+                back_right: ret.3.is_err(),
+                drib: ret.4.is_err(),
             });
         }
 

@@ -4,18 +4,17 @@
 #![feature(const_mut_refs)]
 #![feature(async_closure)]
 
-use core::f32::consts::PI;
-
 use defmt_rtt as _;
 use defmt::*;
 use embassy_stm32::{
     self,
     executor::InterruptExecutor,
     interrupt::{self, InterruptExt},
-    gpio::{Level, OutputOpenDrain, Pull, Speed, Output},
+    gpio::{Level, Speed, Output},
     peripherals::{DMA1_CH0, DMA1_CH1, DMA1_CH2, DMA1_CH3, DMA1_CH4, DMA1_CH5, DMA1_CH6, DMA1_CH7},
     peripherals::{USART3, UART4, UART5, UART7},
-    usart::{Uart, Parity}, time::mhz,
+    usart::Uart, 
+    time::mhz,
 };
 use embassy_time::{Duration, Ticker, Timer};
 use futures_util::StreamExt;
@@ -27,7 +26,7 @@ use ateam_control_board::{
     stm32_interface::{Stm32Interface, self},
     queue::Buffer,
     uart_queue::{UartReadQueue, UartWriteQueue},
-    include_external_cpp_bin, stspin_motor::WheelMotor, motion::robot_model::{RobotConstants, self, RobotModel},
+    include_external_cpp_bin, stspin_motor::WheelMotor, motion::robot_model::{RobotConstants, RobotModel},
 };
 
 // include_external_cpp_bin!{STEVAL3204_DRIB_POTCTRL_FW_IMG, "dev3204-drib-potctrl.bin"}
@@ -130,7 +129,7 @@ let back_right_reset_pin =
     let spawner = executor.start();
 
     // setup leds
-    let mut grn_led = Output::new(p.PB0, Level::High, Speed::Medium);
+    let mut _grn_led = Output::new(p.PB0, Level::High, Speed::Medium);
     let mut ylw_led = Output::new(p.PE1, Level::High, Speed::Medium);
     let mut red_led = Output::new(p.PB14, Level::High, Speed::Medium);
     ylw_led.set_low();
@@ -313,22 +312,11 @@ let back_right_reset_pin =
         let rec_body_vel = robot_model.wheel_vel_to_robot_vel(wheel_vels);
         defmt::info!("rec_body_vel [{:?},{:?},{:?}]", rec_body_vel[0], rec_body_vel[1], rec_body_vel[2]);
 
-
-
-        // let c_vel = libm::sinf(angle) / 2.0;
-        // let c_vel = 0.2;
         front_right_motor.set_setpoint(wheel_vels[0]);
         front_left_motor.set_setpoint(wheel_vels[1]);
         back_left_motor.set_setpoint(wheel_vels[2]);
         back_right_motor.set_setpoint(wheel_vels[3]);
         angle += core::f32::consts::FRAC_2_PI / 200.0;
-
-        // let c_vel = 0.2;
-        // front_right_motor.set_setpoint(c_vel);
-        // front_left_motor.set_setpoint(c_vel);
-        // back_left_motor.set_setpoint(c_vel);
-        // back_right_motor.set_setpoint(c_vel);
-        // front_right_motor.set_setpoint(1.0);
 
         front_right_motor.send_motion_command();
         front_left_motor.send_motion_command();

@@ -4,13 +4,10 @@
 #![feature(const_mut_refs)]
 
 use apa102_spi::Apa102;
-use ateam_common_packets::bindings_radio::{BasicControl, KickRequest};
+use ateam_common_packets::bindings_radio::KickRequest;
 use ateam_control_board::{
     drivers::{radio::TeamColor, radio::WifiNetwork, rotary::Rotary, shell_indicator::ShellIndicator},
-    include_external_cpp_bin,
-    queue::Buffer,
-    stm32_interface::{get_bootloader_uart_config, Stm32Interface},
-    uart_queue::{UartReadQueue, UartWriteQueue},
+    stm32_interface::get_bootloader_uart_config,
 };
 use control::Control;
 use defmt::info;
@@ -18,9 +15,8 @@ use embassy_stm32::{
     dma::NoDma,
     executor::InterruptExecutor,
     exti::ExtiInput,
-    gpio::{Input, Level, Output, OutputOpenDrain, Pull, Speed},
+    gpio::{Input, Level, Output, Pull, Speed},
     interrupt::{self, InterruptExt},
-    peripherals::{DMA2_CH4, DMA2_CH5, USART6},
     spi,
     time::{hz, mhz},
     usart::{self, Uart},
@@ -54,24 +50,6 @@ static RADIO_TEST: RadioTest<
     RadioReset,
 > = RadioTest::new(unsafe { &mut BUFFERS_TX }, unsafe { &mut BUFFERS_RX });
 
-// include_external_cpp_bin! {KICKER_FW_IMG, "kicker.bin"}
-
-#[link_section = ".sram4"]
-static mut SPI6_BUF: [u8; 4] = [0x0; 4];
-
-#[link_section = ".axisram.buffers"]
-static mut KICKER_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
-    [Buffer::EMPTY; TX_BUF_DEPTH];
-static KICKER_QUEUE_TX: UartWriteQueue<USART6, DMA2_CH4, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
-    UartWriteQueue::new(unsafe { &mut KICKER_BUFFERS_TX });
-
-#[link_section = ".axisram.buffers"]
-static mut KICKER_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
-    [Buffer::EMPTY; RX_BUF_DEPTH];
-static KICKER_QUEUE_RX: UartReadQueue<USART6, DMA2_CH5, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
-    UartReadQueue::new(unsafe { &mut KICKER_BUFFERS_RX });
-
-// static RADIO: Radio<RadioUART, RadioRxDMA, RadioTxDMA> = Radio::new();
 static EXECUTOR_UART_QUEUE: StaticCell<InterruptExecutor<interrupt::CEC>> = StaticCell::new();
 
 #[embassy_executor::main]
@@ -92,7 +70,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
     let spawner = executor.start();
 
-    let mut imu_spi = spi::Spi::new_txonly(
+    let imu_spi = spi::Spi::new_txonly(
         p.SPI3,
         p.PB3,
         p.PB5,
@@ -103,29 +81,18 @@ async fn main(_spawner: embassy_executor::Spawner) {
     );
 
     let mut dotstar = Apa102::new(imu_spi);
-    dotstar.write([RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
+    let _ = dotstar.write([RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
 
     info!("booted");
-
-    // let mut led0 = Output::new(p.PF3, Level::Low, Speed::High);
-
-    // loop {
-    //     Timer::after(Duration::from_millis(1000)).await;
-    //     led0.toggle();
-    // };
-
-    // spawner
-    //     .spawn(power_off_task(p.PF5, p.EXTI5, p.PF4))
-    //     .unwrap();
 
     let radio_int = interrupt::take!(USART10);
     let radio_usart = Uart::new(
         p.USART10, p.PE2, p.PE3, radio_int, p.DMA2_CH0, p.DMA2_CH1, config,
     );
 
-    let rotary = Rotary::new(p.PG9, p.PG10, p.PG11, p.PG12);
+    let _rotary = Rotary::new(p.PG9, p.PG10, p.PG11, p.PG12);
     let mut shell_indicator = ShellIndicator::new(p.PD0, p.PD1, p.PD3, p.PD4);
-    let kicker_det = Input::new(p.PG8, Pull::Down);
+    let _kicker_det = Input::new(p.PG8, Pull::Down);
     let dip1 = Input::new(p.PG7, Pull::Down);
     let dip2 = Input::new(p.PG6, Pull::Down);
     let dip3 = Input::new(p.PG5, Pull::Down);
@@ -347,11 +314,11 @@ async fn main(_spawner: embassy_executor::Spawner) {
         ball_detected_thresh,
     );
 
-    dotstar.write([RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
+    let _ = dotstar.write([RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
 
     control.load_firmware().await;
 
-    dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
+    let _ = dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
 
     let token = unsafe {
         (&mut *(&RADIO_TEST as *const _
@@ -370,7 +337,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     };
     spawner.spawn(token).unwrap();
 
-    dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 10, b: 0 }].iter().cloned());
+    let _ = dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 10, b: 0 }].iter().cloned());
 
     let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
 

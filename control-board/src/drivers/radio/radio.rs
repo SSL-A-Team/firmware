@@ -104,6 +104,7 @@ impl<
             .await
     }
 
+    #[allow(dead_code)]
     pub async fn attention(&self) -> Result<(), ()> {
         self.send_command("AT").await?;
         self.read_ok().await?;
@@ -187,14 +188,15 @@ impl<
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn config_wifi_addr(
         &self,
-        config_id: u8,
-        static_ip: Option<&str>,
-        subnet_mask: Option<&str>,
-        default_gateway: Option<&str>,
-        dns_server1: Option<&str>,
-        dns_server2: Option<&str>,
+        _config_id: u8,
+        _static_ip: Option<&str>,
+        _subnet_mask: Option<&str>,
+        _default_gateway: Option<&str>,
+        _dns_server1: Option<&str>,
+        _dns_server2: Option<&str>,
     ) -> Result<(), ()> {
         todo!("implement if needed");
     }
@@ -205,15 +207,15 @@ impl<
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
 
-        let mut networkUp = 0;
+        let mut network_up = 0;
 
-        while networkUp < 2 {
+        while network_up < 2 {
             self.reader
                 .dequeue(|buf| {
                     let packet = self.to_packet(buf)?;
 
                     if let EdmPacket::ATEvent(ATEvent::NetworkUp { interface_id: 0 }) = packet {
-                        networkUp += 1;
+                        network_up += 1;
                     } else if let EdmPacket::ATEvent(ATEvent::WifiLinkConnected {
                         conn_id: _,
                         bssid: _,
@@ -233,6 +235,7 @@ impl<
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn config_server(
         &self,
         server_id: u8,
@@ -385,8 +388,10 @@ impl<
         }
     }
 
+    #[allow(dead_code)]
     async fn get_response(&self) {}
 
+    #[allow(dead_code)]
     pub async fn read(&self) {
         self.reader
             .dequeue(|buf| {

@@ -4,7 +4,6 @@
 #![feature(const_mut_refs)]
 
 use control::Control;
-use defmt::*;
 use defmt_rtt as _;
 use embassy_time::{Duration, Ticker, Timer};
 use panic_probe as _;
@@ -68,7 +67,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
         .unwrap();
 
     let btn0 = Input::new(p.PD5, Pull::None);
-    let btn1 = Input::new(p.PD6, Pull::None);
 
     let mut led0 = Output::new(p.PF3, Level::Low, Speed::Low);
     let mut led1 = Output::new(p.PF2, Level::Low, Speed::Low);
@@ -150,27 +148,27 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     let ret = control.load_firmware().await;
     if let Err(err) = ret {
-        if err.FR {
+        if err.front_right {
             defmt::error!("Error flashing FR");
         } else {
             led3.set_high();
         }
-        if err.FL {
+        if err.front_left {
             defmt::error!("Error flashing FL");
         } else {
             led0.set_high();
         }
-        if err.BR {
+        if err.back_right {
             defmt::error!("Error flashing BR");
         } else {
             led2.set_high();
         }
-        if err.BL {
+        if err.back_left {
             defmt::error!("Error flashing BL");
         } else {
             led1.set_high();
         }
-        if err.Drib {
+        if err.drib {
             defmt::error!("Error flashing DRIB");
         }
         dotstar
@@ -256,6 +254,4 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
         dotstar.write([COLOR_YELLOW].iter().cloned()).unwrap();
     }
-
-    loop {}
 }

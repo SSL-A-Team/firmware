@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use embassy_stm32::peripherals::*;
 
 pub type RadioUART = USART10;

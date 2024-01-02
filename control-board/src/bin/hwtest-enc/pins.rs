@@ -1,4 +1,6 @@
-use embassy_stm32::{peripherals::*, interrupt};
+#![allow(dead_code)]
+
+use embassy_stm32::peripherals::*;
 
 pub type RadioUART = USART10;
 pub type RadioTxDMA = DMA2_CH0;
