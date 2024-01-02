@@ -1,5 +1,5 @@
 use ateam_common_packets::bindings_radio::{ParameterCommandCode::*, ParameterName};
-use ateam_common_packets::bindings_radio::ParameterDataFormat::{PID_LIMITED_INTEGRAL_F32, VEC3_F32, VEC4_F32, F32};
+use ateam_common_packets::bindings_radio::ParameterDataFormat::{PID_LIMITED_INTEGRAL_F32, VEC3_F32, VEC4_F32};
 use ateam_common_packets::bindings_radio::ParameterName::{VEL_PID_X, RC_BODY_VEL_LIMIT, RC_BODY_ACC_LIMIT, VEL_PID_Y, ANGULAR_VEL_PID_Z, VEL_CGKF_ENCODER_NOISE, VEL_CGKF_PROCESS_NOISE, VEL_CGKF_GYRO_NOISE, VEL_CGFK_INITIAL_COVARIANCE, VEL_CGKF_K_MATRIX, RC_WHEEL_ACC_LIMIT};
 use nalgebra::{SVector, Vector3, Vector4, Vector5};
 
