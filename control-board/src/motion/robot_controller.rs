@@ -1,5 +1,5 @@
 use ateam_common_packets::bindings_radio::{ParameterCommandCode::*, ParameterName};
-use ateam_common_packets::bindings_radio::ParameterDataFormat::{PID_LIMITED_INTEGRAL_F32, VEC3_F32};
+use ateam_common_packets::bindings_radio::ParameterDataFormat::{PID_LIMITED_INTEGRAL_F32, VEC3_F32, VEC4_F32, F32};
 use ateam_common_packets::bindings_radio::ParameterName::{VEL_PID_X, RC_BODY_VEL_LIMIT, RC_BODY_ACC_LIMIT, VEL_PID_Y, ANGULAR_VEL_PID_Z, VEL_CGKF_ENCODER_NOISE, VEL_CGKF_PROCESS_NOISE, VEL_CGKF_GYRO_NOISE, VEL_CGFK_INITIAL_COVARIANCE, VEL_CGKF_K_MATRIX, RC_WHEEL_ACC_LIMIT};
 use nalgebra::{SVector, Vector3, Vector4, Vector5};
 
@@ -273,34 +273,15 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
             return Err(*param_cmd);
         }
 
-        match param_cmd.parameter_name {
-            RC_BODY_VEL_LIMIT => {
-                if param_cmd.data_format == VEC3_F32 {
-                    // if commanded to write, do the write
-                    if param_cmd.command_code == PCC_WRITE {
-                        self.body_velocity_limit.as_mut_slice().copy_from_slice(unsafe { &param_cmd.data.vec3_f32 });
-                    }
+        if param_cmd.command_code == PCC_READ {
+            match param_cmd.parameter_name {
+                VEL_PID_X => {
+                    // set the type
+                    reply_cmd.data_format = PID_LIMITED_INTEGRAL_F32;
 
-                    // write back
-                    unsafe { reply_cmd.data.vec3_f32.copy_from_slice(self.body_velocity_limit.as_slice()); }
-
-                    reply_cmd.command_code = PCC_ACK;
-                } else {
-                    reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
-                    return Err(reply_cmd);
-                }
-            },
-            VEL_PID_X => {
-                if param_cmd.data_format == PID_LIMITED_INTEGRAL_F32 {
-                    defmt::trace!("hit VEL_PID_X update block");
+                    // readback the data
                     #[allow(non_snake_case)] // K is the mathematical symbol for this matrix
-                    let mut current_K = self.body_vel_controller.get_K();
-
-                    // if commanded to write, do the write
-                    if param_cmd.command_code == PCC_WRITE {
-                        defmt::trace!("hit VEL_PID_X write update block");
-                        current_K.row_mut(0).copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
-                    }
+                    let current_K = self.body_vel_controller.get_K();
 
                     // can't slice copy b/c backing storage is column-major
                     // so a row slice isn't contiguous in backing memory and
@@ -314,17 +295,263 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                     }
 
                     reply_cmd.command_code = PCC_ACK;
-                } else {
-                    reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                },
+                VEL_PID_Y => {
+                    reply_cmd.data_format = PID_LIMITED_INTEGRAL_F32;
+
+                    #[allow(non_snake_case)]
+                    let current_K = self.body_vel_controller.get_K();
+                    unsafe {
+                        reply_cmd.data.pidii_f32[0] = current_K.row(1)[0];
+                        reply_cmd.data.pidii_f32[1] = current_K.row(1)[1];
+                        reply_cmd.data.pidii_f32[2] = current_K.row(1)[2];
+                        reply_cmd.data.pidii_f32[3] = current_K.row(1)[3];
+                        reply_cmd.data.pidii_f32[4] = current_K.row(1)[4];
+                    }
+
+                    reply_cmd.command_code = PCC_ACK;
+                },
+                ANGULAR_VEL_PID_Z => {
+                    reply_cmd.data_format = PID_LIMITED_INTEGRAL_F32;
+                    
+                    #[allow(non_snake_case)]
+                    let current_K = self.body_vel_controller.get_K();
+                    unsafe {
+                        reply_cmd.data.pidii_f32[0] = current_K.row(2)[0];
+                        reply_cmd.data.pidii_f32[1] = current_K.row(2)[1];
+                        reply_cmd.data.pidii_f32[2] = current_K.row(2)[2];
+                        reply_cmd.data.pidii_f32[3] = current_K.row(2)[3];
+                        reply_cmd.data.pidii_f32[4] = current_K.row(2)[4];
+                    }
+
+                    reply_cmd.command_code = PCC_ACK;
+                },
+                // VEL_CGKF_ENCODER_NOISE => {
+
+                // },
+                // VEL_CGKF_GYRO_NOISE => {
+                    
+                // }
+                // VEL_CGKF_PROCESS_NOISE => {
+
+                // },
+                // VEL_CGFK_INITIAL_COVARIANCE => {
+
+                // },
+                // VEL_CGKF_K_MATRIX => {
+
+                // },
+                RC_BODY_VEL_LIMIT => {
+                    // set the type
+                    reply_cmd.data_format = VEC3_F32;
+                    // read back the data
+                    unsafe { reply_cmd.data.vec3_f32.copy_from_slice(self.body_velocity_limit.as_slice()); }
+
+                    reply_cmd.command_code = PCC_ACK;
+                },
+                RC_BODY_ACC_LIMIT => {
+                    reply_cmd.data_format = VEC3_F32;
+                    unsafe { reply_cmd.data.vec3_f32.copy_from_slice(self.body_acceleration_limit.as_slice()); }
+                    reply_cmd.command_code = PCC_ACK;
+                },
+                RC_WHEEL_ACC_LIMIT => {
+                    reply_cmd.data_format = VEC4_F32;
+                    unsafe { reply_cmd.data.vec3_f32.copy_from_slice(self.wheel_acceleration_limits.as_slice()); }
+                    reply_cmd.command_code = PCC_ACK;
+                },
+                _ => {
+                    defmt::debug!("unimplemented key read in RobotController");
+                    reply_cmd.command_code = PCC_NACK_INVALID_NAME;
                     return Err(reply_cmd);
                 }
-            },
-            _ => {
-                defmt::debug!("unimplement key update in RobotController");
-                reply_cmd.command_code = PCC_NACK_INVALID_NAME;
-                return Err(reply_cmd);
+            }
+        } else if param_cmd.command_code == PCC_WRITE {
+            match param_cmd.parameter_name {
+                VEL_PID_X => {
+                    if param_cmd.data_format == PID_LIMITED_INTEGRAL_F32 {
+                        // read data into matrix, modify the matrix row, then write the whole thing back
+                        #[allow(non_snake_case)]
+                        let mut current_K = self.body_vel_controller.get_K();
+                        current_K.row_mut(0).copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
+                        self.body_vel_controller.set_K(current_K);
+
+                        #[allow(non_snake_case)]
+                        let updated_K = self.body_vel_controller.get_K();
+
+                        // can't slice copy b/c backing storage is column-major
+                        // so a row slice isn't contiguous in backing memory and
+                        // therefore you can't do a slice copy
+                        unsafe {
+                            reply_cmd.data.pidii_f32[0] = updated_K.row(0)[0];
+                            reply_cmd.data.pidii_f32[1] = updated_K.row(0)[1];
+                            reply_cmd.data.pidii_f32[2] = updated_K.row(0)[2];
+                            reply_cmd.data.pidii_f32[3] = updated_K.row(0)[3];
+                            reply_cmd.data.pidii_f32[4] = updated_K.row(0)[4];
+                        }
+
+                        reply_cmd.command_code = PCC_ACK;
+                    } else {
+                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                        return Err(reply_cmd);
+                    }
+                },
+                VEL_PID_Y => {
+                    if param_cmd.data_format == PID_LIMITED_INTEGRAL_F32 {
+                        #[allow(non_snake_case)]
+                        let mut current_K = self.body_vel_controller.get_K();
+                        current_K.row_mut(1).copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
+                        self.body_vel_controller.set_K(current_K);
+
+                        #[allow(non_snake_case)]
+                        let updated_K = self.body_vel_controller.get_K();
+                        unsafe {
+                            reply_cmd.data.pidii_f32[0] = updated_K.row(1)[0];
+                            reply_cmd.data.pidii_f32[1] = updated_K.row(1)[1];
+                            reply_cmd.data.pidii_f32[2] = updated_K.row(1)[2];
+                            reply_cmd.data.pidii_f32[3] = updated_K.row(1)[3];
+                            reply_cmd.data.pidii_f32[4] = updated_K.row(1)[4];
+                        }
+
+                        reply_cmd.command_code = PCC_ACK;
+                    } else {
+                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                        return Err(reply_cmd);
+                    }
+                },
+                ANGULAR_VEL_PID_Z => {
+                    if param_cmd.data_format == PID_LIMITED_INTEGRAL_F32 {
+                        #[allow(non_snake_case)]
+                        let mut current_K = self.body_vel_controller.get_K();
+                        current_K.row_mut(2).copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
+                        self.body_vel_controller.set_K(current_K);
+
+                        #[allow(non_snake_case)]
+                        let updated_K = self.body_vel_controller.get_K();
+                        unsafe {
+                            reply_cmd.data.pidii_f32[0] = updated_K.row(2)[0];
+                            reply_cmd.data.pidii_f32[1] = updated_K.row(2)[1];
+                            reply_cmd.data.pidii_f32[2] = updated_K.row(2)[2];
+                            reply_cmd.data.pidii_f32[3] = updated_K.row(2)[3];
+                            reply_cmd.data.pidii_f32[4] = updated_K.row(2)[4];
+                        }
+
+                        reply_cmd.command_code = PCC_ACK;
+                    } else {
+                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                        return Err(reply_cmd);
+                    }
+                },
+                // VEL_CGKF_ENCODER_NOISE => {
+
+                // },
+                // VEL_CGKF_GYRO_NOISE => {
+                    
+                // }
+                // VEL_CGKF_PROCESS_NOISE => {
+
+                // },
+                // VEL_CGFK_INITIAL_COVARIANCE => {
+
+                // },
+                // VEL_CGKF_K_MATRIX => {
+
+                // },
+                RC_BODY_VEL_LIMIT => {
+                    if param_cmd.data_format == VEC3_F32 {
+                        // write the new data, then read it back into the reply
+                        self.body_velocity_limit.as_mut_slice().copy_from_slice(unsafe { &param_cmd.data.vec3_f32 });
+                        unsafe { reply_cmd.data.vec3_f32.copy_from_slice(self.body_velocity_limit.as_slice()); }
+    
+                        reply_cmd.command_code = PCC_ACK;
+                    } else {
+                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                        return Err(reply_cmd);
+                    }
+                },
+                RC_BODY_ACC_LIMIT => {
+                    if param_cmd.data_format == VEC3_F32 {
+                        // write the new data, then read it back into the reply
+                        self.body_acceleration_limit.as_mut_slice().copy_from_slice(unsafe { &param_cmd.data.vec3_f32 });
+                        unsafe { reply_cmd.data.vec3_f32.copy_from_slice(self.body_acceleration_limit.as_slice()); }
+    
+                        reply_cmd.command_code = PCC_ACK;
+                    } else {
+                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                        return Err(reply_cmd);
+                    }
+                },
+                RC_WHEEL_ACC_LIMIT => {
+                    if param_cmd.data_format == VEC4_F32 {
+                        // write the new data, then read it back into the reply
+                        self.wheel_acceleration_limits.as_mut_slice().copy_from_slice(unsafe { &param_cmd.data.vec3_f32 });
+                        unsafe { reply_cmd.data.vec3_f32.copy_from_slice(self.wheel_acceleration_limits.as_slice()); }
+    
+                        reply_cmd.command_code = PCC_ACK;
+                    } else {
+                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                        return Err(reply_cmd);
+                    }
+                },
+                _ => {
+                    defmt::debug!("unimplemented key write in RobotController");
+                    reply_cmd.command_code = PCC_NACK_INVALID_NAME;
+                    return Err(reply_cmd);
+                }
             }
         }
+
+        // match param_cmd.parameter_name {
+        //     RC_BODY_VEL_LIMIT => {
+        //         if param_cmd.data_format == VEC3_F32 {
+        //             // if commanded to write, do the write
+        //             if param_cmd.command_code == PCC_WRITE {
+        //                 self.body_velocity_limit.as_mut_slice().copy_from_slice(unsafe { &param_cmd.data.vec3_f32 });
+        //             }
+
+        //             // write back
+        //             unsafe { reply_cmd.data.vec3_f32.copy_from_slice(self.body_velocity_limit.as_slice()); }
+
+        //             reply_cmd.command_code = PCC_ACK;
+        //         } else {
+        //             reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+        //             return Err(reply_cmd);
+        //         }
+        //     },
+        //     VEL_PID_X => {
+        //         if param_cmd.data_format == PID_LIMITED_INTEGRAL_F32 {
+        //             defmt::trace!("hit VEL_PID_X update block");
+        //             #[allow(non_snake_case)] // K is the mathematical symbol for this matrix
+        //             let mut current_K = self.body_vel_controller.get_K();
+
+        //             // if commanded to write, do the write
+        //             if param_cmd.command_code == PCC_WRITE {
+        //                 defmt::trace!("hit VEL_PID_X write update block");
+        //                 current_K.row_mut(0).copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
+        //             }
+
+        //             // can't slice copy b/c backing storage is column-major
+        //             // so a row slice isn't contiguous in backing memory and
+        //             // therefore you can't do a slice copy
+        //             unsafe {
+        //                 reply_cmd.data.pidii_f32[0] = current_K.row(0)[0];
+        //                 reply_cmd.data.pidii_f32[1] = current_K.row(0)[1];
+        //                 reply_cmd.data.pidii_f32[2] = current_K.row(0)[2];
+        //                 reply_cmd.data.pidii_f32[3] = current_K.row(0)[3];
+        //                 reply_cmd.data.pidii_f32[4] = current_K.row(0)[4];
+        //             }
+
+        //             reply_cmd.command_code = PCC_ACK;
+        //         } else {
+        //             reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+        //             return Err(reply_cmd);
+        //         }
+        //     },
+        //     _ => {
+        //         defmt::debug!("unimplement key update in RobotController");
+        //         reply_cmd.command_code = PCC_NACK_INVALID_NAME;
+        //         return Err(reply_cmd);
+        //     }
+        // }
 
         return Ok(reply_cmd);
     }
