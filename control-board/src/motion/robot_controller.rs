@@ -154,7 +154,12 @@ impl<'a> BodyVelocityController<'a> {
         }
     }
 
-    pub fn control_update(&mut self, setpoint: &Vector3<f32>, wheel_velocities: &Vector4<f32>, gyro_theta: f32) {
+    pub fn control_update(&mut self, setpoint: &Vector3<f32>, wheel_velocities: &Vector4<f32>, wheel_torques: &Vector4<f32>, gyro_theta: f32) {
+        self.debug_telemetry.motor_fr.wheel_torque = wheel_torques[1];
+        self.debug_telemetry.motor_fl.wheel_torque = wheel_torques[0];
+        self.debug_telemetry.motor_bl.wheel_torque = wheel_torques[3];
+        self.debug_telemetry.motor_br.wheel_torque = wheel_torques[2];
+
         // construct the observation vector the KF expects
         let z: Vector5<f32> = Vector5::new(wheel_velocities[0], wheel_velocities[1], wheel_velocities[2], wheel_velocities[3], gyro_theta);
         self.control_update_z(setpoint, z);

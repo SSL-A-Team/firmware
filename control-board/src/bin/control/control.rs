@@ -461,10 +461,6 @@ impl<'a> Control<'a> {
             defmt::info!("ball detected");
         }
 
-        // let vel = 0.0005; // DC
-        // let angle: f32 = core::f32::consts::PI / 4.0;
-        // let cmd_vel: Vector3<f32> =
-        //     Vector3::new(libm::sinf(angle) * vel, libm::cosf(angle) * vel, 0.0);
         if let Some(latest_control) = &latest_control {
             let cmd_vel = Vector3::new(
                 latest_control.vel_x_linear,
@@ -481,7 +477,6 @@ impl<'a> Control<'a> {
                 self.ticks_since_packet = 0;
             }
         }
-        // let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel);
 
         // now we have setpoint r(t) in self.cmd_vel
         let battery_v = self.battery_sub.next_message_pure().await as f32;
@@ -497,10 +492,18 @@ impl<'a> Control<'a> {
                     self.back_left_motor.read_rads(),
                     self.back_right_motor.read_rads()
                 );
+
+                // currents current report as torques
+                let wheel_torques = Vector4::new(
+                    self.front_right_motor.read_current(),
+                    self.front_left_motor.read_current(),
+                    self.back_left_motor.read_current(),
+                    self.back_right_motor.read_current()
+                );
             
                 // TODO read from channel or something
 
-                self.robot_controller.control_update(&self.cmd_vel, &wheel_vels, gyro_rads);
+                self.robot_controller.control_update(&self.cmd_vel, &wheel_vels, &wheel_torques, gyro_rads);
             
                 self.robot_controller.get_wheel_velocities()
             } 
@@ -519,23 +522,13 @@ impl<'a> Control<'a> {
                 0.0)
         };
 
-        // let c_vel = libm::sinf(angle) / 2.0;
-        // let c_vel = 0.2;
         self.front_right_motor.set_setpoint(wheel_vels[0]);
         self.front_left_motor.set_setpoint(wheel_vels[1]);
         self.back_left_motor.set_setpoint(wheel_vels[2]);
         self.back_right_motor.set_setpoint(wheel_vels[3]);
-        // angle += core::f32::consts::FRAC_2_PI / 200.0;
-        let drib_dc = -1.0 * self.drib_vel / 1000.0;
-        // defmt::info!("Drib Duty Cycle: {}", drib_dc);
-        // let drib_dc = -0.1;
-        self.drib_motor.set_setpoint(drib_dc);
 
-        // let c_vel = 0.2;
-        // front_right_motor.set_setpoint(c_vel);
-        // front_left_motor.set_setpoint(c_vel);
-        // back_left_motor.set_setpoint(c_vel);
-        // back_right_motor.set_setpoint(c_vel);
+        let drib_dc = -1.0 * self.drib_vel / 1000.0;
+        self.drib_motor.set_setpoint(drib_dc);
 
         self.front_right_motor.send_motion_command();
         self.front_left_motor.send_motion_command();
