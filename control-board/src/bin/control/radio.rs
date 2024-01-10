@@ -207,8 +207,7 @@ where
                     let mut no_packet_timeout = Ticker::every(Duration::from_millis(3000));
                     loop {
                         {
-                            // can this block? and/or can we get away with an AtomicBool here?
-                            // check the timeout watchdig flag set by the packet processing task
+                            // TODO this can be an AtomicBool
                             let mut last_control = last_control.lock().await;
                             if !*last_control {
                                 cortex_m::peripheral::SCB::sys_reset();
