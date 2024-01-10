@@ -62,7 +62,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     );
 
     let mut dotstar = Apa102::new(imu_spi);
-    let _res = dotstar.write([RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
+    let _ = dotstar.write([RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
 
     let front_right_int = interrupt::take!(USART1);
     let front_left_int = interrupt::take!(UART4);
@@ -139,11 +139,11 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     control.load_firmware().await;
 
-    let _res = dotstar.write([RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
+    let _ = dotstar.write([RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
 
-    let _res = dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
+    let _ = dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
 
-    let _res = dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 10, b: 0 }].iter().cloned());
+    let _ = dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 10, b: 0 }].iter().cloned());
 
     let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
 
