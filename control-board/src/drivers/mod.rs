@@ -1,3 +1,4 @@
+pub mod imu;
 pub mod kicker;
 pub mod radio;
 pub mod rotary;

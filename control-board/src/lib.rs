@@ -23,6 +23,7 @@ pub mod uart_queue;
 pub mod parameter_interface;
 
 pub mod drivers;
+pub mod tasks;
 
 pub mod colors {
     use smart_leds::RGB8;
