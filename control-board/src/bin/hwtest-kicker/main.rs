@@ -149,7 +149,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
     );
 
     let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
-    let mut last_kick_ticks = 0;
     loop {
         kicker.process_telemetry();
 

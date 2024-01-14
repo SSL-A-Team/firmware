@@ -4,29 +4,25 @@
 #![feature(const_mut_refs)]
 #![feature(async_closure)]
 
-use core::future::pending;
-
 use apa102_spi::Apa102;
-use ateam_common_packets::bindings_radio::{BasicControl, KickRequest};
 use ateam_control_board::{
     adc_raw_to_v, adc_v_to_battery_voltage,
     drivers::{
         radio::TeamColor, radio::WifiNetwork, rotary::Rotary, shell_indicator::ShellIndicator, kicker::Kicker,
     },
-    include_external_cpp_bin,
     queue::Buffer,
     stm32_interface::{get_bootloader_uart_config, Stm32Interface},
     uart_queue::{UartReadQueue, UartWriteQueue},
-    BATTERY_BUFFER_SIZE, BATTERY_MAX_VOLTAGE, BATTERY_MIN_VOLTAGE, include_kicker_bin,
+    BATTERY_BUFFER_SIZE, BATTERY_MAX_VOLTAGE, BATTERY_MIN_VOLTAGE, include_kicker_bin, parameter_interface::ParameterInterface,
 };
 use control::Control;
 use defmt::info;
 use embassy_stm32::{
-    adc::{Adc, AdcPin, InternalChannel, SampleTime, Temperature},
+    adc::{Adc, SampleTime},
     dma::NoDma,
     executor::InterruptExecutor,
     exti::ExtiInput,
-    gpio::{Input, Level, Output, OutputOpenDrain, Pull, Speed},
+    gpio::{Input, Level, Output, Pull, Speed},
     interrupt::{self, InterruptExt},
     peripherals::{DMA2_CH4, DMA2_CH5, USART6},
     spi,
@@ -49,8 +45,7 @@ use static_cell::StaticCell;
 
 use embassy_stm32::rcc::AdcClockSource;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::channel::Channel;
-use embassy_sync::pubsub::{PubSubChannel, Subscriber};
+use embassy_sync::pubsub::{PubSubChannel};
 
 mod control;
 mod pins;
@@ -146,23 +141,12 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     info!("booted");
 
-    // let mut led0 = Output::new(p.PF3, Level::Low, Speed::High);
-
-    // loop {
-    //     Timer::after(Duration::from_millis(1000)).await;
-    //     led0.toggle();
-    // };
-
-    // spawner
-    //     .spawn(power_off_task(p.PF5, p.EXTI5, p.PF4))
-    //     .unwrap();
-
     let radio_int = interrupt::take!(USART10);
     let radio_usart = Uart::new(
         p.USART10, p.PE2, p.PE3, radio_int, p.DMA2_CH0, p.DMA2_CH1, config,
     );
 
-    let rotary = Rotary::new(p.PG9, p.PG10, p.PG11, p.PG12);
+    let _rotary = Rotary::new(p.PG9, p.PG10, p.PG11, p.PG12);
     let mut shell_indicator = ShellIndicator::new(p.PD0, p.PD1, p.PD3, p.PD4);
     let kicker_det = Input::new(p.PG8, Pull::Down);
     let dip1 = Input::new(p.PG7, Pull::Down);
@@ -170,14 +154,14 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let dip3 = Input::new(p.PG5, Pull::Down);
     let dip4 = Input::new(p.PG4, Pull::Down);
     let dip5 = Input::new(p.PG3, Pull::Down);
-    let dip6 = Input::new(p.PG2, Pull::Down);
+    let _dip6 = Input::new(p.PG2, Pull::Down);
     let dip7 = Input::new(p.PD15, Pull::Down);
 
     // let robot_id = rotary.read();
 
-    /////////////////////
-    // Dip Switch Inputs
-    /////////////////////
+    ////////////////////////
+    // Dip Switch Inputs  //
+    ////////////////////////
     let robot_id = (dip1.is_high() as u8) << 3
         | (dip2.is_high() as u8) << 2
         | (dip3.is_high() as u8) << 1
@@ -207,9 +191,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
         TeamColor::Yellow
     };
 
-    //////////////////
-    // Battery voltage
-    //////////////////
+    //////////////////////
+    // Battery Voltage  //
+    //////////////////////
 
     let mut adc3 = Adc::new(p.ADC3, &mut Delay);
     adc3.set_sample_time(SampleTime::Cycles1_5);
@@ -309,7 +293,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let gyro_sub = GYRO_CHANNEL.subscriber().unwrap();
     let battery_sub = BATTERY_CHANNEL.subscriber().unwrap();
 
-    if kicker_det.is_high() {
+    if kicker_det.is_low() {
         defmt::warn!("kicker appears unplugged!");
     }
 
@@ -421,18 +405,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     loop {
         unsafe { wdg.pet() };
-        let latest = RADIO_TEST.get_latest_control();
-        // let latest = Some(BasicControl{
-        //     vel_x_linear: 0.,
-        //     vel_y_linear: 0.,
-        //     vel_z_angular: 0.05,
-        //     kick_vel: 0.,
-        //     dribbler_speed: 0.2,
-        //     kick_request: 0,
-        // });
+
         unsafe {
             SPI6_BUF[0] = 0x86;
-            // SPI6_BUF[0] = 0x86;
             imu_cs2.set_low();
             let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..3]).await;
             imu_cs2.set_high();
@@ -444,9 +419,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
         // could just feed gyro in here but the comment in control said to use a channel
 
-        //
-        // Battery reading
-        //
+        ///////////////////////
+        //  Battery reading  //
+        ///////////////////////
 
         let current_battery_v =
             adc_v_to_battery_voltage(adc_raw_to_v(adc3.read(&mut battery_pin) as f32));
@@ -473,12 +448,35 @@ async fn main(_spawner: embassy_executor::Spawner) {
             });
         }
 
-        //
-        // Telemtry
-        //
+        /////////////////////////
+        //  Parameter Updates  //
+        /////////////////////////
+        
+        let latest_param_cmd = RADIO_TEST.get_latest_params_cmd();
 
-        let telemetry = control.tick(latest);
-        if let (Some(mut telemetry), control_debug_telem) = telemetry.await {
+        if let Some(latest_param_cmd) = latest_param_cmd {
+            let param_cmd_resp = control.apply_command(&latest_param_cmd);
+            
+            // if param_cmd_resp is Err, then the requested parameter update had no submodule acceping the
+            // field, or the type was invalid, or the update code is unimplemented
+            // if param_cmd_resp is Ok, then the read/write was successful
+            if let Ok(resp) = param_cmd_resp {
+                defmt::info!("sending successful parameter update command response");
+                RADIO_TEST.send_parameter_response(resp).await;
+            } else if let Err(resp) = param_cmd_resp {
+                defmt::warn!("sending failed parameter updated command response");
+                RADIO_TEST.send_parameter_response(resp).await;
+            }
+        }
+
+        ////////////////
+        //  Telemtry  //
+        ////////////////
+
+        let latest_control_cmd = RADIO_TEST.get_latest_control();
+
+        let telemetry = control.tick(latest_control_cmd).await;
+        if let (Some(mut telemetry), control_debug_telem) = telemetry {
             // info!("{:?}", defmt::Debug2Format(&telemetry));
 
             telemetry.kicker_charge_level = kicker.hv_rail_voltage();
@@ -490,11 +488,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
             }
         }
 
-
-
         kicker.process_telemetry();
 
-        if let Some(control) = latest {
+        if let Some(control) = latest_control_cmd {
             kicker.set_kick_strength(control.kick_vel);
             kicker.request_kick(control.kick_request);
             kicker.send_command();

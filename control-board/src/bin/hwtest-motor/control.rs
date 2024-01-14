@@ -1,13 +1,7 @@
-use ateam_common_packets::{bindings_radio::{BasicControl, BasicTelemetry}, bindings_stspin::MotorResponse_Motion_Packet};
-use defmt::info;
+use ateam_common_packets::bindings_radio::{BasicControl, BasicTelemetry};
 use embassy_executor::SendSpawner;
 use embassy_stm32::{
-    gpio::{Level, Output, OutputOpenDrain, Pull, Speed},
-    peripherals::{
-        DMA1_CH0, DMA1_CH1, DMA1_CH2, DMA1_CH3, DMA1_CH4, DMA1_CH5, DMA1_CH6, DMA1_CH7,
-        DMA2_CH2, DMA2_CH3,
-        UART4, UART5, UART7, USART3, USART6,
-    },
+    gpio::{Level, Output, Speed},
     usart::Uart,
 };
 use embassy_time::{Duration, Timer};
@@ -334,19 +328,19 @@ impl Control {
     pub async fn load_firmware(&mut self) {
         defmt::info!("flashing firmware");
 
-        self.front_right_motor.load_default_firmware_image().await;
+        let _ = self.front_right_motor.load_default_firmware_image().await;
         defmt::info!("FR flashed");
 
-        self.front_left_motor.load_default_firmware_image().await;
+        let _ = self.front_left_motor.load_default_firmware_image().await;
         defmt::info!("FL flashed");
 
-        self.back_left_motor.load_default_firmware_image().await;
+        let _ = self.back_left_motor.load_default_firmware_image().await;
         defmt::info!("BL flashed");
 
-        self.back_right_motor.load_default_firmware_image().await;
+        let _ = self.back_right_motor.load_default_firmware_image().await;
         defmt::info!("BR flashed");
 
-        self.drib_motor.load_default_firmware_image().await;
+        let _ = self.drib_motor.load_default_firmware_image().await;
         defmt::info!("DRIB flashed");
 
 

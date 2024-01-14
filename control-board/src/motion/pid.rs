@@ -3,24 +3,24 @@ use nalgebra::{
     clamp
 };
 
-pub struct PidController<'a, const NUM_STATES: usize> {
-    K: &'a SMatrix<f32, NUM_STATES, 5>,
+pub struct PidController<const NUM_STATES: usize> {
+    K: SMatrix<f32, NUM_STATES, 5>,
     u: SVector<f32, NUM_STATES>,
     prev_error: SVector<f32, NUM_STATES>,
     integrated_error: SVector<f32, NUM_STATES>,
 }
 
-impl<'a, const NUM_STATES: usize> PidController<'a, NUM_STATES> {
-    pub fn from_gains_matrix(K: &'a SMatrix<f32, NUM_STATES, 5>) -> PidController<'a, NUM_STATES> {
+impl<'a, const NUM_STATES: usize> PidController<NUM_STATES> {
+    pub fn from_gains_matrix(K: &'a SMatrix<f32, NUM_STATES, 5>) -> PidController<NUM_STATES> {
         PidController {
-            K: K, 
+            K: K.clone(), 
             u: SVector::<f32, NUM_STATES>::zeros(),
             prev_error: SVector::<f32, NUM_STATES>::zeros(),
             integrated_error: SVector::<f32, NUM_STATES>::zeros(),
         }
     }
 
-    pub fn calculate(&mut self, r: SVector<f32, NUM_STATES>, y: SVector<f32, NUM_STATES>, dt: f32) {
+    pub fn calculate(&mut self, r: SVector<f32, NUM_STATES>, y: SVector<f32, NUM_STATES>, _dt: f32) {
         let error = r - y;
 
         // calculate integrated error
@@ -45,5 +45,15 @@ impl<'a, const NUM_STATES: usize> PidController<'a, NUM_STATES> {
 
     pub fn get_u(&self) -> SVector<f32, NUM_STATES> {
         self.u
+    }
+
+    #[allow(non_snake_case)]
+    pub fn get_K(&self) -> SMatrix<f32, NUM_STATES, 5> {
+        return self.K;
+    }
+
+    #[allow(non_snake_case)]
+    pub fn set_K(&mut self, new_K: SMatrix<f32, NUM_STATES, 5>) {
+        self.K.copy_from(&new_K)
     }
 }

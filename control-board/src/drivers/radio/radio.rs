@@ -1,5 +1,3 @@
-use core::future::Future;
-
 use core::fmt::Write;
 use embassy_stm32::usart;
 use heapless::String;
@@ -9,24 +7,7 @@ use crate::uart_queue::{UartReadQueue, UartWriteQueue};
 use super::at_protocol::{ATEvent, ATResponse};
 use super::edm_protocol::EdmPacket;
 
-// use crate::uart_queue::{Reader, Writer};
-
-// pub trait Reader<'a> {
-//     type F<RET, FN: FnOnce(&[u8]) -> RET>: Future<Output = Result<RET, ()>>
-//     where
-//         Self: 'a;
-
-//     fn read<RET, FN: FnOnce(&[u8]) -> RET>(&'a self, fn_read: FN) -> Self::F<RET, FN>;
-// }
-
-// pub trait Writer<'a> {
-//     type F<FN: FnOnce(&mut [u8]) -> usize>: Future<Output = Result<(), ()>>
-//     where
-//         Self: 'a;
-
-//     fn write<FN: FnOnce(&mut [u8]) -> usize>(&'a self, fn_write: FN) -> Self::F<FN>;
-// }
-
+#[allow(dead_code)]
 pub enum RadioMode {
     // Unknown,
     CommandMode,
@@ -34,6 +15,7 @@ pub enum RadioMode {
     ExtendedDataMode,
 }
 
+#[allow(dead_code)]
 pub enum WifiAuth<'a> {
     Open,
     WPA { passphrase: &'a str },
@@ -42,6 +24,7 @@ pub enum WifiAuth<'a> {
     EAPTLS,
 }
 
+#[allow(dead_code)]
 pub enum ServerType {
     Disabled = 0,
     TCP = 1,
@@ -58,7 +41,6 @@ pub struct PeerConnection {
     pub channel_id: u8,
 }
 
-// pub struct Radio<'a, R: Reader<'a>, W: Writer<'a>> {
 pub struct Radio<
     'a,
     UART: usart::BasicInstance,
@@ -122,6 +104,7 @@ impl<
             .await
     }
 
+    #[allow(dead_code)]
     pub async fn attention(&self) -> Result<(), ()> {
         self.send_command("AT").await?;
         self.read_ok().await?;
@@ -205,14 +188,15 @@ impl<
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn config_wifi_addr(
         &self,
-        config_id: u8,
-        static_ip: Option<&str>,
-        subnet_mask: Option<&str>,
-        default_gateway: Option<&str>,
-        dns_server1: Option<&str>,
-        dns_server2: Option<&str>,
+        _config_id: u8,
+        _static_ip: Option<&str>,
+        _subnet_mask: Option<&str>,
+        _default_gateway: Option<&str>,
+        _dns_server1: Option<&str>,
+        _dns_server2: Option<&str>,
     ) -> Result<(), ()> {
         todo!("implement if needed");
     }
@@ -223,15 +207,15 @@ impl<
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
 
-        let mut networkUp = 0;
+        let mut network_up = 0;
 
-        while networkUp < 2 {
+        while network_up < 2 {
             self.reader
                 .dequeue(|buf| {
                     let packet = self.to_packet(buf)?;
 
                     if let EdmPacket::ATEvent(ATEvent::NetworkUp { interface_id: 0 }) = packet {
-                        networkUp += 1;
+                        network_up += 1;
                     } else if let EdmPacket::ATEvent(ATEvent::WifiLinkConnected {
                         conn_id: _,
                         bssid: _,
@@ -251,6 +235,7 @@ impl<
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn config_server(
         &self,
         server_id: u8,
@@ -403,8 +388,10 @@ impl<
         }
     }
 
+    #[allow(dead_code)]
     async fn get_response(&self) {}
 
+    #[allow(dead_code)]
     pub async fn read(&self) {
         self.reader
             .dequeue(|buf| {
@@ -433,33 +420,3 @@ impl<
         }
     }
 }
-
-// impl<
-//         'a,
-//         UART: usart::BasicInstance,
-//         Dma: usart::RxDma<UART>,
-//         const LEN: usize,
-//         const DEPTH: usize,
-//     > Reader<'a> for ateam_control_board::uart_queue::UartReadQueue<'a, UART, Dma, LEN, DEPTH>
-// {
-//     type F<RET, FN: FnOnce(&[u8]) -> RET> = impl Future<Output = Result<RET, ()>> where Self: 'a;
-
-//     fn read<RET, FN: FnOnce(&[u8]) -> RET>(&'a self, fn_read: FN) -> Self::F<RET, FN> {
-//         async { Ok(self.dequeue(|buf| fn_read(buf)).await) }
-//     }
-// }
-
-// impl<
-//         'a,
-//         UART: usart::BasicInstance,
-//         Dma: usart::TxDma<UART>,
-//         const LEN: usize,
-//         const DEPTH: usize,
-//     > Writer<'a> for ateam_control_board::uart_queue::UartWriteQueue<'a, UART, Dma, LEN, DEPTH>
-// {
-//     type F<FN: FnOnce(&mut [u8]) -> usize> = impl Future<Output = Result<(), ()>> where Self: 'a;
-
-//     fn write<FN: FnOnce(&mut [u8]) -> usize>(&'a self, fn_write: FN) -> Self::F<FN> {
-//         async { self.enqueue(|buf| fn_write(buf)).or(Err(())) }
-//     }
-// }

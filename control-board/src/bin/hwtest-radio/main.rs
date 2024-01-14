@@ -25,7 +25,7 @@ use ateam_control_board::drivers::radio::{RobotRadio, TeamColor, WifiNetwork};
 use ateam_control_board::queue;
 use ateam_control_board::uart_queue::{UartReadQueue, UartWriteQueue};
 
-use ateam_common_packets::bindings_radio::BasicTelemetry;
+use ateam_common_packets::{bindings_radio::BasicTelemetry, radio::DataPacket};
 
 
 static EXECUTOR_UART_QUEUE: StaticCell<InterruptExecutor<interrupt::CEC>> = StaticCell::new();
@@ -140,12 +140,16 @@ async fn main(_spawner: embassy_executor::Spawner) {
             })
             .await;
         info!("send");
-        let control = radio.read_control().await;
-        if let Ok(_) = control {
-            info!("received control packet.")
-            // info!("{:?}", defmt::Debug2Format(&control));
+
+        let data_packet = radio.read_packet().await;
+        if let Ok(data_packet) = data_packet {
+            if let DataPacket::BasicControl(control) = data_packet {
+                info!("received control packet.");
+                info!("{:?}", defmt::Debug2Format(&control));
+
+                info!("{}", seq);
+                seq = (seq + 1) % 10000;
+            }
         }
-        info!("{}", seq);
-        seq = (seq + 1) % 10000;
     }
 }

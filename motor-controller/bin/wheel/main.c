@@ -279,6 +279,8 @@ int main() {
             // TODO: add filter? 
 
             // correct torque sign from recovered velocity
+            // TODO: this should probably be acceleration based not velocity
+            // e.g. F = ma
             if (enc_vel_rads < 0.0f) {
                 measured_torque_Nm = -fabs(measured_torque_Nm);
             }

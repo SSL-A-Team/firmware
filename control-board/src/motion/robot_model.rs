@@ -1,7 +1,5 @@
-use core::f32::consts::PI;
-
-use nalgebra::{Matrix3, Matrix3x4, Matrix4x3, Vector3, Vector4, Vector6};
-use libm::{sinf, cosf, asinf, acosf};
+use nalgebra::{Matrix3x4, Matrix4x3, Vector3, Vector4};
+use libm::{sinf, cosf};
 
 #[derive(Clone, Copy)]
 pub struct RobotConstants {

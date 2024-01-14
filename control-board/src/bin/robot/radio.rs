@@ -1,10 +1,8 @@
-use core::cell::RefCell;
-
-use ateam_common_packets::bindings_radio::{BasicControl, BasicTelemetry};
+use ateam_common_packets::{bindings_radio::{BasicControl, BasicTelemetry}, radio::DataPacket};
 use core::future::Future;
 use defmt::*;
 use embassy_executor::{raw::TaskStorage, SendSpawner, SpawnToken};
-use embassy_stm32::{gpio::Pin, interrupt::Interrupt, usart, Peripheral};
+use embassy_stm32::{gpio::Pin, usart, Peripheral};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::Duration;
 use ateam_control_board::{
@@ -253,10 +251,12 @@ where
     ) -> ControlTaskFuture<UART, RxDma, TxDma, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, ResetPin> {
         async move {
             loop {
-                let control = radio.read_control().await;
-                if let Ok(control) = control {
-                    let mut latest_control = latest_control.lock().await;
-                    *latest_control = Some(control);
+                let data_packet = radio.read_packet().await;
+                if let Ok(data_packet) = data_packet {
+                    if let DataPacket::BasicControl(control) = data_packet {
+                        let mut latest_control = latest_control.lock().await;
+                        *latest_control = Some(control);
+                    }
                 }
             }
         }

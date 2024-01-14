@@ -5,7 +5,7 @@ use defmt::*;
 
 use embassy_stm32::gpio::{Output, Pin};
 use embassy_stm32::pac;
-use embassy_stm32::usart::{self, Parity, StopBits, Config};
+use embassy_stm32::usart::{self, Parity, Config};
 use embassy_time::{Duration, Timer};
 use embassy_time::with_timeout;
 

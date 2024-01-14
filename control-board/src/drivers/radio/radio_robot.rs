@@ -1,13 +1,14 @@
 use super::radio::{PeerConnection, Radio, WifiAuth};
 use crate::uart_queue::{UartReadQueue, UartWriteQueue};
 use ateam_common_packets::bindings_radio::{
-    self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data, BasicTelemetry, ControlDebugTelemetry,
+    self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data, BasicTelemetry, ControlDebugTelemetry, ParameterCommand,
 };
+use ateam_common_packets::radio::DataPacket;
 use const_format::formatcp;
 use core::fmt::Write;
 use core::mem::size_of;
 use embassy_futures::select::{select, Either};
-use embassy_stm32::gpio::{Level, OutputOpenDrain, Pin, Pull, Speed, Output};
+use embassy_stm32::gpio::{Level, Pin, Speed, Output};
 use embassy_stm32::pac;
 use embassy_stm32::usart;
 use embassy_stm32::Peripheral;
@@ -58,6 +59,8 @@ unsafe impl<
 {
 }
 
+// suppresses unused reset_pin warning. Even if unused, the radio should certainly own its own reset pin
+#[allow(dead_code)]
 pub struct RobotRadio<
     'a,
     UART: usart::BasicInstance,
@@ -348,6 +351,29 @@ impl<
         Ok(())
     }
 
+    pub async fn send_parameter_response(&self, parameter_cmd: ParameterCommand) -> Result<(), ()> {
+        let packet = RadioPacket {
+            crc32: 0,
+            major_version: bindings_radio::kProtocolVersionMajor,
+            minor_version: bindings_radio::kProtocolVersionMinor,
+            command_code: CommandCode::CC_ROBOT_PARAMETER_COMMAND,
+            data_length: size_of::<ParameterCommand>() as u16,
+            data: RadioPacket_Data {
+                robot_parameter_command: parameter_cmd
+            },
+        };
+        let packet_bytes = unsafe {
+            core::slice::from_raw_parts(
+                &packet as *const _ as *const u8,
+                size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                    + size_of::<ParameterCommand>(),
+            )
+        };
+        self.send_data(packet_bytes).await?;
+
+        Ok(())
+    }
+
     pub async fn wait_hello(&self, timeout: Duration) -> Result<HelloResponse, ()> {
         let read_fut = self.read_data(|data| {
             const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
@@ -375,24 +401,38 @@ impl<
         }
     }
 
-    pub async fn read_control(&self) -> Result<BasicControl, ()> {
+    pub async fn read_packet(&self) -> Result<DataPacket, ()> {
         self.read_data(|data| {
-            const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+            const CONTROL_PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
                 + size_of::<BasicControl>();
-            if data.len() != PACKET_SIZE {
+            const PARAMERTER_PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                + size_of::<ParameterCommand>();
+
+            if data.len() == CONTROL_PACKET_SIZE {
+                let mut data_copy = [0u8; CONTROL_PACKET_SIZE];
+                data_copy.clone_from_slice(&data[0..CONTROL_PACKET_SIZE]);
+    
+                let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
+    
+                if packet.command_code != CommandCode::CC_CONTROL {
+                    return Err(());
+                }
+    
+                Ok(unsafe { DataPacket::BasicControl(packet.data.control) })
+            } else if data.len() == PARAMERTER_PACKET_SIZE {
+                let mut data_copy = [0u8; PARAMERTER_PACKET_SIZE];
+                data_copy.clone_from_slice(&data[0..PARAMERTER_PACKET_SIZE]);
+    
+                let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
+    
+                if packet.command_code != CommandCode::CC_ROBOT_PARAMETER_COMMAND {
+                    return Err(());
+                }
+    
+                Ok(unsafe { DataPacket::ParameterCommand(packet.data.robot_parameter_command) })
+            } else {
                 return Err(());
             }
-
-            let mut data_copy = [0u8; PACKET_SIZE];
-            data_copy.clone_from_slice(&data[0..PACKET_SIZE]);
-
-            let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
-
-            if packet.command_code != CommandCode::CC_CONTROL {
-                return Err(());
-            }
-
-            Ok(unsafe { packet.data.control })
         })
         .await?
     }

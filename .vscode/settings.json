@@ -17,5 +17,6 @@
     "rust-analyzer.check.allTargets": false,
     // don't show notifications for unlinked Cargo.toml files. This is misleads folks into
     // including projects under incorrect ABIs.
-    "rust-analyzer.showUnlinkedFileNotification": false
+    "rust-analyzer.showUnlinkedFileNotification": false,
+    "ros.distro": "humble"
 }
