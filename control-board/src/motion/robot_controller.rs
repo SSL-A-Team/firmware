@@ -356,7 +356,7 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                 },
                 RC_WHEEL_ACC_LIMIT => {
                     reply_cmd.data_format = VEC4_F32;
-                    unsafe { reply_cmd.data.vec3_f32.copy_from_slice(self.wheel_acceleration_limits.as_slice()); }
+                    unsafe { reply_cmd.data.vec4_f32.copy_from_slice(self.wheel_acceleration_limits.as_slice()); }
                     reply_cmd.command_code = PCC_ACK;
                 },
                 _ => {
@@ -483,8 +483,8 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                 RC_WHEEL_ACC_LIMIT => {
                     if param_cmd.data_format == VEC4_F32 {
                         // write the new data, then read it back into the reply
-                        self.wheel_acceleration_limits.as_mut_slice().copy_from_slice(unsafe { &param_cmd.data.vec3_f32 });
-                        unsafe { reply_cmd.data.vec3_f32.copy_from_slice(self.wheel_acceleration_limits.as_slice()); }
+                        self.wheel_acceleration_limits.as_mut_slice().copy_from_slice(unsafe { &param_cmd.data.vec4_f32 });
+                        unsafe { reply_cmd.data.vec4_f32.copy_from_slice(self.wheel_acceleration_limits.as_slice()); }
     
                         reply_cmd.command_code = PCC_ACK;
                     } else {
