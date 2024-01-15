@@ -73,21 +73,12 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let mut led2 = Output::new(p.PF1, Level::Low, Speed::Low);
     let mut led3 = Output::new(p.PF0, Level::Low, Speed::Low);
 
-    let front_right_int = interrupt::take!(USART1);
     let front_left_int = interrupt::take!(UART4);
     let back_left_int = interrupt::take!(UART7);
     let back_right_int = interrupt::take!(UART8);
+    let front_right_int = interrupt::take!(USART1);
     let drib_int = interrupt::take!(UART5);
 
-    let front_right_usart = Uart::new(
-        p.USART1,
-        p.PB15,
-        p.PB14,
-        front_right_int,
-        p.DMA1_CH0,
-        p.DMA1_CH1,
-        get_bootloader_uart_config(),
-    );
     let front_left_usart = Uart::new(
         p.UART4,
         p.PA1,
@@ -115,6 +106,15 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.DMA1_CH7,
         get_bootloader_uart_config(),
     );
+    let front_right_usart = Uart::new(
+        p.USART1,
+        p.PB15,
+        p.PB14,
+        front_right_int,
+        p.DMA1_CH0,
+        p.DMA1_CH1,
+        get_bootloader_uart_config(),
+    );
     let drib_usart = Uart::new(
         p.UART5,
         p.PB12,
@@ -128,46 +128,50 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let ball_detected_thresh = 1.0;
     let mut control = Control::new(
         &spawner,
-        front_right_usart,
         front_left_usart,
         back_left_usart,
         back_right_usart,
+        front_right_usart,
         drib_usart,
-        p.PD8,
         p.PC1,
         p.PF8,
         p.PB9,
+        p.PD8,
         p.PD13,
-        p.PD9,
         p.PC0,
         p.PF9,
         p.PB8,
+        p.PD9,
         p.PD12,
         ball_detected_thresh,
     );
 
     let ret = control.load_firmware().await;
     if let Err(err) = ret {
-        if err.front_right {
-            defmt::error!("Error flashing FR");
-        } else {
-            led3.set_high();
-        }
         if err.front_left {
             defmt::error!("Error flashing FL");
         } else {
             led0.set_high();
         }
-        if err.back_right {
-            defmt::error!("Error flashing BR");
-        } else {
-            led2.set_high();
-        }
+
         if err.back_left {
             defmt::error!("Error flashing BL");
         } else {
             led1.set_high();
         }
+
+        if err.back_right {
+            defmt::error!("Error flashing BR");
+        } else {
+            led2.set_high();
+        }
+
+        if err.front_right {
+            defmt::error!("Error flashing FR");
+        } else {
+            led3.set_high();
+        }
+
         if err.drib {
             defmt::error!("Error flashing DRIB");
         }
@@ -191,31 +195,31 @@ async fn main(_spawner: embassy_executor::Spawner) {
             main_loop_rate_ticker.next().await;
             control.tick(ROBOT_VEL_ANGULAR, 64.);
 
-            let err_fr = control.front_right_motor.read_is_error();
             let err_fl = control.front_left_motor.read_is_error();
-            let err_br = control.back_right_motor.read_is_error();
             let err_bl = control.back_left_motor.read_is_error();
+            let err_br = control.back_right_motor.read_is_error();
+            let err_fr = control.front_right_motor.read_is_error();
             let err_drib = control.drib_motor.read_is_error();
 
-            let rpm_fr = control.front_right_motor.read_rpm();
             let rpm_fl = control.front_left_motor.read_rpm();
-            let rpm_br = control.back_right_motor.read_rpm();
             let rpm_bl = control.back_left_motor.read_rpm();
+            let rpm_br = control.back_right_motor.read_rpm();
+            let rpm_fr = control.front_right_motor.read_rpm();
 
-            let rpm_ok_fr = rpm_fr > EXPECTED_RPM_NO_LOAD * (1. - EXPECTED_RPM_TOLERANCE)
-                && rpm_fr < EXPECTED_RPM_NO_LOAD * (1. + EXPECTED_RPM_TOLERANCE);
             let rpm_ok_fl = rpm_fl > EXPECTED_RPM_NO_LOAD * (1. - EXPECTED_RPM_TOLERANCE)
                 && rpm_fl < EXPECTED_RPM_NO_LOAD * (1. + EXPECTED_RPM_TOLERANCE);
-            let rpm_ok_br = rpm_br > EXPECTED_RPM_NO_LOAD * (1. - EXPECTED_RPM_TOLERANCE)
-                && rpm_br < EXPECTED_RPM_NO_LOAD * (1. + EXPECTED_RPM_TOLERANCE);
             let rpm_ok_bl = rpm_bl > EXPECTED_RPM_NO_LOAD * (1. - EXPECTED_RPM_TOLERANCE)
                 && rpm_bl < EXPECTED_RPM_NO_LOAD * (1. + EXPECTED_RPM_TOLERANCE);
+            let rpm_ok_br = rpm_br > EXPECTED_RPM_NO_LOAD * (1. - EXPECTED_RPM_TOLERANCE)
+                && rpm_br < EXPECTED_RPM_NO_LOAD * (1. + EXPECTED_RPM_TOLERANCE);
+            let rpm_ok_fr = rpm_fr > EXPECTED_RPM_NO_LOAD * (1. - EXPECTED_RPM_TOLERANCE)
+                && rpm_fr < EXPECTED_RPM_NO_LOAD * (1. + EXPECTED_RPM_TOLERANCE);
 
-            if err_fr || err_fl || err_br || err_bl || err_drib {
+            if  err_fl || err_bl || err_br || err_fr || err_drib {
                 dotstar
                     .write([COLOR_BLUE, COLOR_RED].iter().cloned())
                     .unwrap();
-            } else if !rpm_ok_fr || !rpm_ok_fl || !rpm_ok_br || !rpm_ok_bl {
+            } else if !rpm_ok_fl || !rpm_ok_bl || !rpm_ok_br || !rpm_ok_fr {
                 dotstar
                     .write([COLOR_BLUE, COLOR_YELLOW].iter().cloned())
                     .unwrap();
@@ -230,16 +234,19 @@ async fn main(_spawner: embassy_executor::Spawner) {
             } else {
                 led0.set_low();
             }
+
             if !err_bl && rpm_ok_bl {
                 led1.set_high();
             } else {
                 led1.set_low();
             }
+
             if !err_br && rpm_ok_br {
                 led2.set_high();
             } else {
                 led2.set_low();
             }
+
             if !err_fr && rpm_ok_fr {
                 led3.set_high();
             } else {
