@@ -7,15 +7,24 @@ use embassy_stm32::{
 
 use defmt::*;
 
-pub struct Bmi085<'a, 'buf, T: spi::Instance, TxDmaCh: embassy_stm32::spi::TxDma<T>, RxDmaCh: embassy_stm32::spi::RxDma<T>, AccelCsPin: Pin, GyroCsPin: Pin> {
+use core::cmp::min;
+
+pub struct Bmi085<
+        'a,
+        'buf,
+        T: spi::Instance,
+        TxDmaCh: embassy_stm32::spi::TxDma<T>,
+        RxDmaCh: embassy_stm32::spi::RxDma<T>,
+        AccelCsPin: Pin,
+        GyroCsPin: Pin> {
     spi: spi::Spi<'a, T, TxDmaCh, RxDmaCh>,
     accel_cs: Output<'a, AccelCsPin>,
     gyro_cs: Output<'a, GyroCsPin>,
-    spi_buf: &'buf mut [u8; 4],
+    spi_buf: &'buf mut [u8; 7],
 }
 
 #[repr(u8)]
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, dead_code)]
 enum AccelRegisters {
     ACC_CHIP_ID = 0x00,
     ACC_ERR_REG = 0x02,
@@ -43,26 +52,46 @@ enum AccelRegisters {
     ACC_SOFTRESET = 0x7E,
 }
 
-impl Into<u8> for AccelRegisters {
-    fn into(self) -> u8 {
-        return self as u8;
-    }
-}
-
 const ACCEL_CHIP_ID: u8 = 0x1F;
 
+#[repr(u8)]
+#[allow(non_camel_case_types, dead_code)]
 enum GyroRegisters {
-
+    GYRO_CHIP_ID = 0x00,
+    RATE_X_LSB = 0x02,
+    RATE_X_MSB = 0x03,
+    RATE_Y_LSB = 0x04,
+    RATE_Y_MSB = 0x05,
+    RATE_Z_LSB = 0x06,
+    RATE_Z_MSB = 0x07,
+    GYRO_INT_STAT_1 = 0x0A,
+    GYRO_RANGE = 0x0F,
+    GYRO_BANDWIDTH = 0x10,
+    GYRO_LPM1 = 0x11,
+    GYRO_SOFTRESET = 0x14,
+    GYRO_INT_CONTROL = 0x15,
+    INT3_INT4_IO_CONF = 0x16,
+    INT3_INT4_IO_MAP = 0x18,
+    GYRO_SELF_TEST = 0x3C,
 }
 
 const GYRO_CHIP_ID: u8 = 0x0F;
 
-impl<'a, 'buf, T: spi::Instance, TxDmaCh: embassy_stm32::spi::TxDma<T>, RxDmaCh: embassy_stm32::spi::RxDma<T>, AccelCsPin: Pin, GyroCsPin: Pin> Bmi085<'a, 'buf, T, TxDmaCh, RxDmaCh, AccelCsPin, GyroCsPin> {
+const READ_BIT: u8 = 0x80;
+
+impl<'a,
+        'buf,
+        T: spi::Instance,
+        TxDmaCh: embassy_stm32::spi::TxDma<T>,
+        RxDmaCh: embassy_stm32::spi::RxDma<T>,
+        AccelCsPin: Pin,
+        GyroCsPin: Pin> 
+    Bmi085<'a, 'buf, T, TxDmaCh, RxDmaCh, AccelCsPin, GyroCsPin> {
     pub fn new_from_spi(
         spi: spi::Spi<'a, T, TxDmaCh, RxDmaCh>, 
         accel_cs: Output<'a, AccelCsPin>, 
         gyro_cs: Output<'a, GyroCsPin>,
-        spi_buf: &'buf mut [u8; 4],
+        spi_buf: &'buf mut [u8; 7],
     ) -> Self {
         Bmi085 {
             spi: spi,
@@ -81,7 +110,7 @@ impl<'a, 'buf, T: spi::Instance, TxDmaCh: embassy_stm32::spi::TxDma<T>, RxDmaCh:
         rxdma: impl Peripheral<P = RxDmaCh> + 'a,
         accel_cs: impl Peripheral<P = AccelCsPin> + 'a,
         gyro_cs: impl Peripheral<P = GyroCsPin> + 'a,
-        spi_buf: &'buf mut [u8; 4],
+        spi_buf: &'buf mut [u8; 7],
     ) -> Self {
         let imu_spi = spi::Spi::new(
             peri,
@@ -105,37 +134,52 @@ impl<'a, 'buf, T: spi::Instance, TxDmaCh: embassy_stm32::spi::TxDma<T>, RxDmaCh:
         }
     }
 
-    fn select_accel(&self) {
+    fn select_accel(&mut self) {
         self.gyro_cs.set_high();
         self.accel_cs.set_low();
     }
 
-    fn select_gyro(&self) {
+    fn select_gyro(&mut self) {
         self.accel_cs.set_high();
         self.gyro_cs.set_low();
     }
 
-    fn deselect(&self) {
+    fn deselect(&mut self) {
         self.accel_cs.set_high();
-        self.gyro_cs.set_low();
+        self.gyro_cs.set_high();
     }
 
-    fn read(&mut self, reg: u8) -> u8 {
-        0
+    async fn read(&mut self, reg: u8) -> u8 {
+        self.spi_buf[0] = reg | READ_BIT;
+        let _ = self.spi.transfer_in_place(&mut self.spi_buf[..2]).await;
+        self.spi_buf[1]
     }
 
-    fn read_accel(&mut self, reg: AccelRegisters) -> u8 {
+    async fn burst_read(&mut self, reg: u8, dest: &mut [u8]) {
+        // the transaction length is either the dest buf size + 1 
+        // (the start addr + N data bytes)
+        // OR upper bounded by internal length of the buffer.
+        let trx_len = min(dest.len() + 1, self.spi_buf.len());
+
+        self.spi_buf[0] = reg | READ_BIT;
+        let _ = self.spi.transfer_in_place(&mut self.spi_buf[..trx_len]).await;
+        dest[1..trx_len].copy_from_slice(&self.spi_buf[1..trx_len]);
+    }
+
+    async fn read_accel(&mut self, reg: AccelRegisters) -> u8 {
         self.select_accel();
-        return self.read(reg as u8);
+        self.read(reg as u8).await
     }
 
-    fn read_gyro(&mut self, reg: GyroRegisters) -> u8 {
+    async fn read_gyro(&mut self, reg: GyroRegisters) -> u8 {
         self.select_gyro();
-        return self.read(reg as u8);
+        self.read(reg as u8).await
     }
 
-    fn write(&mut self, reg: u8, val: u8) {
-
+    async fn write(&mut self, reg: u8, val: u8) {
+        self.spi_buf[0] = reg & !READ_BIT;
+        self.spi_buf[1] = val;
+        let _ = self.spi.transfer_in_place(&mut self.spi_buf[..2]).await;
     }
 
     fn write_accel(&mut self, reg: AccelRegisters, val: u8) {
@@ -151,20 +195,28 @@ impl<'a, 'buf, T: spi::Instance, TxDmaCh: embassy_stm32::spi::TxDma<T>, RxDmaCh:
     pub async fn self_test(&mut self) -> bool {
         let mut has_self_test_error = false;
 
-        self.spi_buf[0] = AccelRegisters::ACC_CHIP_ID as u8;
-        self.select_accel();
-        let _ = self.spi.transfer_in_place(self.spi_buf).await;
-        let accel_id = self.spi_buf[1];
-        debug!("accelerometer id: 0x{:x}", accel_id);
+        self.deselect();
 
-        SPI6_BUF[0] = 0x80;
-        imu_cs2.set_low();
-        let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
-        imu_cs2.set_high();
-        let gyro_id = SPI6_BUF[1];
-        debug!("gyro id: 0x{:x}", gyro_id);
+        let acc_chip_id = self.read_accel(AccelRegisters::ACC_CHIP_ID).await;
+        if acc_chip_id != ACCEL_CHIP_ID {
+            warn!("read accel ID (0x{:x}) does not match expected BMI085 accel ID (0x{:x})", acc_chip_id, ACCEL_CHIP_ID);
+            has_self_test_error = true;
+        } else {
+            debug!("accel id verified: 0x{:x}", acc_chip_id);
+        }
 
-        true
+        let gyro_chip_id = self.read_gyro(GyroRegisters::GYRO_CHIP_ID).await;
+        if gyro_chip_id != GYRO_CHIP_ID {
+            warn!("read gyro ID (0x{:x}) does not match expected BMI085 gyro ID (0x{:x})", gyro_chip_id, GYRO_CHIP_ID);
+            has_self_test_error = true;
+        } else {
+            debug!("gyro id verified: 0x{:x}", gyro_chip_id);
+        }
+        
+        // TODO: accel BIST
+        // TODO: gyro BIST
+
+        has_self_test_error
     }
 
 }
