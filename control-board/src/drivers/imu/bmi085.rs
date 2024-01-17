@@ -1,3 +1,11 @@
+/*
+ * Driver for the Bosch BMI085 IMU.
+ * 
+ * https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bmi085-ds001.pdf
+ * 
+ */
+
+
 use embassy_stm32::{
     gpio::{Pin, Level},
     spi::{self, SckPin, MosiPin, MisoPin},
@@ -6,6 +14,7 @@ use embassy_stm32::{
 };
 
 use defmt::*;
+use embassy_time::{Timer, Duration};
 
 use core::cmp::min;
 
@@ -73,6 +82,15 @@ enum GyroRegisters {
     INT3_INT4_IO_CONF = 0x16,
     INT3_INT4_IO_MAP = 0x18,
     GYRO_SELF_TEST = 0x3C,
+}
+
+#[repr(u8)]
+#[allow(dead_code)]
+enum GyroSelfTestReg {
+    RateOk = 0b10000,
+    BistFail = 0b00100,
+    BistRdy = 0b00010,
+    TrigBist = 0b00001,
 }
 
 const GYRO_CHIP_ID: u8 = 0x0F;
@@ -155,23 +173,35 @@ impl<'a,
         self.spi_buf[1]
     }
 
-    async fn burst_read(&mut self, reg: u8, dest: &mut [u8]) {
+    async fn accel_burst_read(&mut self, reg: AccelRegisters, dest: &mut [u8]) {
+        // the transaction length is either the dest buf size + 2 
+        // (the start addr + N data bytes) + 1 spurious byte for data to settle (or something)
+        // OR upper bounded by internal length of the buffer.
+        let trx_len = min(dest.len() + 2, self.spi_buf.len());
+
+        self.spi_buf[0] = reg as u8 | READ_BIT;
+        self.spi_buf[1] = 0x00;
+        let _ = self.spi.transfer_in_place(&mut self.spi_buf[..trx_len]).await;
+        dest.copy_from_slice(&self.spi_buf[2..trx_len]);
+    }
+
+    async fn gyro_burst_read(&mut self, reg: GyroRegisters, dest: &mut [u8]) {
         // the transaction length is either the dest buf size + 1 
         // (the start addr + N data bytes)
         // OR upper bounded by internal length of the buffer.
         let trx_len = min(dest.len() + 1, self.spi_buf.len());
 
-        self.spi_buf[0] = reg | READ_BIT;
+        self.spi_buf[0] = reg as u8 | READ_BIT;
         let _ = self.spi.transfer_in_place(&mut self.spi_buf[..trx_len]).await;
-        dest[1..trx_len].copy_from_slice(&self.spi_buf[1..trx_len]);
+        dest.copy_from_slice(&self.spi_buf[1..trx_len]);
     }
 
-    async fn read_accel(&mut self, reg: AccelRegisters) -> u8 {
+    async fn accel_read(&mut self, reg: AccelRegisters) -> u8 {
         self.select_accel();
         self.read(reg as u8).await
     }
 
-    async fn read_gyro(&mut self, reg: GyroRegisters) -> u8 {
+    async fn gyro_read(&mut self, reg: GyroRegisters) -> u8 {
         self.select_gyro();
         self.read(reg as u8).await
     }
@@ -182,14 +212,45 @@ impl<'a,
         let _ = self.spi.transfer_in_place(&mut self.spi_buf[..2]).await;
     }
 
-    fn write_accel(&mut self, reg: AccelRegisters, val: u8) {
+    async fn accel_write(&mut self, reg: AccelRegisters, val: u8) {
         self.select_accel();
-        self.write(reg as u8, val);
+        self.write(reg as u8, val).await;
     }
 
-    fn write_gyro(&mut self, reg: GyroRegisters, val: u8) {
+    async fn gyro_write(&mut self, reg: GyroRegisters, val: u8) {
         self.select_gyro();
-        self.write(reg as u8, val);
+        self.write(reg as u8, val).await;
+    }
+
+    async fn accel_self_test(&mut self) -> bool {
+        warn!("accel BIST is unimplemented");
+
+        true
+    }
+
+    async fn gyro_self_test(&mut self) -> bool {
+        self.gyro_write(GyroRegisters::GYRO_SELF_TEST, GyroSelfTestReg::TrigBist as u8).await;
+        let mut try_ct = 0;
+        loop {
+            let strreg_val = self.gyro_read(GyroRegisters::GYRO_SELF_TEST).await;
+            if (strreg_val & GyroSelfTestReg::BistRdy as u8) != 0 {
+                if (strreg_val & GyroSelfTestReg::BistFail as u8) != 0 {
+                    warn!("gyro failed BIST. (the bist fail bit is high)");
+                    return false;
+                } else {
+                    debug!("gyro passed self test.");
+                    return true;
+                }
+            }
+
+            Timer::after(Duration::from_millis(10)).await;
+            try_ct += 1;
+
+            if try_ct > 10 {
+                warn!("gyro BIST did not converge.");
+                return false;
+            }
+        }
     }
 
     pub async fn self_test(&mut self) -> bool {
@@ -197,7 +258,8 @@ impl<'a,
 
         self.deselect();
 
-        let acc_chip_id = self.read_accel(AccelRegisters::ACC_CHIP_ID).await;
+        let _ = self.accel_read(AccelRegisters::ACC_CHIP_ID).await;
+        let acc_chip_id = self.accel_read(AccelRegisters::ACC_CHIP_ID).await;
         if acc_chip_id != ACCEL_CHIP_ID {
             warn!("read accel ID (0x{:x}) does not match expected BMI085 accel ID (0x{:x})", acc_chip_id, ACCEL_CHIP_ID);
             has_self_test_error = true;
@@ -205,7 +267,8 @@ impl<'a,
             debug!("accel id verified: 0x{:x}", acc_chip_id);
         }
 
-        let gyro_chip_id = self.read_gyro(GyroRegisters::GYRO_CHIP_ID).await;
+        let _ = self.gyro_read(GyroRegisters::GYRO_CHIP_ID).await;
+        let gyro_chip_id = self.gyro_read(GyroRegisters::GYRO_CHIP_ID).await;
         if gyro_chip_id != GYRO_CHIP_ID {
             warn!("read gyro ID (0x{:x}) does not match expected BMI085 gyro ID (0x{:x})", gyro_chip_id, GYRO_CHIP_ID);
             has_self_test_error = true;
@@ -213,10 +276,38 @@ impl<'a,
             debug!("gyro id verified: 0x{:x}", gyro_chip_id);
         }
         
-        // TODO: accel BIST
-        // TODO: gyro BIST
+        if !self.accel_self_test().await {
+            has_self_test_error = true;
+        }
+
+        if !self.gyro_self_test().await {
+            has_self_test_error = true;
+        }
 
         has_self_test_error
     }
+
+    const fn read_pair_to_i16(&self, lsb: u8, msb: u8) -> i16 {
+        (msb as u16 * 256 + lsb as u16) as i16
+    }
+    
+    pub async fn get_accel_data(&mut self) -> [i16; 3] {
+        let mut buf: [u8; 6] = [0; 6];
+        self.accel_burst_read(AccelRegisters::ACC_X_LSB, &mut buf).await;
+
+        [self.read_pair_to_i16(buf[0], buf[1]),
+            self.read_pair_to_i16(buf[2], buf[3]),
+            self.read_pair_to_i16(buf[4], buf[5])]
+    }
+
+    pub async fn get_gyro_data(&mut self) -> [i16; 3] {
+        let mut buf: [u8; 6] = [0; 6];
+        self.gyro_burst_read(GyroRegisters::RATE_X_LSB, &mut buf).await;
+
+        [self.read_pair_to_i16(buf[0], buf[1]),
+            self.read_pair_to_i16(buf[2], buf[3]),
+            self.read_pair_to_i16(buf[4], buf[5])]
+    }
+
 
 }
