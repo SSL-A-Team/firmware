@@ -128,8 +128,8 @@ static mut DRIB_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
 static DRIB_QUEUE_RX: UartReadQueue<MotorDUart, MotorDDmaRx, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
     UartReadQueue::new(unsafe { &mut DRIB_BUFFERS_RX });
 
-const WHEEL_ANGLES_DEG: Vector4<f32> = Vector4::new(60.0, 135.0, 225.0, 300.0);
-const WHEEL_RADIUS_M: f32 = 0.049 / 2.0; // wheel dia 49mm
+const WHEEL_ANGLES_DEG: Vector4<f32> = Vector4::new(300.0, 45.0,135.0,240.0);
+const WHEEL_RADIUS_M: f32 = 0.0247; // wheel dia 49mm
 const WHEEL_DISTANCE_TO_ROBOT_CENTER_M: Vector4<f32> = Vector4::new(0.0798, 0.0837, 0.0837, 0.0798); // from center of wheel body to center of robot
 
 pub struct MotorsError<T> {
@@ -415,17 +415,17 @@ impl Control {
         self.drib_vel = vel_drib;
         let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel);
 
-        self.front_right_motor.set_setpoint(wheel_vels[0]);
-        self.front_left_motor.set_setpoint(wheel_vels[1]);
-        self.back_left_motor.set_setpoint(wheel_vels[2]);
-        self.back_right_motor.set_setpoint(wheel_vels[3]);
+        self.front_left_motor.set_setpoint(wheel_vels[0]);
+        self.back_left_motor.set_setpoint(wheel_vels[1]);
+        self.back_right_motor.set_setpoint(wheel_vels[2]);
+        self.front_right_motor.set_setpoint(wheel_vels[3]);
         let drib_dc = self.drib_vel / 1000.0;
         self.drib_motor.set_setpoint(drib_dc);
 
-        self.front_right_motor.send_motion_command();
         self.front_left_motor.send_motion_command();
         self.back_left_motor.send_motion_command();
         self.back_right_motor.send_motion_command();
+        self.front_right_motor.send_motion_command();
         self.drib_motor.send_motion_command();
     }
 }

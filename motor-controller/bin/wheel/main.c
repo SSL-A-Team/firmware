@@ -199,6 +199,7 @@ int main() {
 
                 telemetry_enabled = motor_command_packet.data.motion.enable_telemetry;
                 r_motor_board = motor_command_packet.data.motion.setpoint;
+                motion_control_type = motor_command_packet.data.motion.motion_control_type;
             } else if (motor_command_packet.type == MCP_PARAMS) {
                 // a params update is issued (or the upstream just wants to readback current params)
 

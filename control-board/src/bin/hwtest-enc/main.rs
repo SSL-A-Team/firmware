@@ -19,6 +19,12 @@ use embassy_stm32::{
     time::{hz, mhz},
     usart::Uart,
 };
+
+use nalgebra::{Vector4, AbstractRotation};
+
+use ateam_common_packets::bindings_stspin::{
+    MotorCommand_MotionType
+};
 use futures_util::StreamExt;
 use smart_leds::SmartLedsWrite;
 use static_cell::StaticCell;
@@ -31,7 +37,7 @@ static EXECUTOR_UART_QUEUE: StaticCell<InterruptExecutor<interrupt::CEC>> = Stat
 // Angular velocity commanded in rads/sec
 const ROBOT_VEL_ANGULAR: f32 = 10.;
 // Expected RPM read from encoder for commanded velocity when wheels have no load
-const EXPECTED_RPM_NO_LOAD: f32 = 370.;
+const EXPECTED_RPM_NO_LOAD: Vector4<f32> = Vector4::new(-308.51573584, -323.59357255, -323.59357255, -308.51573584);
 // Allowed tolerance for expected RPM in percent
 const EXPECTED_RPM_TOLERANCE: f32 = 0.20;
 
@@ -67,6 +73,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         .unwrap();
 
     let btn0 = Input::new(p.PD5, Pull::None);
+    let btn1 = Input::new(p.PD6, Pull::None);
 
     let mut led0 = Output::new(p.PF3, Level::Low, Speed::Low);
     let mut led1 = Output::new(p.PF2, Level::Low, Speed::Low);
@@ -186,15 +193,33 @@ async fn main(_spawner: embassy_executor::Spawner) {
     dotstar.write([COLOR_YELLOW].iter().cloned()).unwrap();
 
     loop {
+        defmt::info!("Waiting for BTN0 press to start motors. Hold BTN1 for open loop, don't for velocity loop");
+       
         while btn0.is_high() {}
         while btn0.is_low() {}
 
+        if btn1.is_low(){
+            defmt::info!("OPEN LOOP");
+            control.front_left_motor.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+            control.back_left_motor.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+            control.back_right_motor.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+            control.front_right_motor.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+        }
+        else {
+            defmt::info!("VELOCITY LOOP");
+            control.front_left_motor.set_motion_type(MotorCommand_MotionType::VELOCITY);
+            control.back_left_motor.set_motion_type(MotorCommand_MotionType::VELOCITY);
+            control.back_right_motor.set_motion_type(MotorCommand_MotionType::VELOCITY);
+            control.front_right_motor.set_motion_type(MotorCommand_MotionType::VELOCITY);
+        }
+
         let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
+       
+        defmt::info!("Motors starting. Press BTN0 to stop");
 
         loop {
             main_loop_rate_ticker.next().await;
-            control.tick(ROBOT_VEL_ANGULAR, 64.);
-
+            control.tick(ROBOT_VEL_ANGULAR, 0.);
             let err_fl = control.front_left_motor.read_is_error();
             let err_bl = control.back_left_motor.read_is_error();
             let err_br = control.back_right_motor.read_is_error();
@@ -206,14 +231,10 @@ async fn main(_spawner: embassy_executor::Spawner) {
             let rpm_br = control.back_right_motor.read_rpm();
             let rpm_fr = control.front_right_motor.read_rpm();
 
-            let rpm_ok_fl = rpm_fl > EXPECTED_RPM_NO_LOAD * (1. - EXPECTED_RPM_TOLERANCE)
-                && rpm_fl < EXPECTED_RPM_NO_LOAD * (1. + EXPECTED_RPM_TOLERANCE);
-            let rpm_ok_bl = rpm_bl > EXPECTED_RPM_NO_LOAD * (1. - EXPECTED_RPM_TOLERANCE)
-                && rpm_bl < EXPECTED_RPM_NO_LOAD * (1. + EXPECTED_RPM_TOLERANCE);
-            let rpm_ok_br = rpm_br > EXPECTED_RPM_NO_LOAD * (1. - EXPECTED_RPM_TOLERANCE)
-                && rpm_br < EXPECTED_RPM_NO_LOAD * (1. + EXPECTED_RPM_TOLERANCE);
-            let rpm_ok_fr = rpm_fr > EXPECTED_RPM_NO_LOAD * (1. - EXPECTED_RPM_TOLERANCE)
-                && rpm_fr < EXPECTED_RPM_NO_LOAD * (1. + EXPECTED_RPM_TOLERANCE);
+            let rpm_ok_fl = within_percent_err(EXPECTED_RPM_NO_LOAD[0], rpm_fl, EXPECTED_RPM_TOLERANCE);
+            let rpm_ok_bl = within_percent_err(EXPECTED_RPM_NO_LOAD[1], rpm_bl, EXPECTED_RPM_TOLERANCE);
+            let rpm_ok_br = within_percent_err(EXPECTED_RPM_NO_LOAD[2], rpm_br, EXPECTED_RPM_TOLERANCE);
+            let rpm_ok_fr = within_percent_err(EXPECTED_RPM_NO_LOAD[3], rpm_fr, EXPECTED_RPM_TOLERANCE);
 
             if  err_fl || err_bl || err_br || err_fr || err_drib {
                 dotstar
@@ -257,8 +278,19 @@ async fn main(_spawner: embassy_executor::Spawner) {
                 while btn0.is_low() {}
                 break;
             }
+
+            defmt::info!("RPM {:?} {:?} {:?} {:?}", rpm_fl, rpm_bl, rpm_br, rpm_fr);
         }
 
         dotstar.write([COLOR_YELLOW].iter().cloned()).unwrap();
     }
+}
+
+pub fn within_percent_err(expected: f32, actual: f32, percent: f32) -> bool {
+    let calc_percent = (expected - actual)/(actual + 0.0000001);
+    return abs32(calc_percent) < percent;
+}
+
+pub fn abs32(x: f32) -> f32 {
+    f32::from_bits(x.to_bits() & (i32::MAX as u32))
 }
