@@ -93,6 +93,29 @@ enum GyroSelfTestReg {
     TrigBist = 0b00001,
 }
 
+#[repr(u8)]
+#[allow(dead_code)]
+pub enum GyroRange {
+    PlusMinus2000DegPerSec = 0x00,
+    PlusMinus1000DegPerSec = 0x01,
+    PlusMinus500DegPerSec = 0x02,
+    PlusMinus250DegPerSec = 0x03,
+    PlusMinus125DegPerSec = 0x04,
+}
+
+#[repr(u8)]
+#[allow(dead_code)]
+pub enum GyroBandwidth {
+    FilterBw532Hz = 0x00,
+    FilterBw230Hz = 0x01,
+    FilterBw116Hz = 0x02,
+    FilterBw47Hz = 0x03,
+    FilterBw23Hz = 0x04,
+    FilterBw12Hz = 0x05,
+    FilterBw64Hz = 0x06,
+    FilterBw32Hz = 0x07,
+}
+
 const GYRO_CHIP_ID: u8 = 0x0F;
 
 const READ_BIT: u8 = 0x80;
@@ -291,7 +314,7 @@ impl<'a,
         (msb as u16 * 256 + lsb as u16) as i16
     }
     
-    pub async fn get_accel_data(&mut self) -> [i16; 3] {
+    pub async fn accel_get_data(&mut self) -> [i16; 3] {
         let mut buf: [u8; 6] = [0; 6];
         self.accel_burst_read(AccelRegisters::ACC_X_LSB, &mut buf).await;
 
@@ -300,7 +323,7 @@ impl<'a,
             self.read_pair_to_i16(buf[4], buf[5])]
     }
 
-    pub async fn get_gyro_data(&mut self) -> [i16; 3] {
+    pub async fn gyro_get_data(&mut self) -> [i16; 3] {
         let mut buf: [u8; 6] = [0; 6];
         self.gyro_burst_read(GyroRegisters::RATE_X_LSB, &mut buf).await;
 
@@ -309,5 +332,11 @@ impl<'a,
             self.read_pair_to_i16(buf[4], buf[5])]
     }
 
+    pub async fn gyro_set_range(&mut self, range: GyroRange) {
+        self.gyro_write(GyroRegisters::GYRO_RANGE, range as u8).await;
+    }
 
+    pub async fn gyro_set_bandwidth(&mut self, bandwidth: GyroBandwidth) {
+        self.gyro_write(GyroRegisters::GYRO_BANDWIDTH, bandwidth as u8).await;
+    }
 }
