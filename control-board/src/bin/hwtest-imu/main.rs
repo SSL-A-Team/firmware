@@ -20,6 +20,8 @@ use embassy_time::{Duration, Timer};
 use apa102_spi::Apa102;
 use smart_leds::{SmartLedsWrite, RGB8};
 
+use tasks::imu::spawn_imu_tasks;
+
 #[link_section = ".sram4"]
 static mut SPI6_BUF: [u8; 4] = [0x0; 4];
 
@@ -62,37 +64,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
         spi::Config::default(),
     );
 
-    // // acceleromter
-    let mut imu_cs1 = Output::new(p.PC4, Level::High, Speed::VeryHigh);
-    // // gyro
-    let mut imu_cs2 = Output::new(p.PC5, Level::High, Speed::VeryHigh);
+    static GYRO_CHANNEL: PubSubChannel<ThreadModeRawMutex, f32, 1, 1, 1> = PubSubChannel::new();
+    static ACCEL_CHANNEL: PubSubChannel<ThreadModeRawMutex, f32, 1, 1, 1> = PubSubChannel::new();
 
-    Timer::after(Duration::from_millis(1)).await;
-
-    unsafe {
-        SPI6_BUF[0] = 0x80;
-        // info!("xfer {=[u8]:x}", SPI6_BUF[0..1]);
-        imu_cs1.set_low();
-        let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
-        imu_cs1.set_high();
-        let accel_id = SPI6_BUF[1];
-        info!("accelerometer id: 0x{:x}", accel_id);
-
-        SPI6_BUF[0] = 0x80;
-        imu_cs2.set_low();
-        let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
-        imu_cs2.set_high();
-        let gyro_id = SPI6_BUF[1];
-        info!("gyro id: 0x{:x}", gyro_id);
-
-        loop {
-            SPI6_BUF[0] = 0x86;
-            // SPI6_BUF[0] = 0x86;
-            imu_cs2.set_low();
-            let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..3]).await;
-            imu_cs2.set_high();
-            let rate_z = (SPI6_BUF[2] as u16 * 256 + SPI6_BUF[1] as u16) as i16;
-            info!("z rate: {}", rate_z);
-        }
-    }
+    spawn_imu_tasks(_spawner, GYRO_CHANNEL.publisher(), ACCEL_CHANNEL.publisher());
 }

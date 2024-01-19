@@ -18,6 +18,8 @@ use embassy_time::{Timer, Duration};
 
 use core::cmp::min;
 
+const MAX_TRANSACTION_BUF_LEN: usize = 8;
+
 pub struct Bmi085<
         'a,
         'buf,
@@ -29,7 +31,7 @@ pub struct Bmi085<
     spi: spi::Spi<'a, T, TxDmaCh, RxDmaCh>,
     accel_cs: Output<'a, AccelCsPin>,
     gyro_cs: Output<'a, GyroCsPin>,
-    spi_buf: &'buf mut [u8; 7],
+    spi_buf: &'buf mut [u8; MAX_TRANSACTION_BUF_LEN],
 }
 
 #[repr(u8)]
@@ -132,7 +134,7 @@ impl<'a,
         spi: spi::Spi<'a, T, TxDmaCh, RxDmaCh>, 
         accel_cs: Output<'a, AccelCsPin>, 
         gyro_cs: Output<'a, GyroCsPin>,
-        spi_buf: &'buf mut [u8; 7],
+        spi_buf: &'buf mut [u8; MAX_TRANSACTION_BUF_LEN],
     ) -> Self {
         Bmi085 {
             spi: spi,
@@ -151,7 +153,7 @@ impl<'a,
         rxdma: impl Peripheral<P = RxDmaCh> + 'a,
         accel_cs: impl Peripheral<P = AccelCsPin> + 'a,
         gyro_cs: impl Peripheral<P = GyroCsPin> + 'a,
-        spi_buf: &'buf mut [u8; 7],
+        spi_buf: &'buf mut [u8; MAX_TRANSACTION_BUF_LEN],
     ) -> Self {
         let imu_spi = spi::Spi::new(
             peri,
