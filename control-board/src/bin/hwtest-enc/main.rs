@@ -3,6 +3,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(const_mut_refs)]
 
+use core::f32::consts::PI;
+
 use control::Control;
 use defmt_rtt as _;
 use embassy_time::{Duration, Ticker, Timer};
@@ -192,34 +194,42 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     dotstar.write([COLOR_YELLOW].iter().cloned()).unwrap();
 
+    let mut robot_ang_vel: f32 = 0.0;
     loop {
         defmt::info!("Waiting for BTN0 press to start motors. Hold BTN1 for open loop, don't for velocity loop");
-       
+        
         while btn0.is_high() {}
         while btn0.is_low() {}
+        
+        //if btn1.is_low(){
+        //    defmt::info!("OPEN LOOP");
+        //    control.front_left_motor.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+        //    control.back_left_motor.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+        //    control.back_right_motor.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+        //    control.front_right_motor.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+        //}
+        //else {
+        //    defmt::info!("VELOCITY LOOP");
+        //    control.front_left_motor.set_motion_type(MotorCommand_MotionType::VELOCITY);
+        //    control.back_left_motor.set_motion_type(MotorCommand_MotionType::VELOCITY);
+        //    control.back_right_motor.set_motion_type(MotorCommand_MotionType::VELOCITY);
+        //    control.front_right_motor.set_motion_type(MotorCommand_MotionType::VELOCITY);
+        //}
 
-        if btn1.is_low(){
-            defmt::info!("OPEN LOOP");
-            control.front_left_motor.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
-            control.back_left_motor.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
-            control.back_right_motor.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
-            control.front_right_motor.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+        if btn1.is_low() {
+            robot_ang_vel = robot_ang_vel + 0.1;
         }
-        else {
-            defmt::info!("VELOCITY LOOP");
-            control.front_left_motor.set_motion_type(MotorCommand_MotionType::VELOCITY);
-            control.back_left_motor.set_motion_type(MotorCommand_MotionType::VELOCITY);
-            control.back_right_motor.set_motion_type(MotorCommand_MotionType::VELOCITY);
-            control.front_right_motor.set_motion_type(MotorCommand_MotionType::VELOCITY);
+        else {  
+            robot_ang_vel = robot_ang_vel - 0.1;
         }
-
+        
         let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
-       
+        
         defmt::info!("Motors starting. Press BTN0 to stop");
-
+        
         loop {
             main_loop_rate_ticker.next().await;
-            control.tick(ROBOT_VEL_ANGULAR, 0.);
+            control.tick(robot_ang_vel, 0.);
             let err_fl = control.front_left_motor.read_is_error();
             let err_bl = control.back_left_motor.read_is_error();
             let err_br = control.back_right_motor.read_is_error();
@@ -230,6 +240,21 @@ async fn main(_spawner: embassy_executor::Spawner) {
             let rpm_bl = control.back_left_motor.read_rpm();
             let rpm_br = control.back_right_motor.read_rpm();
             let rpm_fr = control.front_right_motor.read_rpm();
+
+            let rads_raw_fl = enc_delta_to_rads(control.front_left_motor.read_encoder_delta());
+            let rads_raw_bl = enc_delta_to_rads(control.back_left_motor.read_encoder_delta());
+            let rads_raw_br = enc_delta_to_rads(control.back_right_motor.read_encoder_delta());
+            let rads_raw_fr = enc_delta_to_rads(control.front_right_motor.read_encoder_delta());
+
+            let vel_setpoint_fl = control.front_left_motor.read_vel_setpoint();
+            let vel_setpoint_bl = control.back_left_motor.read_vel_setpoint();
+            let vel_setpoint_br = control.back_right_motor.read_vel_setpoint();
+            let vel_setpoint_fr = control.front_right_motor.read_vel_setpoint();
+
+            let duty_cycle_fl = control.front_left_motor.read_vel_computed_setpoint();
+            let duty_cycle_bl = control.back_left_motor.read_vel_computed_setpoint();
+            let duty_cycle_br = control.back_right_motor.read_vel_computed_setpoint();
+            let duty_cycle_fr = control.front_right_motor.read_vel_computed_setpoint();
 
             let rpm_ok_fl = within_percent_err(EXPECTED_RPM_NO_LOAD[0], rpm_fl, EXPECTED_RPM_TOLERANCE);
             let rpm_ok_bl = within_percent_err(EXPECTED_RPM_NO_LOAD[1], rpm_bl, EXPECTED_RPM_TOLERANCE);
@@ -280,6 +305,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
             }
 
             defmt::info!("RPM {:?} {:?} {:?} {:?}", rpm_fl, rpm_bl, rpm_br, rpm_fr);
+            defmt::info!("SET POINT {:?} {:?} {:?} {:?}", vel_setpoint_fl, vel_setpoint_bl, vel_setpoint_br, vel_setpoint_fr);
+            defmt::info!("DUTY {:?} {:?} {:?} {:?}", duty_cycle_fl, duty_cycle_bl, duty_cycle_br, duty_cycle_fr);
+            defmt::info!("RADS RAW {:?} {:?} {:?} {:?}", rads_raw_fl, rads_raw_bl, rads_raw_br, rads_raw_fr);
         }
 
         dotstar.write([COLOR_YELLOW].iter().cloned()).unwrap();
@@ -293,4 +321,8 @@ pub fn within_percent_err(expected: f32, actual: f32, percent: f32) -> bool {
 
 pub fn abs32(x: f32) -> f32 {
     f32::from_bits(x.to_bits() & (i32::MAX as u32))
+}
+
+pub fn enc_delta_to_rads(enc_delta: i32) -> f32 {
+    (((enc_delta as f32)/4000.0) * 2.0 * PI)/(10.0/1000.0)
 }

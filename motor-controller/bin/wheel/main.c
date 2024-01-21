@@ -337,7 +337,7 @@ int main() {
             response_packet.data.motion.vel_enc_estimate = enc_rad_s_filt;
             response_packet.data.motion.vel_hall_estimate = 0U;
             response_packet.data.motion.vel_computed_error = vel_pid.prev_err;
-            response_packet.data.motion.vel_computed_setpoint = vel_setpoint_rads;
+            response_packet.data.motion.vel_computed_setpoint = u_vel_loop;
         }
 
 
@@ -348,6 +348,8 @@ int main() {
             // set the motor duty cycle
             if (motion_control_type == OPEN_LOOP) {
                 float r_motor = mm_rads_to_dc(&df45_model, r_motor_board);
+                response_packet.data.motion.vel_setpoint = r_motor_board;
+                response_packet.data.motion.vel_computed_setpoint = r_motor;
                 pwm6step_set_duty_cycle_f(r_motor);
             } else if (motion_control_type == VELOCITY) {
                 pwm6step_set_duty_cycle_f(u_vel_loop);
