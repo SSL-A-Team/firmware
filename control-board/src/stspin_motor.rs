@@ -296,7 +296,7 @@ impl<
     }
 
     pub fn read_vel_setpoint(&self) -> f32 {
-        return self.current_state.vel_setpoint * 60.0 / (2.0 * PI);
+        return self.current_state.vel_setpoint;
     }
 
     pub fn read_vel_computed_setpoint(&self) -> f32 {

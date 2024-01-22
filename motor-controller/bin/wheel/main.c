@@ -136,7 +136,9 @@ int main() {
     df45_model.torque_to_current_linear_model_b = DF45_TORQUE_TO_CURRENT_LINEAR_B;
     df45_model.current_to_torque_linear_model_m = DF45_CURRENT_TO_TORQUE_LINEAR_M;
     df45_model.current_to_torque_linear_model_b = DF45_CURRENT_TO_TORQUE_LINEAR_B;
-
+    df45_model.rads_to_dc_linear_map_m = DF45_RADS_TO_DC_LINEAR_M;
+    df45_model.rads_to_dc_linear_map_b = DF45_RADS_TO_DC_LINEAR_B;
+    
     // setup the velocity PID
     PidConstants_t vel_pid_constants;
     pid_constants_initialize(&vel_pid_constants);

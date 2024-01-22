@@ -823,8 +823,6 @@ void pwm6step_set_duty_cycle(int32_t duty_cycle) {
     uint32_t duty_cycle_abs = abs(duty_cycle);
     if (duty_cycle_abs > UINT16_MAX) {
         duty_cycle_abs = UINT16_MAX;
-    } else if (duty_cycle_abs < DUTYCYCLE_DEADBAND){
-        duty_cycle_abs = 0;
     }
 
     uint16_t timer_duty_cycle = (uint16_t) duty_cycle_abs;
