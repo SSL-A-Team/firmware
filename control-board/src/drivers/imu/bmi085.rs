@@ -32,10 +32,12 @@ pub struct Bmi085<
     accel_cs: Output<'a, AccelCsPin>,
     gyro_cs: Output<'a, GyroCsPin>,
     spi_buf: &'buf mut [u8; MAX_TRANSACTION_BUF_LEN],
+    gyro_range: GyroRange,
 }
 
 #[repr(u8)]
 #[allow(non_camel_case_types, dead_code)]
+#[derive(Clone, Copy, Debug)]
 enum AccelRegisters {
     ACC_CHIP_ID = 0x00,
     ACC_ERR_REG = 0x02,
@@ -67,6 +69,7 @@ const ACCEL_CHIP_ID: u8 = 0x1F;
 
 #[repr(u8)]
 #[allow(non_camel_case_types, dead_code)]
+#[derive(Clone, Copy, Debug)]
 enum GyroRegisters {
     GYRO_CHIP_ID = 0x00,
     RATE_X_LSB = 0x02,
@@ -88,6 +91,7 @@ enum GyroRegisters {
 
 #[repr(u8)]
 #[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
 enum GyroSelfTestReg {
     RateOk = 0b10000,
     BistFail = 0b00100,
@@ -97,6 +101,7 @@ enum GyroSelfTestReg {
 
 #[repr(u8)]
 #[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
 pub enum GyroRange {
     PlusMinus2000DegPerSec = 0x00,
     PlusMinus1000DegPerSec = 0x01,
@@ -107,6 +112,7 @@ pub enum GyroRange {
 
 #[repr(u8)]
 #[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
 pub enum GyroBandwidth {
     FilterBw532Hz = 0x00,
     FilterBw230Hz = 0x01,
@@ -141,6 +147,7 @@ impl<'a,
             accel_cs: accel_cs,
             gyro_cs: gyro_cs,
             spi_buf: spi_buf,
+            gyro_range: GyroRange::PlusMinus2000DegPerSec,
         }
     }
 
@@ -174,6 +181,7 @@ impl<'a,
             accel_cs: accel_cs,
             gyro_cs: imu_cs,
             spi_buf: spi_buf,
+            gyro_range: GyroRange::PlusMinus2000DegPerSec
         }
     }
 
@@ -316,7 +324,7 @@ impl<'a,
         (msb as u16 * 256 + lsb as u16) as i16
     }
     
-    pub async fn accel_get_data(&mut self) -> [i16; 3] {
+    pub async fn accel_get_raw_data(&mut self) -> [i16; 3] {
         let mut buf: [u8; 6] = [0; 6];
         self.accel_burst_read(AccelRegisters::ACC_X_LSB, &mut buf).await;
 
@@ -325,7 +333,7 @@ impl<'a,
             self.read_pair_to_i16(buf[4], buf[5])]
     }
 
-    pub async fn gyro_get_data(&mut self) -> [i16; 3] {
+    pub async fn gyro_get_raw_data(&mut self) -> [i16; 3] {
         let mut buf: [u8; 6] = [0; 6];
         self.gyro_burst_read(GyroRegisters::RATE_X_LSB, &mut buf).await;
 
@@ -334,8 +342,30 @@ impl<'a,
             self.read_pair_to_i16(buf[4], buf[5])]
     }
 
+    pub fn convert_raw_gyro_sample(&self, raw_sample: i16) -> f32 {
+        let conversion_num = match self.gyro_range {
+            GyroRange::PlusMinus2000DegPerSec => 2000.0,
+            GyroRange::PlusMinus1000DegPerSec => 1000.0,
+            GyroRange::PlusMinus500DegPerSec => 500.0,
+            GyroRange::PlusMinus250DegPerSec => 250.0,
+            GyroRange::PlusMinus125DegPerSec => 125.0,
+        };
+
+        raw_sample as f32 * (conversion_num / i16::MAX as f32)
+    }
+
+    pub async fn gyro_get_data(&mut self) -> [f32; 3] {
+        let raw_data = self.gyro_get_raw_data().await;
+
+        return [self.convert_raw_gyro_sample(raw_data[0]),
+            self.convert_raw_gyro_sample(raw_data[1]),
+            self.convert_raw_gyro_sample(raw_data[2])]
+    }
+
     pub async fn gyro_set_range(&mut self, range: GyroRange) {
         self.gyro_write(GyroRegisters::GYRO_RANGE, range as u8).await;
+
+        self.gyro_range = range;
     }
 
     pub async fn gyro_set_bandwidth(&mut self, bandwidth: GyroBandwidth) {

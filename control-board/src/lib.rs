@@ -14,13 +14,13 @@
 #![feature(async_fn_in_trait)]
 #![feature(const_fn_floating_point_arithmetic)]
 
-// pub mod fw_images;
-pub mod queue;
 pub mod motion;
+pub mod parameter_interface;
+pub mod pins;
+pub mod queue;
 pub mod stm32_interface;
 pub mod stspin_motor;
 pub mod uart_queue;
-pub mod parameter_interface;
 
 pub mod drivers;
 pub mod tasks;

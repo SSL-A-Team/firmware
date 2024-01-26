@@ -20,7 +20,7 @@ use embassy_time::{Duration, Timer};
 use apa102_spi::Apa102;
 use smart_leds::{SmartLedsWrite, RGB8};
 
-use tasks::imu::spawn_imu_tasks;
+use ateam_control_board::tasks::imu::imu_task;
 
 #[link_section = ".sram4"]
 static mut SPI6_BUF: [u8; 4] = [0x0; 4];
