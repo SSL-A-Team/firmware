@@ -7,6 +7,7 @@ mod pins;
 
 use defmt::*;
 use defmt_rtt as _;
+use embassy_sync::{pubsub::PubSubChannel, blocking_mutex::raw::ThreadModeRawMutex};
 use panic_probe as _;
 
 use embassy_stm32::{
@@ -20,7 +21,7 @@ use embassy_time::{Duration, Timer};
 use apa102_spi::Apa102;
 use smart_leds::{SmartLedsWrite, RGB8};
 
-use ateam_control_board::tasks::imu::imu_task;
+use ateam_control_board::{tasks::imu::imu_task, drivers::imu::{AccelFrame, GyroFrame}};
 
 #[link_section = ".sram4"]
 static mut SPI6_BUF: [u8; 4] = [0x0; 4];
@@ -64,8 +65,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
         spi::Config::default(),
     );
 
-    static GYRO_CHANNEL: PubSubChannel<ThreadModeRawMutex, f32, 1, 1, 1> = PubSubChannel::new();
-    static ACCEL_CHANNEL: PubSubChannel<ThreadModeRawMutex, f32, 1, 1, 1> = PubSubChannel::new();
+    static ACCEL_CHANNEL: PubSubChannel<ThreadModeRawMutex, AccelFrame, 1, 1, 1> = PubSubChannel::new();
+    let accel_pub = ACCEL_CHANNEL.publisher().unwrap();
+    let accel_sub = ACCEL_CHANNEL.subscriber().unwrap();
 
-    spawn_imu_tasks(_spawner, GYRO_CHANNEL.publisher(), ACCEL_CHANNEL.publisher());
+    static GYRO_CHANNEL: PubSubChannel<ThreadModeRawMutex, GyroFrame, 1, 1, 1> = PubSubChannel::new();
+    let gyro_pub = GYRO_CHANNEL.publisher().unwrap();
+    let gyro_sub = GYRO_CHANNEL.subscriber().unwrap();
+
+    _spawner.spawn(imu_task(gyro_pub, accel_pub, p.SPI6, p.PA5, p.PA7, p.PA6, p.BDMA_CH0, p.BDMA_CH1, p.PC4, p.PC5, p.PB1, p.PB2, p.EXTI1, p.EXTI2)).unwrap();
 }

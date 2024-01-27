@@ -17,6 +17,7 @@ use crate::pins::{ImuSpi, ImuTxDma, ImuRxDma, ImuAccelCsPin, ImuGyroCsPin, ImuAc
 static IMU_BUFFER_CELL: StaticCell<[u8; 8]> = StaticCell::new();
 // static mut IMU_BUF: [u8; 8] = [0; 8];
 
+// #[embassy_executor::task]
 pub async fn imu_task<'a,
         GyroMutex: RawMutex,
         const GYRO_CAP: usize,
