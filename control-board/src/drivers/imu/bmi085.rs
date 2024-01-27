@@ -124,6 +124,40 @@ pub enum GyroBandwidth {
     FilterBw32Hz = 0x07,
 }
 
+#[repr(u8)]
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+enum GyroIntCtrl {
+    InterruptOff = 0x00,
+    InterruptOnNewData = 0x80,
+}
+
+#[repr(u8)]
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+pub enum GyroIntPinMode {
+    PushPull = 0b0,
+    OpenDrain = 0b1,
+}
+
+#[repr(u8)]
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+pub enum GyroIntPinActiveState {
+    ActiveLow = 0b0,
+    ActiveHigh = 0b1,
+}
+
+#[repr(u8)]
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+pub enum GyroIntMap {
+    NotMapped = 0x00,
+    Int3 = 0x01,
+    Int4 = 0x80,
+    Int3AndInt4 = 0x81,
+}
+
 const GYRO_CHIP_ID: u8 = 0x0F;
 
 const READ_BIT: u8 = 0x80;
@@ -370,5 +404,26 @@ impl<'a,
 
     pub async fn gyro_set_bandwidth(&mut self, bandwidth: GyroBandwidth) {
         self.gyro_write(GyroRegisters::GYRO_BANDWIDTH, bandwidth as u8).await;
+    }
+
+    pub async fn gyro_enable_interrupts(&mut self) {
+        self.gyro_write(GyroRegisters::GYRO_INT_CONTROL, GyroIntCtrl::InterruptOnNewData as u8).await;
+    }
+
+    pub async fn gyro_disable_interrupts(&mut self) {
+        self.gyro_write(GyroRegisters::GYRO_INT_CONTROL, GyroIntCtrl::InterruptOff as u8).await;
+    }
+
+    pub async fn gyro_set_int_config(&mut self,
+        int3_active_state: GyroIntPinActiveState,
+        int3_mode: GyroIntPinMode,
+        int4_active_state: GyroIntPinActiveState,
+        int4_mode: GyroIntPinMode) {
+        let reg_val = (int4_mode as u8) << 3 | (int4_active_state as u8) << 2 | (int3_mode as u8) << 1 | int3_active_state as u8;
+        self.gyro_write(GyroRegisters::INT3_INT4_IO_CONF, reg_val).await;
+    }
+
+    pub async fn gyro_set_int_map(&mut self, map: GyroIntMap) {
+        self.gyro_write(GyroRegisters::INT3_INT4_IO_MAP, map as u8).await;
     }
 }

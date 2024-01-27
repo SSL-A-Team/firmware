@@ -1,13 +1,14 @@
 use embassy_stm32::Peripheral;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Input, Pull};
-use embassy_stm32::interrupt::InterruptExt;
 use embassy_stm32::spi::{SckPin, MisoPin, MosiPin};
 use embassy_sync::{pubsub::Publisher, blocking_mutex::raw::RawMutex};
+
 use nalgebra::Vector3;
+
 use static_cell::StaticCell;
 
-use crate::drivers::imu::bmi085::{Bmi085, GyroRange, GyroBandwidth};
+use crate::drivers::imu::bmi085::{Bmi085, GyroRange, GyroBandwidth, GyroIntMap, GyroIntPinActiveState, GyroIntPinMode};
 use crate::drivers::imu::{GyroFrame, AccelFrame};
 
 use crate::pins::{ImuSpi, ImuTxDma, ImuRxDma, ImuAccelCsPin, ImuGyroCsPin, ImuAccelIntPin, ImuGyroIntPin};
@@ -44,15 +45,25 @@ pub async fn imu_task<'a,
     let imu_buf = IMU_BUFFER_CELL.init([0; 8]);
     let mut imu = Bmi085::new_from_pins(imu_spi, sck, mosi, miso, txdma, rxdma, accel_cs, gyro_cs, imu_buf);
 
-    let _accel_int = Input::new(accel_int_pin, Pull::Down);
+    let accel_int_input = Input::new(accel_int_pin, Pull::Down);
+    let _accel_int = ExtiInput::new(accel_int_input, accel_int);
 
-    let gyro_int_input = Input::new(gyro_int_pin, Pull::Down);
+    // IMU breakout INT2 is directly connected to the MCU with no hardware PU/PD. Select software Pull::Up and
+    // imu open drain
+    let gyro_int_input = Input::new(gyro_int_pin, Pull::Up);
     let mut gyro_int = ExtiInput::new(gyro_int_input, gyro_int);
+    imu.gyro_set_int_config(GyroIntPinActiveState::ActiveLow,
+        GyroIntPinMode::OpenDrain,
+        GyroIntPinActiveState::ActiveLow,
+        GyroIntPinMode::OpenDrain).await;
+    // enable BMI085 Gyro INT3 which is electrically wired to IMU breakout INT2 named gyro_int_pin
+    imu.gyro_set_int_map(GyroIntMap::Int3).await;
 
     imu.gyro_set_range(GyroRange::PlusMinus2000DegPerSec).await;
     imu.gyro_set_bandwidth(GyroBandwidth::FilterBw64Hz).await;
 
-    // TODO: enable interrupts / set int mode
+    // enable interrupts
+    imu.gyro_enable_interrupts().await;
 
     // BMI085 internally shares a SPI bus so we can't actually asynchronously read both the IMU and Accel
     // unless we used a mutex but that's still a lot of overhead. We'll just sync on the Gyro INT since
@@ -60,7 +71,7 @@ pub async fn imu_task<'a,
     // accel update/
 
     loop {
-        // block on gyro int
+        // block on gyro interrupt, active low
         gyro_int.wait_for_falling_edge().await;
 
         // read gyro data
