@@ -539,20 +539,26 @@ static void perform_commutation_cycle() {
     hall_recorded_state_on_transition = read_hall();
 
     if (hall_recorded_state_on_transition == 0x7) {
-        hall_disconnect_error_count++;
+        hall_disconnect_error_count += HALL_DISCONNECT_ERROR_INCREMENT;
+        if (hall_disconnect_error_count > HALL_DISCONNECT_MAX_ACCU_ERROR) {
+            hall_disconnect_error_count = HALL_DISCONNECT_MAX_ACCU_ERROR;
+        }
+    } else if (hall_disconnect_error_count > 0) {
+        hall_disconnect_error_count -= HALL_DISCONNECT_ERROR_CLEAR_DECREMENT;
     }
 
     if (hall_recorded_state_on_transition == 0x0) {
-        hall_power_error_count++;
+        hall_power_error_count += HALL_POWER_ERROR_INCREMENT;
+        if (hall_power_error_count > HALL_POWER_MAX_ACCU_ERROR) {
+            hall_power_error_count = HALL_POWER_MAX_ACCU_ERROR;
+        }
+    } else if (hall_power_error_count > 0) {
+        hall_power_error_count -= HALL_POWER_ERROR_CLEAR_DECREMENT;
     }
 
-    if (hall_power_error_count > HALL_POWER_ERROR_THRESHOLD) {
-        motor_errors.hall_power = true;
-    }
-
-    if (hall_disconnect_error_count > HALL_DISCONNECT_ERROR_THRESHOLD) {
-        motor_errors.hall_disconnected = true;
-    }
+    // update error flags
+    motor_errors.hall_power = hall_power_error_count > HALL_POWER_ERROR_THRESHOLD;
+    motor_errors.hall_disconnected = hall_disconnect_error_count > HALL_DISCONNECT_ERROR_THRESHOLD;
 
     uint8_t expected_transition = 0;
     if (commanded_motor_direction == CLOCKWISE) {
