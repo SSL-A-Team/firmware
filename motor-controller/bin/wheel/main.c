@@ -146,10 +146,10 @@ int main() {
     pid_initialize(&vel_pid, &vel_pid_constants);
 
     vel_pid_constants.kP = 1.0f;
-    // vel_pid_constants.kI = 0.0001;
-    // vel_pid_constants.kD = 0.1;
-    // vel_pid_constants.kI_max = 550.0;
-    // vel_pid_constants.kI_min = -550.0;
+    vel_pid_constants.kI = 0.0001f;
+    // vel_pid_constants.kD = 0.1f;
+    vel_pid_constants.kI_max = 10.0;
+    vel_pid_constants.kI_min = -10.0;
 
     // setup the torque PID
     PidConstants_t torque_pid_constants;
@@ -297,7 +297,7 @@ int main() {
             }
 
             // calculate PID on the torque in Nm
-            float torque_setpoint_Nm = pid_calculate(&torque_pid, r_Nm, measured_torque_Nm);
+            float torque_setpoint_Nm = pid_calculate(&torque_pid, r_Nm, measured_torque_Nm, TORQUE_LOOP_RATE_S);
 
             // convert desired torque to desired current
             float current_setpoint = mm_torque_to_current(&df45_model, fabs(torque_setpoint_Nm));
@@ -328,7 +328,7 @@ int main() {
             enc_rad_s_filt = iir_filter_update(&encoder_filter, enc_vel_rads);
         
             // compute the velcoity PID
-            float vel_setpoint_rads = pid_calculate(&vel_pid, r_motor_board, enc_rad_s_filt);
+            float vel_setpoint_rads = pid_calculate(&vel_pid, r_motor_board, enc_rad_s_filt, VELOCITY_LOOP_RATE_S);
             // back convert rads to duty cycle
             u_vel_loop = mm_rads_to_dc(&df45_model, vel_setpoint_rads);
             // u_vel_loop = vel_setpoint / DF45_MAX_MOTOR_RAD_PER_S;

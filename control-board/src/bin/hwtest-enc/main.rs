@@ -216,7 +216,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
             control.front_right_motor.set_motion_type(MotorCommand_MotionType::VELOCITY);
         }
 
-        let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
+        let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(50));
 
         defmt::info!("Motors starting. Press BTN0 to stop");
         loop {

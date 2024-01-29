@@ -23,12 +23,12 @@ void pid_initialize(Pid_t *pid, PidConstants_t *pid_constants) {
 
 // this graphic might be helpful
 // https://upload.wikimedia.org/wikipedia/commons/4/43/PID_en.svg
-float pid_calculate(Pid_t *pid, float r, float y) {
+float pid_calculate(Pid_t *pid, float r, float y, float dt) {
     float err = r - y;
     
     float termP = err * pid->pid_constants->kP;
 
-    float termI = pid->eI + (err * pid->pid_constants->kI);
+    float termI = (pid->eI + (err * dt)) * pid->pid_constants->kI;
     if (termI > pid->pid_constants->kI_max) {
         termI = pid->pid_constants->kI_max;
     } else if (termI < pid->pid_constants->kI_min) {
