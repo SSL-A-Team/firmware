@@ -148,8 +148,8 @@ int main() {
     vel_pid_constants.kP = 1.0f;
     vel_pid_constants.kI = 0.0001f;
     // vel_pid_constants.kD = 0.1f;
-    vel_pid_constants.kI_max = 10.0;
-    vel_pid_constants.kI_min = -10.0;
+    vel_pid_constants.kI_max = 0.1;
+    vel_pid_constants.kI_min = -0.1;
 
     // setup the torque PID
     PidConstants_t torque_pid_constants;

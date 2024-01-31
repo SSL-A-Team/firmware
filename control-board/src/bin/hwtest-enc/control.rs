@@ -2,6 +2,11 @@ use ateam_control_board::{
     include_external_cpp_bin,
     queue::Buffer,
     motion::robot_model::{RobotConstants, RobotModel},
+    motion::params::robot_physical_params::{
+        WHEEL_ANGLES_DEG,
+        WHEEL_RADIUS_M,
+        WHEEL_DISTANCE_TO_ROBOT_CENTER_M
+    },
     stm32_interface::Stm32Interface,
     stspin_motor::{DribblerMotor, WheelMotor},
     uart_queue::{UartReadQueue, UartWriteQueue},
@@ -127,10 +132,6 @@ static mut DRIB_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
     [Buffer::EMPTY; RX_BUF_DEPTH];
 static DRIB_QUEUE_RX: UartReadQueue<MotorDUart, MotorDDmaRx, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
     UartReadQueue::new(unsafe { &mut DRIB_BUFFERS_RX });
-
-const WHEEL_ANGLES_DEG: Vector4<f32> = Vector4::new(300.0, 45.0,135.0,240.0);
-const WHEEL_RADIUS_M: f32 = 0.0247; // wheel dia 49mm
-const WHEEL_DISTANCE_TO_ROBOT_CENTER_M: Vector4<f32> = Vector4::new(0.0798, 0.0837, 0.0837, 0.0798); // from center of wheel body to center of robot
 
 pub struct MotorsError<T> {
     pub front_left: T,
@@ -400,7 +401,7 @@ impl Control {
         self.front_right_motor.process_packets();
         self.drib_motor.process_packets();
 
-        self.front_left_motor.log_reset("RL");
+        self.front_left_motor.log_reset("FL");
         self.back_left_motor.log_reset("BL");
         self.back_right_motor.log_reset("BR");
         self.front_right_motor.log_reset("FR");

@@ -238,21 +238,12 @@ async fn main(_spawner: embassy_executor::Spawner) {
         info!("gyro id: 0x{:x}", gyro_id);
     }
 
-    let front_right_int = interrupt::take!(USART1);
     let front_left_int = interrupt::take!(UART4);
     let back_left_int = interrupt::take!(UART7);
     let back_right_int = interrupt::take!(UART8);
+    let front_right_int = interrupt::take!(USART1);
     let drib_int = interrupt::take!(UART5);
 
-    let front_right_usart = Uart::new(
-        p.USART1,
-        p.PB15,
-        p.PB14,
-        front_right_int,
-        p.DMA1_CH0,
-        p.DMA1_CH1,
-        get_bootloader_uart_config(),
-    );
     let front_left_usart = Uart::new(
         p.UART4,
         p.PA1,
@@ -278,6 +269,15 @@ async fn main(_spawner: embassy_executor::Spawner) {
         back_right_int,
         p.DMA1_CH6,
         p.DMA1_CH7,
+        get_bootloader_uart_config(),
+    );
+    let front_right_usart = Uart::new(
+        p.USART1,
+        p.PB15,
+        p.PB14,
+        front_right_int,
+        p.DMA1_CH0,
+        p.DMA1_CH1,
         get_bootloader_uart_config(),
     );
     let drib_usart = Uart::new(
@@ -319,10 +319,10 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let ball_detected_thresh = 1.0;
     let mut control = Control::new(
         &spawner,
-        front_right_usart,
         front_left_usart,
         back_left_usart,
         back_right_usart,
+        front_right_usart,
         drib_usart,
         p.PD8,
         p.PC1,

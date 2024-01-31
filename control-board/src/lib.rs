@@ -13,6 +13,7 @@
 #![feature(ptr_metadata)]
 #![feature(async_fn_in_trait)]
 #![feature(const_fn_floating_point_arithmetic)]
+#![feature(const_float_bits_conv)]
 
 // pub mod fw_images;
 pub mod queue;
@@ -60,6 +61,10 @@ pub const fn adc_raw_to_v(adc_raw: f32) -> f32 {
 
 pub const fn adc_v_to_battery_voltage(adc_mv: f32) -> f32 {
     (adc_mv / 2.762) * BATTERY_MAX_VOLTAGE
+}
+
+pub const fn abs32(x: f32) -> f32 {
+    f32::from_bits(x.to_bits() & (i32::MAX as u32))
 }
 
 

@@ -11,7 +11,7 @@ use embassy_time::{Duration, Ticker, Timer};
 use panic_probe as _;
 
 use apa102_spi::Apa102;
-use ateam_control_board::{colors::*, stm32_interface::get_bootloader_uart_config};
+use ateam_control_board::{abs32, colors::*, stm32_interface::get_bootloader_uart_config};
 use embassy_stm32::{
     dma::NoDma,
     executor::InterruptExecutor,
@@ -303,10 +303,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
 pub fn within_percent_err(expected: f32, actual: f32, percent: f32) -> bool {
     let calc_percent = (expected - actual)/(actual + 0.0000001);
     return abs32(calc_percent) < percent;
-}
-
-pub fn abs32(x: f32) -> f32 {
-    f32::from_bits(x.to_bits() & (i32::MAX as u32))
 }
 
 pub fn enc_delta_to_rads(enc_delta: i32) -> f32 {
