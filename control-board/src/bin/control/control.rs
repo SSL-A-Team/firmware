@@ -537,6 +537,12 @@ impl<'a> Control<'a> {
         self.back_right_motor.send_motion_command();
         self.drib_motor.send_motion_command();
 
+        let err_fr = self.front_right_motor.read_is_error() as u32;
+        let err_fl = self.front_left_motor.read_is_error() as u32;
+        let err_br = self.back_right_motor.read_is_error() as u32;
+        let err_bl = self.back_left_motor.read_is_error() as u32;
+        let err_drib = self.drib_motor.read_is_error() as u32;
+
         (Some(BasicTelemetry {
             sequence_number: 0,
             robot_revision_major: 0,
@@ -545,7 +551,7 @@ impl<'a> Control<'a> {
             battery_temperature: 0.,
             _bitfield_align_1: [],
             _bitfield_1: BasicTelemetry::new_bitfield_1(
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, err_fr, 0, err_fl, 0, err_br, 0, err_bl, 0, err_drib, 0, 0, 0, 0,
             ),
             motor_0_temperature: 0.,
             motor_1_temperature: 0.,
