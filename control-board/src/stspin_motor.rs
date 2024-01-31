@@ -279,6 +279,10 @@ impl<
         return self.current_state.master_error() != 0;
     }
 
+    pub fn check_hall_error(&self) -> bool {
+        return self.current_state.hall_power_error() != 0 || self.current_state.hall_disconnected_error() != 0 || self.current_state.hall_enc_vel_disagreement_error() != 0;
+    }
+
     pub fn read_current(&self) -> f32 {
         return self.current_state.current_estimate;
     }
@@ -561,6 +565,10 @@ impl<
 
     pub fn read_is_error(&self) -> bool {
         return self.current_state.master_error() != 0;
+    }
+
+    pub fn check_hall_error(&self) -> bool {
+        return self.current_state.hall_power_error() != 0 || self.current_state.hall_disconnected_error() != 0 || self.current_state.hall_enc_vel_disagreement_error() != 0;
     }
 
     pub fn read_current(&self) -> f32 {
