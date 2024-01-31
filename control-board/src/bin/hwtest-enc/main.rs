@@ -187,7 +187,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         dotstar
             .write([COLOR_RED, COLOR_RED].iter().cloned())
             .unwrap();
-        defmt::panic!("Error flashing STSPINs")
+        defmt::error!("Error flashing STSPINs")
     } else {
         defmt::info!("All STSPINs flashed correctly")
     }

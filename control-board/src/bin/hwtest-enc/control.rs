@@ -364,7 +364,7 @@ impl Control {
         )
         .await;
 
-        if ret.0.is_err() || ret.1.is_err() || ret.2.is_err() || ret.3.is_err() || ret.4.is_err() {
+        if ret.0.is_err() || ret.1.is_err() || ret.2.is_err() || ret.3.is_err() {
             return Err(MotorsError {
                 front_left: ret.0.is_err(),
                 back_left: ret.1.is_err(),
