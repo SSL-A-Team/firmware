@@ -480,6 +480,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
             // info!("{:?}", defmt::Debug2Format(&telemetry));
 
             telemetry.kicker_charge_level = kicker.hv_rail_voltage();
+            telemetry.set_breakbeam_ball_detected(kicker.ball_detected() as u32);
 
             RADIO_TEST.send_telemetry(telemetry).await;
 
