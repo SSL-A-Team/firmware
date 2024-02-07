@@ -50,5 +50,7 @@ pub type ImuRxDma = BDMA_CH1;
 pub type ImuAccelCsPin = PC4;
 pub type ImuGyroCsPin = PC5;
 pub type ImuAccelIntPin = PB1;
+pub type ImuAccelInt = EXTI1;
 pub type ImuGyroIntPin = PB2;
+pub type ImuGyroInt = EXTI2;
 pub type ImuDetPin = PF11;

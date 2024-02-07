@@ -7,12 +7,10 @@ mod pins;
 
 use defmt::*;
 use defmt_rtt as _;
-use embassy_sync::{pubsub::PubSubChannel, blocking_mutex::raw::ThreadModeRawMutex};
 use panic_probe as _;
 
 use embassy_stm32::{
     dma::NoDma,
-    gpio::{Level, Output, Speed},
     spi,
     time::{hz, mhz},
 };
@@ -21,10 +19,8 @@ use embassy_time::{Duration, Timer};
 use apa102_spi::Apa102;
 use smart_leds::{SmartLedsWrite, RGB8};
 
-use ateam_control_board::{tasks::imu::imu_task, drivers::imu::{AccelFrame, GyroFrame}};
+use ateam_control_board::{tasks::imu::{start_imu_task, get_accel_sub, get_gyro_sub}};
 
-#[link_section = ".sram4"]
-static mut SPI6_BUF: [u8; 4] = [0x0; 4];
 
 #[embassy_executor::main]
 async fn main(_spawner: embassy_executor::Spawner) {
@@ -52,26 +48,25 @@ async fn main(_spawner: embassy_executor::Spawner) {
     );
 
     let mut dotstar = Apa102::new(dot_spi);
-    let _ = dotstar.write([RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
+    let _ = dotstar.write([RGB8 { r: 10, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 0 }].iter().cloned());
 
-    let mut imu_spi = spi::Spi::new(
-        p.SPI6,
-        p.PA5,
-        p.PA7,
-        p.PA6,
-        p.BDMA_CH0,
-        p.BDMA_CH1,
-        hz(1_000_000),
-        spi::Config::default(),
-    );
+    start_imu_task(_spawner, p.SPI6, p.PA5, p.PA7, p.PA6, p.BDMA_CH0, p.BDMA_CH1, p.PC4, p.PC5, p.PB1, p.PB2, p.EXTI1, p.EXTI2).expect("unable to start IMU task");
 
-    static ACCEL_CHANNEL: PubSubChannel<ThreadModeRawMutex, AccelFrame, 1, 1, 1> = PubSubChannel::new();
-    let accel_pub = ACCEL_CHANNEL.publisher().unwrap();
-    let accel_sub = ACCEL_CHANNEL.subscriber().unwrap();
+    let _ = dotstar.write([RGB8 { r: 0, g: 0, b: 10 }, RGB8 { r: 0, g: 0, b: 0 }].iter().cloned());
 
-    static GYRO_CHANNEL: PubSubChannel<ThreadModeRawMutex, GyroFrame, 1, 1, 1> = PubSubChannel::new();
-    let gyro_pub = GYRO_CHANNEL.publisher().unwrap();
-    let gyro_sub = GYRO_CHANNEL.subscriber().unwrap();
 
-    _spawner.spawn(imu_task(gyro_pub, accel_pub, p.SPI6, p.PA5, p.PA7, p.PA6, p.BDMA_CH0, p.BDMA_CH1, p.PC4, p.PC5, p.PB1, p.PB2, p.EXTI1, p.EXTI2)).unwrap();
+    let mut accel_sub = get_accel_sub().expect("accel data channel had no subscribers left");
+    let mut gyro_sub = get_gyro_sub().expect("gyro data channel had no subscribers left");
+
+    loop {
+        let gyro_data = gyro_sub.next_message_pure().await;
+        let accel_data = accel_sub.try_next_message_pure();
+        if let Some(accel_data) = accel_data {
+            defmt::info!("received gyro ({}, {}, {}) and accel ({}, {}, {})", gyro_data.x, gyro_data.y, gyro_data.z, accel_data.x, accel_data.y, accel_data.z);
+        } else {
+            defmt::info!("received gyro ({}, {}, {})", gyro_data.x, gyro_data.y, gyro_data.z);
+        }
+
+        let _ = dotstar.write([RGB8 { r: 0, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 0 }].iter().cloned());
+    }
 }
