@@ -55,7 +55,7 @@ async fn imu_task_entry(mut imu: Bmi085<'static, 'static, ImuSpi, ImuTxDma, ImuR
         gyro_int.wait_for_falling_edge().await;
 
         // read gyro data
-        let imu_data = imu.gyro_get_data().await;
+        let imu_data = imu.gyro_get_data_rads().await;
         gyro_pub.publish_immediate(Vector3::new(imu_data[0], imu_data[1], imu_data[2]));
 
         // read accel data

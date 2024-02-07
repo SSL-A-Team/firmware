@@ -16,7 +16,7 @@ use embassy_stm32::{
 use defmt::*;
 use embassy_time::{Timer, Duration};
 
-use core::cmp::min;
+use core::{cmp::min, f32::consts::PI};
 
 const MAX_TRANSACTION_BUF_LEN: usize = 8;
 
@@ -295,6 +295,14 @@ impl<'a,
         true
     }
 
+    pub async fn init(&mut self) {
+        // imu accel needs at least one dummy read to set the data mode to SPI from POn I2C
+        // second read should be valid here for sanity purposes
+
+        let _ = self.accel_read(AccelRegisters::ACC_CHIP_ID).await;
+        let _ = self.accel_read(AccelRegisters::ACC_CHIP_ID).await;
+    }
+
     async fn gyro_self_test(&mut self) -> bool {
         self.gyro_write(GyroRegisters::GYRO_SELF_TEST, GyroSelfTestReg::TrigBist as u8).await;
         let mut try_ct = 0;
@@ -376,7 +384,7 @@ impl<'a,
             self.read_pair_to_i16(buf[4], buf[5])]
     }
 
-    pub fn convert_raw_gyro_sample(&self, raw_sample: i16) -> f32 {
+    pub fn convert_raw_gyro_sample_dps(&self, raw_sample: i16) -> f32 {
         let conversion_num = match self.gyro_range {
             GyroRange::PlusMinus2000DegPerSec => 2000.0,
             GyroRange::PlusMinus1000DegPerSec => 1000.0,
@@ -388,12 +396,24 @@ impl<'a,
         raw_sample as f32 * (conversion_num / i16::MAX as f32)
     }
 
-    pub async fn gyro_get_data(&mut self) -> [f32; 3] {
+    pub fn convert_raw_gyro_sample_rads(&self, raw_sample: i16) -> f32 {
+        (self.convert_raw_gyro_sample_dps(raw_sample) / 360.0) * 2.0 * PI
+    }
+
+    pub async fn gyro_get_data_dps(&mut self) -> [f32; 3] {
         let raw_data = self.gyro_get_raw_data().await;
 
-        return [self.convert_raw_gyro_sample(raw_data[0]),
-            self.convert_raw_gyro_sample(raw_data[1]),
-            self.convert_raw_gyro_sample(raw_data[2])]
+        return [self.convert_raw_gyro_sample_dps(raw_data[0]),
+            self.convert_raw_gyro_sample_dps(raw_data[1]),
+            self.convert_raw_gyro_sample_dps(raw_data[2])]
+    }
+
+    pub async fn gyro_get_data_rads(&mut self) -> [f32; 3] {
+        let raw_data = self.gyro_get_raw_data().await;
+
+        return [self.convert_raw_gyro_sample_rads(raw_data[0]),
+            self.convert_raw_gyro_sample_rads(raw_data[1]),
+            self.convert_raw_gyro_sample_rads(raw_data[2])]
     }
 
     pub async fn gyro_set_range(&mut self, range: GyroRange) {
