@@ -20,6 +20,7 @@ use core::{cmp::min, f32::consts::PI};
 
 const MAX_TRANSACTION_BUF_LEN: usize = 8;
 
+/// SPI driver for the Bosch BMI085 IMU: Accel + Gyro
 pub struct Bmi085<
         'a,
         'buf,
@@ -32,6 +33,7 @@ pub struct Bmi085<
     accel_cs: Output<'a, AccelCsPin>,
     gyro_cs: Output<'a, GyroCsPin>,
     spi_buf: &'buf mut [u8; MAX_TRANSACTION_BUF_LEN],
+    accel_range: AccelRange,
     gyro_range: GyroRange,
 }
 
@@ -63,6 +65,48 @@ enum AccelRegisters {
     ACC_PWR_CONF = 0x7C,
     ACC_PWR_CTRL = 0x7D,
     ACC_SOFTRESET = 0x7E,
+}
+
+#[repr(u8)]
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+pub enum AccelRange {
+    Range2g = 0x00,
+    Range4g = 0x01,
+    Range8g = 0x02,
+    Range16g = 0x03,
+}
+
+#[repr(u8)]
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+pub enum AccelConfBwp {
+    OverSampling4Fold = 0x08,
+    OverSampling2Fold = 0x09,
+    OverSamplingNormal = 0x0A,
+}
+
+#[repr(u8)]
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+pub enum AccelConfOdr {
+    OutputDataRate12p5 = 0x05,
+    OutputDataRate25p0 = 0x06,
+    OutputDataRate50p0 = 0x07,
+    OutputDataRate100p0 = 0x08,
+    OutputDataRate200p0 = 0x09,
+    OutputDataRate400p0 = 0x0A,
+    OutputDataRate800p0 = 0x0B,
+    OutputDataRate1600p0 = 0x0C,
+}
+
+#[repr(u8)]
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+enum AccelSelfTestReg {
+    Off = 0x00,
+    PositiveSelfTest = 0x0D,
+    NegativeSelfTest = 0x09,
 }
 
 const ACCEL_CHIP_ID: u8 = 0x1F;
@@ -170,6 +214,7 @@ impl<'a,
         AccelCsPin: Pin,
         GyroCsPin: Pin> 
     Bmi085<'a, 'buf, T, TxDmaCh, RxDmaCh, AccelCsPin, GyroCsPin> {
+    /// creates a new BMI085 instance from a pre-existing Spi peripheral
     pub fn new_from_spi(
         spi: spi::Spi<'a, T, TxDmaCh, RxDmaCh>, 
         accel_cs: Output<'a, AccelCsPin>, 
@@ -181,10 +226,12 @@ impl<'a,
             accel_cs: accel_cs,
             gyro_cs: gyro_cs,
             spi_buf: spi_buf,
+            accel_range: AccelRange::Range4g,
             gyro_range: GyroRange::PlusMinus2000DegPerSec,
         }
     }
 
+    ///t creates a new BMI085 instance from uninitialized pins
     pub fn new_from_pins(
         peri: impl Peripheral<P = T> + 'a,
         sck: impl Peripheral<P = impl SckPin<T>> + 'a,
@@ -215,7 +262,8 @@ impl<'a,
             accel_cs: accel_cs,
             gyro_cs: imu_cs,
             spi_buf: spi_buf,
-            gyro_range: GyroRange::PlusMinus2000DegPerSec
+            accel_range: AccelRange::Range4g,
+            gyro_range: GyroRange::PlusMinus2000DegPerSec,
         }
     }
 
@@ -289,12 +337,6 @@ impl<'a,
         self.write(reg as u8, val).await;
     }
 
-    async fn accel_self_test(&mut self) -> bool {
-        warn!("accel BIST is unimplemented");
-
-        true
-    }
-
     pub async fn init(&mut self) {
         // imu accel needs at least one dummy read to set the data mode to SPI from POn I2C
         // second read should be valid here for sanity purposes
@@ -303,7 +345,53 @@ impl<'a,
         let _ = self.accel_read(AccelRegisters::ACC_CHIP_ID).await;
     }
 
-    async fn gyro_self_test(&mut self) -> bool {
+    async fn accel_self_test(&mut self) -> Result<(), ()> {
+        // test is non-trivial, e.g. not self contained
+        // procedure is described in section 4.6.1 of the datasheet
+
+        self.accel_set_range(AccelRange::Range16g).await;
+        self.accel_set_bandwidth(AccelConfBwp::OverSamplingNormal, AccelConfOdr::OutputDataRate1600p0).await;
+        Timer::after(Duration::from_millis(2 + 1)).await;
+
+        self.accel_write(AccelRegisters::ACC_SELF_TEST, AccelSelfTestReg::PositiveSelfTest as u8).await;
+        Timer::after(Duration::from_millis(50 + 1)).await;
+        let positive_test_data = self.accel_get_data_mg().await;
+
+        self.accel_write(AccelRegisters::ACC_SELF_TEST, AccelSelfTestReg::NegativeSelfTest as u8).await;
+        Timer::after(Duration::from_millis(50 + 1)).await;
+        let negative_test_data = self.accel_get_data_mg().await;
+
+        self.accel_write(AccelRegisters::ACC_SELF_TEST, AccelSelfTestReg::Off as u8).await;
+        Timer::after(Duration::from_millis(50 + 1)).await;
+
+        let x_diff = positive_test_data[0] - negative_test_data[0];
+        let y_diff = positive_test_data[1] - negative_test_data[1];
+        let z_diff = positive_test_data[2] - negative_test_data[2];
+
+        let mut result = Ok(());
+        if x_diff < 1000.0 {
+            trace!("accel self test failed x-axis needed polarity difference >=1000 got {}", x_diff);
+            result = Err(())
+        }
+
+        if y_diff < 1000.0 {
+            trace!("accel self test failed y-axis needed polarity difference >=1000 got {}", y_diff);
+            result = Err(())
+        }
+
+        if z_diff < 500.0 {
+            trace!("accel self test failed z-axis needed polarity difference >=500 got {}", z_diff);
+            result = Err(())
+        }
+
+        if result.is_err() {
+            warn!("accel failed BIST. (one or more axis diverged)");
+        }
+
+        result
+    }
+
+    async fn gyro_self_test(&mut self) -> Result<(), ()> {
         self.gyro_write(GyroRegisters::GYRO_SELF_TEST, GyroSelfTestReg::TrigBist as u8).await;
         let mut try_ct = 0;
         loop {
@@ -311,10 +399,10 @@ impl<'a,
             if (strreg_val & GyroSelfTestReg::BistRdy as u8) != 0 {
                 if (strreg_val & GyroSelfTestReg::BistFail as u8) != 0 {
                     warn!("gyro failed BIST. (the bist fail bit is high)");
-                    return false;
+                    return Err(());
                 } else {
                     debug!("gyro passed self test.");
-                    return true;
+                    return Ok(());
                 }
             }
 
@@ -323,13 +411,13 @@ impl<'a,
 
             if try_ct > 10 {
                 warn!("gyro BIST did not converge.");
-                return false;
+                return Err(());
             }
         }
     }
 
-    pub async fn self_test(&mut self) -> bool {
-        let mut has_self_test_error = false;
+    pub async fn self_test(&mut self) -> Result<(), ()> {
+        let mut has_self_test_error = Ok(());
 
         self.deselect();
 
@@ -337,7 +425,7 @@ impl<'a,
         let acc_chip_id = self.accel_read(AccelRegisters::ACC_CHIP_ID).await;
         if acc_chip_id != ACCEL_CHIP_ID {
             warn!("read accel ID (0x{:x}) does not match expected BMI085 accel ID (0x{:x})", acc_chip_id, ACCEL_CHIP_ID);
-            has_self_test_error = true;
+            has_self_test_error = Err(());
         } else {
             debug!("accel id verified: 0x{:x}", acc_chip_id);
         }
@@ -346,17 +434,17 @@ impl<'a,
         let gyro_chip_id = self.gyro_read(GyroRegisters::GYRO_CHIP_ID).await;
         if gyro_chip_id != GYRO_CHIP_ID {
             warn!("read gyro ID (0x{:x}) does not match expected BMI085 gyro ID (0x{:x})", gyro_chip_id, GYRO_CHIP_ID);
-            has_self_test_error = true;
+            has_self_test_error = Err(());
         } else {
             debug!("gyro id verified: 0x{:x}", gyro_chip_id);
         }
         
-        if !self.accel_self_test().await {
-            has_self_test_error = true;
+        if (self.accel_self_test().await).is_err() {
+            has_self_test_error = Err(());
         }
 
-        if !self.gyro_self_test().await {
-            has_self_test_error = true;
+        if (self.gyro_self_test().await).is_err() {
+            has_self_test_error = Err(());
         }
 
         has_self_test_error
@@ -375,6 +463,51 @@ impl<'a,
             self.read_pair_to_i16(buf[4], buf[5])]
     }
 
+    pub fn accel_range_mg(&self) -> f32 {
+        match self.accel_range {
+            AccelRange::Range2g => 2000.0,
+            AccelRange::Range4g => 4000.0,
+            AccelRange::Range8g => 8000.0,
+            AccelRange::Range16g => 16000.0,
+        }
+    }
+
+    pub fn convert_accel_raw_sample_mg(&self, raw_sample: i16) -> f32 {
+        let conversion_num = self.accel_range_mg();
+
+        raw_sample as f32 * (conversion_num / i16::MAX as f32)
+    }
+
+    pub fn convert_accel_raw_sample_mps(&self, raw_sample: i16) -> f32 {
+        self.convert_accel_raw_sample_mg(raw_sample) / 1000.0 * 9.80665
+    }
+
+    pub async fn accel_get_data_mg(&mut self) -> [f32; 3] {
+        let raw_data = self.accel_get_raw_data().await;
+
+        return [self.convert_accel_raw_sample_mg(raw_data[0]),
+            self.convert_accel_raw_sample_mg(raw_data[1]),
+            self.convert_accel_raw_sample_mg(raw_data[2])]
+    }
+
+    pub async fn accel_get_data_mps(&mut self) -> [f32; 3] {
+        let raw_data = self.accel_get_raw_data().await;
+
+        return [self.convert_accel_raw_sample_mps(raw_data[0]),
+            self.convert_accel_raw_sample_mps(raw_data[1]),
+            self.convert_accel_raw_sample_mps(raw_data[2])]
+    }
+
+    pub async fn accel_set_bandwidth(&mut self, oversampling_mode: AccelConfBwp, output_data_rate: AccelConfOdr) {
+        self.accel_write(AccelRegisters::ACC_CONF, (oversampling_mode as u8) << 4 | output_data_rate as u8 ).await;
+    }
+
+    pub async fn accel_set_range(&mut self, range: AccelRange) {
+        self.accel_write(AccelRegisters::ACC_RANGE, range as u8).await;
+
+        self.accel_range = range;
+    }
+
     pub async fn gyro_get_raw_data(&mut self) -> [i16; 3] {
         let mut buf: [u8; 6] = [0; 6];
         self.gyro_burst_read(GyroRegisters::RATE_X_LSB, &mut buf).await;
@@ -384,20 +517,36 @@ impl<'a,
             self.read_pair_to_i16(buf[4], buf[5])]
     }
 
-    pub fn convert_raw_gyro_sample_dps(&self, raw_sample: i16) -> f32 {
-        let conversion_num = match self.gyro_range {
+    pub const fn dps_to_rads(dps: f32) -> f32 {
+        (dps / 360.0) * 2.0 * PI
+    }
+
+    fn gyro_rate(&self) -> f32 {
+        match self.gyro_range {
             GyroRange::PlusMinus2000DegPerSec => 2000.0,
             GyroRange::PlusMinus1000DegPerSec => 1000.0,
             GyroRange::PlusMinus500DegPerSec => 500.0,
             GyroRange::PlusMinus250DegPerSec => 250.0,
             GyroRange::PlusMinus125DegPerSec => 125.0,
-        };
+        }
+    }
+
+    pub fn max_dps(&self) -> f32 {
+        self.gyro_rate()
+    }
+
+    pub fn max_rads(&self) -> f32 {
+        Self::dps_to_rads(self.max_dps())
+    }
+
+    pub fn convert_raw_gyro_sample_dps(&self, raw_sample: i16) -> f32 {
+        let conversion_num = self.gyro_rate();
 
         raw_sample as f32 * (conversion_num / i16::MAX as f32)
     }
 
     pub fn convert_raw_gyro_sample_rads(&self, raw_sample: i16) -> f32 {
-        (self.convert_raw_gyro_sample_dps(raw_sample) / 360.0) * 2.0 * PI
+        Self::dps_to_rads(self.convert_raw_gyro_sample_dps(raw_sample))
     }
 
     pub async fn gyro_get_data_dps(&mut self) -> [f32; 3] {

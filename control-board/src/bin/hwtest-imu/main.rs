@@ -19,7 +19,7 @@ use embassy_time::{Duration, Timer};
 use apa102_spi::Apa102;
 use smart_leds::{SmartLedsWrite, RGB8};
 
-use ateam_control_board::{tasks::imu::{start_imu_task, get_accel_sub, get_gyro_sub}};
+use ateam_control_board::*;
 
 
 #[embassy_executor::main]
@@ -50,13 +50,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let mut dotstar = Apa102::new(dot_spi);
     let _ = dotstar.write([RGB8 { r: 10, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 0 }].iter().cloned());
 
-    start_imu_task(_spawner, p.SPI6, p.PA5, p.PA7, p.PA6, p.BDMA_CH0, p.BDMA_CH1, p.PC4, p.PC5, p.PB1, p.PB2, p.EXTI1, p.EXTI2).expect("unable to start IMU task");
+    tasks::imu::start_imu_task(_spawner, p.SPI6, p.PA5, p.PA7, p.PA6, p.BDMA_CH0, p.BDMA_CH1, p.PC4, p.PC5, p.PB1, p.PB2, p.EXTI1, p.EXTI2).expect("unable to start IMU task");
 
     let _ = dotstar.write([RGB8 { r: 0, g: 0, b: 10 }, RGB8 { r: 0, g: 0, b: 0 }].iter().cloned());
 
 
-    let mut accel_sub = get_accel_sub().expect("accel data channel had no subscribers left");
-    let mut gyro_sub = get_gyro_sub().expect("gyro data channel had no subscribers left");
+    let mut accel_sub = tasks::imu::get_accel_sub().expect("accel data channel had no subscribers left");
+    let mut gyro_sub = tasks::imu::get_gyro_sub().expect("gyro data channel had no subscribers left");
 
     loop {
         let gyro_data = gyro_sub.next_message_pure().await;
@@ -67,6 +67,12 @@ async fn main(_spawner: embassy_executor::Spawner) {
             defmt::info!("received gyro ({}, {}, {})", gyro_data.x, gyro_data.y, gyro_data.z);
         }
 
-        let _ = dotstar.write([RGB8 { r: 0, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 0 }].iter().cloned());
+        const MAX_ANGULAR_RATE_RADS: f32 = 34.91;  // IMU task configures for 2000d/s = 34.91 rad/s
+        let g_val_mag: u8 = ((gyro_data.z / MAX_ANGULAR_RATE_RADS) * u8::MAX as f32) as u8;
+
+        let _ = dotstar.write([
+            RGB8 { r: 0, g: if gyro_data.z > 0.0 { g_val_mag } else { 0 }, b: 0 },
+            RGB8 { r: 0, g: if gyro_data.z < 0.0 { g_val_mag } else { 0 }, b: 0 }]
+            .iter().cloned());
     }
 }

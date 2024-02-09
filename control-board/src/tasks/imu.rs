@@ -10,7 +10,7 @@ use nalgebra::Vector3;
 
 use static_cell::StaticCell;
 
-use crate::drivers::imu::bmi085::{Bmi085, GyroRange, GyroBandwidth, GyroIntMap, GyroIntPinActiveState, GyroIntPinMode};
+use crate::drivers::imu::bmi085::{Bmi085, GyroRange, GyroBandwidth, GyroIntMap, GyroIntPinActiveState, GyroIntPinMode, AccelRange, AccelConfOdr, AccelConfBwp};
 use crate::drivers::imu::{GyroFrame, AccelFrame};
 
 use crate::pins::{ImuSpi, ImuTxDma, ImuRxDma, ImuAccelCsPin, ImuGyroCsPin, ImuAccelIntPin, ImuGyroIntPin};
@@ -31,6 +31,15 @@ static GYRO_DATA_CHANNEL: GyroDataChannel = PubSubChannel::new();
 async fn imu_task_entry(mut imu: Bmi085<'static, 'static, ImuSpi, ImuTxDma, ImuRxDma, ImuAccelCsPin, ImuGyroCsPin>, mut _accel_int: ExtiInput<'static, ImuAccelIntPin>, mut gyro_int: ExtiInput<'static, ImuGyroIntPin>) {
     let accel_pub = ACCEL_DATA_CHANNEL.publisher().expect("accel data channel had no publisher left");
     let gyro_pub = GYRO_DATA_CHANNEL.publisher().expect("gyro data channel had no publisher left");
+
+    imu.init().await;
+    let self_test_res = imu.self_test().await;
+    if self_test_res.is_err() {
+        defmt::error!("IMU self test failed");
+    }
+
+    imu.accel_set_range(AccelRange::Range2g).await;  // range +- 19.6 m/s^2
+    imu.accel_set_bandwidth(AccelConfBwp::OverSampling2Fold, AccelConfOdr::OutputDataRate400p0).await;  // bandwidth 80Hz
 
     imu.gyro_set_int_config(GyroIntPinActiveState::ActiveLow,
         GyroIntPinMode::OpenDrain,
