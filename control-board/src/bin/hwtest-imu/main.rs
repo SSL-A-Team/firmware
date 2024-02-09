@@ -11,7 +11,6 @@ use panic_probe as _;
 
 use embassy_stm32::{
     dma::NoDma,
-    gpio::{Level, Output, Speed},
     spi,
     time::{hz, mhz},
 };
@@ -20,8 +19,8 @@ use embassy_time::{Duration, Timer};
 use apa102_spi::Apa102;
 use smart_leds::{SmartLedsWrite, RGB8};
 
-#[link_section = ".sram4"]
-static mut SPI6_BUF: [u8; 4] = [0x0; 4];
+use ateam_control_board::*;
+
 
 #[embassy_executor::main]
 async fn main(_spawner: embassy_executor::Spawner) {
@@ -49,50 +48,31 @@ async fn main(_spawner: embassy_executor::Spawner) {
     );
 
     let mut dotstar = Apa102::new(dot_spi);
-    let _ = dotstar.write([RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
+    let _ = dotstar.write([RGB8 { r: 10, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 0 }].iter().cloned());
 
-    let mut imu_spi = spi::Spi::new(
-        p.SPI6,
-        p.PA5,
-        p.PA7,
-        p.PA6,
-        p.BDMA_CH0,
-        p.BDMA_CH1,
-        hz(1_000_000),
-        spi::Config::default(),
-    );
+    tasks::imu::start_imu_task(_spawner, p.SPI6, p.PA5, p.PA7, p.PA6, p.BDMA_CH0, p.BDMA_CH1, p.PC4, p.PC5, p.PB1, p.PB2, p.EXTI1, p.EXTI2).expect("unable to start IMU task");
 
-    // // acceleromter
-    let mut imu_cs1 = Output::new(p.PC4, Level::High, Speed::VeryHigh);
-    // // gyro
-    let mut imu_cs2 = Output::new(p.PC5, Level::High, Speed::VeryHigh);
+    let _ = dotstar.write([RGB8 { r: 0, g: 0, b: 10 }, RGB8 { r: 0, g: 0, b: 0 }].iter().cloned());
 
-    Timer::after(Duration::from_millis(1)).await;
 
-    unsafe {
-        SPI6_BUF[0] = 0x80;
-        // info!("xfer {=[u8]:x}", SPI6_BUF[0..1]);
-        imu_cs1.set_low();
-        let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
-        imu_cs1.set_high();
-        let accel_id = SPI6_BUF[1];
-        info!("accelerometer id: 0x{:x}", accel_id);
+    let mut accel_sub = tasks::imu::get_accel_sub().expect("accel data channel had no subscribers left");
+    let mut gyro_sub = tasks::imu::get_gyro_sub().expect("gyro data channel had no subscribers left");
 
-        SPI6_BUF[0] = 0x80;
-        imu_cs2.set_low();
-        let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
-        imu_cs2.set_high();
-        let gyro_id = SPI6_BUF[1];
-        info!("gyro id: 0x{:x}", gyro_id);
-
-        loop {
-            SPI6_BUF[0] = 0x86;
-            // SPI6_BUF[0] = 0x86;
-            imu_cs2.set_low();
-            let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..3]).await;
-            imu_cs2.set_high();
-            let rate_z = (SPI6_BUF[2] as u16 * 256 + SPI6_BUF[1] as u16) as i16;
-            info!("z rate: {}", rate_z);
+    loop {
+        let gyro_data = gyro_sub.next_message_pure().await;
+        let accel_data = accel_sub.try_next_message_pure();
+        if let Some(accel_data) = accel_data {
+            defmt::info!("received gyro ({}, {}, {}) and accel ({}, {}, {})", gyro_data.x, gyro_data.y, gyro_data.z, accel_data.x, accel_data.y, accel_data.z);
+        } else {
+            defmt::info!("received gyro ({}, {}, {})", gyro_data.x, gyro_data.y, gyro_data.z);
         }
+
+        const MAX_ANGULAR_RATE_RADS: f32 = 34.91;  // IMU task configures for 2000d/s = 34.91 rad/s
+        let g_val_mag: u8 = ((gyro_data.z / MAX_ANGULAR_RATE_RADS) * u8::MAX as f32) as u8;
+
+        let _ = dotstar.write([
+            RGB8 { r: 0, g: if gyro_data.z > 0.0 { g_val_mag } else { 0 }, b: 0 },
+            RGB8 { r: 0, g: if gyro_data.z < 0.0 { g_val_mag } else { 0 }, b: 0 }]
+            .iter().cloned());
     }
 }
