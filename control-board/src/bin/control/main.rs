@@ -57,15 +57,15 @@ use credentials::private_credentials::wifi::wifi_credentials;
 use credentials::public_credentials::wifi::wifi_credentials;
 
 // Uncomment for testing:
-// use panic_probe as _;
+use panic_probe as _;
 
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    defmt::error!("{}", defmt::Display2Format(info));
-    // Delay to give it a change to print
-    cortex_m::asm::delay(10_000_000);
-    cortex_m::peripheral::SCB::sys_reset();
-}
+// #[panic_handler]
+// fn panic(info: &core::panic::PanicInfo) -> ! {
+//     defmt::error!("{}", defmt::Display2Format(info));
+//     // Delay to give it a change to print
+//     cortex_m::asm::delay(10_000_000);
+//     cortex_m::peripheral::SCB::sys_reset();
+// }
 
 include_kicker_bin! {KICKER_FW_IMG, "kicker.bin"}
 

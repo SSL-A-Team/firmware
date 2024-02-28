@@ -41,6 +41,11 @@ pub enum TeamColor {
     Blue,
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum HelloResponseError {
+
+}
+
 fn get_uuid() -> u16 {
     unsafe { *(0x1FF1_E800 as *const u16) }
 }
