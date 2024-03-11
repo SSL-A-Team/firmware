@@ -2,53 +2,55 @@ use nalgebra::base::SMatrix;
 
 #[allow(non_camel_case_types)]
 pub struct CgKalmanFilter<'a, const NUM_STATES: usize, const NUM_CONTROL_INPUTS: usize, const NUM_OBSERVATIONS: usize> {
-    F_k: &'a SMatrix<f32, NUM_STATES, NUM_STATES>,
-    B_k: &'a SMatrix<f32, NUM_STATES, NUM_CONTROL_INPUTS>,
-    H_k: &'a SMatrix<f32, NUM_OBSERVATIONS, NUM_STATES>,
-    Q_k: &'a SMatrix<f32, NUM_STATES, NUM_STATES>,
-    R_k: &'a SMatrix<f32, NUM_OBSERVATIONS, NUM_OBSERVATIONS>,
-    P_k: SMatrix<f32, NUM_STATES, NUM_STATES>,
-    K_k: &'a SMatrix<f32, NUM_STATES, NUM_OBSERVATIONS>,
-    x_hat: SMatrix<f32, NUM_STATES, 1>,
+    state_transition: &'a SMatrix<f32, NUM_STATES, NUM_STATES>,
+    control_input: &'a SMatrix<f32, NUM_STATES, NUM_CONTROL_INPUTS>,
+    observation_model: &'a SMatrix<f32, NUM_OBSERVATIONS, NUM_STATES>,
+    process_covar: &'a SMatrix<f32, NUM_STATES, NUM_STATES>,
+    observation_covar: &'a SMatrix<f32, NUM_OBSERVATIONS, NUM_OBSERVATIONS>,
+    covar_estimate: SMatrix<f32, NUM_STATES, NUM_STATES>,
+    kalman_gain: &'a SMatrix<f32, NUM_STATES, NUM_OBSERVATIONS>,
+    state_estimate: SMatrix<f32, NUM_STATES, 1>,
 }
 
 impl<'a, const NUM_STATES: usize, const NUM_CONTROL_INPUTS: usize, const NUM_OBSERVATIONS: usize> CgKalmanFilter<'a, NUM_STATES, NUM_CONTROL_INPUTS, NUM_OBSERVATIONS> {
-    pub fn new(F_k: &'a SMatrix<f32, NUM_STATES, NUM_STATES>,
-                B_k: &'a SMatrix<f32, NUM_STATES, NUM_CONTROL_INPUTS>,
-                H_k: &'a SMatrix<f32, NUM_OBSERVATIONS, NUM_STATES>,
-                Q_k: &'a SMatrix<f32, NUM_STATES, NUM_STATES>,
-                R_k: &'a SMatrix<f32, NUM_OBSERVATIONS, NUM_OBSERVATIONS>,
-                P_k: &'a SMatrix<f32, NUM_STATES, NUM_STATES>,
-                K_k: &'a SMatrix<f32, NUM_STATES, NUM_OBSERVATIONS>,
+    pub fn new(state_transition: &'a SMatrix<f32, NUM_STATES, NUM_STATES>,
+                control_input: &'a SMatrix<f32, NUM_STATES, NUM_CONTROL_INPUTS>,
+                observation_model: &'a SMatrix<f32, NUM_OBSERVATIONS, NUM_STATES>,
+                process_covar: &'a SMatrix<f32, NUM_STATES, NUM_STATES>,
+                observation_covar: &'a SMatrix<f32, NUM_OBSERVATIONS, NUM_OBSERVATIONS>,
+                covar_estimate: &'a SMatrix<f32, NUM_STATES, NUM_STATES>,
+                kalman_gain: &'a SMatrix<f32, NUM_STATES, NUM_OBSERVATIONS>,
                 // TODO: ? accept starting state? 
             ) -> CgKalmanFilter<'a, NUM_STATES, NUM_CONTROL_INPUTS, NUM_OBSERVATIONS> {
         let mut filter = CgKalmanFilter {
-            F_k: F_k,
-            B_k: B_k,
-            H_k: H_k,
-            Q_k: Q_k,
-            R_k: R_k,
-            P_k: SMatrix::<f32, NUM_STATES, NUM_STATES>::zeros(),
-            K_k: K_k,
-            x_hat: SMatrix::<f32, NUM_STATES, 1>::zeros(),
+            state_transition: state_transition,
+            control_input: control_input,
+            observation_model: observation_model,
+            process_covar: process_covar,
+            observation_covar: observation_covar,
+            covar_estimate: SMatrix::<f32, NUM_STATES, NUM_STATES>::zeros(),
+            kalman_gain: kalman_gain,
+            state_estimate: SMatrix::<f32, NUM_STATES, 1>::zeros(),
         };
 
-        filter.P_k.copy_from(P_k);
+        filter.covar_estimate.copy_from(covar_estimate);
 
         filter
     }
 
     pub fn predict(&mut self, u: &SMatrix<f32, NUM_CONTROL_INPUTS, 1>) {
-        self.x_hat = self.F_k * self.x_hat + self.B_k * u;
-        let P_k_hat = self.F_k * self.P_k * self.F_k.transpose() + self.Q_k;
-        self.P_k.copy_from(&P_k_hat);
+        self.state_estimate = self.state_transition * self.state_estimate + self.control_input * u;
+        let covar_estimate_hat = self.state_transition * self.covar_estimate * self.state_transition.transpose() + self.process_covar;
+        self.covar_estimate.copy_from(&covar_estimate_hat);
     }
 
-    pub fn update(&mut self, z: &SMatrix<f32, NUM_OBSERVATIONS, 1>) {
-        // y = z - H*x_hat
-        //let S: SMatrix<f32, NUM_OBSERVATIONS, NUM_OBSERVATIONS> = self.H_k * self.P_k * self.H_k.transpose() + self.R_k;
-        //let K: SMatrix<f32, NUM_STATES, NUM_OBSERVATIONS> = self.P_k * self.H_k.transpose() * S.try_inverse().unwrap();
-        // x_hat += K*y
+    pub fn update(&mut self, measurement: &SMatrix<f32, NUM_OBSERVATIONS, 1>) {
+        //let innovation_residual = measurement - self.observation_model*self.state_estimate;
+        //let innovation_covar: SMatrix<f32, NUM_OBSERVATIONS, NUM_OBSERVATIONS> = self.observation_model * self.covar_estimate * self.observation_model.transpose() + self.observation_covar;
+        //let optimal_kalman_gain = self.covar_estimate * self.observation_model.transpose() * innovation_covar.try_inverse().unwrap();
+        //self.kalman_gain.copy_from(&optimal_kalman_gain);
+        //self.state_estimate += self.kalman_gain*innovation_residual;
+
         // P = (I - K*H)*P
 
         /*
@@ -63,19 +65,19 @@ impl<'a, const NUM_STATES: usize, const NUM_CONTROL_INPUTS: usize, const NUM_OBS
         */
         
 
-        let z_hat: SMatrix<f32, NUM_OBSERVATIONS, 1> = self.H_k * self.x_hat;
-        let y: SMatrix<f32, NUM_OBSERVATIONS, 1> = z - z_hat;
-        self.x_hat += self.K_k * y;
+        let z_hat: SMatrix<f32, NUM_OBSERVATIONS, 1> = self.observation_model * self.state_estimate;
+        let y: SMatrix<f32, NUM_OBSERVATIONS, 1> = measurement - z_hat;
+        self.state_estimate += self.kalman_gain * y;
 
-        // defmt::info!("x predictor: {:?}, {:?}, {:?}", self.x_hat[0], self.x_hat[1], self.x_hat[2]);
+        // defmt::info!("x predictor: {:?}, {:?}, {:?}", self.state_estimate[0], self.state_estimate[1], self.state_estimate[2]);
     }
 
-    pub fn read_state(&self, x_hat: &mut SMatrix<f32, NUM_STATES, 1>) {
-       x_hat.copy_from(&self.x_hat);
+    pub fn read_state(&self, state_estimate: &mut SMatrix<f32, NUM_STATES, 1>) {
+       state_estimate.copy_from(&self.state_estimate);
     }
 
     pub fn get_state(&self) -> SMatrix<f32, NUM_STATES, 1> {
-        self.x_hat
+        self.state_estimate
     }
 }
 

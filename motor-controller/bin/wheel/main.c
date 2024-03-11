@@ -145,11 +145,11 @@ int main() {
     Pid_t vel_pid;
     pid_initialize(&vel_pid, &vel_pid_constants);
 
-    // vel_pid_constants.kP = 1.0f;
-    // vel_pid_constants.kI = 0.0001f;
+    vel_pid_constants.kP = 1.0f;
+    vel_pid_constants.kI = 0.0001f;
     // vel_pid_constants.kD = 0.1f;
-    vel_pid_constants.kI_max = 0.1;
-    vel_pid_constants.kI_min = -0.1;
+    vel_pid_constants.kI_max = 1.0;
+    vel_pid_constants.kI_min = -1.0;
 
     // setup the torque PID
     PidConstants_t torque_pid_constants;
@@ -334,7 +334,7 @@ int main() {
             // u_vel_loop = vel_setpoint / DF45_MAX_MOTOR_RAD_PER_S;
 
             // velocity control data
-            response_packet.data.motion.vel_setpoint = vel_setpoint_rads;
+            response_packet.data.motion.vel_setpoint = r_motor_board;
             response_packet.data.motion.encoder_delta = enc_delta;
             response_packet.data.motion.vel_enc_estimate = enc_rad_s_filt;
             response_packet.data.motion.vel_hall_estimate = 0U;
