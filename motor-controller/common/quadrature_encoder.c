@@ -65,19 +65,6 @@ void quadenc_setup() {
     TIM3->CR1 |= (TIM_CR1_CEN);
 }
 
-/**
- * @brief gets the raw counter value
- * 
- * @return uint16_t 
- */
-uint16_t quadenc_get_counter() {
-    // counter clockwise counts down
-    //  - underflow resets to 65535
-    // clockwise counts up
-    //  - overflow to 0
-
-    return TIM3->CNT;
-}
 
 /**
  * @brief resets the counter to the median value
@@ -97,13 +84,25 @@ void quadenc_reset_encoder_delta() {
  * NOTE: make sure its infeasible for 32k tick to occur
  *       in either direction between calls to get the
  *       delta
+ * 
+ * Currently the encoder is set to 4000 step per revolution. 
+ * The motor can go 5260 rpm -> 87.66 rps.
+ * The steps per second is 4000*87.66 = 350,666.66.
+ *
+ *    
  * TODO: investigate OF/UF detection so we know if the delta is bad
  * 
  * @return int32_t number of encoder ticks since the last call
  */
 int32_t quadenc_get_encoder_delta() {
-    uint16_t cur_val = quadenc_get_counter();
-    quadenc_reset_encoder_delta();
+    // counter clockwise counts down
+    //  - underflow resets to 65535
+    // clockwise counts up
+    //  - overflow to 0
+    // Gets the current count
+    uint16_t cur_val = TIM3->CNT;
+    // Resets the count back to the center value
+    TIM3->CNT = 0x8000;
 
     int32_t enc_delta = (int32_t) cur_val - 0x8000;
     return enc_delta;

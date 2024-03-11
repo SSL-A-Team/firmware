@@ -4,7 +4,7 @@ use ateam_common_packets::bindings_radio::ParameterName::{VEL_PID_X, RC_BODY_VEL
 use nalgebra::{SVector, Vector3, Vector4, Vector5};
 
 use crate::parameter_interface::ParameterInterface;
-
+use crate::abs32;
 use super::constant_gain_kalman_filter::CgKalmanFilter;
 use super::pid::PidController;
 use super::robot_model::RobotModel;
@@ -69,7 +69,7 @@ impl<'a> BodyVelocityController<'a> {
                     wheel_velocity: 0.0,
                     wheel_torque: 0.0
                 },
-                motor_fr: MotorDebugTelemetry { 
+                motor_bl: MotorDebugTelemetry { 
                     wheel_setpoint: 0.0,
                     wheel_velocity: 0.0,
                     wheel_torque: 0.0
@@ -79,7 +79,7 @@ impl<'a> BodyVelocityController<'a> {
                     wheel_velocity: 0.0,
                     wheel_torque: 0.0
                 },
-                motor_bl: MotorDebugTelemetry { 
+                motor_fr: MotorDebugTelemetry { 
                     wheel_setpoint: 0.0,
                     wheel_velocity: 0.0,
                     wheel_torque: 0.0
@@ -155,17 +155,17 @@ impl<'a> BodyVelocityController<'a> {
     }
 
     pub fn control_update(&mut self, setpoint: &Vector3<f32>, wheel_velocities: &Vector4<f32>, wheel_torques: &Vector4<f32>, gyro_theta: f32) {
-        self.debug_telemetry.motor_fr.wheel_torque = wheel_torques[1];
         self.debug_telemetry.motor_fl.wheel_torque = wheel_torques[0];
-        self.debug_telemetry.motor_bl.wheel_torque = wheel_torques[3];
+        self.debug_telemetry.motor_bl.wheel_torque = wheel_torques[1];
         self.debug_telemetry.motor_br.wheel_torque = wheel_torques[2];
+        self.debug_telemetry.motor_fr.wheel_torque = wheel_torques[3];
 
         // construct the observation vector the KF expects
         let z: Vector5<f32> = Vector5::new(wheel_velocities[0], wheel_velocities[1], wheel_velocities[2], wheel_velocities[3], gyro_theta);
         self.control_update_z(setpoint, z);
     }
 
-    pub fn control_update_z(&mut self, setpoint: &Vector3<f32>, z: Vector5<f32>) {
+    pub fn control_update_z(&mut self, setpoint: &Vector3<f32>, mut z: Vector5<f32>) {
         // TODO there are a few discrete time intergrals and derivatives in here
         // these should probably be genericized/templated some how
 
@@ -175,15 +175,12 @@ impl<'a> BodyVelocityController<'a> {
         let setpoint = clamp_scale_vector(setpoint, &BODY_VEL_LIM);
         self.debug_telemetry.commanded_body_velocity.copy_from_slice(setpoint.as_slice());
 
-        // Firmware does FR, FL, BL, BR ordering like graph quadrants
-        // Software does FL, FR, BR, BL ordering "clockwise"
-        // we'll do the mapping here for now
-        // FIX ME
-        self.debug_telemetry.imu_gyro[2] = z.a;
-        self.debug_telemetry.motor_fr.wheel_velocity = z[1];
+        // Firmware does FL, BL, BR, FR ordering like graph quadrants
+        self.debug_telemetry.imu_gyro[2] = z[4];
         self.debug_telemetry.motor_fl.wheel_velocity = z[0];
-        self.debug_telemetry.motor_bl.wheel_velocity = z[3];
+        self.debug_telemetry.motor_bl.wheel_velocity = z[1];
         self.debug_telemetry.motor_br.wheel_velocity = z[2];
+        self.debug_telemetry.motor_fr.wheel_velocity = z[3];
 
         // determine commanded body accleration, and clamp-scale the the control input
         let sp_body_acc = (setpoint - self.prev_setpoint) / self.loop_dt_s;
@@ -191,6 +188,15 @@ impl<'a> BodyVelocityController<'a> {
         let setpoint_limited = self.prev_setpoint + (sp_body_acc_limited * self.loop_dt_s);
         self.prev_setpoint = setpoint_limited;
         self.debug_telemetry.clamped_commanded_body_velocity.copy_from_slice(setpoint_limited.as_slice());
+        
+        let wheel_vel: Vector4<f32> = Vector4::new(z[0], z[1], z[2], z[3]); 
+        // Convert encoder velocity to body velocity. 
+        let enc_body_vel = self.robot_model.wheel_vel_to_robot_vel(wheel_vel);
+        
+        // If the encoder estimate is small enough, then replace IMU value to reduce jitter.
+        if abs32(enc_body_vel[2]) < 0.01 {
+            z[4] = enc_body_vel[2]
+        }
 
         // get latest wheel vals and gyro (observe the state)
         // process observation input into CGKF
@@ -202,7 +208,8 @@ impl<'a> BodyVelocityController<'a> {
 
         // apply control policy
         self.body_vel_controller.calculate(setpoint_limited, y, self.loop_dt_s);
-        let u = self.body_vel_controller.get_u();
+        let u = self.body_vel_controller.get_u(); 
+
         self.debug_telemetry.body_velocity_u.copy_from_slice(u.as_slice());
 
         // transform body velocity commands into the wheel velocity domain
