@@ -41,6 +41,11 @@ pub enum TeamColor {
     Blue,
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum HelloResponseError {
+
+}
+
 fn get_uuid() -> u16 {
     unsafe { *(0x1FF1_E800 as *const u16) }
 }
@@ -374,29 +379,47 @@ impl<
         Ok(())
     }
 
+    async fn process_hello_resp(&self) -> HelloResponse {
+        loop {
+            let res = self.read_data(|data| {
+                const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                    + size_of::<HelloResponse>();
+                if data.len() != PACKET_SIZE {
+                    defmt::debug!("received spurious packet when waiting for hello response.");
+                    return Err(());
+                }
+
+                let mut data_copy = [0u8; PACKET_SIZE];
+                data_copy.clone_from_slice(&data[0..PACKET_SIZE]);
+
+                let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
+
+                if packet.command_code != CommandCode::CC_HELLO_RESP {
+                    if packet.command_code == CommandCode::CC_NACK {
+                        defmt::debug!("received NACK hello response. Ignoring.");
+                        return Err(())
+                    } else {
+                        defmt::warn!("received unknown hello response command code.");
+                        return Err(())
+                    }
+                }
+
+                return Ok(unsafe { packet.data.hello_response });
+            }).await;
+
+            if let Ok(hello_response) = res {
+                if let Ok(hello_response) = hello_response {
+                    return hello_response;
+                }
+            } else {
+                defmt::warn!("could not structure data from radio queue while waiting for hello response");
+            }
+        }
+    }
+
     pub async fn wait_hello(&self, timeout: Duration) -> Result<HelloResponse, ()> {
-        let read_fut = self.read_data(|data| {
-            const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
-                + size_of::<HelloResponse>();
-            if data.len() != PACKET_SIZE {
-                return Err(());
-            }
-
-            let mut data_copy = [0u8; PACKET_SIZE];
-            data_copy.clone_from_slice(&data[0..PACKET_SIZE]);
-
-            let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
-
-            if packet.command_code != CommandCode::CC_HELLO_RESP {
-                return Err(());
-            }
-            // TODO: handle nack
-
-            Ok(unsafe { packet.data.hello_response })
-        });
-
-        match select(read_fut, Timer::after(timeout)).await {
-            Either::First(ret) => ret?,
+        match select(self.process_hello_resp(), Timer::after(timeout)).await {
+            Either::First(ret) => Ok(ret),
             Either::Second(_) => Err(()),
         }
     }
