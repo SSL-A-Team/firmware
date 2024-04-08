@@ -452,7 +452,7 @@ impl<'a> Control<'a> {
     pub async fn tick(&mut self, latest_control: Option<BasicControl>) -> (Option<BasicTelemetry>, ControlDebugTelemetry) {
         self.process_mc_packets();
 
-        self.front_left_motor.log_reset("RL");
+        self.front_left_motor.log_reset("FL");
         self.back_left_motor.log_reset("BL");
         self.back_right_motor.log_reset("BR");
         self.front_right_motor.log_reset("FR");
@@ -485,7 +485,6 @@ impl<'a> Control<'a> {
         let gyro_rads = (self.gyro_sub.next_message_pure().await as f32) * 2.0 * core::f32::consts::PI / 360.0;
         let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
             if controls_enabled {
-                // TODO check order
                 let wheel_vels = Vector4::new(
                     self.front_left_motor.read_rads(),
                     self.back_left_motor.read_rads(),
@@ -510,7 +509,7 @@ impl<'a> Control<'a> {
             } 
             else 
             {
-                self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel)
+                self.robot_model.robot_vel_to_wheel_vel(&self.cmd_vel)
             }
         }
         else {

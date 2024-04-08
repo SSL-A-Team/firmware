@@ -45,11 +45,11 @@ impl RobotModel {
         }
     }
 
-    pub fn robot_vel_to_wheel_vel(&self, robot_vel: Vector3<f32>) -> Vector4<f32> {
+    pub fn robot_vel_to_wheel_vel(&self, robot_vel: &Vector3<f32>) -> Vector4<f32> {
         self.t_body_to_wheel * robot_vel
     }
 
-    pub fn wheel_vel_to_robot_vel(&self, wheel_vels: Vector4<f32>) -> Vector3<f32> {
+    pub fn wheel_vel_to_robot_vel(&self, wheel_vels: &Vector4<f32>) -> Vector3<f32> {
         self.t_wheel_to_body * wheel_vels
     }
 }

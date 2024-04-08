@@ -414,7 +414,7 @@ impl Control {
         let cmd_vel = Vector3::new(0., 0., vel_angular);
         self.cmd_vel = cmd_vel;
         self.drib_vel = vel_drib;
-        let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel);
+        let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(&self.cmd_vel);
 
         self.front_left_motor.set_setpoint(wheel_vels[0]);
         self.back_left_motor.set_setpoint(wheel_vels[1]);
