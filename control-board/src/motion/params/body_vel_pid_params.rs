@@ -1,7 +1,7 @@
 use nalgebra::{matrix, vector, Matrix3x5, Vector3, Vector4};
 
 // Kp, Ki, Kd, Ki_err_min, Ki_err_max
-pub static K_pid: Matrix3x5<f32> = 
+pub static PID_GAIN: Matrix3x5<f32> = 
         matrix![6.0, 1.5, 0.0, -1.0, 1.0;
                 6.0, 1.5, 0.0, -1.0, 1.0;
                 6.0, 0.5, 0.0, -3.0, 3.0];

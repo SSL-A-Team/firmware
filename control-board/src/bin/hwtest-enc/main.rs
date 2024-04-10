@@ -22,7 +22,7 @@ use embassy_stm32::{
     usart::Uart,
 };
 
-use nalgebra::{Vector4, AbstractRotation};
+use nalgebra::{Vector4};
 
 use ateam_common_packets::bindings_stspin::{
     MotorCommand_MotionType
@@ -194,7 +194,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     dotstar.write([COLOR_YELLOW].iter().cloned()).unwrap();
 
-    let mut robot_ang_vel: f32 = 10.0;
+    let robot_ang_vel: f32 = 10.0;
     loop {
         defmt::info!("Waiting for BTN0 press to start motors. Hold BTN1 for open loop, don't for velocity loop");
         

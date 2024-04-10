@@ -1,15 +1,14 @@
 use nalgebra::{matrix, Matrix3, Matrix3x4, Matrix3x5, Matrix5, Matrix5x3};
 
-pub const KfNumStates: usize = 3;
-pub const KfNumControlInputs: usize = 4;
-pub const KfNumObservations: usize = 5;
+pub const KF_NUM_STATES: usize = 3;
+pub const KF_NUM_CONTROL_INPUTS: usize = 4;
+pub const KF_NUM_OBSERVATIONS: usize = 5;
 
-const ExpectedDt: f32 = 10000.0;  // 10mS = 10000uS
-const ExpectedDt2: f32 = ExpectedDt * ExpectedDt;
-const EncoderNoise: f32 = 0.11;  // noise in rad / sampling time 
-const GyroNoise: f32 = 0.002;  // BMI085 compensated for spectral noise at 100Hz sample rate
-const ProcessNoise: f32 = 0.05;
-const InitialCovariance: f32 = 0.11;
+const EXPECTED_DT: f32 = 10000.0;  // 10mS = 10000uS
+const EXPECTED_DT_2: f32 = EXPECTED_DT * EXPECTED_DT;
+const ENCODER_NOISE: f32 = 0.11;  // noise in rad / sampling time 
+const GYRO_NOISE: f32 = 0.002;  // BMI085 compensated for spectral noise at 100Hz sample rate
+const PROCESS_NOISE: f32 = 0.05;
 
 // Assume constant velocity as a valid linearization of the transition system
 pub static STATE_TRANSITION: Matrix3<f32> = 
@@ -31,16 +30,16 @@ pub static OBSERVATION_MODEL: Matrix5x3<f32> =
                 0.0, 0.0, 1.0];
                 
 pub static PROCESS_COV: Matrix3<f32> =
-        matrix![KfNumStates as f32 * ProcessNoise / ExpectedDt2, 0.0,                                           0.0;
-                0.0,                                           KfNumStates as f32 * ProcessNoise / ExpectedDt2, 0.0;
-                0.0,                                           0.0,                                           KfNumStates as f32 * ProcessNoise / ExpectedDt2];
+        matrix![KF_NUM_STATES as f32 * PROCESS_NOISE / EXPECTED_DT_2, 0.0,                                           0.0;
+                0.0,                                           KF_NUM_STATES as f32 * PROCESS_NOISE / EXPECTED_DT_2, 0.0;
+                0.0,                                           0.0,                                           KF_NUM_STATES as f32 * PROCESS_NOISE / EXPECTED_DT_2];
 
 pub static OBSERVATION_COV: Matrix5<f32> = 
-        matrix![EncoderNoise, 0.0,          0.0,          0.0,          0.0;
-                0.0,          EncoderNoise, 0.0,          0.0,          0.0;
-                0.0,          0.0,          EncoderNoise, 0.0,          0.0;
-                0.0,          0.0,          0.0,          EncoderNoise, 0.0;
-                0.0,          0.0,          0.0,          0.0,          GyroNoise];
+        matrix![ENCODER_NOISE, 0.0,          0.0,          0.0,          0.0;
+                0.0,          ENCODER_NOISE, 0.0,          0.0,          0.0;
+                0.0,          0.0,          ENCODER_NOISE, 0.0,          0.0;
+                0.0,          0.0,          0.0,          ENCODER_NOISE, 0.0;
+                0.0,          0.0,          0.0,          0.0,          GYRO_NOISE];
 
 pub static KALMAN_GAIN: Matrix3x5<f32> = 
         matrix![0.008483887, -0.008483887, -0.006927967, 0.006928444, 0.0;

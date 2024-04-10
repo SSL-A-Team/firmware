@@ -4,7 +4,6 @@ pub struct CgKalmanFilter<'a, const NUM_STATES: usize, const NUM_CONTROL_INPUTS:
     control_input: &'a SMatrix<f32, NUM_STATES, NUM_CONTROL_INPUTS>,
     observation_model: &'a SMatrix<f32, NUM_OBSERVATIONS, NUM_STATES>,
     process_cov: &'a SMatrix<f32, NUM_STATES, NUM_STATES>,
-    observation_cov: &'a SMatrix<f32, NUM_OBSERVATIONS, NUM_OBSERVATIONS>,
     kalman_gain: &'a SMatrix<f32, NUM_STATES, NUM_OBSERVATIONS>,
     estimate_cov: SMatrix<f32, NUM_STATES, NUM_STATES>,
     state_estimate: SMatrix<f32, NUM_STATES, 1>,
@@ -18,15 +17,13 @@ impl<'a, const NUM_STATES: usize, const NUM_CONTROL_INPUTS: usize, const NUM_OBS
                 control_input: &'a SMatrix<f32, NUM_STATES, NUM_CONTROL_INPUTS>,
                 observation_model: &'a SMatrix<f32, NUM_OBSERVATIONS, NUM_STATES>,
                 process_cov: &'a SMatrix<f32, NUM_STATES, NUM_STATES>,
-                observation_cov: &'a SMatrix<f32, NUM_OBSERVATIONS, NUM_OBSERVATIONS>,
                 kalman_gain: &'a SMatrix<f32, NUM_STATES, NUM_OBSERVATIONS>,
             ) -> CgKalmanFilter<'a, NUM_STATES, NUM_CONTROL_INPUTS, NUM_OBSERVATIONS> {
-        let mut filter = CgKalmanFilter {
+        let filter = CgKalmanFilter {
             state_transition: state_transition,
             control_input: control_input,
             observation_model: observation_model,
             process_cov: process_cov,
-            observation_cov: observation_cov,
             kalman_gain: kalman_gain,
             estimate_cov: SMatrix::<f32, NUM_STATES, NUM_STATES>::zeros(),
             state_estimate: SMatrix::<f32, NUM_STATES, 1>::zeros(),

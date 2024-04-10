@@ -8,7 +8,15 @@ use embassy_time::{Duration, Timer};
 use ateam_control_board::{
     include_external_cpp_bin,
     queue::Buffer,
-    motion::robot_model::{RobotConstants, RobotModel},
+    motion::robot_model::{
+        RobotConstants, 
+        RobotModel,
+    },
+    motion::params::robot_physical_params::{
+        WHEEL_ANGLES_DEG,
+        WHEEL_RADIUS_M,
+        WHEEL_DISTANCE_TO_ROBOT_CENTER_M
+    },
     stm32_interface::Stm32Interface,
     stspin_motor::{WheelMotor, DribblerMotor},
     uart_queue::{UartReadQueue, UartWriteQueue},
@@ -98,10 +106,6 @@ static mut DRIB_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
     [Buffer::EMPTY; RX_BUF_DEPTH];
 static DRIB_QUEUE_RX: UartReadQueue<MotorDUart, MotorDDmaRx, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
     UartReadQueue::new(unsafe { &mut DRIB_BUFFERS_RX });
-
-const WHEEL_ANGLES_DEG: Vector4<f32> = Vector4::new(30.0, 150.0, 225.0, 315.0);
-const WHEEL_RADIUS_M: f32 = 0.049 / 2.0; // wheel dia 49mm
-const WHEEL_DISTANCE_TO_ROBOT_CENTER_M: f32 = 0.085; // 85mm from center of wheel body to center of robot
 
 pub struct Control {
     robot_model: RobotModel,
@@ -303,10 +307,10 @@ impl Control {
                 WHEEL_RADIUS_M,
             ),
             wheel_dist_to_cent_m: Vector4::new(
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+                WHEEL_DISTANCE_TO_ROBOT_CENTER_M[0],
+                WHEEL_DISTANCE_TO_ROBOT_CENTER_M[1],
+                WHEEL_DISTANCE_TO_ROBOT_CENTER_M[2],
+                WHEEL_DISTANCE_TO_ROBOT_CENTER_M[3],
             ),
         };
 
