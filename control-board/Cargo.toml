@@ -107,11 +107,6 @@ name = "kicker"
 test = false
 harness = false
 
-[[bin]]
-name = "proto-drivetrain"
-test = false
-harness = false
-
 [[test]]
 name = "basic-test"
 harness = false
