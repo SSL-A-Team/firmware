@@ -88,7 +88,13 @@ pub fn start_imu_task(spawner: Spawner,
         accel_int: impl Peripheral<P = <ImuAccelIntPin as embassy_stm32::gpio::Pin>::ExtiChannel> + 'static,
         gyro_int: impl Peripheral<P = <ImuGyroIntPin as embassy_stm32::gpio::Pin>::ExtiChannel> + 'static,
     ) -> Result<(), SpawnError> {
+
+    defmt::warn!("here3!");
+
     let imu_buf = IMU_BUFFER_CELL.init([0; 8]);
+
+    defmt::warn!("here4!");
+
     let imu = Bmi085::new_from_pins(peri, sck, mosi, miso, txdma, rxdma, accel_cs, gyro_cs, imu_buf);
 
     let accel_int_input = Input::new(accel_int_pin, Pull::Down);
@@ -98,6 +104,8 @@ pub fn start_imu_task(spawner: Spawner,
     // imu open drain
     let gyro_int_input = Input::new(gyro_int_pin, Pull::Up);
     let gyro_int = ExtiInput::new(gyro_int_input, gyro_int);
+
+    defmt::warn!("here!");
 
     spawner.spawn(imu_task_entry(imu, accel_int, gyro_int))
 }

@@ -50,7 +50,11 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let mut dotstar = Apa102::new(dot_spi);
     let _ = dotstar.write([RGB8 { r: 10, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 0 }].iter().cloned());
 
+    defmt::warn!("here!");
+
     tasks::imu::start_imu_task(_spawner, p.SPI6, p.PA5, p.PA7, p.PA6, p.BDMA_CH0, p.BDMA_CH1, p.PC4, p.PC5, p.PB1, p.PB2, p.EXTI1, p.EXTI2).expect("unable to start IMU task");
+
+    defmt::warn!("here2!");
 
     let _ = dotstar.write([RGB8 { r: 0, g: 0, b: 10 }, RGB8 { r: 0, g: 0, b: 0 }].iter().cloned());
 
