@@ -13,6 +13,7 @@
 #![feature(ptr_metadata)]
 #![feature(async_fn_in_trait)]
 #![feature(const_fn_floating_point_arithmetic)]
+#![feature(const_maybe_uninit_write)]
 
 pub mod motion;
 pub mod parameter_interface;

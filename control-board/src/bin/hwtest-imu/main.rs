@@ -52,7 +52,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     defmt::warn!("here!");
 
-    tasks::imu::start_imu_task(_spawner, p.SPI6, p.PA5, p.PA7, p.PA6, p.BDMA_CH0, p.BDMA_CH1, p.PC4, p.PC5, p.PB1, p.PB2, p.EXTI1, p.EXTI2).expect("unable to start IMU task");
+    tasks::imu::start_imu_task(&_spawner, p.SPI6, p.PA5, p.PA7, p.PA6, p.BDMA_CH0, p.BDMA_CH1, p.PC4, p.PC5, p.PB1, p.PB2, p.EXTI1, p.EXTI2).expect("unable to start IMU task");
 
     defmt::warn!("here2!");
 

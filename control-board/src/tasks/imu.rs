@@ -9,6 +9,7 @@ use embassy_sync::pubsub::{PubSubChannel, Subscriber, Error};
 use nalgebra::Vector3;
 
 use static_cell::StaticCell;
+use static_cell::make_static;
 
 use crate::drivers::imu::bmi085::{Bmi085, GyroRange, GyroBandwidth, GyroIntMap, GyroIntPinActiveState, GyroIntPinMode, AccelRange, AccelConfOdr, AccelConfBwp};
 use crate::drivers::imu::{GyroFrame, AccelFrame};
@@ -21,8 +22,9 @@ type GyroDataChannel = PubSubChannel<ThreadModeRawMutex, GyroFrame, 1, 1, 1>;
 pub type AccelSub<'a> = Subscriber<'a, ThreadModeRawMutex, AccelFrame, 1, 1, 1>;
 pub type GyroSub<'a> = Subscriber<'a, ThreadModeRawMutex, GyroFrame, 1, 1, 1>;
 
-#[link_section = ".axisram.buffers"]
-static IMU_BUFFER_CELL: StaticCell<[u8; 8]> = StaticCell::new();
+// #[link_section = ".axisram.buffers"]
+// static IMU_BUFFER_CELL: StaticCell<[u8; 8]> = StaticCell::new([u8; 0]);
+// let imu_buf = make_static!([0u8; 8], #[link_section = ".axisram.buffers"]);
 
 static ACCEL_DATA_CHANNEL: AccelDataChannel = PubSubChannel::new();
 static GYRO_DATA_CHANNEL: GyroDataChannel = PubSubChannel::new();
@@ -74,7 +76,7 @@ async fn imu_task_entry(mut imu: Bmi085<'static, 'static, ImuSpi, ImuTxDma, ImuR
     }
 }
 
-pub fn start_imu_task(spawner: Spawner, 
+pub fn start_imu_task(spawner: &Spawner, 
         peri: impl Peripheral<P = ImuSpi> + 'static,
         sck: impl Peripheral<P = impl SckPin<ImuSpi>> + 'static,
         mosi: impl Peripheral<P = impl MosiPin<ImuSpi>> + 'static,
@@ -91,7 +93,8 @@ pub fn start_imu_task(spawner: Spawner,
 
     defmt::warn!("here3!");
 
-    let imu_buf = IMU_BUFFER_CELL.init([0; 8]);
+    // let imu_buf = IMU_BUFFER_CELL.init([0; 8]);
+    let imu_buf = make_static!([0u8; 8], #[link_section = ".axisram.buffers"]);
 
     defmt::warn!("here4!");
 
