@@ -63,6 +63,15 @@ debug-assertions = false
 debug = true
 lto = 'fat'
 
+[profile.dev-inspect]
+inherits = "dev"
+debug = true
+opt-level = 0
+lto = false
+debug-assertions = true
+overflow-checks = true
+strip = "none"
+
 [lib]
 test = false
 harness = false

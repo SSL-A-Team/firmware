@@ -23,7 +23,7 @@ pub type AccelSub<'a> = Subscriber<'a, ThreadModeRawMutex, AccelFrame, 1, 1, 1>;
 pub type GyroSub<'a> = Subscriber<'a, ThreadModeRawMutex, GyroFrame, 1, 1, 1>;
 
 // #[link_section = ".axisram.buffers"]
-// static IMU_BUFFER_CELL: StaticCell<[u8; 8]> = StaticCell::new([u8; 0]);
+static IMU_BUFFER_CELL: StaticCell<[u8; 8]> = StaticCell::new();
 // let imu_buf = make_static!([0u8; 8], #[link_section = ".axisram.buffers"]);
 
 static ACCEL_DATA_CHANNEL: AccelDataChannel = PubSubChannel::new();
@@ -93,8 +93,8 @@ pub fn start_imu_task(spawner: &Spawner,
 
     defmt::warn!("here3!");
 
-    // let imu_buf = IMU_BUFFER_CELL.init([0; 8]);
-    let imu_buf = make_static!([0u8; 8], #[link_section = ".axisram.buffers"]);
+    let imu_buf = IMU_BUFFER_CELL.init([0; 8]);
+    // let imu_buf = make_static!([0u8; 8], #[link_section = ".axisram.buffers"]);
 
     defmt::warn!("here4!");
 
