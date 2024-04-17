@@ -86,7 +86,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let back_left_int = interrupt::take!(UART7);
     let back_right_int = interrupt::take!(UART8);
     let front_right_int = interrupt::take!(USART1);
-    let drib_int = interrupt::take!(UART5);
 
     let front_left_usart = Uart::new(
         p.UART4,
@@ -124,35 +123,21 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.DMA1_CH1,
         get_bootloader_uart_config(),
     );
-    let drib_usart = Uart::new(
-        p.UART5,
-        p.PB12,
-        p.PB13,
-        drib_int,
-        p.DMA2_CH2,
-        p.DMA2_CH3,
-        get_bootloader_uart_config(),
-    );
 
-    let ball_detected_thresh = 1.0;
     let mut control = Control::new(
         &spawner,
         front_left_usart,
         back_left_usart,
         back_right_usart,
         front_right_usart,
-        drib_usart,
         p.PC1,
         p.PF8,
         p.PB9,
         p.PD8,
-        p.PD13,
         p.PC0,
         p.PF9,
         p.PB8,
-        p.PD9,
-        p.PD12,
-        ball_detected_thresh,
+        p.PD9
     );
 
     let ret = control.load_firmware().await;
@@ -181,9 +166,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
             led3.set_high();
         }
 
-        if err.drib {
-            defmt::error!("Error flashing DRIB");
-        }
         dotstar
             .write([COLOR_RED, COLOR_RED].iter().cloned())
             .unwrap();
@@ -221,37 +203,42 @@ async fn main(_spawner: embassy_executor::Spawner) {
         defmt::info!("Motors starting. Press BTN0 to stop");
         loop {
             main_loop_rate_ticker.next().await;
-            control.tick(robot_ang_vel, 0.);
+            control.tick(robot_ang_vel);
             let err_fl = control.front_left_motor.read_is_error();
             let err_bl = control.back_left_motor.read_is_error();
             let err_br = control.back_right_motor.read_is_error();
             let err_fr = control.front_right_motor.read_is_error();
-            let err_drib = control.drib_motor.read_is_error();
+
             let rpm_fl = control.front_left_motor.read_rpm();
             let rpm_bl = control.back_left_motor.read_rpm();
             let rpm_br = control.back_right_motor.read_rpm();
             let rpm_fr = control.front_right_motor.read_rpm();
+
             let rads_raw_fl = enc_delta_to_rads(control.front_left_motor.read_encoder_delta());
             let rads_raw_bl = enc_delta_to_rads(control.back_left_motor.read_encoder_delta());
             let rads_raw_br = enc_delta_to_rads(control.back_right_motor.read_encoder_delta());
             let rads_raw_fr = enc_delta_to_rads(control.front_right_motor.read_encoder_delta());
+
             let rads_filt_fl = control.front_left_motor.read_rads();
             let rads_filt_bl = control.back_left_motor.read_rads();
             let rads_filt_br = control.back_right_motor.read_rads();
             let rads_filt_fr = control.front_right_motor.read_rads();
+
             let vel_setpoint_fl = control.front_left_motor.read_vel_setpoint();
             let vel_setpoint_bl = control.back_left_motor.read_vel_setpoint();
             let vel_setpoint_br = control.back_right_motor.read_vel_setpoint();
             let vel_setpoint_fr = control.front_right_motor.read_vel_setpoint();
+            
             let duty_cycle_fl = control.front_left_motor.read_vel_computed_setpoint();
             let duty_cycle_bl = control.back_left_motor.read_vel_computed_setpoint();
             let duty_cycle_br = control.back_right_motor.read_vel_computed_setpoint();
             let duty_cycle_fr = control.front_right_motor.read_vel_computed_setpoint();
+            
             let rpm_ok_fl = within_percent_err(EXPECTED_RPM_NO_LOAD[0], rpm_fl, EXPECTED_RPM_TOLERANCE);
             let rpm_ok_bl = within_percent_err(EXPECTED_RPM_NO_LOAD[1], rpm_bl, EXPECTED_RPM_TOLERANCE);
             let rpm_ok_br = within_percent_err(EXPECTED_RPM_NO_LOAD[2], rpm_br, EXPECTED_RPM_TOLERANCE);
             let rpm_ok_fr = within_percent_err(EXPECTED_RPM_NO_LOAD[3], rpm_fr, EXPECTED_RPM_TOLERANCE);
-            if  err_fl || err_bl || err_br || err_fr || err_drib {
+            if  err_fl || err_bl || err_br || err_fr {
                 dotstar
                     .write([COLOR_BLUE, COLOR_RED].iter().cloned())
                     .unwrap();
@@ -264,30 +251,36 @@ async fn main(_spawner: embassy_executor::Spawner) {
                     .write([COLOR_BLUE, COLOR_GREEN].iter().cloned())
                     .unwrap();
             }
+
             if !err_fl && rpm_ok_fl {
                 led0.set_high();
             } else {
                 led0.set_low();
             }
+
             if !err_bl && rpm_ok_bl {
                 led1.set_high();
             } else {
                 led1.set_low();
             }
+
             if !err_br && rpm_ok_br {
                 led2.set_high();
             } else {
                 led2.set_low();
             }
+
             if !err_fr && rpm_ok_fr {
                 led3.set_high();
             } else {
                 led3.set_low();
             }
+
             if btn0.is_low() {
                 while btn0.is_low() {}
                 break;
             }
+
             defmt::info!("ROBOT ANG {:?} SET POINT {:?} {:?} {:?} {:?} DC {:?} {:?} {:?} {:?} RADS FILT {:?} {:?} {:?} {:?} RADS RAW {:?} {:?} {:?} {:?}", 
             robot_ang_vel,
             vel_setpoint_fl, vel_setpoint_bl, vel_setpoint_br, vel_setpoint_fr,

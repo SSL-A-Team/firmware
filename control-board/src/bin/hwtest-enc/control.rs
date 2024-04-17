@@ -21,7 +21,6 @@ use nalgebra::{Vector3, Vector4};
 
 use crate::pins::*;
 
-include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 
 // motor pinout
@@ -29,7 +28,6 @@ include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 // BackLeft Wheel   - UART4  - tx pd1,  rx pd0,  boot pg0,  rst pg1, DMA1 4/5
 // BackRight Wheel  - USART3 - tx pb10, rx pb11, boot pf4,  rst pa3, DMA1 6/7
 // FrontRight Wheel - UART5  - tx pb6,  pb12,    boot pb1,  rst pb2, DMA1 0/1
-// Dribbler         - USART6 - tx pc6,  rx pc7,  boot pc2,  rst pd7, DMA2 2/3
 
 const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 3;
@@ -120,31 +118,16 @@ static FRONT_RIGHT_QUEUE_RX: UartReadQueue<
     RX_BUF_DEPTH,
 > = UartReadQueue::new(unsafe { &mut FRONT_RIGHT_BUFFERS_RX });
 
-// buffers for dribbler
-#[link_section = ".axisram.buffers"]
-static mut DRIB_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
-    [Buffer::EMPTY; TX_BUF_DEPTH];
-static DRIB_QUEUE_TX: UartWriteQueue<MotorDUart, MotorDDmaTx, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
-    UartWriteQueue::new(unsafe { &mut DRIB_BUFFERS_TX });
-
-#[link_section = ".axisram.buffers"]
-static mut DRIB_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
-    [Buffer::EMPTY; RX_BUF_DEPTH];
-static DRIB_QUEUE_RX: UartReadQueue<MotorDUart, MotorDDmaRx, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
-    UartReadQueue::new(unsafe { &mut DRIB_BUFFERS_RX });
-
 pub struct MotorsError<T> {
     pub front_left: T,
     pub back_right: T,
     pub back_left: T,
-    pub front_right: T,
-    pub drib: T,
+    pub front_right: T
 }
 
 pub struct Control {
     robot_model: RobotModel,
     cmd_vel: Vector3<f32>,
-    drib_vel: f32,
     pub front_left_motor: WheelMotor<
         'static,
         MotorFLUart,
@@ -193,18 +176,6 @@ pub struct Control {
         MotorFRBootPin,
         MotorFRResetPin,
     >,
-    pub drib_motor: DribblerMotor<
-        'static,
-        MotorDUart,
-        MotorDDmaRx,
-        MotorDDmaTx,
-        MAX_RX_PACKET_SIZE,
-        MAX_TX_PACKET_SIZE,
-        RX_BUF_DEPTH,
-        TX_BUF_DEPTH,
-        MotorDBootPin,
-        MotorDResetPin,
-    >,
 }
 
 impl Control {
@@ -214,39 +185,31 @@ impl Control {
         back_left_usart: Uart<'static, MotorBLUart, MotorBLDmaTx, MotorBLDmaRx>,
         back_right_usart: Uart<'static, MotorBRUart, MotorBRDmaTx, MotorBRDmaRx>,
         front_right_usart: Uart<'static, MotorFRUart, MotorFRDmaTx, MotorFRDmaRx>,
-        drib_usart: Uart<'static, MotorDUart, MotorDDmaTx, MotorDDmaRx>,
         front_left_boot0_pin: MotorFLBootPin,
         back_left_boot0_pin: MotorBLBootPin,
         back_right_boot0_pin: MotorBRBootPin,
         front_right_boot0_pin: MotorFRBootPin,
-        drib_boot0_pin: MotorDBootPin,
         front_left_reset_pin: MotorFLResetPin,
         back_left_reset_pin: MotorBLResetPin,
         back_right_reset_pin: MotorBRResetPin,
         front_right_reset_pin: MotorFRResetPin,
-        drib_reset_pin: MotorDResetPin,
-        ball_detected_thresh: f32,
     ) -> Control {
         let wheel_firmware_image = WHEEL_FW_IMG;
-        let drib_firmware_image = DRIB_FW_IMG;
 
         let (front_left_tx, front_left_rx) = front_left_usart.split();
         let (back_left_tx, back_left_rx) = back_left_usart.split();
         let (back_right_tx, back_right_rx) = back_right_usart.split();
         let (front_right_tx, front_right_rx) = front_right_usart.split();
-        let (drib_tx, drib_rx) = drib_usart.split();
 
         let front_left_boot0_pin = Output::new(front_left_boot0_pin, Level::Low, Speed::Medium); // boot0 not active
         let back_left_boot0_pin = Output::new(back_left_boot0_pin, Level::Low, Speed::Medium); // boot0 not active
         let back_right_boot0_pin = Output::new(back_right_boot0_pin, Level::Low, Speed::Medium); // boot0 not active
         let front_right_boot0_pin = Output::new(front_right_boot0_pin, Level::Low, Speed::Medium); // boot0 not active
-        let drib_boot0_pin = Output::new(drib_boot0_pin, Level::Low, Speed::Medium); // boot0 not active
 
         let front_left_reset_pin = Output::new(front_left_reset_pin, Level::Low, Speed::Medium); // reset active
         let back_left_reset_pin = Output::new(back_left_reset_pin, Level::Low, Speed::Medium); // reset active
         let back_right_reset_pin = Output::new(back_right_reset_pin, Level::Low, Speed::Medium); // reset active
         let front_right_reset_pin = Output::new(front_right_reset_pin, Level::Low, Speed::Medium); // reset active
-        let drib_reset_pin = Output::new(drib_reset_pin, Level::Low, Speed::Medium); // reset active
 
         spawner
             .spawn(FRONT_LEFT_QUEUE_RX.spawn_task(front_left_rx))
@@ -272,8 +235,6 @@ impl Control {
         spawner
             .spawn(FRONT_RIGHT_QUEUE_TX.spawn_task(front_right_tx))
             .unwrap();
-        spawner.spawn(DRIB_QUEUE_RX.spawn_task(drib_rx)).unwrap();
-        spawner.spawn(DRIB_QUEUE_TX.spawn_task(drib_tx)).unwrap();
 
         let front_left_stm32_interface = Stm32Interface::new(
             &FRONT_LEFT_QUEUE_RX,
@@ -307,18 +268,6 @@ impl Control {
         );
         let front_right_motor = WheelMotor::new(front_right_stm32_interface, wheel_firmware_image);
 
-        let drib_stm32_interface = Stm32Interface::new(
-            &DRIB_QUEUE_RX,
-            &DRIB_QUEUE_TX,
-            Some(drib_boot0_pin),
-            Some(drib_reset_pin),
-        );
-        let drib_motor = DribblerMotor::new(
-            drib_stm32_interface,
-            drib_firmware_image,
-            ball_detected_thresh,
-        );
-
         let robot_model_constants: RobotConstants = RobotConstants {
             wheel_angles_rad: Vector4::new(
                 WHEEL_ANGLES_DEG[0].to_radians(),
@@ -345,22 +294,19 @@ impl Control {
         Control {
             robot_model,
             cmd_vel: Vector3::new(0., 0., 0.),
-            drib_vel: 0.0,
             front_left_motor,
             back_left_motor,
             back_right_motor,
-            front_right_motor,
-            drib_motor,
+            front_right_motor
         }
     }
 
     pub async fn load_firmware(&mut self) -> Result<(), MotorsError<bool>> {
-        let ret = embassy_futures::join::join5(
+        let ret = embassy_futures::join::join4(
             self.front_left_motor.load_default_firmware_image(),
             self.back_left_motor.load_default_firmware_image(),
             self.back_right_motor.load_default_firmware_image(),
             self.front_right_motor.load_default_firmware_image(),
-            self.drib_motor.load_default_firmware_image(),
         )
         .await;
 
@@ -369,64 +315,51 @@ impl Control {
                 front_left: ret.0.is_err(),
                 back_left: ret.1.is_err(),
                 back_right: ret.2.is_err(),
-                front_right: ret.3.is_err(),
-                drib: ret.4.is_err(),
+                front_right: ret.3.is_err()
             });
         }
 
-        embassy_futures::join::join5(
+        embassy_futures::join::join4(
             self.front_left_motor.leave_reset(),
             self.back_left_motor.leave_reset(),
             self.back_right_motor.leave_reset(),
-            self.front_right_motor.leave_reset(),
-            self.drib_motor.leave_reset(),
-        )
+            self.front_right_motor.leave_reset()
+            )
         .await;
 
         self.front_left_motor.set_telemetry_enabled(true);
         self.back_left_motor.set_telemetry_enabled(true);
         self.back_right_motor.set_telemetry_enabled(true);
         self.front_right_motor.set_telemetry_enabled(true);
-        self.drib_motor.set_telemetry_enabled(true);
 
         Timer::after(Duration::from_millis(10)).await;
 
         Ok(())
     }
 
-    pub fn tick(&mut self, vel_angular: f32, vel_drib: f32) {
+    pub fn tick(&mut self, vel_angular: f32) {
         self.front_left_motor.process_packets();
         self.back_left_motor.process_packets();
         self.back_right_motor.process_packets();
         self.front_right_motor.process_packets();
-        self.drib_motor.process_packets();
 
         self.front_left_motor.log_reset("FL");
         self.back_left_motor.log_reset("BL");
         self.back_right_motor.log_reset("BR");
         self.front_right_motor.log_reset("FR");
-        self.drib_motor.log_reset("DRIB");
-
-        if self.drib_motor.ball_detected() {
-            defmt::info!("ball detected");
-        }
 
         let cmd_vel = Vector3::new(0., 0., vel_angular);
         self.cmd_vel = cmd_vel;
-        self.drib_vel = vel_drib;
         let wheel_vels = self.robot_model.robot_vel_to_wheel_vel(&self.cmd_vel);
 
         self.front_left_motor.set_setpoint(wheel_vels[0]);
         self.back_left_motor.set_setpoint(wheel_vels[1]);
         self.back_right_motor.set_setpoint(wheel_vels[2]);
         self.front_right_motor.set_setpoint(wheel_vels[3]);
-        let drib_dc = self.drib_vel / 1000.0;
-        self.drib_motor.set_setpoint(drib_dc);
 
         self.front_left_motor.send_motion_command();
         self.back_left_motor.send_motion_command();
         self.back_right_motor.send_motion_command();
         self.front_right_motor.send_motion_command();
-        self.drib_motor.send_motion_command();
     }
 }
