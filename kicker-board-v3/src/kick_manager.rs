@@ -47,9 +47,9 @@ pub enum KickType {
 
 pub struct KickManager<'a> {
     // external interface
-    charge_pin: Output<'a, ChargePin>,
-    kick_pin: Output<'a, KickPin>,
-    chip_pin: Output<'a, ChipPin>,
+    charge_pin: Output<'a>,
+    kick_pin: Output<'a>,
+    chip_pin: Output<'a>,
 
     // record keeping
     error_latched: bool,
@@ -57,9 +57,9 @@ pub struct KickManager<'a> {
 
 impl<'a> KickManager<'a> {
     pub fn new(
-            charge_pin: Output<'a, ChargePin>,
-            kick_pin: Output<'a, KickPin>,
-            chip_pin: Output<'a, ChipPin>,
+            charge_pin: Output<'a>,
+            kick_pin: Output<'a>,
+            chip_pin: Output<'a>,
     ) -> KickManager<'a> {
         KickManager {
             charge_pin,

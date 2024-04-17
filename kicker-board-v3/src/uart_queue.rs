@@ -1,20 +1,17 @@
 use crate::queue::{self, Buffer, DequeueRef, Error, Queue};
 
-use core::future::Future;
+use core::{cell::UnsafeCell, future::Future};
 use defmt::info;
 use embassy_executor::{raw::TaskStorage, SpawnToken};
-use embassy_stm32::{
-    usart::{self, UartRx, UartTx},
-};
+use embassy_stm32::{mode::Async, usart::{self, UartRx, UartTx}};
 
 pub struct UartReadQueue<
-    'a,
     UART: usart::BasicInstance,
     DMA: usart::RxDma<UART>,
     const LENGTH: usize,
     const DEPTH: usize,
 > {
-    queue_rx: Queue<'a, LENGTH, DEPTH>,
+    queue_rx: Queue<LENGTH, DEPTH>,
     task: TaskStorage<ReadTaskFuture<UART, DMA, LENGTH, DEPTH>>,
 }
 
@@ -25,7 +22,7 @@ unsafe impl<
         DMA: usart::RxDma<UART>,
         const LENGTH: usize,
         const DEPTH: usize,
-    > Send for UartReadQueue<'a, UART, DMA, LENGTH, DEPTH>
+    > Send for UartReadQueue<UART, DMA, LENGTH, DEPTH>
 {
 }
 
@@ -42,9 +39,9 @@ impl<
         DMA: usart::RxDma<UART>,
         const LENGTH: usize,
         const DEPTH: usize,
-    > UartReadQueue<'a, UART, DMA, LENGTH, DEPTH>
+    > UartReadQueue<UART, DMA, LENGTH, DEPTH>
 {
-    pub const fn new(buffers: &'a mut [Buffer<LENGTH>; DEPTH]) -> Self {
+    pub const fn new(buffers: UnsafeCell<[Buffer<LENGTH>; DEPTH]>) -> Self {
         Self {
             queue_rx: Queue::new(buffers),
             task: TaskStorage::new(),
@@ -52,9 +49,8 @@ impl<
     }
 
     fn read_task(
-        queue_rx: &'static Queue<'a, LENGTH, DEPTH>,
-        mut rx: UartRx<'a, UART, DMA>,
-        // mut int: UART::Interrupt,
+        queue_rx: &'static Queue<LENGTH, DEPTH>,
+        mut rx: UartRx<'static, UART, Async>,
     ) -> ReadTaskFuture<UART, DMA, LENGTH, DEPTH> {
         async move {
             loop {
@@ -81,7 +77,7 @@ impl<
 
     pub fn spawn_task(
         &'static self,
-        rx: UartRx<'a, UART, DMA>,
+        rx: UartRx<'static, UART, Async>,
     ) -> SpawnToken<impl Sized> {
         self.task.spawn(|| Self::read_task(&self.queue_rx, rx))
     }
@@ -97,13 +93,12 @@ impl<
 }
 
 pub struct UartWriteQueue<
-    'a,
     UART: usart::BasicInstance,
     DMA: usart::TxDma<UART>,
     const LENGTH: usize,
     const DEPTH: usize,
 > {
-    queue_tx: Queue<'a, LENGTH, DEPTH>,
+    queue_tx: Queue<LENGTH, DEPTH>,
     task: TaskStorage<WriteTaskFuture<UART, DMA, LENGTH, DEPTH>>,
 }
 
@@ -120,9 +115,9 @@ impl<
         DMA: usart::TxDma<UART>,
         const LENGTH: usize,
         const DEPTH: usize,
-    > UartWriteQueue<'a, UART, DMA, LENGTH, DEPTH>
+    > UartWriteQueue<UART, DMA, LENGTH, DEPTH>
 {
-    pub const fn new(buffers: &'a mut [Buffer<LENGTH>; DEPTH]) -> Self {
+    pub const fn new(buffers: UnsafeCell<[Buffer<LENGTH>; DEPTH]>) -> Self {
         Self {
             queue_tx: Queue::new(buffers),
             task: TaskStorage::new(),
@@ -130,8 +125,8 @@ impl<
     }
 
     fn write_task(
-        queue_tx: &'static Queue<'a, LENGTH, DEPTH>,
-        mut tx: UartTx<'a, UART, DMA>,
+        queue_tx: &'static Queue<LENGTH, DEPTH>,
+        mut tx: UartTx<'static, UART, Async>,
     ) -> WriteTaskFuture<UART, DMA, LENGTH, DEPTH> {
         async move {
             loop {
@@ -152,7 +147,7 @@ impl<
         }
     }
 
-    pub fn spawn_task(&'static self, tx: UartTx<'a, UART, DMA>) -> SpawnToken<impl Sized> {
+    pub fn spawn_task(&'static self, tx: UartTx<'static, UART, Async>) -> SpawnToken<impl Sized> {
         self.task.spawn(|| Self::write_task(&self.queue_tx, tx))
     }
 
@@ -180,12 +175,11 @@ pub trait Writer {
 }
 
 impl<
-        'a,
         UART: usart::BasicInstance,
         Dma: usart::RxDma<UART>,
         const LEN: usize,
         const DEPTH: usize,
-    > Reader for crate::uart_queue::UartReadQueue<'a, UART, Dma, LEN, DEPTH>
+    > Reader for crate::uart_queue::UartReadQueue<UART, Dma, LEN, DEPTH>
 {
     async fn read<RET, FN: FnOnce(&[u8]) -> RET>(&self, fn_read: FN) -> Result<RET, ()> {
         Ok(self.dequeue(|buf| fn_read(buf)).await)
@@ -193,12 +187,11 @@ impl<
 }
 
 impl<
-        'a,
         UART: usart::BasicInstance,
         Dma: usart::TxDma<UART>,
         const LEN: usize,
         const DEPTH: usize,
-    > Writer for crate::uart_queue::UartWriteQueue<'a, UART, Dma, LEN, DEPTH>
+    > Writer for crate::uart_queue::UartWriteQueue<UART, Dma, LEN, DEPTH>
 {
     async fn write<FN: FnOnce(&mut [u8]) -> usize>(&self, fn_write: FN) -> Result<(), ()> {
         self.enqueue(|buf| fn_write(buf)).or(Err(()))

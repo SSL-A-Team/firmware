@@ -1,8 +1,8 @@
 use embassy_stm32::peripherals::*;
 
+pub type ChargePin = PE4;
 pub type KickPin = PE5;
 pub type ChipPin = PE6;
-pub type ChargePin = PE4;
 
 pub type PowerRailAdc = ADC1;
 pub type PowerRail200vReadPin = PC0;
@@ -25,5 +25,5 @@ pub type PowerKill = PD6;
 pub type ComsUartModule = USART1;
 pub type ComsUartTxPin = PA9;
 pub type ComsUartRxPin = PA10;
-pub type ComsUartTxDma = DMA1_CH2;
-pub type ComsUartRxDma = DMA1_CH3;
+pub type ComsUartTxDma = DMA2_CH7;
+pub type ComsUartRxDma = DMA2_CH2;

@@ -1,8 +1,5 @@
 use core::{
-    cell::UnsafeCell,
-    future::poll_fn,
-    mem::MaybeUninit,
-    task::{Poll, Waker},
+    cell::UnsafeCell, future::poll_fn, mem::MaybeUninit, sync::atomic::{AtomicBool, AtomicUsize, Ordering}, task::{Poll, Waker}
 };
 use critical_section;
 
@@ -19,7 +16,7 @@ impl<const LENGTH: usize> Buffer<LENGTH> {
 }
 
 pub struct DequeueRef<'a, const LENGTH: usize, const DEPTH: usize> {
-    queue: &'a Queue<'a, LENGTH, DEPTH>,
+    queue: &'a Queue<LENGTH, DEPTH>,
     data: &'a [u8],
 }
 
@@ -39,7 +36,7 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Drop for DequeueRef<'a, LENGTH
 }
 
 pub struct EnqueueRef<'a, const LENGTH: usize, const DEPTH: usize> {
-    queue: &'a Queue<'a, LENGTH, DEPTH>,
+    queue: &'a Queue<LENGTH, DEPTH>,
     data: &'a mut [u8],
     len: &'a mut usize,
 }
@@ -69,29 +66,29 @@ pub enum Error {
     InProgress,
 }
 
-pub struct Queue<'a, const LENGTH: usize, const DEPTH: usize> {
-    buffers: &'a [Buffer<LENGTH>; DEPTH],
-    read_index: UnsafeCell<usize>,
-    read_in_progress: UnsafeCell<bool>,
-    write_index: UnsafeCell<usize>,
-    write_in_progress: UnsafeCell<bool>,
-    size: UnsafeCell<usize>,
+pub struct Queue<const LENGTH: usize, const DEPTH: usize> {
+    buffers: UnsafeCell<[Buffer<LENGTH>; DEPTH]>,
+    read_index: AtomicUsize,
+    read_in_progress: AtomicBool,
+    write_index: AtomicUsize,
+    write_in_progress: AtomicBool,
+    size: AtomicUsize,
     enqueue_waker: UnsafeCell<Option<Waker>>,
     dequeue_waker: UnsafeCell<Option<Waker>>,
 }
 
-unsafe impl<'a, const LENGTH: usize, const DEPTH: usize> Send for Queue<'a, LENGTH, DEPTH> {}
-unsafe impl<'a, const LENGTH: usize, const DEPTH: usize> Sync for Queue<'a, LENGTH, DEPTH> {}
+unsafe impl<'a, const LENGTH: usize, const DEPTH: usize> Send for Queue<LENGTH, DEPTH> {}
+unsafe impl<'a, const LENGTH: usize, const DEPTH: usize> Sync for Queue<LENGTH, DEPTH> {}
 
-impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<'a, LENGTH, DEPTH> {
-    pub const fn new(buffers: &'a mut [Buffer<LENGTH>; DEPTH]) -> Self {
+impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
+    pub const fn new(buffers: UnsafeCell<[Buffer<LENGTH>; DEPTH]>) -> Self {
         Self {
-            buffers,
-            read_index: UnsafeCell::new(0),
-            read_in_progress: UnsafeCell::new(false),
-            write_index: UnsafeCell::new(0),
-            write_in_progress: UnsafeCell::new(false),
-            size: UnsafeCell::new(0),
+            buffers: buffers,
+            read_index: AtomicUsize::new(0),
+            read_in_progress: AtomicBool::new(false),
+            write_index: AtomicUsize::new(0),
+            write_in_progress: AtomicBool::new(false),
+            size: AtomicUsize::new(0),
             enqueue_waker: UnsafeCell::new(None),
             dequeue_waker: UnsafeCell::new(None),
         }
@@ -99,15 +96,18 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<'a, LENGTH, DEPTH> {
 
     pub fn try_dequeue(&self) -> Result<DequeueRef<LENGTH, DEPTH>, Error> {
         critical_section::with(|_| unsafe {
-            if *self.read_in_progress.get() {
+            if self.read_in_progress.load(Ordering::SeqCst) {
                 return Err(Error::InProgress);
             }
 
-            if *self.size.get() > 0 {
-                *self.read_in_progress.get() = true;
-                let buf = &self.buffers[*self.read_index.get()];
+            if self.size.load(Ordering::SeqCst) > 0 {
+                self.read_in_progress.store(true, Ordering::SeqCst);
+
+                let bufs = &*self.buffers.get();
+                let buf = &bufs[self.read_index.load(Ordering::SeqCst)];
                 let len = buf.len.assume_init();
                 let data = &MaybeUninit::slice_assume_init_ref(&buf.data)[..len];
+
                 Ok(DequeueRef { queue: self, data })
             } else {
                 Err(Error::QueueFullEmpty)
@@ -136,19 +136,18 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<'a, LENGTH, DEPTH> {
     }
 
     fn cancel_dequeue(&self) {
-        critical_section::with(|_| unsafe {
-            *self.read_in_progress.get() = false;
-        });
+        self.read_in_progress.store(false, Ordering::SeqCst);
     }
 
     fn finish_dequeue(&self) {
         critical_section::with(|_| unsafe {
-            let read_in_progress = self.read_in_progress.get();
-            if *read_in_progress {
-                *read_in_progress = false;
-                *self.read_index.get() = (*self.read_index.get() + 1) % DEPTH;
-                *self.size.get() -= 1;
+            if self.read_in_progress.load(Ordering::SeqCst) {
+                self.read_in_progress.store(false, Ordering::SeqCst);
+
+                self.read_index.store((self.read_index.load(Ordering::SeqCst) + 1) % DEPTH, Ordering::SeqCst);
+                self.size.fetch_sub(1, Ordering::SeqCst);
             }
+
             if let Some(w) = (*self.enqueue_waker.get()).take() {
                 w.wake();
             }
@@ -157,14 +156,14 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<'a, LENGTH, DEPTH> {
 
     pub fn try_enqueue(&self) -> Result<EnqueueRef<LENGTH, DEPTH>, Error> {
         critical_section::with(|_| unsafe {
-            if *self.write_in_progress.get() {
+            if self.write_in_progress.load(Ordering::SeqCst) {
                 return Err(Error::InProgress);
             }
 
-            if *self.size.get() < DEPTH {
-                *self.write_in_progress.get() = true;
-                let buf = &self.buffers[*self.write_index.get()];
-                let buf = &mut *(buf as *const _ as *mut Buffer<LENGTH>);
+            if self.size.load(Ordering::SeqCst) < DEPTH {
+                self.write_in_progress.store(true, Ordering::SeqCst);
+                let bufs = &mut *self.buffers.get();
+                let buf = &mut bufs[self.write_index.load(Ordering::SeqCst)];
                 let data = MaybeUninit::slice_assume_init_mut(&mut buf.data);
                 let len = buf.len.write(0);
 
@@ -199,19 +198,18 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<'a, LENGTH, DEPTH> {
     }
 
     fn cancel_enqueue(&self) {
-        critical_section::with(|_| unsafe {
-            *self.write_in_progress.get() = false;
-        });
+        self.write_in_progress.store(false, Ordering::SeqCst);
     }
 
     fn finish_enqueue(&self) {
         critical_section::with(|_| unsafe {
-            let write_in_progress = self.write_in_progress.get();
-            if *write_in_progress {
-                *write_in_progress = false;
-                *self.write_index.get() = (*self.write_index.get() + 1) % DEPTH;
-                *self.size.get() += 1;
+            if self.write_in_progress.load(Ordering::SeqCst) {
+                self.write_in_progress.store(false, Ordering::SeqCst);
+
+                self.write_index.store((self.write_index.load(Ordering::SeqCst) + 1) % DEPTH, Ordering::SeqCst);
+                self.size.fetch_add(1, Ordering::SeqCst);
             }
+
             if let Some(w) = (*self.dequeue_waker.get()).take() {
                 w.wake();
             }

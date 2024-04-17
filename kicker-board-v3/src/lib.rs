@@ -1,17 +1,16 @@
 #![no_std]
 #![feature(const_mut_refs)]
 #![feature(const_fn_floating_point_arithmetic)]
-#![feature(async_fn_in_trait)]
 #![feature(type_alias_impl_trait)]
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(const_maybe_uninit_uninit_array)]
 
 pub mod pins;
-// pub mod kick_manager;
-// pub mod queue;
-// pub mod uart_queue;
-// pub mod drivers;
+pub mod kick_manager;
+pub mod queue;
+pub mod uart_queue;
+pub mod drivers;
 
 pub const ADC_VREFINT_NOMINAL: f32 = 1230.0; // mV
 
