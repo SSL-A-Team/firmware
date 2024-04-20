@@ -1,17 +1,23 @@
 use core::{
-    cell::UnsafeCell, future::poll_fn, mem::MaybeUninit, sync::atomic::{AtomicBool, AtomicUsize, Ordering}, task::{Poll, Waker}
+    cell::{SyncUnsafeCell, UnsafeCell},
+    future::poll_fn,
+    mem::MaybeUninit,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    task::{Poll, Waker}
 };
 use critical_section;
 
 pub struct Buffer<const LENGTH: usize> {
     pub data: [MaybeUninit<u8>; LENGTH],
-    pub len: MaybeUninit<usize>,
+    // pub len: MaybeUninit<usize>,
+    len: usize,
 }
 
 impl<const LENGTH: usize> Buffer<LENGTH> {
     pub const EMPTY: Buffer<LENGTH> = Buffer {
         data: MaybeUninit::uninit_array(),
-        len: MaybeUninit::uninit(),
+        // len: MaybeUninit::uninit(),
+        len: 0
     };
 }
 
@@ -67,7 +73,7 @@ pub enum Error {
 }
 
 pub struct Queue<const LENGTH: usize, const DEPTH: usize> {
-    buffers: UnsafeCell<[Buffer<LENGTH>; DEPTH]>,
+    buffers: &'static [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH],
     read_index: AtomicUsize,
     read_in_progress: AtomicBool,
     write_index: AtomicUsize,
@@ -81,7 +87,7 @@ unsafe impl<'a, const LENGTH: usize, const DEPTH: usize> Send for Queue<LENGTH, 
 unsafe impl<'a, const LENGTH: usize, const DEPTH: usize> Sync for Queue<LENGTH, DEPTH> {}
 
 impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
-    pub const fn new(buffers: UnsafeCell<[Buffer<LENGTH>; DEPTH]>) -> Self {
+    pub const fn new(buffers: &'static [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH]) -> Self {
         Self {
             buffers: buffers,
             read_index: AtomicUsize::new(0),
@@ -95,7 +101,7 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
     }
 
     pub fn try_dequeue(&self) -> Result<DequeueRef<LENGTH, DEPTH>, Error> {
-        critical_section::with(|_| unsafe {
+        critical_section::with(|_| {
             if self.read_in_progress.load(Ordering::SeqCst) {
                 return Err(Error::InProgress);
             }
@@ -103,10 +109,18 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
             if self.size.load(Ordering::SeqCst) > 0 {
                 self.read_in_progress.store(true, Ordering::SeqCst);
 
-                let bufs = &*self.buffers.get();
-                let buf = &bufs[self.read_index.load(Ordering::SeqCst)];
-                let len = buf.len.assume_init();
-                let data = &MaybeUninit::slice_assume_init_ref(&buf.data)[..len];
+                /* Safety: the async access to buffer data is guarded by atomic read/write and queue size flags.
+                 * The flagging logic should ensure a buffer can only be referenced be a user or a DMA engine but
+                 * not both at once.
+                 */
+                let buf = unsafe { &*self.buffers[self.read_index.load(Ordering::SeqCst)].get() };
+                // let len = unsafe { buf.len.assume_init() } ;
+                /* Saftey: this is safe because &buf.data is const/static allocated legally in the main.rs file 
+                 * (where a user can specify the link section) and so the compiler knows the type and satisfied
+                 * defined behavior constraints w.r.t data alignment and init values, and therefore referencing
+                 * the buffer means the internal data is valid.
+                 */
+                let data = unsafe { &MaybeUninit::slice_assume_init_ref(&buf.data)[..buf.len] };
 
                 Ok(DequeueRef { queue: self, data })
             } else {
@@ -122,10 +136,13 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
         // }
 
         poll_fn(|cx| {
-            critical_section::with(|_| unsafe {
+            critical_section::with(|_| {
                 match self.try_dequeue() {
                     Err(Error::QueueFullEmpty) => {
-                        *self.dequeue_waker.get() = Some(cx.waker().clone());
+                        /* Safety: this raw pointer write is safe because the underlying memory is statically allocated
+                         * and the total write operation is atomic across tasks because of the critical_section closure 
+                         */
+                        unsafe { *self.dequeue_waker.get() = Some(cx.waker().clone()) };
                         Poll::Pending
                     }
                     r => Poll::Ready(r),
@@ -140,7 +157,7 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
     }
 
     fn finish_dequeue(&self) {
-        critical_section::with(|_| unsafe {
+        critical_section::with(|_| {
             if self.read_in_progress.load(Ordering::SeqCst) {
                 self.read_in_progress.store(false, Ordering::SeqCst);
 
@@ -148,29 +165,44 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                 self.size.fetch_sub(1, Ordering::SeqCst);
             }
 
-            if let Some(w) = (*self.enqueue_waker.get()).take() {
+            /* Safety: this raw pointer write is safe because the underlying memory is statically allocated
+             * and the total write operation is atomic across tasks because of the critical_section closure 
+             */
+            if let Some(w) = unsafe { (*self.enqueue_waker.get()).take() } {
                 w.wake();
             }
         });
     }
 
     pub fn try_enqueue(&self) -> Result<EnqueueRef<LENGTH, DEPTH>, Error> {
-        critical_section::with(|_| unsafe {
+        critical_section::with(|_| {
             if self.write_in_progress.load(Ordering::SeqCst) {
                 return Err(Error::InProgress);
             }
 
             if self.size.load(Ordering::SeqCst) < DEPTH {
                 self.write_in_progress.store(true, Ordering::SeqCst);
-                let bufs = &mut *self.buffers.get();
-                let buf = &mut bufs[self.write_index.load(Ordering::SeqCst)];
-                let data = MaybeUninit::slice_assume_init_mut(&mut buf.data);
-                let len = buf.len.write(0);
+                /* Safety: the async access to buffer data is guarded by atomic read/write and queue size flags.
+                 * The flagging logic should ensure a buffer can only be referenced be a user or a DMA engine but
+                 * not both at once.
+                 */
+                let buf = unsafe { &mut *self.buffers[self.write_index.load(Ordering::SeqCst)].get() };
+                /* Saftey: this is safe because &buf.data is const/static allocated legally in the main.rs file 
+                 * (where a user can specify the link section) and so the compiler knows the type and satisfied
+                 * defined behavior constraints w.r.t data alignment and init values, and therefore referencing
+                 * the buffer means the internal data is valid.
+                 */
+                let data = unsafe { MaybeUninit::slice_assume_init_mut(&mut buf.data) };
+
+                // TODO CHCEK: https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#method.write-1 this should overwrite the value and
+                // return a mut ref to the new value
+                // let len = buf.len.write(0);
+                buf.len = 0;
 
                 Ok(EnqueueRef {
                     queue: self,
                     data,
-                    len: len,
+                    len: &mut buf.len,
                 })
             } else {
                 Err(Error::QueueFullEmpty)
@@ -179,15 +211,21 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
     }
 
     pub async fn enqueue(&self) -> Result<EnqueueRef<LENGTH, DEPTH>, Error> {
+        /* Safety: this raw pointer access is safe because the underlying memory is statically allocated
+         * and the total read operation is atomic across tasks because of the critical_section closure 
+         */
         if critical_section::with(|_| unsafe { (*self.enqueue_waker.get()).is_some() }) {
             return Err(Error::InProgress);
         }
 
         poll_fn(|cx| {
-            critical_section::with(|_| unsafe {
+            critical_section::with(|_| {
                 match self.try_enqueue() {
                     Err(Error::QueueFullEmpty) => {
-                        *self.enqueue_waker.get() = Some(cx.waker().clone());
+                        /* Safety: this raw pointer write is safe because the underlying memory is statically allocated
+                         * and the total write operation is atomic across tasks because of the critical_section closure 
+                         */
+                        unsafe { *self.enqueue_waker.get() = Some(cx.waker().clone()) };
                         Poll::Pending
                     }
                     r => Poll::Ready(r),
@@ -202,7 +240,7 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
     }
 
     fn finish_enqueue(&self) {
-        critical_section::with(|_| unsafe {
+        critical_section::with(|_| {
             if self.write_in_progress.load(Ordering::SeqCst) {
                 self.write_in_progress.store(false, Ordering::SeqCst);
 
@@ -210,7 +248,10 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                 self.size.fetch_add(1, Ordering::SeqCst);
             }
 
-            if let Some(w) = (*self.dequeue_waker.get()).take() {
+            /* Safety: this raw pointer write is safe because the underlying memory is statically allocated
+             * and the total write operation is atomic across tasks because of the critical_section closure 
+             */
+            if let Some(w) = unsafe { (*self.dequeue_waker.get()).take() } {
                 w.wake();
             }
         });

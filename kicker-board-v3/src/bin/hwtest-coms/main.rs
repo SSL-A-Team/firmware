@@ -2,8 +2,9 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 #![feature(const_mut_refs)]
+#![feature(sync_unsafe_cell)]
 
-use core::cell::UnsafeCell;
+use core::cell::SyncUnsafeCell;
 use static_cell::StaticCell;
 
 use defmt::*;
@@ -15,25 +16,22 @@ use embassy_executor::{Executor, InterruptExecutor};
 use embassy_stm32::{
     adc::{Adc, Resolution, SampleTime},
     gpio::{Level, Output, Speed},
-    interrupt::{self, InterruptExt},
+    interrupt,
+    interrupt::InterruptExt,
     pac::Interrupt,
     rcc::{AHBPrescaler, APBPrescaler, Pll, PllMul, PllPDiv, PllPreDiv, PllQDiv, PllSource, Sysclk},
     usart::{Config, Parity, StopBits, Uart}
 };
 use embassy_stm32::{bind_interrupts, peripherals, usart};
 
-use embassy_time::{Delay, Duration, Instant, Ticker};
+use embassy_time::{Duration, Instant, Ticker};
 
 use ateam_kicker_board_v3::{
-    adc_raw_to_v,
-    adc_v_to_battery_voltage,
+    adc_200v_to_rail_voltage, adc_raw_to_v,
     kick_manager::{
         KickManager, 
-        KickType},
-    pins::{
-        BlueStatusLed1Pin, BlueStatusLed2Pin, ChargePin, ChipPin, ComsUartModule, ComsUartRxDma, ComsUartTxDma, KickPin, PowerRail200vReadPin, RedStatusLedPin},
-    queue::Buffer,
-    uart_queue::{
+        KickType}, pins::{
+        BlueStatusLed1Pin, BlueStatusLed2Pin, ChargePin, ChipPin, ComsUartModule, ComsUartRxDma, ComsUartTxDma, KickPin, PowerRail200vReadPin, RedStatusLedPin}, queue::Buffer, uart_queue::{
         UartReadQueue,
         UartWriteQueue,
     }
@@ -47,20 +45,22 @@ const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 3;
 
 // control communications tx buffer
+const COMS_BUFFER_VAL_TX: SyncUnsafeCell<Buffer<MAX_TX_PACKET_SIZE>> = 
+    SyncUnsafeCell::new(Buffer::EMPTY);
 #[link_section = ".bss"]
-static mut COMS_BUFFERS_TX: StaticCell<UnsafeCell<[Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH]>> = StaticCell::new();
-static COMS_QUEUE_TX: StaticCell<UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>> = StaticCell::new();
+static COMS_BUFFERS_TX: [SyncUnsafeCell<Buffer<MAX_TX_PACKET_SIZE>>; TX_BUF_DEPTH] = 
+    [COMS_BUFFER_VAL_TX; TX_BUF_DEPTH];
+static COMS_QUEUE_TX: UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = 
+    UartWriteQueue::new(&COMS_BUFFERS_TX);
 
 // control communications rx buffer
+const COMS_BUFFER_VAL_RX: SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>> = 
+    SyncUnsafeCell::new(Buffer::EMPTY);
 #[link_section = ".bss"]
-static mut COMS_BUFFERS_RX: StaticCell<UnsafeCell<[Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH]>> = StaticCell::new();
-static COMS_QUEUE_RX: StaticCell<UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>> = StaticCell::new();
-
-// #[link_section = ".bss"]
-// static mut COMS_BUFFERS_RX: UnsafeCell<[Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH]> =
-//     UnsafeCell::new([Buffer::EMPTY; RX_BUF_DEPTH]);
-// static COMS_QUEUE_RX: UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
-//     UartReadQueue::new(unsafe { COMS_BUFFERS_RX });
+static COMS_BUFFERS_RX: [SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>>; RX_BUF_DEPTH] = 
+    [COMS_BUFFER_VAL_RX; RX_BUF_DEPTH];
+static COMS_QUEUE_RX: UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> = 
+    UartReadQueue::new(&COMS_BUFFERS_RX);
 
 fn get_empty_control_packet() -> KickerControl {
     KickerControl {
@@ -107,7 +107,7 @@ async fn high_pri_kick_task(
     // TODO dotstars
 
     // coms buffers
-    let mut telemetry_enabled: bool = false;
+    let mut telemetry_enabled: bool;
     let mut kicker_control_packet: KickerControl = get_empty_control_packet();
     let mut kicker_telemetry_packet: KickerTelemetry = get_empty_telem_packet();
 
@@ -116,11 +116,10 @@ async fn high_pri_kick_task(
     let mut last_packet_sent_time = Instant::now();
 
     loop {
-        let mut vrefint = adc.enable_vref(&mut Delay);
-        let vrefint_sample = adc.read_internal(&mut vrefint) as f32;
+        let mut vrefint = adc.enable_vrefint();
+        let vrefint_sample = adc.read(&mut vrefint) as f32;
 
-        let rail_voltage = adc_v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32, vrefint_sample));
-        let battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(adc.read(&mut battery_voltage_pin) as f32, vrefint_sample));
+        let rail_voltage = adc_200v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32, vrefint_sample));
         // optionally pre-flag errors? 
 
         /////////////////////////////////////
@@ -156,7 +155,7 @@ async fn high_pri_kick_task(
         telemetry_enabled = kicker_control_packet.telemetry_enabled() != 0;
 
         // no charge/kick in coms test
-        let res = kick_manager.command(battery_voltage, rail_voltage, false, KickType::None, 0.0).await;
+        let res = kick_manager.command(22.5, rail_voltage, false, KickType::None, 0.0).await;
 
         // send telemetry packet
         if telemetry_enabled {
@@ -164,7 +163,7 @@ async fn high_pri_kick_task(
             if Instant::checked_duration_since(&cur_time, last_packet_sent_time).unwrap().as_millis() > 20 {
                 kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(0, 0, ball_detected as u32, res.is_err() as u32);
                 kicker_telemetry_packet.rail_voltage = rail_voltage;
-                kicker_telemetry_packet.battery_voltage = battery_voltage;
+                kicker_telemetry_packet.battery_voltage = 22.5;
 
                 // raw interpretaion of a struct for wire transmission is unsafe
                 unsafe {
@@ -249,14 +248,6 @@ fn main() -> ! {
     let p = embassy_stm32::init(stm32_config);
 
     info!("kicker startup!");
-    
-    let coms_buffers_tx = unsafe { COMS_BUFFERS_TX.init(UnsafeCell::new([Buffer::EMPTY; TX_BUF_DEPTH])) };
-    // I don't think the queue actually needs to be static or linked into a specific section of memory
-    let coms_queue_tx = unsafe { COMS_QUEUE_TX.init(UartWriteQueue::new(*coms_buffers_tx)) };
-
-    let coms_buffers_rx = unsafe { COMS_BUFFERS_RX.init(UnsafeCell::new([Buffer::EMPTY; RX_BUF_DEPTH])) };
-    // I don't think the queue actually needs to be static or linked into a specific section of memory
-    let coms_queue_rx = unsafe { COMS_QUEUE_RX.init(UartReadQueue::new(*coms_buffers_rx)) };
 
     let _status_led = Output::new(p.PA11, Level::High, Speed::Low);
 
@@ -267,10 +258,10 @@ fn main() -> ! {
     // high priority executor handles kicking system
     // High-priority executor: I2C1, priority level 6
     // TODO CHECK THIS IS THE HIGHEST PRIORITY
-    interrupt::TIM2.set_priority(interrupt::Priority::P6);
+    embassy_stm32::interrupt::TIM2.set_priority(embassy_stm32::interrupt::Priority::P6);
     let spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
 
-    unwrap!(spawner.spawn(high_pri_kick_task(&coms_queue_rx, &coms_queue_tx, adc, p.PE4, p.PE5, p.PE6, p.PC0, p.PE1, p.PE2, p.PE3)));
+    unwrap!(spawner.spawn(high_pri_kick_task(&COMS_QUEUE_RX, &COMS_QUEUE_TX, adc, p.PE4, p.PE5, p.PE6, p.PC0, p.PE1, p.PE2, p.PE3)));
 
     //////////////////////////////////
     //  COMMUNICATIONS TASKS SETUP  //
@@ -297,7 +288,7 @@ fn main() -> ! {
     // Low priority executor: runs in thread mode, using WFE/SEV
     let lp_executor = EXECUTOR_LOW.init(Executor::new());
     lp_executor.run(|spawner| {
-        unwrap!(spawner.spawn(coms_queue_tx.spawn_task(coms_uart_tx)));
-        unwrap!(spawner.spawn(coms_queue_rx.spawn_task(coms_uart_rx)));
+        unwrap!(spawner.spawn(COMS_QUEUE_TX.spawn_task(coms_uart_tx)));
+        unwrap!(spawner.spawn(COMS_QUEUE_RX.spawn_task(coms_uart_rx)));
     });
 }

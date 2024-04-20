@@ -1,6 +1,10 @@
+#![warn(async_fn_in_trait)]
+
 use crate::queue::{self, Buffer, DequeueRef, Error, Queue};
 
-use core::{cell::UnsafeCell, future::Future};
+use core::{
+    cell::SyncUnsafeCell,
+    future::Future};
 use defmt::info;
 use embassy_executor::{raw::TaskStorage, SpawnToken};
 use embassy_stm32::{mode::Async, usart::{self, UartRx, UartTx}};
@@ -41,7 +45,7 @@ impl<
         const DEPTH: usize,
     > UartReadQueue<UART, DMA, LENGTH, DEPTH>
 {
-    pub const fn new(buffers: UnsafeCell<[Buffer<LENGTH>; DEPTH]>) -> Self {
+    pub const fn new(buffers: &'static[SyncUnsafeCell<Buffer<LENGTH>>; DEPTH]) -> Self {
         Self {
             queue_rx: Queue::new(buffers),
             task: TaskStorage::new(),
@@ -117,7 +121,7 @@ impl<
         const DEPTH: usize,
     > UartWriteQueue<UART, DMA, LENGTH, DEPTH>
 {
-    pub const fn new(buffers: UnsafeCell<[Buffer<LENGTH>; DEPTH]>) -> Self {
+    pub const fn new(buffers: &'static [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH]) -> Self {
         Self {
             queue_tx: Queue::new(buffers),
             task: TaskStorage::new(),

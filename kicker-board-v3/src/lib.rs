@@ -5,6 +5,7 @@
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(const_maybe_uninit_uninit_array)]
+#![feature(sync_unsafe_cell)]
 
 pub mod pins;
 pub mod kick_manager;

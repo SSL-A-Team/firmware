@@ -22,7 +22,6 @@
  *   is in an active state.
  */
 
-use crate::pins::{ChargePin, KickPin, ChipPin};
 use embassy_stm32::gpio::Output;
 use embassy_time::{Duration, Timer};
 use libm::{fmaxf, fminf};

@@ -53,6 +53,7 @@
             }))
             rust-analyzer
             probe-run
+            probe-rs
 
             # Python
             (pkgs.${python}.withPackages
