@@ -7,11 +7,13 @@
 #![feature(const_maybe_uninit_uninit_array)]
 #![feature(sync_unsafe_cell)]
 
-pub mod pins;
+pub mod drivers;
+pub mod tasks;
+
 pub mod kick_manager;
+pub mod pins;
 pub mod queue;
 pub mod uart_queue;
-pub mod drivers;
 
 pub const ADC_VREFINT_NOMINAL: f32 = 1230.0; // mV
 

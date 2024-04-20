@@ -10,14 +10,14 @@ use cortex_m_rt::entry;
 use embassy_executor::Spawner;
 use embassy_executor::Executor;
 use embassy_stm32::{
-    adc::SampleTime, gpio::{Level, Output, Speed}, peripherals::ADC1, time::mhz
+    adc::{Adc, SampleTime},
+    gpio::{Level, Output, Speed}
 };
-use embassy_time::{Delay, Duration, Timer};
-use embassy_stm32::adc::{Adc, Temperature, VrefInt};
+use embassy_time::{Duration, Timer};
 
 use static_cell::StaticCell;
 
-use ateam_kicker_board_v3::*;
+use ateam_kicker_board_v3::{tasks::get_system_config, *};
 use ateam_kicker_board_v3::pins::*;
 
 use panic_probe as _;
@@ -82,18 +82,15 @@ static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) -> ! {
-    let mut stm32_config: embassy_stm32::Config = Default::default();
-    // stm32_config.rcc.sys_ck = Some(mhz(168));
-    // stm32_config.rcc.hclk = Some(mhz(96));
-
-    let p = embassy_stm32::init(stm32_config);
+    let sys_config = get_system_config(tasks::ClkSource::InternalOscillator);
+    let p = embassy_stm32::init(sys_config);
 
     info!("kicker startup!");
 
     let _kick_pin = Output::new(p.PE5, Level::Low, Speed::Medium);
     let _chip_pin = Output::new(p.PE6, Level::Low, Speed::Medium);
     
-    let mut adc = Adc::new(p.ADC1);
+    let adc = Adc::new(p.ADC1);
 
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());

@@ -2,32 +2,21 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-use cortex_m::prelude::_embedded_hal_blocking_delay_DelayUs;
 use defmt::*;
+
+use ateam_kicker_board_v3::tasks::get_system_config;
+use embassy_stm32::gpio::{Level, Output, Speed};
 use {defmt_rtt as _, panic_probe as _};
 use embassy_executor::Spawner;
-use embassy_stm32::{
-    exti::ExtiInput,
-    gpio::{Input, Level, Output, Pull, Speed},
-    interrupt::{self, InterruptExt},
-    time::mhz,
-    usart::{self, Uart},
-};
-use embassy_time::{Duration, Ticker, Timer};
-use ateam_kicker_board::{
-    drivers::{breakbeam::Breakbeam}
-};
-use ateam_kicker_board::pins::{BlueStatusLedPin, GreenStatusLedPin, BreakbeamTxPin, BreakbeamRxPin};
+
+use embassy_time::{Duration, Timer};
+use ateam_kicker_board_v3::drivers::breakbeam::Breakbeam;
 
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    let mut stm32_config: embassy_stm32::Config = Default::default();
-    stm32_config.rcc.sys_ck = Some(mhz(48));
-    stm32_config.rcc.hclk = Some(mhz(48));
-    stm32_config.rcc.pclk = Some(mhz(48));
-
-    let p = embassy_stm32::init(stm32_config);
+    let sys_cfg = get_system_config(ateam_kicker_board_v3::tasks::ClkSource::InternalOscillator);
+    let p = embassy_stm32::init(sys_cfg);
 
     let _charge_pin = Output::new(p.PB3, Level::Low, Speed::Medium);
     let _kick_pin = Output::new(p.PB0, Level::Low, Speed::Medium);
