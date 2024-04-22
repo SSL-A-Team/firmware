@@ -18,8 +18,9 @@ impl<'a, const NUM_STATES: usize, const NUM_CONTROL_INPUTS: usize, const NUM_OBS
                 observation_model: &'a SMatrix<f32, NUM_OBSERVATIONS, NUM_STATES>,
                 process_cov: &'a SMatrix<f32, NUM_STATES, NUM_STATES>,
                 kalman_gain: &'a SMatrix<f32, NUM_STATES, NUM_OBSERVATIONS>,
+                estimate_cov: &'a SMatrix::<f32, NUM_STATES, NUM_STATES>,
             ) -> CgKalmanFilter<'a, NUM_STATES, NUM_CONTROL_INPUTS, NUM_OBSERVATIONS> {
-        let filter = CgKalmanFilter {
+        let mut filter = CgKalmanFilter {
             state_transition: state_transition,
             control_input: control_input,
             observation_model: observation_model,
@@ -31,6 +32,9 @@ impl<'a, const NUM_STATES: usize, const NUM_CONTROL_INPUTS: usize, const NUM_OBS
             pred_estimate_cov: SMatrix::<f32, NUM_STATES, NUM_STATES>::zeros(),
             measurement_residual: SMatrix::<f32, NUM_OBSERVATIONS, 1>::zeros()
         };
+
+        // Just initializing to non-zero, so don't need a permanent reference in struct
+        filter.estimate_cov.copy_from(estimate_cov);
 
         filter
     }

@@ -11,7 +11,7 @@ use super::robot_model::RobotModel;
 
 use super::params::body_vel_filter_params::{
     KF_NUM_STATES, KF_NUM_CONTROL_INPUTS, KF_NUM_OBSERVATIONS, 
-    STATE_TRANSITION, CONTROL_INPUT, OBSERVATION_MODEL, PROCESS_COV, KALMAN_GAIN,
+    STATE_TRANSITION, CONTROL_INPUT, OBSERVATION_MODEL, PROCESS_COV, INIT_ESTIMATE_COV, KALMAN_GAIN,
 };
 
 use super::params::body_vel_pid_params::{
@@ -49,7 +49,7 @@ pub struct BodyVelocityController<'a> {
 impl<'a> BodyVelocityController<'a> {
     pub fn new_from_global_params(loop_dt_s: f32, robot_model: RobotModel) -> BodyVelocityController<'a> {
         let body_vel_filter: CgKalmanFilter<KF_NUM_STATES, KF_NUM_CONTROL_INPUTS, KF_NUM_OBSERVATIONS> = 
-                CgKalmanFilter::new(&STATE_TRANSITION, &CONTROL_INPUT, &OBSERVATION_MODEL, &PROCESS_COV, &KALMAN_GAIN);
+                CgKalmanFilter::new(&STATE_TRANSITION, &CONTROL_INPUT, &OBSERVATION_MODEL, &PROCESS_COV, &KALMAN_GAIN, &INIT_ESTIMATE_COV);
 
         let body_vel_controller: PidController<KF_NUM_STATES> =
                 PidController::from_gains_matrix(&PID_GAIN);

@@ -9,6 +9,7 @@ const EXPECTED_DT_2: f32 = EXPECTED_DT * EXPECTED_DT;
 const ENCODER_NOISE: f32 = 0.11;  // noise in rad / sampling time 
 const GYRO_NOISE: f32 = 0.002;  // BMI085 compensated for spectral noise at 100Hz sample rate
 const PROCESS_NOISE: f32 = 0.05;
+const INITIAL_COV: f32 = 0.11;
 
 // Assume constant velocity as a valid linearization of the transition system
 pub static STATE_TRANSITION: Matrix3<f32> = 
@@ -40,6 +41,11 @@ pub static OBSERVATION_COV: Matrix5<f32> =
                 0.0,          0.0,          ENCODER_NOISE, 0.0,          0.0;
                 0.0,          0.0,          0.0,          ENCODER_NOISE, 0.0;
                 0.0,          0.0,          0.0,          0.0,          GYRO_NOISE];
+
+pub static INIT_ESTIMATE_COV: Matrix3<f32> =
+        matrix![INITIAL_COV, 0.0,         0.0;
+                0.0,         INITIAL_COV, 0.0;
+                0.0,         0.0,         INITIAL_COV];
 
 pub static KALMAN_GAIN: Matrix3x5<f32> = 
         matrix![0.008483887, -0.008483887, -0.006927967, 0.006928444, 0.0;
