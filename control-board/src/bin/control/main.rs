@@ -63,7 +63,7 @@ use credentials::public_credentials::wifi::wifi_credentials;
 fn panic(info: &core::panic::PanicInfo) -> ! {
     defmt::error!("{}", defmt::Display2Format(info));
     // Delay to give it a change to print
-    cortex_m::asm::delay(10_000_000);
+    cortex_m::asm::delay(1_000_000_000);
     cortex_m::peripheral::SCB::sys_reset();
 }
 
