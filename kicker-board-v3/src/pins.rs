@@ -18,9 +18,10 @@ pub type RedStatusLedPin = PE1;
 pub type BlueStatusLed1Pin = PE2;
 pub type BlueStatusLed2Pin = PE3;
 
-pub type UserBtn = PD4;
-pub type PowerBtnInt = PD5;
-pub type PowerKill = PD6;
+pub type UserBtnPin = PD4;
+pub type PowerBtnIntPin = PD5;
+pub type PowerBtnIntExti = EXTI5;
+pub type PowerKillPin = PD6;
 
 pub type ComsUartModule = USART1;
 pub type ComsUartTxPin = PA9;

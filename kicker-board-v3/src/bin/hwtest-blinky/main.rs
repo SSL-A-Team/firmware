@@ -8,8 +8,7 @@ use {defmt_rtt as _, panic_probe as _};
 use embassy_executor::Spawner;
 use embassy_executor::Executor;
 use embassy_stm32::{
-    adc::{Adc, SampleTime},
-    gpio::{Level, Output, Speed}
+    adc::{Adc, SampleTime}, exti::ExtiInput, gpio::{Level, Output, Pull, Speed}, interrupt::InterruptExt
 };
 use embassy_time::{Duration, Timer};
 
@@ -39,6 +38,8 @@ async fn blink(
     let mut status_led_red = Output::new(status_led_red, Level::Low, Speed::Medium);
     let mut status_led_blue1 = Output::new(status_led_blue1, Level::Low, Speed::Medium);
     let mut status_led_blue2 = Output::new(status_led_blue2, Level::Low, Speed::Medium);
+
+    // let usr_btn = Input::new();
 
     // let mut temp = adc.enable_temperature();
     adc.set_resolution(embassy_stm32::adc::Resolution::BITS12);
@@ -74,8 +75,32 @@ async fn blink(
         adc_6v2_to_rail_voltage(adc_raw_to_v(raw_6v2, vrefint_sample)),
         adc_5v0_to_rail_voltage(adc_raw_to_v(raw_5v0, vrefint_sample)),
         adc_3v3_to_rail_voltage(adc_raw_to_v(raw_int, vrefint_sample)));
+
+
     }
 }
+
+#[embassy_executor::task]
+async fn shutdown_int(pwr_btn_int_pin: PowerBtnIntPin,
+                      pwr_btn_int_exti: PowerBtnIntExti,
+                      pwr_kill_pin: PowerKillPin) {
+
+    let mut pwr_btn_int = ExtiInput::new(pwr_btn_int_pin, pwr_btn_int_exti, Pull::Down);
+    let mut pwr_kill = Output::new(pwr_kill_pin, Level::High, Speed::Medium);
+
+    defmt::info!("task waiting for btn int from power front end...");
+
+    pwr_btn_int.wait_for_rising_edge().await;
+
+    defmt::warn!("received request to power down.");
+
+    // TODO do anything you need to do
+
+    pwr_kill.set_low();
+
+    loop {}
+}
+
 static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
 #[embassy_executor::main]
@@ -85,14 +110,15 @@ async fn main(_spawner: Spawner) -> ! {
 
     info!("kicker startup!");
 
-    let _kick_pin = Output::new(p.PE5, Level::Low, Speed::Medium);
-    let _chip_pin = Output::new(p.PE6, Level::Low, Speed::Medium);
+    // let _kick_pin = Output::new(p.PE5, Level::Low, Speed::Medium);
+    // let _chip_pin = Output::new(p.PE6, Level::Low, Speed::Medium);
     
     let adc = Adc::new(p.ADC1);
 
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
+        unwrap!(spawner.spawn(shutdown_int(p.PD5, p.EXTI5, p.PD6)));
         unwrap!(spawner.spawn(blink(p.PE4, p.PE1, p.PE0, p.PE2, p.PE3, adc, p.PC0, p.PC1, p.PC3, p.PC2)));
     });
 }
