@@ -46,7 +46,7 @@
 #define VELOCITY_LOOP_RATE_S ((float) VELOCITY_LOOP_RATE_MS / (float) MS_PER_S)
 #define TORQUE_LOOP_RATE_MS 1
 #define TORQUE_LOOP_RATE_S ((float) TORQUE_LOOP_RATE_MS / (float) MS_PER_S)
-#define TELEMETRY_LOOP_RATE_MS 5
+#define TELEMETRY_LOOP_RATE_MS 1
 
 ////////////////////////
 //  FILTERING/TUNING  //
