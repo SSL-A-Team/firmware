@@ -9,9 +9,8 @@ use cortex_m_rt::entry;
 
 use embassy_executor::Executor;
 use embassy_stm32::{
-    adc::Adc,
-    gpio::{Level, Output, Speed},
-    adc::SampleTime,
+    adc::{Adc, SampleTime},
+    gpio::{Input, Level, Output, Pull, Speed},
 };
 use embassy_time::{Duration, Timer, Ticker};
 
@@ -27,6 +26,7 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
         reg_charge: ChargePin,
         status_led_red: RedStatusLedPin,
         status_led_green: GreenStatusLedPin,
+        usr_btn_pin: UserBtnPin,
         kick_pin: KickPin) -> ! {
 
     let mut ticker = Ticker::every(Duration::from_millis(1));
@@ -36,6 +36,8 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
     let mut reg_charge = Output::new(reg_charge, Level::Low, Speed::Medium);
     let mut status_led_green = Output::new(status_led_green, Level::Low, Speed::Medium);
     let mut status_led_red = Output::new(status_led_red, Level::Low, Speed::Medium);
+
+    let usr_btn = Input::new(usr_btn_pin, Pull::None);
 
     status_led_green.set_high();
     Timer::after(Duration::from_millis(500)).await;
@@ -65,8 +67,17 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
         }
     }
 
+    'outer: while usr_btn.is_low() {
+        while usr_btn.is_high() {
+            defmt::info!("btn pressed! - initiating kick cycle");
+            break 'outer;
+        }
+    }
+
+    Timer::after(Duration::from_millis(1000)).await;
+
     reg_charge.set_high();
-    Timer::after(Duration::from_millis(50)).await;
+    Timer::after(Duration::from_millis(450)).await;
     reg_charge.set_low();
 
     let mut vrefint = adc.enable_vrefint();
@@ -122,6 +133,6 @@ fn main() -> ! {
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        unwrap!(spawner.spawn(run_kick(adc, p.PC0, p.PC1, p.PE4, p.PE1, p.PE0, p.PE5)));
+        unwrap!(spawner.spawn(run_kick(adc, p.PC0, p.PC1, p.PE4, p.PE1, p.PE0, p.PD4, p.PE5)));
     });
 }

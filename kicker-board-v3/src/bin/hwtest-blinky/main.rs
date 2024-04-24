@@ -37,7 +37,7 @@ async fn blink(
         mut rail_5v0_pin: PowerRail5v0ReadPin) -> ! {
 
     let mut reg_charge = Output::new(reg_charge, Level::Low, Speed::Medium);
-    let mut status_led_green = Output::new(status_led_green, Level::Low, Speed::Medium);
+    let mut status_led_green = Output::new(status_led_green, Level::High, Speed::Medium);
     let mut status_led_red = Output::new(status_led_red, Level::Low, Speed::Medium);
     let mut status_led_blue1 = Output::new(status_led_blue1, Level::Low, Speed::Medium);
     let mut status_led_blue2 = Output::new(status_led_blue2, Level::Low, Speed::Medium);
@@ -50,7 +50,7 @@ async fn blink(
 
     'outer: while usr_btn.is_low() {
         while usr_btn.is_high() {
-            defmt::info!("btn pressed! - initiating kick cycle");
+            defmt::info!("btn pressed! - cycle");
             break 'outer;
         }
     }
