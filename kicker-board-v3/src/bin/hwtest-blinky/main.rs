@@ -8,7 +8,9 @@ use {defmt_rtt as _, panic_probe as _};
 use embassy_executor::Spawner;
 use embassy_executor::Executor;
 use embassy_stm32::{
-    adc::{Adc, SampleTime}, exti::ExtiInput, gpio::{Level, Output, Pull, Speed}, interrupt::InterruptExt
+    adc::{Adc, SampleTime}, 
+    exti::ExtiInput,
+    gpio::{Input, Level, Output, Pull, Speed},
 };
 use embassy_time::{Duration, Timer};
 
@@ -27,6 +29,7 @@ async fn blink(
         status_led_green: GreenStatusLedPin,
         status_led_blue1: BlueStatusLed1Pin,
         status_led_blue2: BlueStatusLed2Pin,
+        usr_btn_pin: UserBtnPin,
         mut adc: Adc<'static, PowerRailAdc>,
         mut rail_200v_pin: PowerRail200vReadPin,
         mut rail_12v0_pin: PowerRail12vReadPin,
@@ -39,11 +42,20 @@ async fn blink(
     let mut status_led_blue1 = Output::new(status_led_blue1, Level::Low, Speed::Medium);
     let mut status_led_blue2 = Output::new(status_led_blue2, Level::Low, Speed::Medium);
 
-    // let usr_btn = Input::new();
+    let usr_btn = Input::new(usr_btn_pin, Pull::None);
 
     // let mut temp = adc.enable_temperature();
     adc.set_resolution(embassy_stm32::adc::Resolution::BITS12);
     adc.set_sample_time(SampleTime::CYCLES480);
+
+    'outer: while usr_btn.is_low() {
+        while usr_btn.is_high() {
+            defmt::info!("btn pressed! - initiating kick cycle");
+            break 'outer;
+        }
+    }
+
+    Timer::after(Duration::from_millis(1000)).await;
 
     loop {
         reg_charge.set_low();
@@ -94,6 +106,8 @@ async fn shutdown_int(pwr_btn_int_pin: PowerBtnIntPin,
 
     defmt::warn!("received request to power down.");
 
+    Timer::after(Duration::from_millis(1000)).await;
+
     // TODO do anything you need to do
 
     pwr_kill.set_low();
@@ -110,8 +124,8 @@ async fn main(_spawner: Spawner) -> ! {
 
     info!("kicker startup!");
 
-    // let _kick_pin = Output::new(p.PE5, Level::Low, Speed::Medium);
-    // let _chip_pin = Output::new(p.PE6, Level::Low, Speed::Medium);
+    let _kick_pin = Output::new(p.PE5, Level::Low, Speed::Medium);
+    let _chip_pin = Output::new(p.PE6, Level::Low, Speed::Medium);
     
     let adc = Adc::new(p.ADC1);
 
@@ -119,6 +133,6 @@ async fn main(_spawner: Spawner) -> ! {
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
         unwrap!(spawner.spawn(shutdown_int(p.PD5, p.EXTI5, p.PD6)));
-        unwrap!(spawner.spawn(blink(p.PE4, p.PE1, p.PE0, p.PE2, p.PE3, adc, p.PC0, p.PC1, p.PC3, p.PC2)));
+        unwrap!(spawner.spawn(blink(p.PE4, p.PE1, p.PE0, p.PE2, p.PE3, p.PD4, adc, p.PC0, p.PC1, p.PC3, p.PC2)));
     });
 }
