@@ -48,10 +48,10 @@
 
             # Rust Embedded
             (rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override {
-              extensions = [ "rust-src" ];
+              extensions = [ "rust-src" "rust-analyzer" ];
               targets = [ "thumbv7em-none-eabihf" "thumbv6m-none-eabi" ];
             }))
-            rust-analyzer
+            # rust-analyzer
             probe-run
             probe-rs
 

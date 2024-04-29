@@ -1,0 +1,21 @@
+[package]
+name = "ateam-lib-stm32"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "A common library for ateam stm32 targets"
+repository = "https://github.com/SSL-A-Team/firmware"
+
+[dependencies]
+embassy-stm32 = { version = "0.1.0", default-features = false }
+embassy-executor = { version = "0.5.0", default-features = false }
+defmt = "=0.3.6" # pin this for now, probe run doesn't support wire version 4, which dropped in 3.4 (3.3 recalled)
+defmt-rtt = "0.3"
+critical-section = "1.1.1"
+
+[patch.crates-io]
+embassy-executor = { git = "https://github.com/embassy-rs/embassy"}
+embassy-sync = { git = "https://github.com/embassy-rs/embassy"}
+embassy-time = { git = "https://github.com/embassy-rs/embassy"}
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy"}
+embassy-futures = { git = "https://github.com/embassy-rs/embassy"}
