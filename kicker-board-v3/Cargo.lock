@@ -24,6 +24,7 @@ name = "ateam-kicker-board-v3"
 version = "0.1.0"
 dependencies = [
  "ateam-common-packets",
+ "ateam-lib-stm32",
  "const_format",
  "cortex-m",
  "cortex-m-rt",
@@ -41,6 +42,17 @@ dependencies = [
  "libm",
  "panic-probe",
  "static_cell",
+]
+
+[[package]]
+name = "ateam-lib-stm32"
+version = "0.1.0"
+dependencies = [
+ "critical-section 1.1.2",
+ "defmt",
+ "defmt-rtt",
+ "embassy-executor",
+ "embassy-stm32",
 ]
 
 [[package]]

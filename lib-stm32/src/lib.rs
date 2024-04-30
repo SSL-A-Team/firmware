@@ -5,5 +5,8 @@
 #![feature(const_maybe_uninit_uninit_array)]
 #![feature(maybe_uninit_slice)]
 
-pub mod queue;
+pub mod drivers;
 pub mod uart;
+
+pub mod queue;
+
