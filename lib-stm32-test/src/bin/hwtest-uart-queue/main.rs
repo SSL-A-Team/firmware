@@ -177,8 +177,8 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
 
     let coms_usart = Uart::new(
         p.USART2,
-        p.PD6,
-        p.PD5,
+        p.PD6, // rx
+        p.PD5, // tx
         Irqs,
         p.DMA1_CH1,
         p.DMA1_CH2,
@@ -187,6 +187,7 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
 
     let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
 
+    // MIGHT should put queues in mix prio, this could elicit the bug
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
