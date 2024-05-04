@@ -1,21 +1,28 @@
-use embassy_stm32::gpio::{Output, Input, Pin, Pull};
-use embassy_stm32::pwm::simple_pwm::{PwmPin, SimplePwm};
-use embassy_stm32::pwm::Channel;
+use embassy_stm32::gpio::{Input, Output, OutputType, Pin, Pull};
+use embassy_stm32::timer::{
+    GeneralInstance4Channel,
+    Channel,
+    simple_pwm::{
+        PwmPin,
+        SimplePwm}};
 use embassy_stm32::time::khz;
+use embassy_stm32::Peripheral;
 use embassy_time::{Duration, Timer};
 
-pub struct Breakbeam<'a, PwmTx: Pin, PinRx: Pin> {
-    pin_tx: SimplePwm<'a, PwmTx>,
-    pin_rx: Input<'a, PinRx>,
+pub struct Breakbeam<'a, Timer: GeneralInstance4Channel> {
+    pin_tx: SimplePwm<'a, Timer>,
+    pin_rx: Input<'a>,
 }
 
-impl<'a, PinTx: Pin, PinRx: Pin, Timer: Peripheral> Breakbeam<'a, PinTx, PinRx, > {
-    pub fn new(pin_tx: PinTx, pin_rx: PinRx) -> Self {
-        let ch_1 = PwmPin::new_ch1(pin_tx);
+impl<'a, Timer: GeneralInstance4Channel> Breakbeam<'a, Timer> {
+    pub fn new(pin_tx: PwmPin<'a, Timer, Channel>, pin_rx: impl Peripheral<P = impl Pin> + 'a) -> Self {
+        let ch_1 = PwmPin::new_ch1(pin_tx, OutputType::PushPull);
         let mut pwm_tx = SimplePwm::new(pin_tx, Level::High, Speed::Low);
+        
         let pin_rx = Input::new(pin_rx, Pull::Down);
+
         Self {
-            pwm_tx,
+            pin_tx: pwm_tx,
             pin_rx
         }
     }

@@ -8,9 +8,9 @@ use core::{
 };
 
 use embassy_stm32::{
-    bind_interrupts, exti::ExtiInput, gpio::{Level, Output, Pull, Speed}, peripherals::{self, *}, usart::{self, *}
+    bind_interrupts, exti::ExtiInput, gpio::{Level, Output, Pull, Speed}, interrupt, pac::Interrupt, peripherals::{self, *}, usart::{self, *}
 };
-use embassy_executor::Executor;
+use embassy_executor::{Executor, InterruptExecutor};
 use embassy_time::Timer;
 
 use defmt::*;
@@ -32,9 +32,9 @@ type UserBtnPin = PC13;
 type UserBtnExti = EXTI13;
 
 const MAX_TX_PACKET_SIZE: usize = 64;
-const TX_BUF_DEPTH: usize = 10;
+const TX_BUF_DEPTH: usize = 5;
 const MAX_RX_PACKET_SIZE: usize = 64;
-const RX_BUF_DEPTH: usize = 10;
+const RX_BUF_DEPTH: usize = 5;
 
 // control communications tx buffer
 const COMS_BUFFER_VAL_TX: SyncUnsafeCell<Buffer<MAX_TX_PACKET_SIZE>> = 
@@ -123,7 +123,7 @@ async fn handle_btn_press(usr_btn_pin: UserBtnPin,
 
     let mut usr_btn = ExtiInput::new(usr_btn_pin, usr_btn_exti, Pull::Down);
 
-    let mut green_led = Output::new(led_green_pin, Level::Low, Speed::Medium);
+    let mut green_led = Output::new(led_green_pin, Level::High, Speed::Medium);
     let mut yellow_led = Output::new(led_yellow_pin, Level::Low, Speed::Medium);
     let mut red_led = Output::new(led_red_pin, Level::Low, Speed::Medium);
 
@@ -142,11 +142,11 @@ async fn handle_btn_press(usr_btn_pin: UserBtnPin,
         if cur_loop_rate == 100 {
             new_loop_rate = 10;
 
-            red_led.set_high();
+            yellow_led.set_high();
         } else if cur_loop_rate == 10 {
             new_loop_rate = 1;
 
-            yellow_led.set_high();
+            red_led.set_high();
         } else {
             green_led.set_high();
         }
@@ -154,7 +154,13 @@ async fn handle_btn_press(usr_btn_pin: UserBtnPin,
     }
 }
 
+static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
 static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
+
+#[interrupt]
+unsafe fn TIM2() {
+    EXECUTOR_HIGH.on_interrupt();
+}
 
 bind_interrupts!(struct Irqs {
     USART2 => usart::InterruptHandler<peripherals::USART2>;
@@ -166,6 +172,12 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
     let stm32_config: embassy_stm32::Config = Default::default();
     let p = embassy_stm32::init(stm32_config);
     
+    // high priority executor handles kicking system
+    // High-priority executor: I2C1, priority level 6
+    // TODO CHECK THIS IS THE HIGHEST PRIORITY
+    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::TIM2, embassy_stm32::interrupt::Priority::P6);
+    let high_pri_spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
+
     //////////////////////////////////
     //  COMMUNICATIONS TASKS SETUP  //
     //////////////////////////////////
@@ -187,13 +199,17 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
 
     let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
 
+    unwrap!(high_pri_spawner.spawn(COMS_QUEUE_RX.spawn_task(coms_uart_rx)));
+    unwrap!(high_pri_spawner.spawn(COMS_QUEUE_TX.spawn_task(coms_uart_tx)));
+
+
     // MIGHT should put queues in mix prio, this could elicit the bug
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
         unwrap!(spawner.spawn(handle_btn_press(p.PC13, p.EXTI13, p.PB0, p.PE1, p.PB14)));
-        unwrap!(spawner.spawn(COMS_QUEUE_RX.spawn_task(coms_uart_rx)));
-        unwrap!(spawner.spawn(COMS_QUEUE_TX.spawn_task(coms_uart_tx)));
+        // unwrap!(spawner.spawn(COMS_QUEUE_RX.spawn_task(coms_uart_rx)));
+        // unwrap!(spawner.spawn(COMS_QUEUE_TX.spawn_task(coms_uart_tx)));
         unwrap!(spawner.spawn(rx_task(&COMS_QUEUE_RX)));
         unwrap!(spawner.spawn(tx_task(&COMS_QUEUE_TX)));
     });

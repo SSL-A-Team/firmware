@@ -51,13 +51,28 @@ impl<'buf, T: spi::Instance, const CS_POL_N: bool> AT25DF041B<'buf, T, CS_POL_N>
         self.select();
 
         self.rx_buf[0] = 0x9F;
+        self.select();
         let res = self.transfer(5).await; // send cmd byte, get 4 back
+        self.deselect();
         if res.is_err() {
             return Err(());
         }
 
-        
+        // let mfg_id = self.rx_buf[1];
+        // let dev_id_upper = self.rx_buf[2];
+        // let dev_id_lower = self.rx_buf[3];
+        // let dev_edis_len = self.rx_buf[4];
 
-        return Err(())
+        let expected_mfg_info: [u8; 4] = [0x1F, 0x44, 0x02, 0x00];
+        let mut received_mfg_info: [u8; 4] = [0; 4];
+        received_mfg_info.copy_from_slice(&self.rx_buf[1..5]);
+
+        if received_mfg_info != expected_mfg_info {
+            defmt::error!("AT25DF041B manufacturer information did not match datasheet.");
+            defmt::debug!("expected {}, got {}", expected_mfg_info, received_mfg_info);
+            return Err(())
+        }
+
+        return Ok(())
     }
 }
