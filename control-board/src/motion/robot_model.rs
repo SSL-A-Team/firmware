@@ -23,10 +23,10 @@ impl RobotModel {
         let neg_r = -(&robot_constants.wheel_radius_m);
 
         Matrix4x3::new(
-            cosf(theta[0]) / neg_r[0], sinf(theta[0]) / neg_r[0], wheel_dist[0] / neg_r[0],
-            cosf(theta[1]) / neg_r[1], sinf(theta[1]) / neg_r[1], wheel_dist[1] / neg_r[1],
-            cosf(theta[2]) / neg_r[2], sinf(theta[2]) / neg_r[2], wheel_dist[2] / neg_r[2],
-            cosf(theta[3]) / neg_r[3], sinf(theta[3]) / neg_r[3], wheel_dist[3] / neg_r[3],
+            cosf(theta[0]) / neg_r[0], sinf(theta[0]) / neg_r[0], -wheel_dist[0] / neg_r[0],
+            cosf(theta[1]) / neg_r[1], sinf(theta[1]) / neg_r[1], -wheel_dist[1] / neg_r[1],
+            cosf(theta[2]) / neg_r[2], sinf(theta[2]) / neg_r[2], -wheel_dist[2] / neg_r[2],
+            cosf(theta[3]) / neg_r[3], sinf(theta[3]) / neg_r[3], -wheel_dist[3] / neg_r[3],
         )
     }
 

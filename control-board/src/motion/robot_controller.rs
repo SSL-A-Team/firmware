@@ -191,7 +191,7 @@ impl<'a> BodyVelocityController<'a> {
         
         // If the encoder estimate is small enough, then replace IMU value with 
         // encoder value to reduce the jittery noise.
-        if abs32(enc_body_vel[2]) < 0.01 {
+        if abs32(enc_body_vel[2]) < 0.1 {
             measurement[4] = enc_body_vel[2]
         }
 

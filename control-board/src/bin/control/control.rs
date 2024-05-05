@@ -360,10 +360,10 @@ impl<'a> Control<'a> {
                 WHEEL_RADIUS_M,
             ),
             wheel_dist_to_cent_m: Vector4::new(
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M[0],
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M[1],
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M[2],
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M[3],
+                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
             ),
         };
 
