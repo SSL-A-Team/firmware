@@ -56,6 +56,7 @@ static COMS_QUEUE_RX: UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET
 
 static LOOP_RATE_MS: AtomicU16 = AtomicU16::new(100);
 
+#[allow(dead_code)]
 struct StupidPacket {
     fields_of_minimal_intelligence: [usize; 16],
 }

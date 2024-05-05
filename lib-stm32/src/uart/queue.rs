@@ -183,11 +183,11 @@ impl<
 }
 
 pub trait Reader {
-    async fn read<RET, FN: FnOnce(&[u8]) -> RET>(&self, fn_read: FN) -> Result<RET, ()>;
+    fn read<RET, FN: FnOnce(&[u8]) -> RET>(&self, fn_read: FN) -> impl core::future::Future<Output = Result<RET, ()>>;
 }
 
 pub trait Writer {
-    async fn write<FN: FnOnce(&mut [u8]) -> usize>(&self, fn_write: FN) -> Result<(), ()>;
+    fn write<FN: FnOnce(&mut [u8]) -> usize>(&self, fn_write: FN) -> impl core::future::Future<Output = Result<(), ()>>;
 }
 
 impl<
