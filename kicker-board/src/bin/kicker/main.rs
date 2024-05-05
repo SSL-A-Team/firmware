@@ -5,7 +5,7 @@
 #![feature(sync_unsafe_cell)]
 
 use core::cell::SyncUnsafeCell;
-use ateam_kicker_board::{drivers::breakbeam::Breakbeam, tasks::get_system_config};
+use ateam_kicker_board::{drivers::breakbeam::Breakbeam, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin}, tasks::get_system_config};
 use static_cell::StaticCell;
 
 use defmt::*;
@@ -33,7 +33,7 @@ use ateam_kicker_board::{
     kick_manager::{KickManager, KickType},
     pins::{
         BlueStatusLed1Pin, BlueStatusLed2Pin, ChargePin, ChipPin, ComsUartModule, ComsUartRxDma,
-        ComsUartTxDma, PowerRail200vReadPin, KickPin, RedStatusLedPin, BreakbeamTxPin, BreakbeamRxPin,
+        ComsUartTxDma, PowerRail200vReadPin, KickPin, RedStatusLedPin,
     },
 };
 
@@ -110,8 +110,8 @@ async fn high_pri_kick_task(
     charge_pin: ChargePin,
     kick_pin: KickPin,
     chip_pin: ChipPin,
-    breakbeam_tx: BreakbeamTxPin,
-    breakbeam_rx: BreakbeamRxPin,
+    breakbeam_tx: BreakbeamLeftAgpioPin,
+    breakbeam_rx: BreakbeamRightAgpioPin,
     mut rail_pin: PowerRail200vReadPin,
     err_led_pin: RedStatusLedPin,
     ball_detected_led1_pin: BlueStatusLed1Pin,
@@ -416,7 +416,7 @@ fn main() -> ! {
     // TODO CHECK THIS IS THE HIGHEST PRIORITY
     embassy_stm32::interrupt::TIM2.set_priority(embassy_stm32::interrupt::Priority::P6);
     let spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
-    unwrap!(spawner.spawn(high_pri_kick_task(&COMS_QUEUE_RX, &COMS_QUEUE_TX, adc, p.PE4, p.PE5, p.PE6, p.PA3, p.PA2, p.PC0, p.PE1, p.PE2, p.PE3)));
+    unwrap!(spawner.spawn(high_pri_kick_task(&COMS_QUEUE_RX, &COMS_QUEUE_TX, adc, p.PE4, p.PE5, p.PE6, p.PA1, p.PA0, p.PC0, p.PE1, p.PE2, p.PE3)));
 
 
     //////////////////////////////////
