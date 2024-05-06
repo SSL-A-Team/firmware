@@ -9,8 +9,6 @@ if (!(Confirm-AdministatorPrivledgesActive)) {
     # user has not deliberately run the script as admin
     # print text warning and pause so they know a UAC prompt is coming
     Write-Host "Elevating to administrator runtime. You will prompted via UAC."
-    # Write-Host "Press any *LETTER* key to continue..."
-    # $null = [Console]::ReadKey() | Out-Null
     
     # elevate
     if ([int](Get-CimInstance -Class Win32_OperatingSystem | Select-Object -ExpandProperty BuildNumber) -ge 6000) {
