@@ -10,7 +10,10 @@ dependencies = [
  "defmt",
  "defmt-rtt",
  "embassy-executor",
+ "embassy-futures",
  "embassy-stm32",
+ "embassy-sync",
+ "embassy-time",
 ]
 
 [[package]]

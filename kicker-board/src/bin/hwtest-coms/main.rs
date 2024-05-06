@@ -5,6 +5,7 @@
 #![feature(sync_unsafe_cell)]
 
 use core::cell::SyncUnsafeCell;
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use static_cell::StaticCell;
 
 use defmt::*;
@@ -45,13 +46,14 @@ const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 3;
 
 // control communications tx buffer
+const COMS_BUFFER_MUTEX: Mutex<CriticalSectionRawMutex, bool> = Mutex::new(false);
 const COMS_BUFFER_VAL_TX: SyncUnsafeCell<Buffer<MAX_TX_PACKET_SIZE>> = 
     SyncUnsafeCell::new(Buffer::EMPTY);
 #[link_section = ".bss"]
 static COMS_BUFFERS_TX: [SyncUnsafeCell<Buffer<MAX_TX_PACKET_SIZE>>; TX_BUF_DEPTH] = 
     [COMS_BUFFER_VAL_TX; TX_BUF_DEPTH];
 static COMS_QUEUE_TX: UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = 
-    UartWriteQueue::new(&COMS_BUFFERS_TX);
+    UartWriteQueue::new(&COMS_BUFFERS_TX, COMS_BUFFER_MUTEX);
 
 // control communications rx buffer
 const COMS_BUFFER_VAL_RX: SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>> = 
@@ -60,7 +62,7 @@ const COMS_BUFFER_VAL_RX: SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>> =
 static COMS_BUFFERS_RX: [SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>>; RX_BUF_DEPTH] = 
     [COMS_BUFFER_VAL_RX; RX_BUF_DEPTH];
 static COMS_QUEUE_RX: UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> = 
-    UartReadQueue::new(&COMS_BUFFERS_RX);
+    UartReadQueue::new(&COMS_BUFFERS_RX, COMS_BUFFER_MUTEX);
 
 fn get_empty_control_packet() -> KickerControl {
     KickerControl {

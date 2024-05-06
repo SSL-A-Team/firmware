@@ -4,13 +4,14 @@
 
 use core::{
     cell::SyncUnsafeCell,
-    sync::atomic::AtomicU16
+    sync::atomic::AtomicU32
 };
 
 use embassy_stm32::{
     bind_interrupts, exti::ExtiInput, gpio::{Level, Output, Pull, Speed}, interrupt, pac::Interrupt, peripherals::{self, *}, usart::{self, *}
 };
 use embassy_executor::{Executor, InterruptExecutor};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::Timer;
 
 use defmt::*;
@@ -37,13 +38,14 @@ const MAX_RX_PACKET_SIZE: usize = 64;
 const RX_BUF_DEPTH: usize = 5;
 
 // control communications tx buffer
+const COMS_BUFFER_MUTEX: Mutex<CriticalSectionRawMutex, bool> = Mutex::new(false);
 const COMS_BUFFER_VAL_TX: SyncUnsafeCell<Buffer<MAX_TX_PACKET_SIZE>> = 
     SyncUnsafeCell::new(Buffer::EMPTY);
 #[link_section = ".axisram.buffers"]
 static COMS_BUFFERS_TX: [SyncUnsafeCell<Buffer<MAX_TX_PACKET_SIZE>>; TX_BUF_DEPTH] = 
     [COMS_BUFFER_VAL_TX; TX_BUF_DEPTH];
 static COMS_QUEUE_TX: UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = 
-    UartWriteQueue::new(&COMS_BUFFERS_TX);
+    UartWriteQueue::new(&COMS_BUFFERS_TX, COMS_BUFFER_MUTEX);
 
 // control communications rx buffer
 const COMS_BUFFER_VAL_RX: SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>> = 
@@ -52,9 +54,9 @@ const COMS_BUFFER_VAL_RX: SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>> =
 static COMS_BUFFERS_RX: [SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>>; RX_BUF_DEPTH] = 
     [COMS_BUFFER_VAL_RX; RX_BUF_DEPTH];
 static COMS_QUEUE_RX: UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> = 
-    UartReadQueue::new(&COMS_BUFFERS_RX);
+    UartReadQueue::new(&COMS_BUFFERS_RX, COMS_BUFFER_MUTEX);
 
-static LOOP_RATE_MS: AtomicU16 = AtomicU16::new(100);
+static BAUD_RATE: AtomicU32 = AtomicU32::new(115200);
 
 #[allow(dead_code)]
 struct StupidPacket {
@@ -84,10 +86,11 @@ async fn rx_task(coms_reader: &'static UartReadQueue<ComsUartModule, ComsUartRxD
                     *state.offset(i as isize) = buf[i];
                 }                
             }
+
+            defmt::info!("got a packet");
         }
 
-        let millis = LOOP_RATE_MS.load(core::sync::atomic::Ordering::SeqCst);
-        Timer::after_millis(millis as u64).await;
+        Timer::after_millis(10).await;
     }
 }
 
@@ -110,8 +113,7 @@ async fn tx_task(coms_writer: &'static UartWriteQueue<ComsUartModule, ComsUartTx
             let _res = coms_writer.enqueue_copy(struct_bytes);
         }
 
-        let millis = LOOP_RATE_MS.load(core::sync::atomic::Ordering::SeqCst);
-        Timer::after_millis(millis as u64).await;
+        Timer::after_millis(1000).await;
     }
 }
 
@@ -120,14 +122,14 @@ async fn handle_btn_press(usr_btn_pin: UserBtnPin,
     usr_btn_exti: UserBtnExti,
     led_green_pin: LedGreenPin,
     led_yellow_pin: LedYellowPin,
-    led_red_pin: LedRedPin) {
+    led_red_pin: LedRedPin,
+    coms_writer: &'static UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>) {
 
     let mut usr_btn = ExtiInput::new(usr_btn_pin, usr_btn_exti, Pull::Down);
 
     let mut green_led = Output::new(led_green_pin, Level::High, Speed::Medium);
     let mut yellow_led = Output::new(led_yellow_pin, Level::Low, Speed::Medium);
     let mut red_led = Output::new(led_red_pin, Level::Low, Speed::Medium);
-
 
     loop {
         usr_btn.wait_for_rising_edge().await;
@@ -136,22 +138,32 @@ async fn handle_btn_press(usr_btn_pin: UserBtnPin,
         yellow_led.set_low();
         red_led.set_low();
 
-        defmt::info!("updating loop rates");
+        defmt::info!("updating baudrate");
 
-        let cur_loop_rate = LOOP_RATE_MS.load(core::sync::atomic::Ordering::SeqCst);
-        let mut new_loop_rate = 100;
-        if cur_loop_rate == 100 {
-            new_loop_rate = 10;
+        let mut coms_uart_config = Config::default();
 
-            yellow_led.set_high();
-        } else if cur_loop_rate == 10 {
-            new_loop_rate = 1;
-
+        let cur_baud_rate = BAUD_RATE.load(core::sync::atomic::Ordering::SeqCst);
+        if cur_baud_rate == 115_200 {
             red_led.set_high();
+
+            defmt::info!("set 2M,PE,S1");
+            coms_uart_config.baudrate = 2_000_000; // 2 Mbaud
+            coms_uart_config.parity = Parity::ParityEven;
+            coms_uart_config.stop_bits = StopBits::STOP1;
+
+            BAUD_RATE.store(2_000_000, core::sync::atomic::Ordering::SeqCst);
         } else {
             green_led.set_high();
-        }
-        LOOP_RATE_MS.store(new_loop_rate, core::sync::atomic::Ordering::SeqCst);
+
+            defmt::info!("set 115200,PN,S1");
+            coms_uart_config.baudrate = 115_200; // 2 Mbaud
+            coms_uart_config.parity = Parity::ParityNone;
+            coms_uart_config.stop_bits = StopBits::STOP1;
+
+            BAUD_RATE.store(115_200, core::sync::atomic::Ordering::SeqCst);
+        };
+
+        coms_writer.update_uart_config(coms_uart_config).await;
     }
 }
 
@@ -184,8 +196,8 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
     //////////////////////////////////
 
     let mut coms_uart_config = Config::default();
-    coms_uart_config.baudrate = 2_000_000; // 2 Mbaud
-    coms_uart_config.parity = Parity::ParityEven;
+    coms_uart_config.baudrate = 115_200; // 2 Mbaud
+    coms_uart_config.parity = Parity::ParityNone;
     coms_uart_config.stop_bits = StopBits::STOP1;
 
     let coms_usart = Uart::new(
@@ -208,7 +220,7 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        unwrap!(spawner.spawn(handle_btn_press(p.PC13, p.EXTI13, p.PB0, p.PE1, p.PB14)));
+        unwrap!(spawner.spawn(handle_btn_press(p.PC13, p.EXTI13, p.PB0, p.PE1, p.PB14, &COMS_QUEUE_TX)));
         // unwrap!(spawner.spawn(COMS_QUEUE_RX.spawn_task(coms_uart_rx)));
         // unwrap!(spawner.spawn(COMS_QUEUE_TX.spawn_task(coms_uart_tx)));
         unwrap!(spawner.spawn(rx_task(&COMS_QUEUE_RX)));

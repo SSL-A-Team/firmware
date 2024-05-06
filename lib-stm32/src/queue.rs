@@ -62,6 +62,7 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> EnqueueRef<'a, LENGTH, DEPTH> 
     pub fn len(&mut self) -> &mut usize {
         self.len
     }
+    
     pub fn cancel(self) {
         self.queue.cancel_enqueue();
     }

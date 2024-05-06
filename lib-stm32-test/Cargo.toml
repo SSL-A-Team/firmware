@@ -60,7 +60,7 @@ test = false
 harness = false
 
 [[bin]]
-name = "hwtest-uart-queue"
+name = "hwtest-uart-queue-mixedrate"
 test = false
 harness = false
 
