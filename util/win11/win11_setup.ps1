@@ -231,7 +231,7 @@ function Install-wingetPackage {
 #  Script  #
 ############
 
-Write-Host "Checking critical verions..."
+Write-Host "Checking critical versions..."
 
 $anyInstallPending = $false
 $canInstallMissingItems = $true

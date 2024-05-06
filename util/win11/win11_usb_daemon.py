@@ -16,7 +16,7 @@ USBIPD_CMD_ATTACH_BUSID = ["usbipd", "attach", "--wsl", "--busid", "ID"]
 USBIPD_CMD_DETACH_BUSID = ["usbipd", "detach", "--busid", "ID"]
 
 
-ST_LINK_DESCR_KEY = "ST-Link Debug"
+DESCR_KEYS = ["ST-Link Debug", "J-Link driver"]
 DEV_KEY = "Devices"
 
 running = True
@@ -91,7 +91,7 @@ def attach_device_to_wsl(dev: Device):
         # print("Bus Id invalid. This sometimes happens with reconnects or as the stlink VHUB is enumerated.")
         return False
     
-    print(f"New ST-Link device ({dev.bus_id}). Attaching to WSL")
+    print(f"New programmer device ({dev.description}) at id ({dev.bus_id}). Attaching to WSL")
 
     if dev.client_ip_address is not None:
         print(f"Bus ({dev.bus_id}) is already attached")
@@ -128,8 +128,10 @@ def attach_device_to_wsl(dev: Device):
 
 def process_new_devices(devices: set[Device]):
     for dev in devices:
-        if ST_LINK_DESCR_KEY in dev.description:
-            attach_device_to_wsl(dev)
+        # Iterates through all of the possible keys and adds if matches.
+        for key in DESCR_KEYS:
+            if key in dev.description:
+                attach_device_to_wsl(dev)
 
 
 def cleanup_device(dev: Device):
@@ -139,7 +141,7 @@ def cleanup_device(dev: Device):
         return False
 
     if dev.client_ip_address is not None:
-        print(f"Cleaning up ST-Link device ({dev.bus_id}).")
+        print(f"Cleaning up programmer device ({dev.description}) at id ({dev.bus_id}).")
 
         USBIPD_CMD_DETACH_BUSID[3] = dev.bus_id
         output = subprocess.run(USBIPD_CMD_DETACH_BUSID, capture_output=True)
@@ -152,8 +154,10 @@ def cleanup_device(dev: Device):
 
 def process_removed_devices(devices: set[Device]):
     for dev in devices:
-        if ST_LINK_DESCR_KEY in dev.description:
-            cleanup_device(dev)
+        # Iterates through all of the possible keys and adds if matches.
+        for key in DESCR_KEYS:
+            if key in dev.description:
+                cleanup_device(dev)
 
 
 def shutdown_cleanup():
@@ -170,6 +174,7 @@ def shutdown_handler(sig, frame):
 
 
 if __name__ == "__main__":
+    print("Starting USBIPD Daemon")
     try:
         valid_env = validate_env()
         if not valid_env:
