@@ -84,7 +84,8 @@ apt update
 apt install linux-tools-generic hwdata
 update-alternatives --install /usr/local/bin/usbip usbip /usr/lib/linux-tools/*-generic/usbip 20
 ```
+First run `win11_setup.ps1` in `util/win11` and allow the script to install/update additional dependencies as needed.
 
-TODO: automate `usbipd wsl attach --busid <busid>`
+Then run `win11_usb_daemon.ps1` also in `util/win11` to automatically manage the ST-Link / J-Link programmer passthrough. 
 
 Additional information is available at [Microsoft USB passthrough documentation](https://learn.microsoft.com/en-us/windows/wsl/connect-usb).
