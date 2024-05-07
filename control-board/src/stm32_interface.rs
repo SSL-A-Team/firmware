@@ -9,8 +9,8 @@ use embassy_stm32::usart::{self, Parity, Config};
 use embassy_time::{Duration, Timer};
 use embassy_time::with_timeout;
 
-use crate::queue::{DequeueRef, Error};
-use crate::uart_queue::{Reader, Writer, UartReadQueue, UartWriteQueue};
+use ateam_lib_stm32::queue::{DequeueRef, Error};
+use ateam_lib_stm32::uart::queue::{Reader, Writer, UartReadQueue, UartWriteQueue};
 
 pub const STM32_BOOTLOADER_MAX_BAUD_RATE: u32 = 115_200;
 pub const STM32_BOOTLOADER_ACK: u8 = 0x79;
@@ -47,13 +47,11 @@ pub struct Stm32Interface<
         const LEN_TX: usize,
         const DEPTH_RX: usize, 
         const DEPTH_TX: usize,
-        Boot0Pin: Pin, 
-        ResetPin: Pin
 > {
-    reader: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
-    writer: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
-    boot0_pin: Option<Output<'a, Boot0Pin>>,
-    reset_pin: Option<Output<'a, ResetPin>>,
+    reader: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
+    writer: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+    boot0_pin: Option<Output<'a>>,
+    reset_pin: Option<Output<'a>>,
 
     reset_pin_noninverted: bool,
 
@@ -69,16 +67,14 @@ impl<
         const LEN_TX: usize,
         const DEPTH_RX: usize, 
         const DEPTH_TX: usize,
-        Boot0Pin: Pin, 
-        ResetPin: Pin
-    > Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin>
+    > Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
 {
     pub fn new(        
-        read_queue: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
-        boot0_pin: Option<Output<'a, Boot0Pin>>,
-        reset_pin: Option<Output<'a, ResetPin>>
-    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin> {
+        read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        boot0_pin: Option<Output<'a>>,
+        reset_pin: Option<Output<'a>>
+    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         // let the user set the initial state
         // if boot0_pin.is_some() {
         //     boot0_pin.as_mut().unwrap().set_low();
@@ -99,11 +95,11 @@ impl<
     }
 
     pub fn new_noninverted_reset(        
-        read_queue: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
-        boot0_pin: Option<Output<'a, Boot0Pin>>,
-        reset_pin: Option<Output<'a, ResetPin>>
-    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin> {
+        read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        boot0_pin: Option<Output<'a>>,
+        reset_pin: Option<Output<'a>>
+    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         // let the user set the initial state
         // if boot0_pin.is_some() {
         //     boot0_pin.as_mut().unwrap().set_low();
@@ -237,47 +233,54 @@ impl<
         Ok(())
     }
 
-    pub unsafe fn update_uart_config(&self, baudrate: u32, parity: Parity) {
-        let div = (UART::frequency().0 + (baudrate / 2)) / baudrate * UART::MULTIPLIER;
+    pub async fn update_uart_config(&self, baudrate: u32, parity: Parity) {
+        let mut config = usart::Config::default();
+        config.baudrate = baudrate;
+        config.parity = parity;
 
-        // let irq = UART::Interrupt::steal();
-        // irq.disable();
+        self.writer.update_uart_config(config).await;
 
-        let r = UART::regs();
-        // disable the uart. Can't modify parity and baudrate while module is enabled
-        r.cr1().modify(|w| {
-            w.set_ue(false);
-        });
 
-        // set the baudrate
-        r.brr().modify(|w| {
-            w.set_brr(div);
-        });
+        // let div = (UART::frequency().0 + (baudrate / 2)) / baudrate * UART::MULTIPLIER;
 
-        // set parity 
-        r.cr1().modify(|w| {
-            if parity != Parity::ParityNone {
-                // configure 9 bit transmission and enable parity control
-                w.set_m0(pac::lpuart::vals::M0::BIT9);
-                w.set_pce(true);
+        // // let irq = UART::Interrupt::steal();
+        // // irq.disable();
 
-                // set polarity type
-                if parity == Parity::ParityEven {
-                    w.set_ps(pac::lpuart::vals::Ps::EVEN);
-                } else {
-                    w.set_ps(pac::lpuart::vals::Ps::ODD);
-                }
-            } else {
-                // disable parity (1 byte transmissions)
-                w.set_m0(pac::lpuart::vals::M0::BIT8);
-                w.set_pce(false);
-            }
-        });
+        // let r = UART::regs();
+        // // disable the uart. Can't modify parity and baudrate while module is enabled
+        // r.cr1().modify(|w| {
+        //     w.set_ue(false);
+        // });
 
-        // reenable UART
-        r.cr1().modify(|w| {
-            w.set_ue(true);
-        });
+        // // set the baudrate
+        // r.brr().modify(|w| {
+        //     w.set_brr(div);
+        // });
+
+        // // set parity 
+        // r.cr1().modify(|w| {
+        //     if parity != Parity::ParityNone {
+        //         // configure 9 bit transmission and enable parity control
+        //         w.set_m0(pac::usart::vals::M0::BIT9);
+        //         w.set_pce(true);
+
+        //         // set polarity type
+        //         if parity == Parity::ParityEven {
+        //             w.set_ps(pac::usart::vals::Ps::EVEN);
+        //         } else {
+        //             w.set_ps(pac::usart::vals::Ps::ODD);
+        //         }
+        //     } else {
+        //         // disable parity (1 byte transmissions)
+        //         w.set_m0(pac::usart::vals::M0::BIT8);
+        //         w.set_pce(false);
+        //     }
+        // });
+
+        // // reenable UART
+        // r.cr1().modify(|w| {
+        //     w.set_ue(true);
+        // });
 
         // let div = (pclk_freq.0 + (config.baudrate / 2)) / config.baudrate * multiplier;
 

@@ -2,7 +2,7 @@ use core::fmt::Write;
 use embassy_stm32::usart;
 use heapless::String;
 
-use crate::uart_queue::{UartReadQueue, UartWriteQueue};
+use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
 
 use super::at_protocol::{ATEvent, ATResponse};
 use super::edm_protocol::EdmPacket;
@@ -51,8 +51,8 @@ pub struct Radio<
     const DEPTH_TX: usize,
     const DEPTH_RX: usize,
 > {
-    reader: &'a UartReadQueue<'a, UART, RxDma, LEN_RX, DEPTH_RX>,
-    writer: &'a UartWriteQueue<'a, UART, TxDma, LEN_TX, DEPTH_TX>,
+    reader: &'a UartReadQueue<UART, RxDma, LEN_RX, DEPTH_RX>,
+    writer: &'a UartWriteQueue<UART, TxDma, LEN_TX, DEPTH_TX>,
     mode: RadioMode,
     wifi_connected: bool,
 }
@@ -69,8 +69,8 @@ impl<
     > Radio<'a, UART, TxDma, RxDma, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>
 {
     pub fn new(
-        reader: &'a UartReadQueue<'a, UART, RxDma, LEN_RX, DEPTH_RX>,
-        writer: &'a UartWriteQueue<'a, UART, TxDma, LEN_TX, DEPTH_TX>,
+        reader: &'a UartReadQueue<UART, RxDma, LEN_RX, DEPTH_RX>,
+        writer: &'a UartWriteQueue<UART, TxDma, LEN_TX, DEPTH_TX>,
     ) -> Self {
         Self {
             reader,

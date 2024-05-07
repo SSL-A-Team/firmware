@@ -175,25 +175,25 @@ pub enum ATEvent<'a> {
 }
 
 impl<'b> ATEvent<'b> {
-    const CR_LF: &str = "\r\n";
+    const CR_LF: &'static str = "\r\n";
 
-    const PEER_CONNECTED: &str = "+UUDPC";
-    const PEER_DISCONNECTED: &str = "+UUDPD";
-    const WIFI_LINK_CONNECTED: &str = "+UUWLE";
-    const WIFI_LINK_DISCONNECTED: &str = "+UUWLD";
-    const WIFI_ACCESS_POINT_UP: &str = "+UUWAPU";
-    const WIFI_ACCESS_POINT_DOWN: &str = "+UUWAPD";
-    const WIFI_AP_STATION_CONNECTED: &str = "+UUWAPSTAC";
-    const WIFI_AP_STATION_DISCONNECTED: &str = "+UUWAPSTAD";
-    const ETHERNET_LINK_UP: &str = "+UUETHLU";
-    const ETHERNET_LINK_DOWN: &str = "+UUETHLD";
-    const NETWORK_UP: &str = "+UUNU";
-    const NETWORK_DOWN: &str = "+UUND";
-    const NETWORK_ERROR: &str = "UUNERR";
+    const PEER_CONNECTED: &'static str = "+UUDPC";
+    const PEER_DISCONNECTED: &'static str = "+UUDPD";
+    const WIFI_LINK_CONNECTED: &'static str = "+UUWLE";
+    const WIFI_LINK_DISCONNECTED: &'static str = "+UUWLD";
+    const WIFI_ACCESS_POINT_UP: &'static str = "+UUWAPU";
+    const WIFI_ACCESS_POINT_DOWN: &'static str = "+UUWAPD";
+    const WIFI_AP_STATION_CONNECTED: &'static str = "+UUWAPSTAC";
+    const WIFI_AP_STATION_DISCONNECTED: &'static str = "+UUWAPSTAD";
+    const ETHERNET_LINK_UP: &'static str = "+UUETHLU";
+    const ETHERNET_LINK_DOWN: &'static str = "+UUETHLD";
+    const NETWORK_UP: &'static str = "+UUNU";
+    const NETWORK_DOWN: &'static str = "+UUND";
+    const NETWORK_ERROR: &'static str = "UUNERR";
 
-    const PEER_CONNECTED_BLUETOOTH: &str = "1";
-    const PEER_CONNECTED_IPV4: &str = "2";
-    const PEER_CONNECTED_IPV6: &str = "3";
+    const PEER_CONNECTED_BLUETOOTH: &'static str = "1";
+    const PEER_CONNECTED_IPV4: &'static str = "2";
+    const PEER_CONNECTED_IPV6: &'static str = "3";
 
     pub fn new<'a>(buf: &'a [u8]) -> Result<ATEvent<'a>, ()> {
         let s = core::str::from_utf8(buf).or(Err(()))?;
@@ -314,10 +314,10 @@ pub enum ATResponse<'a> {
 }
 
 impl<'b> ATResponse<'b> {
-    const CR_LF: &str = "\r\n";
+    const CR_LF: &'static str = "\r\n";
 
-    const RESP_OK: &str = "OK";
-    const RESP_ERROR: &str = "ERROR";
+    const RESP_OK: &'static str = "OK";
+    const RESP_ERROR: &'static str = "ERROR";
 
     pub fn new<'a>(buf: &'a [u8]) -> Result<ATResponse<'a>, ()> {
         let s = core::str::from_utf8(buf).or(Err(()))?;

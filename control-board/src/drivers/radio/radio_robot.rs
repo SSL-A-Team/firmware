@@ -1,5 +1,5 @@
 use super::radio::{PeerConnection, Radio, WifiAuth};
-use crate::uart_queue::{UartReadQueue, UartWriteQueue};
+use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
 use ateam_common_packets::bindings_radio::{
     self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data, BasicTelemetry, ControlDebugTelemetry, ParameterCommand,
 };
@@ -9,9 +9,7 @@ use core::fmt::Write;
 use core::mem::size_of;
 use embassy_futures::select::{select, Either};
 use embassy_stm32::gpio::{Level, Pin, Speed, Output};
-use embassy_stm32::pac;
 use embassy_stm32::usart;
-use embassy_stm32::Peripheral;
 use embassy_time::{Duration, Timer};
 use heapless::String;
 
@@ -54,8 +52,7 @@ unsafe impl<
         const LEN_TX: usize,
         const DEPTH_TX: usize,
         const DEPTH_RX: usize,
-        PIN: Pin,
-    > Send for RobotRadio<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_TX, DEPTH_RX, PIN>
+    > Send for RobotRadio<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_TX, DEPTH_RX>
 {
 }
 
@@ -70,7 +67,6 @@ pub struct RobotRadio<
     const LEN_RX: usize,
     const DEPTH_TX: usize,
     const DEPTH_RX: usize,
-    PIN: Pin,
 > {
     radio: Radio<
         'a,
@@ -82,7 +78,7 @@ pub struct RobotRadio<
         DEPTH_TX,
         DEPTH_RX,
     >,
-    reset_pin: Output<'a, PIN>,
+    reset_pin: Output<'a>,
     peer: Option<PeerConnection>,
 }
 
@@ -95,14 +91,13 @@ impl<
         const LEN_RX: usize,
         const DEPTH_TX: usize,
         const DEPTH_RX: usize,
-        PIN: Pin,
-    > RobotRadio<'a, UART, DmaRx, DmaTx, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, PIN>
+    > RobotRadio<'a, UART, DmaRx, DmaTx, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>
 {
     pub async fn new(
-        read_queue: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
-        reset_pin: impl Peripheral<P = PIN> + 'a,
-    ) -> Result<RobotRadio<'a, UART, DmaRx, DmaTx, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, PIN>, ()>
+        read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        reset_pin: impl Pin,
+    ) -> Result<RobotRadio<'a, UART, DmaRx, DmaTx, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>, ()>
     {
         let mut reset_pin = Output::new(reset_pin, Level::High, Speed::Medium);
         Timer::after(Duration::from_micros(100)).await;
@@ -115,22 +110,10 @@ impl<
         radio.set_echo(false).await?;
         radio.config_uart(baudrate, false, 8, true).await?;
 
-        let div = (UART::frequency().0 + (baudrate / 2)) / baudrate * UART::MULTIPLIER;
-        unsafe {
-            let r = UART::regs();
-            r.cr1().modify(|w| {
-                w.set_ue(false);
-            });
-            r.brr().modify(|w| {
-                w.set_brr(div);
-            });
-            r.cr1().modify(|w| {
-                w.set_ue(true);
-                w.set_m0(pac::lpuart::vals::M0::BIT9);
-                w.set_pce(true);
-                w.set_ps(pac::lpuart::vals::Ps::EVEN);
-            });
-        };
+        let mut radio_uart_config = usart::Config::default();
+        radio_uart_config.baudrate = 2_000_000;
+        radio_uart_config.parity = usart::Parity::ParityEven;
+        write_queue.update_uart_config(radio_uart_config).await;
 
         // Datasheet says wait at least 40ms after UART config change
         Timer::after(Duration::from_millis(50)).await;
@@ -382,7 +365,7 @@ impl<
                 return Err(());
             }
 
-            let mut data_copy = [0u8; PACKET_SIZE];
+            let mut data_copy = [0u8; size_of::<RadioPacket>()];
             data_copy.clone_from_slice(&data[0..PACKET_SIZE]);
 
             let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
@@ -409,7 +392,7 @@ impl<
                 + size_of::<ParameterCommand>();
 
             if data.len() == CONTROL_PACKET_SIZE {
-                let mut data_copy = [0u8; CONTROL_PACKET_SIZE];
+                let mut data_copy = [0u8; size_of::<RadioPacket>()];
                 data_copy.clone_from_slice(&data[0..CONTROL_PACKET_SIZE]);
     
                 let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
@@ -420,7 +403,7 @@ impl<
     
                 Ok(unsafe { DataPacket::BasicControl(packet.data.control) })
             } else if data.len() == PARAMERTER_PACKET_SIZE {
-                let mut data_copy = [0u8; PARAMERTER_PACKET_SIZE];
+                let mut data_copy = [0u8; size_of::<RadioPacket>()];
                 data_copy.clone_from_slice(&data[0..PARAMERTER_PACKET_SIZE]);
     
                 let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };

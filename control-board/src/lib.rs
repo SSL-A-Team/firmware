@@ -9,17 +9,14 @@
     maybe_uninit_write_slice
 )]
 #![feature(const_mut_refs)]
-#![feature(adt_const_params)]
 #![feature(ptr_metadata)]
-#![feature(async_fn_in_trait)]
 #![feature(const_fn_floating_point_arithmetic)]
 
 // pub mod fw_images;
-pub mod queue;
 pub mod motion;
+pub mod pins;
 pub mod stm32_interface;
 pub mod stspin_motor;
-pub mod uart_queue;
 pub mod parameter_interface;
 
 pub mod drivers;
@@ -45,8 +42,8 @@ macro_rules! include_external_cpp_bin {
 #[macro_export]
 macro_rules! include_kicker_bin {
     ($var_name:ident, $bin_file:literal) => {
-        pub static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../kicker-board/target/thumbv6m-none-eabi/release/", $bin_file)).len()]
-            = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../kicker-board/target/thumbv6m-none-eabi/release/", $bin_file));
+        pub static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../kicker-board/target/thumbv7em-none-eabi/release/", $bin_file)).len()]
+            = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../kicker-board/target/thumbv7em-none-eabi/release/", $bin_file));
     }
 }
 pub const BATTERY_MIN_VOLTAGE: f32 = 19.0;

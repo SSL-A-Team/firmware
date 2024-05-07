@@ -1,4 +1,4 @@
-use ateam_common_packets::{bindings_radio::{BasicControl, BasicTelemetry, ControlDebugTelemetry, ParameterCommand, ParameterName}};
+use ateam_common_packets::bindings_radio::{BasicControl, BasicTelemetry, ControlDebugTelemetry, ParameterCommand, ParameterName};
 use embassy_executor::SendSpawner;
 use embassy_stm32::{
     gpio::{Level, Output, Speed},
@@ -7,21 +7,21 @@ use embassy_stm32::{
 use embassy_time::{Duration, Timer};
 use ateam_control_board::{
     include_external_cpp_bin,
-    queue::Buffer,
     stm32_interface::Stm32Interface,
     stspin_motor::{WheelMotor, DribblerMotor},
-    uart_queue::{UartReadQueue, UartWriteQueue},
     motion::{
         robot_model::{RobotConstants, RobotModel},
         robot_controller::BodyVelocityController
     },
     BATTERY_MIN_VOLTAGE, parameter_interface::ParameterInterface
 };
+use ateam_lib_stm32::queue::Buffer;
+use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
 use nalgebra::{Vector3, Vector4};
 
 use embassy_sync::pubsub::Subscriber;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use crate::pins::*;
+use ateam_control_board::pins::*;
 
 
 include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}

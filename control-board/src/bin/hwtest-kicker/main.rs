@@ -30,8 +30,6 @@ use static_cell::StaticCell;
 
 use ateam_common_packets::bindings_kicker::KickRequest;
 
-mod pins;
-
 include_kicker_bin! {KICKER_FW_IMG, "kicker.bin"}
 
 const MAX_TX_PACKET_SIZE: usize = 16;
@@ -71,15 +69,17 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
     let spawner = executor.start();
 
+    let dotstar_spi_config = spi::Config::default();
+    dotstar_spi_config.frequency = mhz(1);
+
     let dotstar_spi = spi::Spi::new_txonly(
         p.SPI3,
         p.PB3,
         p.PB5,
         NoDma,
-        NoDma,
-        hz(1_000_000),
-        spi::Config::default(),
+        dotstar_spi_config,
     );
+    
     let mut dotstar = Apa102::new(dotstar_spi);
     let _ = dotstar.write([RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
 

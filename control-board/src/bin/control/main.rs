@@ -8,11 +8,13 @@ use apa102_spi::Apa102;
 use ateam_control_board::{
     adc_raw_to_v, adc_v_to_battery_voltage,
     drivers::{
-        radio::TeamColor, radio::WifiNetwork, rotary::Rotary, shell_indicator::ShellIndicator, kicker::Kicker,
+        radio::TeamColor,
+        radio::WifiNetwork,
+        rotary::Rotary,
+        shell_indicator::ShellIndicator,
+        kicker::Kicker,
     },
-    queue::Buffer,
     stm32_interface::{get_bootloader_uart_config, Stm32Interface},
-    uart_queue::{UartReadQueue, UartWriteQueue},
     BATTERY_BUFFER_SIZE, BATTERY_MAX_VOLTAGE, BATTERY_MIN_VOLTAGE, include_kicker_bin, parameter_interface::ParameterInterface,
 };
 use control::Control;
@@ -20,19 +22,18 @@ use defmt::info;
 use embassy_stm32::{
     adc::{Adc, SampleTime},
     dma::NoDma,
-    executor::InterruptExecutor,
     exti::ExtiInput,
     gpio::{Input, Level, Output, Pull, Speed},
-    interrupt::{self, InterruptExt},
+    interrupt,
     peripherals::{DMA2_CH4, DMA2_CH5, USART6},
     spi,
     time::{hz, mhz},
     usart::{self, Uart},
     wdg::IndependentWatchdog,
 };
-use embassy_time::{Delay, Duration, Ticker, Timer};
-use futures_util::StreamExt;
-use pins::{
+use embassy_executor::InterruptExecutor;
+use embassy_time::{Duration, Ticker, Timer};
+use ateam_control_board::pins::{
     PowerStateExti, PowerStatePin, RadioReset, RadioRxDMA, RadioTxDMA, RadioUART,
     ShutdownCompletePin,
 };
@@ -45,10 +46,12 @@ use static_cell::StaticCell;
 
 use embassy_stm32::rcc::AdcClockSource;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::pubsub::{PubSubChannel};
+use embassy_sync::pubsub::PubSubChannel;
+
+use ateam_lib_stm32::queue::Buffer;
+use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
 
 mod control;
-mod pins;
 mod radio;
 
 #[cfg(not(feature = "no-private-credentials"))]
@@ -130,8 +133,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.SPI3,
         p.PB3,
         p.PB5,
-        NoDma,
-        NoDma,
         hz(1_000_000),
         spi::Config::default(),
     );
@@ -195,13 +196,15 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // Battery Voltage  //
     //////////////////////
 
-    let mut adc3 = Adc::new(p.ADC3, &mut Delay);
+    let mut adc3 = Adc::new(p.ADC3);
     adc3.set_sample_time(SampleTime::Cycles1_5);
     let mut battery_pin = p.PF5;
     let mut battery_voltage_buffer: [f32; BATTERY_BUFFER_SIZE] =
         [BATTERY_MAX_VOLTAGE; BATTERY_BUFFER_SIZE];
     let battery_pub = BATTERY_CHANNEL.publisher().unwrap();
 
+    let imu_spi_config = spi::Config::default();
+    imu_spi_config.frequency = mhz(1);
     let mut imu_spi = spi::Spi::new(
         p.SPI6,
         p.PA5,
@@ -209,8 +212,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.PA6,
         p.BDMA_CH0,
         p.BDMA_CH1,
-        hz(1_000_000),
-        spi::Config::default(),
+        imu_spi_config,
     );
 
     // acceleromter
@@ -507,9 +509,8 @@ async fn power_off_task(
     exti: PowerStateExti,
     shutdown_pin: ShutdownCompletePin,
 ) {
-    let power_state = Input::new(power_state_pin, Pull::None);
     let mut shutdown = Output::new(shutdown_pin, Level::Low, Speed::Low);
-    let mut power_state = ExtiInput::new(power_state, exti);
+    let mut power_state = ExtiInput::new(power_state_pin, exti, Pull::None);
     power_state.wait_for_falling_edge().await;
     shutdown.set_high();
     loop {}

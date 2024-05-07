@@ -4,16 +4,19 @@ use core::{
     cell::SyncUnsafeCell,
     future::Future, sync::atomic::{AtomicBool, Ordering}};
 
-use embassy_executor::{
-    raw::TaskStorage,
-    SpawnToken};
 use embassy_stm32::{
     mode::Async,
     usart::{self, UartRx, UartTx}
 };
-use embassy_futures::select::{select, Either};
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embassy_executor::{
+    raw::TaskStorage,
+    SpawnToken};
 
+use embassy_futures::select::{select, Either};
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex,
+    mutex::Mutex
+};
 use embassy_time::Timer;
 
 use crate::queue::{
@@ -21,7 +24,33 @@ use crate::queue::{
     Buffer,
     DequeueRef, 
     Error,
-    Queue};
+    Queue
+};
+
+macro_rules! make_uart_queues {
+    ($val:expr, $(#[$m:meta])*) => {
+        // shared mutex allowing safe runtime update to UART config
+        const COMS_BUFFER_MUTEX: Mutex<CriticalSectionRawMutex, bool> = Mutex::new(false);
+
+        // tx buffer
+        const COMS_BUFFER_VAL_TX: SyncUnsafeCell<Buffer<MAX_TX_PACKET_SIZE>> = 
+            SyncUnsafeCell::new(Buffer::EMPTY);
+        #[link_section = ".axisram.buffers"]
+        static COMS_BUFFERS_TX: [SyncUnsafeCell<Buffer<MAX_TX_PACKET_SIZE>>; TX_BUF_DEPTH] = 
+            [COMS_BUFFER_VAL_TX; TX_BUF_DEPTH];
+        static COMS_QUEUE_TX: UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = 
+            UartWriteQueue::new(&COMS_BUFFERS_TX, COMS_BUFFER_MUTEX);
+
+        // rx buffer
+        const COMS_BUFFER_VAL_RX: SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>> = 
+            SyncUnsafeCell::new(Buffer::EMPTY);
+        #[link_section = ".axisram.buffers"]
+        static COMS_BUFFERS_RX: [SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>>; RX_BUF_DEPTH] = 
+            [COMS_BUFFER_VAL_RX; RX_BUF_DEPTH];
+        static COMS_QUEUE_RX: UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> = 
+            UartReadQueue::new(&COMS_BUFFERS_RX, COMS_BUFFER_MUTEX);
+    };
+}
 
 pub struct UartReadQueue<
     UART: usart::BasicInstance,

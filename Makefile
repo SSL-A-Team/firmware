@@ -111,7 +111,7 @@ define create-kicker-board-rust-targets
 $1--$2:
 	cd $1 && \
 	cargo build --release --bin $2 && \
-	arm-none-eabi-objcopy -Obinary target/thumbv6m-none-eabi/release/$2 target/thumbv6m-none-eabi/release/$2.bin
+	arm-none-eabi-objcopy -Obinary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin
 kicker-board--all:: $1--$2
 
 $1--$2--run: $1--$2
@@ -121,7 +121,7 @@ $1--$2--run: $1--$2
 $1--$2--debug: $1--$2
 	cd $1 && \
 	cargo build --release --bin $2 && \
-	../util/program.sh $3 $1/target/thumbv6m-none-eabi/release/$2
+	../util/program.sh $3 $1/target/thumbv7em-none-eabihf/release/$2
 endef
 $(foreach element,$(kicker_binaries),$(eval $(call create-kicker-board-rust-targets,kicker-board,$(element),$(kicker_openocd_cfg_file))))
 

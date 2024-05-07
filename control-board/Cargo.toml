@@ -76,11 +76,6 @@ test = false
 harness = false
 
 [[bin]]
-name = "ateam-control-board"
-test = false
-harness = false
-
-[[bin]]
 name = "control"
 test = false
 harness = false

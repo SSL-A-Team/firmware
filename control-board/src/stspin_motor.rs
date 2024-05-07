@@ -29,8 +29,6 @@ pub struct WheelMotor<
     const LEN_TX: usize,
     const DEPTH_RX: usize,
     const DEPTH_TX: usize,
-    Boot0Pin: Pin,
-    ResetPin: Pin,
 > {
     stm32_uart_interface: Stm32Interface<
         'a,
@@ -41,8 +39,6 @@ pub struct WheelMotor<
         LEN_TX,
         DEPTH_RX,
         DEPTH_TX,
-        Boot0Pin,
-        ResetPin,
     >,
     firmware_image: &'a [u8],
 
@@ -73,9 +69,7 @@ impl<
         const LEN_TX: usize,
         const DEPTH_RX: usize,
         const DEPTH_TX: usize,
-        Boot0Pin: Pin,
-        ResetPin: Pin,
-    > WheelMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin>
+    > WheelMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
 {
     pub fn new(
         stm32_interface: Stm32Interface<
@@ -87,11 +81,9 @@ impl<
             LEN_TX,
             DEPTH_RX,
             DEPTH_TX,
-            Boot0Pin,
-            ResetPin,
         >,
         firmware_image: &'a [u8],
-    ) -> WheelMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin>
+    ) -> WheelMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
     {
         let start_state: MotorResponse_Motion_Packet =
             { unsafe { MaybeUninit::zeroed().assume_init() } };
@@ -305,8 +297,6 @@ pub struct DribblerMotor<
     const LEN_TX: usize,
     const DEPTH_RX: usize,
     const DEPTH_TX: usize,
-    Boot0Pin: Pin,
-    ResetPin: Pin,
 > {
     stm32_uart_interface: Stm32Interface<
         'a,
@@ -317,8 +307,6 @@ pub struct DribblerMotor<
         LEN_TX,
         DEPTH_RX,
         DEPTH_TX,
-        Boot0Pin,
-        ResetPin,
     >,
     firmware_image: &'a [u8],
 
@@ -351,9 +339,7 @@ impl<
         const LEN_TX: usize,
         const DEPTH_RX: usize,
         const DEPTH_TX: usize,
-        Boot0Pin: Pin,
-        ResetPin: Pin,
-    > DribblerMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin>
+    > DribblerMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
 {
     pub fn new(
         stm32_interface: Stm32Interface<
@@ -365,12 +351,10 @@ impl<
             LEN_TX,
             DEPTH_RX,
             DEPTH_TX,
-            Boot0Pin,
-            ResetPin,
         >,
         firmware_image: &'a [u8],
         ball_detected_thresh: f32,
-    ) -> DribblerMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin>
+    ) -> DribblerMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
     {
         let start_state: MotorResponse_Motion_Packet =
             { unsafe { MaybeUninit::zeroed().assume_init() } };

@@ -1,13 +1,13 @@
 use embassy_stm32::gpio::{Level, Output, Pin, Speed};
 
-pub struct ShellIndicator<'a, Pin0: Pin, Pin1: Pin, Pin2: Pin, Pin3: Pin> {
-    pin0: Output<'a, Pin0>,
-    pin1: Output<'a, Pin1>,
-    pin2: Output<'a, Pin2>,
-    pin3: Output<'a, Pin3>,
+pub struct ShellIndicator<'a> {
+    pin0: Output<'a>,
+    pin1: Output<'a>,
+    pin2: Output<'a>,
+    pin3: Output<'a>,
 }
 
-impl<'a, Pin0: Pin, Pin1: Pin, Pin2: Pin, Pin3: Pin> ShellIndicator<'a, Pin0, Pin1, Pin2, Pin3> {
+impl<'a> ShellIndicator<'a> {
     // MSB to LSB, LSB "0" start the quadrant C (upper right to lower right 0-3), 0 = pink, 1 = green
     #[rustfmt::skip]
     const ID_TO_PATTERN: [u8; 16] = [
@@ -17,7 +17,7 @@ impl<'a, Pin0: Pin, Pin1: Pin, Pin2: Pin, Pin3: Pin> ShellIndicator<'a, Pin0, Pi
         0x0E, 0x02, 0x0D, 0x01,
     ];
 
-    pub fn new(pin0: Pin0, pin1: Pin1, pin2: Pin2, pin3: Pin3) -> Self {
+    pub fn new(pin0: impl Pin, pin1: impl Pin, pin2: impl Pin, pin3: impl Pin) -> Self {
         Self {
             pin0: Output::new(pin0, Level::Low, Speed::Low),
             pin1: Output::new(pin1, Level::Low, Speed::Low),
