@@ -5,9 +5,11 @@
 #![feature(const_maybe_uninit_uninit_array)]
 #![feature(maybe_uninit_slice)]
 
-
 pub mod drivers;
 pub mod uart;
 
 pub mod queue;
+
+// required for exported queue macros
+pub extern crate paste;
 

@@ -27,28 +27,33 @@ use crate::queue::{
     Queue
 };
 
+#[macro_export]
 macro_rules! make_uart_queues {
-    ($val:expr, $(#[$m:meta])*) => {
+    ($name:ident, $uart:ty, $uart_rx_dma:ty, $uart_tx_dma:ty, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr, $(#[$m:meta])*) => {
+        use $crate::paste;
+        paste::paste! {
         // shared mutex allowing safe runtime update to UART config
-        const COMS_BUFFER_MUTEX: Mutex<CriticalSectionRawMutex, bool> = Mutex::new(false);
+        const [<$name _UART_PERI_MUTEX>]: embassy_sync::mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, bool> = 
+            embassy_sync::mutex::Mutex::new(false);
 
         // tx buffer
-        const COMS_BUFFER_VAL_TX: SyncUnsafeCell<Buffer<MAX_TX_PACKET_SIZE>> = 
-            SyncUnsafeCell::new(Buffer::EMPTY);
-        #[link_section = ".axisram.buffers"]
-        static COMS_BUFFERS_TX: [SyncUnsafeCell<Buffer<MAX_TX_PACKET_SIZE>>; TX_BUF_DEPTH] = 
-            [COMS_BUFFER_VAL_TX; TX_BUF_DEPTH];
-        static COMS_QUEUE_TX: UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = 
-            UartWriteQueue::new(&COMS_BUFFERS_TX, COMS_BUFFER_MUTEX);
+        const [<$name _CONST_TX_BUF_VAL>]: core::cell::SyncUnsafeCell<$crate::queue::Buffer<$tx_buffer_size>> = 
+            core::cell::SyncUnsafeCell::new(Buffer::EMPTY);
+        $(#[$m])*
+        static [<$name _TX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::queue::Buffer<$tx_buffer_size>>; $tx_buffer_depth] = 
+            [[<$name _CONST_TX_BUF_VAL>]; $tx_buffer_depth];
+        static [<$name _TX_UART_QUEUE>]: $crate::uart::queue::UartWriteQueue<$uart, $uart_tx_dma, $tx_buffer_size, $tx_buffer_depth> = 
+        $crate::uart::queue::UartWriteQueue::new(&[<$name _TX_BUFFER>], [<$name _UART_PERI_MUTEX>]);
 
         // rx buffer
-        const COMS_BUFFER_VAL_RX: SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>> = 
-            SyncUnsafeCell::new(Buffer::EMPTY);
-        #[link_section = ".axisram.buffers"]
-        static COMS_BUFFERS_RX: [SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>>; RX_BUF_DEPTH] = 
-            [COMS_BUFFER_VAL_RX; RX_BUF_DEPTH];
-        static COMS_QUEUE_RX: UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> = 
-            UartReadQueue::new(&COMS_BUFFERS_RX, COMS_BUFFER_MUTEX);
+        const [<$name _CONST_RX_BUF_VAL>]: core::cell::SyncUnsafeCell<$crate::queue::Buffer<$rx_buffer_size>> = 
+            core::cell::SyncUnsafeCell::new(Buffer::EMPTY);
+        $(#[$m])*
+        static [<$name _RX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::queue::Buffer<$rx_buffer_size>>; $rx_buffer_depth] = 
+        [[<$name _CONST_RX_BUF_VAL>]; $rx_buffer_depth];
+        static [<$name _RX_UART_QUEUE>]: $crate::uart::queue::UartReadQueue<$uart, $uart_rx_dma, $rx_buffer_size, $rx_buffer_depth> = 
+            $crate::uart::queue::UartReadQueue::new(&[<$name _RX_BUFFER>], [<$name _UART_PERI_MUTEX>]);
+        }
     };
 }
 
@@ -109,7 +114,9 @@ impl<
                 {
                     let _rw_tasks_config_lock = self.uart_mutex.lock().await;
 
-                    match select(rx.read_until_idle(buf.data()), Timer::after_millis(500)).await {
+                    // NOTE: this really shouldn't be a timeout, it should be a signal from tx side that a new config
+                    // is desired. This works for now but the timeout is hacky.
+                    match select(rx.read_until_idle(buf.data()), Timer::after_millis(2000)).await {
                         Either::First(len) => {
                             if let Ok(len) = len {
                                 if len == 0 {
@@ -125,7 +132,8 @@ impl<
                             }
                         },
                         Either::Second(_) => {
-                            defmt::trace!("UartReadQueue - Read to idle timed out")
+                            defmt::trace!("UartReadQueue - Read to idle timed out");
+                            buf.cancel();
                         }
                     }
                 } // frees the inter-task uart config lock
