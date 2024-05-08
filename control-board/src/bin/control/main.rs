@@ -3,33 +3,18 @@
 #![feature(type_alias_impl_trait)]
 #![feature(const_mut_refs)]
 #![feature(async_closure)]
+#![feature(sync_unsafe_cell)]
 
 use apa102_spi::Apa102;
 use ateam_control_board::{
-    adc_raw_to_v, adc_v_to_battery_voltage,
-    drivers::{
-        radio::TeamColor,
-        radio::WifiNetwork,
-        rotary::Rotary,
-        shell_indicator::ShellIndicator,
-        kicker::Kicker,
-    },
-    stm32_interface::{get_bootloader_uart_config, Stm32Interface},
-    BATTERY_BUFFER_SIZE, BATTERY_MAX_VOLTAGE, BATTERY_MIN_VOLTAGE, include_kicker_bin, parameter_interface::ParameterInterface,
+    adc_raw_to_v, adc_v_to_battery_voltage, drivers::{
+        kicker::Kicker, radio::{TeamColor, WifiNetwork}, rotary::Rotary, shell_indicator::ShellIndicator
+    }, get_system_config, include_kicker_bin, parameter_interface::ParameterInterface, stm32_interface::{get_bootloader_uart_config, Stm32Interface}, BATTERY_BUFFER_SIZE, BATTERY_MAX_VOLTAGE, BATTERY_MIN_VOLTAGE
 };
 use control::Control;
 use defmt::info;
 use embassy_stm32::{
-    adc::{Adc, SampleTime},
-    dma::NoDma,
-    exti::ExtiInput,
-    gpio::{Input, Level, Output, Pull, Speed},
-    interrupt,
-    peripherals::{DMA2_CH4, DMA2_CH5, USART6},
-    spi,
-    time::{hz, mhz},
-    usart::{self, Uart},
-    wdg::IndependentWatchdog,
+    adc::{Adc, SampleTime}, bind_interrupts, exti::ExtiInput, gpio::{Input, Level, Output, Pull, Speed}, interrupt, pac::Interrupt, peripherals::{self, BDMA_CH0}, spi, time::{hz, mhz}, usart::{self, Uart}, wdg::IndependentWatchdog
 };
 use embassy_executor::InterruptExecutor;
 use embassy_time::{Duration, Ticker, Timer};
@@ -37,27 +22,23 @@ use ateam_control_board::pins::{
     PowerStateExti, PowerStatePin, RadioReset, RadioRxDMA, RadioTxDMA, RadioUART,
     ShutdownCompletePin,
 };
-use radio::{
-    RadioTest, BUFFERS_RX, BUFFERS_TX, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH,
-    TX_BUF_DEPTH,
-};
-use smart_leds::{SmartLedsWrite, RGB8};
-use static_cell::StaticCell;
 
-use embassy_stm32::rcc::AdcClockSource;
+use smart_leds::{SmartLedsWrite, RGB8};
+
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
 
-use ateam_lib_stm32::queue::Buffer;
-use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
+use ateam_lib_stm32::make_uart_queues;
 
-mod control;
-mod radio;
+use ateam_control_board::motion::tasks::control;
+use ateam_control_board::pins::*;
+use ateam_control_board::radio::RadioTest;
 
 #[cfg(not(feature = "no-private-credentials"))]
 use credentials::private_credentials::wifi::wifi_credentials;
 #[cfg(feature = "no-private-credentials")]
 use credentials::public_credentials::wifi::wifi_credentials;
+use static_cell::ConstStaticCell;
 
 // Uncomment for testing:
 // use panic_probe as _;
@@ -72,16 +53,45 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
 include_kicker_bin! {KICKER_FW_IMG, "kicker.bin"}
 
-static RADIO_TEST: RadioTest<
-    MAX_TX_PACKET_SIZE,
-    MAX_RX_PACKET_SIZE,
-    TX_BUF_DEPTH,
-    RX_BUF_DEPTH,
-    RadioUART,
-    RadioRxDMA,
-    RadioTxDMA,
-    RadioReset,
-> = RadioTest::new(unsafe { &mut BUFFERS_TX }, unsafe { &mut BUFFERS_RX });
+pub const RADIO_MAX_TX_PACKET_SIZE: usize = 256;
+pub const RADIO_TX_BUF_DEPTH: usize = 4;
+pub const RADIO_MAX_RX_PACKET_SIZE: usize = 256;
+pub const RADIO_RX_BUF_DEPTH: usize = 4;
+
+pub const KICKER_MAX_TX_PACKET_SIZE: usize = 256;
+pub const KICKER_TX_BUF_DEPTH: usize = 4;
+pub const KICKER_MAX_RX_PACKET_SIZE: usize = 256;
+pub const KICKER_RX_BUF_DEPTH: usize = 4;
+
+make_uart_queues!(RADIO,
+    RadioUART, RadioRxDMA, RadioTxDMA,
+    RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH,
+    RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH,
+    #[link_section = ".axisram.buffers"]);
+
+make_uart_queues!(KICKER,
+    KickerUart, KickerRxDma, KickerTxDma,
+    KICKER_MAX_RX_PACKET_SIZE, KICKER_RX_BUF_DEPTH,
+    KICKER_MAX_TX_PACKET_SIZE, KICKER_TX_BUF_DEPTH,
+    #[link_section = ".axisram.buffers"]);
+
+#[link_section = ".sram4"]
+static mut SPI6_BUF: [u8; 4] = [0x0; 4];
+
+static RADIO_TEST: ConstStaticCell<RadioTest<
+        RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH,
+        RadioUART, RadioRxDMA, RadioTxDMA, RadioReset>> = 
+    ConstStaticCell::new(RadioTest::new(&RADIO_TX_UART_QUEUE, &RADIO_RX_UART_QUEUE));
+// static RADIO_TEST: RadioTest<
+//     RADIO_MAX_TX_PACKET_SIZE,
+//     RADIO_MAX_RX_PACKET_SIZE,
+//     RADIO_TX_BUF_DEPTH,
+//     RADIO_RX_BUF_DEPTH,
+//     RadioUART,
+//     RadioRxDMA,
+//     RadioTxDMA,
+//     RadioReset,
+// > = RadioTest::new(&RADIO_TX_UART_QUEUE, &RADIO_RX_UART_QUEUE);
 
 // pub sub channel for the gyro vals
 // CAP queue size, n_subs, n_pubs
@@ -91,50 +101,45 @@ static GYRO_CHANNEL: PubSubChannel<ThreadModeRawMutex, f32, 2, 2, 2> = PubSubCha
 // CAP queue size, n_subs, n_pubs
 static BATTERY_CHANNEL: PubSubChannel<ThreadModeRawMutex, f32, 2, 2, 2> = PubSubChannel::new();
 
-#[link_section = ".sram4"]
-static mut SPI6_BUF: [u8; 4] = [0x0; 4];
-
-#[link_section = ".axisram.buffers"]
-static mut KICKER_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
-    [Buffer::EMPTY; TX_BUF_DEPTH];
-static KICKER_QUEUE_TX: UartWriteQueue<USART6, DMA2_CH4, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
-    UartWriteQueue::new(unsafe { &mut KICKER_BUFFERS_TX });
-
-#[link_section = ".axisram.buffers"]
-static mut KICKER_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
-    [Buffer::EMPTY; RX_BUF_DEPTH];
-static KICKER_QUEUE_RX: UartReadQueue<USART6, DMA2_CH5, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
-    UartReadQueue::new(unsafe { &mut KICKER_BUFFERS_RX });
-
 // static RADIO: Radio<RadioUART, RadioRxDMA, RadioTxDMA> = Radio::new();
-static EXECUTOR_UART_QUEUE: StaticCell<InterruptExecutor<interrupt::CEC>> = StaticCell::new();
+static EXECUTOR_UART_QUEUE: InterruptExecutor = InterruptExecutor::new();
+
+#[interrupt]
+unsafe fn CEC() {
+    EXECUTOR_UART_QUEUE.on_interrupt();
+}
+
+bind_interrupts!(struct Irqs {
+    USART10 => usart::InterruptHandler<peripherals::USART10>;
+    USART6 => usart::InterruptHandler<peripherals::USART6>;
+    USART1 => usart::InterruptHandler<peripherals::USART1>;
+    UART4 => usart::InterruptHandler<peripherals::UART4>;
+    UART7 => usart::InterruptHandler<peripherals::UART7>;
+    UART8 => usart::InterruptHandler<peripherals::UART8>;
+    UART5 => usart::InterruptHandler<peripherals::UART5>;
+});
 
 #[embassy_executor::main]
 async fn main(_spawner: embassy_executor::Spawner) {
-    let mut stm32_config: embassy_stm32::Config = Default::default();
-    stm32_config.rcc.hse = Some(mhz(8));
-    stm32_config.rcc.sys_ck = Some(mhz(400));
-    stm32_config.rcc.hclk = Some(mhz(200));
-    stm32_config.rcc.pclk1 = Some(mhz(100));
-    stm32_config.rcc.per_ck = Some(mhz(64));
-    stm32_config.rcc.adc_clock_source = AdcClockSource::PerCk;
-    let p = embassy_stm32::init(stm32_config);
+    let sys_config = get_system_config();
+    let p = embassy_stm32::init(sys_config);
+
     let config = usart::Config::default();
 
     // Delay so dotstar and STSPIN can turn on
     Timer::after(Duration::from_millis(50)).await;
 
-    let irq = interrupt::take!(CEC);
-    irq.set_priority(interrupt::Priority::P6);
-    let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
-    let spawner = executor.start();
+    interrupt::InterruptExt::set_priority(interrupt::CEC, interrupt::Priority::P6);
+    let spawner = EXECUTOR_UART_QUEUE.start(Interrupt::CEC);
 
+    let mut dotstar_spi_config = spi::Config::default();
+    dotstar_spi_config.frequency = hz(1_000_000);
     let dotstar_spi = spi::Spi::new_txonly(
         p.SPI3,
         p.PB3,
         p.PB5,
-        hz(1_000_000),
-        spi::Config::default(),
+        p.DMA2_CH6,
+        dotstar_spi_config,
     );
 
     let mut dotstar = Apa102::new(dotstar_spi);
@@ -142,10 +147,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     info!("booted");
 
-    let radio_int = interrupt::take!(USART10);
     let radio_usart = Uart::new(
-        p.USART10, p.PE2, p.PE3, radio_int, p.DMA2_CH0, p.DMA2_CH1, config,
-    );
+        p.USART10, p.PE2, p.PE3, Irqs, p.DMA2_CH0, p.DMA2_CH1, config,
+    ).unwrap();
 
     let _rotary = Rotary::new(p.PG9, p.PG10, p.PG11, p.PG12);
     let mut shell_indicator = ShellIndicator::new(p.PD0, p.PD1, p.PD3, p.PD4);
@@ -197,13 +201,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
     //////////////////////
 
     let mut adc3 = Adc::new(p.ADC3);
-    adc3.set_sample_time(SampleTime::Cycles1_5);
+    adc3.set_sample_time(SampleTime::CYCLES1_5);
     let mut battery_pin = p.PF5;
     let mut battery_voltage_buffer: [f32; BATTERY_BUFFER_SIZE] =
         [BATTERY_MAX_VOLTAGE; BATTERY_BUFFER_SIZE];
     let battery_pub = BATTERY_CHANNEL.publisher().unwrap();
 
-    let imu_spi_config = spi::Config::default();
+    let mut imu_spi_config = spi::Config::default();
     imu_spi_config.frequency = mhz(1);
     let mut imu_spi = spi::Spi::new(
         p.SPI6,
@@ -240,57 +244,51 @@ async fn main(_spawner: embassy_executor::Spawner) {
         info!("gyro id: 0x{:x}", gyro_id);
     }
 
-    let front_right_int = interrupt::take!(USART1);
-    let front_left_int = interrupt::take!(UART4);
-    let back_left_int = interrupt::take!(UART7);
-    let back_right_int = interrupt::take!(UART8);
-    let drib_int = interrupt::take!(UART5);
-
     let front_right_usart = Uart::new(
         p.USART1,
         p.PB15,
         p.PB14,
-        front_right_int,
+        Irqs,
         p.DMA1_CH0,
         p.DMA1_CH1,
         get_bootloader_uart_config(),
-    );
+    ).unwrap();
     let front_left_usart = Uart::new(
         p.UART4,
         p.PA1,
         p.PA0,
-        front_left_int,
+        Irqs,
         p.DMA1_CH2,
         p.DMA1_CH3,
         get_bootloader_uart_config(),
-    );
+    ).unwrap();
     let back_left_usart = Uart::new(
         p.UART7,
         p.PF6,
         p.PF7,
-        back_left_int,
+        Irqs,
         p.DMA1_CH4,
         p.DMA1_CH5,
         get_bootloader_uart_config(),
-    );
+    ).unwrap();
     let back_right_usart = Uart::new(
         p.UART8,
         p.PE0,
         p.PE1,
-        back_right_int,
+        Irqs,
         p.DMA1_CH6,
         p.DMA1_CH7,
         get_bootloader_uart_config(),
-    );
+    ).unwrap();
     let drib_usart = Uart::new(
         p.UART5,
         p.PB12,
         p.PB13,
-        drib_int,
+        Irqs,
         p.DMA2_CH2,
         p.DMA2_CH3,
         get_bootloader_uart_config(),
-    );
+    ).unwrap();
 
     let gyro_sub = GYRO_CHANNEL.subscriber().unwrap();
     let battery_sub = BATTERY_CHANNEL.subscriber().unwrap();
@@ -299,23 +297,22 @@ async fn main(_spawner: embassy_executor::Spawner) {
         defmt::warn!("kicker appears unplugged!");
     }
 
-    let kicker_int = interrupt::take!(USART6);
     let kicker_usart = Uart::new(
         p.USART6,
         p.PC7,
         p.PC6,
-        kicker_int,
+        Irqs,
         p.DMA2_CH4,
         p.DMA2_CH5,
         get_bootloader_uart_config(),
-    );
+    ).unwrap();
 
-    let (kicker_tx, kicker_rx) = kicker_usart.split();
+    let (kicker_tx, kicker_rx) = Uart::split(kicker_usart);
     spawner
-        .spawn(KICKER_QUEUE_RX.spawn_task(kicker_rx))
+        .spawn(KICKER_RX_UART_QUEUE.spawn_task(kicker_rx))
         .unwrap();
     spawner
-        .spawn(KICKER_QUEUE_TX.spawn_task(kicker_tx))
+        .spawn(KICKER_TX_UART_QUEUE.spawn_task(kicker_tx))
         .unwrap();
 
     let ball_detected_thresh = 1.0;
@@ -350,8 +347,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let kicker_boot0_pin = Output::new(p.PA8, Level::Low, Speed::Medium);
     let kicker_reset_pin = Output::new(p.PA9, Level::Low, Speed::Medium);
     let kicker_stm32_interface = Stm32Interface::new_noninverted_reset(
-        &KICKER_QUEUE_RX,
-        &KICKER_QUEUE_TX,
+        &KICKER_RX_UART_QUEUE,
+        &KICKER_TX_UART_QUEUE,
         Some(kicker_boot0_pin),
         Some(kicker_reset_pin),
     );
@@ -372,13 +369,29 @@ async fn main(_spawner: embassy_executor::Spawner) {
             .cloned(),
     );
 
+    // let token = unsafe {
+    //     (&mut *(&RADIO_TEST as *const _
+    //         as *mut RadioTest<
+    //             RADIO_MAX_TX_PACKET_SIZE,
+    //             RADIO_MAX_RX_PACKET_SIZE,
+    //             RADIO_TX_BUF_DEPTH,
+    //             RADIO_RX_BUF_DEPTH,
+    //             RadioUART,
+    //             RadioRxDMA,
+    //             RadioTxDMA,
+    //             RadioReset,
+    //         >))
+    //         .setup(&spawner, radio_usart, p.PC13, robot_id, team, wifi_network)
+    //         .await
+    // };
+    let radio_test = RADIO_TEST.take();
     let token = unsafe {
         (&mut *(&RADIO_TEST as *const _
             as *mut RadioTest<
-                MAX_TX_PACKET_SIZE,
-                MAX_RX_PACKET_SIZE,
-                TX_BUF_DEPTH,
-                RX_BUF_DEPTH,
+                RADIO_MAX_TX_PACKET_SIZE,
+                RADIO_MAX_RX_PACKET_SIZE,
+                RADIO_TX_BUF_DEPTH,
+                RADIO_RX_BUF_DEPTH,
                 RadioUART,
                 RadioRxDMA,
                 RadioTxDMA,
@@ -387,6 +400,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
             .setup(&spawner, radio_usart, p.PC13, robot_id, team, wifi_network)
             .await
     };
+    // let token = radio_test.setup(&spawner, radio_usart, p.PC13, robot_id, team, wifi_network).await;
     spawner.spawn(token).unwrap();
 
     let _ = dotstar.write(
@@ -454,7 +468,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         //  Parameter Updates  //
         /////////////////////////
         
-        let latest_param_cmd = RADIO_TEST.get_latest_params_cmd();
+        let latest_param_cmd = radio_test.get_latest_params_cmd();
 
         if let Some(latest_param_cmd) = latest_param_cmd {
             let param_cmd_resp = control.apply_command(&latest_param_cmd);
@@ -464,10 +478,10 @@ async fn main(_spawner: embassy_executor::Spawner) {
             // if param_cmd_resp is Ok, then the read/write was successful
             if let Ok(resp) = param_cmd_resp {
                 defmt::info!("sending successful parameter update command response");
-                RADIO_TEST.send_parameter_response(resp).await;
+                radio_test.send_parameter_response(resp).await;
             } else if let Err(resp) = param_cmd_resp {
                 defmt::warn!("sending failed parameter updated command response");
-                RADIO_TEST.send_parameter_response(resp).await;
+                radio_test.send_parameter_response(resp).await;
             }
         }
 
@@ -475,7 +489,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         //  Telemtry  //
         ////////////////
 
-        let latest_control_cmd = RADIO_TEST.get_latest_control();
+        let latest_control_cmd = radio_test.get_latest_control();
 
         let telemetry = control.tick(latest_control_cmd).await;
         if let (Some(mut telemetry), control_debug_telem) = telemetry {
@@ -484,10 +498,10 @@ async fn main(_spawner: embassy_executor::Spawner) {
             telemetry.kicker_charge_level = kicker.hv_rail_voltage();
             telemetry.set_breakbeam_ball_detected(kicker.ball_detected() as u32);
 
-            RADIO_TEST.send_telemetry(telemetry).await;
+            radio_test.send_telemetry(telemetry).await;
 
             if control_debug_telemetry_enabled {
-                RADIO_TEST.send_control_debug_telemetry(control_debug_telem).await;
+                radio_test.send_control_debug_telemetry(control_debug_telem).await;
             }
         }
 

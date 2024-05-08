@@ -182,7 +182,7 @@ impl<
         // ensure UART is in the expected config for the bootloader
         // this operation is unsafe because it takes the uart module offline
         // when the executor may be relying on rx interrupts to unblock a thread
-        unsafe { self.update_uart_config(STM32_BOOTLOADER_MAX_BAUD_RATE, Parity::ParityEven); }
+        self.update_uart_config(STM32_BOOTLOADER_MAX_BAUD_RATE, Parity::ParityEven).await;
 
         defmt::debug!("sending the bootloader baud calibration command...");
         self.writer
@@ -239,87 +239,6 @@ impl<
         config.parity = parity;
 
         self.writer.update_uart_config(config).await;
-
-
-        // let div = (UART::frequency().0 + (baudrate / 2)) / baudrate * UART::MULTIPLIER;
-
-        // // let irq = UART::Interrupt::steal();
-        // // irq.disable();
-
-        // let r = UART::regs();
-        // // disable the uart. Can't modify parity and baudrate while module is enabled
-        // r.cr1().modify(|w| {
-        //     w.set_ue(false);
-        // });
-
-        // // set the baudrate
-        // r.brr().modify(|w| {
-        //     w.set_brr(div);
-        // });
-
-        // // set parity 
-        // r.cr1().modify(|w| {
-        //     if parity != Parity::ParityNone {
-        //         // configure 9 bit transmission and enable parity control
-        //         w.set_m0(pac::usart::vals::M0::BIT9);
-        //         w.set_pce(true);
-
-        //         // set polarity type
-        //         if parity == Parity::ParityEven {
-        //             w.set_ps(pac::usart::vals::Ps::EVEN);
-        //         } else {
-        //             w.set_ps(pac::usart::vals::Ps::ODD);
-        //         }
-        //     } else {
-        //         // disable parity (1 byte transmissions)
-        //         w.set_m0(pac::usart::vals::M0::BIT8);
-        //         w.set_pce(false);
-        //     }
-        // });
-
-        // // reenable UART
-        // r.cr1().modify(|w| {
-        //     w.set_ue(true);
-        // });
-
-        // let div = (pclk_freq.0 + (config.baudrate / 2)) / config.baudrate * multiplier;
-
-        // unsafe {
-        //     r.brr().write_value(regs::Brr(div));
-        //     r.cr2().write(|_w| {});
-        //     r.cr1().write(|w| {
-        //         // enable uart
-        //         w.set_ue(true);
-        //         // enable transceiver
-        //         w.set_te(true);
-        //         // enable receiver
-        //         w.set_re(true);
-        //         // configure word size
-        //         w.set_m0(if parity != Parity::ParityNone {
-        //             pac::lpuart::vals::M0::BIT9
-        //         } else {
-        //             pac::lpuart::vals::M0::BIT8
-        //         });
-        //         // configure parity
-        //         w.set_pce(parity != Parity::ParityNone);
-        //         w.set_ps(match parity {
-        //             Parity::ParityOdd => pac::lpuart::vals::Ps::ODD,
-        //             Parity::ParityEven => pac::lpuart::vals::Ps::EVEN,
-        //             _ => pac::lpuart::vals::Ps::EVEN,
-        //         });
-        //     });
-        // }
-
-        // r.icr().write(|w| {
-        //     w.set_fecf(true);
-        // });
-
-        // irq.unpend();
-        // irq.enable();
-
-        // r.cr1().modify(|w| {
-        //     w.set_idleie(true);
-        // });
     }
 
     pub async fn read_latest_packet(&self) {

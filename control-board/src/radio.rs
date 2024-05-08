@@ -1,32 +1,23 @@
-// use core::cell::RefCell;
+use core::future::Future;
+
+use embassy_executor::{raw::TaskStorage, SendSpawner, SpawnToken};
+use embassy_futures::join::join;
+use embassy_stm32::{gpio::Pin, usart};
+use embassy_stm32::mode::Async;
+use embassy_stm32::usart::Uart;
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embassy_time::{Duration, Ticker};
+
+use defmt::*;
+
+use ateam_lib_stm32::make_uart_queues;
+use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
 
 use ateam_common_packets::bindings_radio::{BasicControl, BasicTelemetry, ControlDebugTelemetry, ParameterCommand};
 use ateam_common_packets::radio::DataPacket;
-use ateam_control_board::{
-    drivers::radio::{RobotRadio, TeamColor, WifiNetwork},
-    queue,
-    uart_queue::{UartReadQueue, UartWriteQueue},
-};
-use core::future::Future;
-use defmt::*;
-use embassy_executor::{raw::TaskStorage, SendSpawner, SpawnToken};
-use embassy_futures::join::join;
-use embassy_stm32::{gpio::Pin, usart, Peripheral};
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-use embassy_time::{Duration, Ticker};
-use futures_util::StreamExt;
 
-pub const MAX_TX_PACKET_SIZE: usize = 256;
-pub const TX_BUF_DEPTH: usize = 4;
-pub const MAX_RX_PACKET_SIZE: usize = 256;
-pub const RX_BUF_DEPTH: usize = 4;
-
-#[link_section = ".axisram.buffers"]
-pub static mut BUFFERS_TX: [queue::Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
-    [queue::Buffer::EMPTY; TX_BUF_DEPTH];
-#[link_section = ".axisram.buffers"]
-pub static mut BUFFERS_RX: [queue::Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
-    [queue::Buffer::EMPTY; RX_BUF_DEPTH];
+use crate::drivers::radio::{RobotRadio, TeamColor, WifiNetwork};
+use crate::pins::*;
 
 type ControlTaskFuture<
     UART: usart::BasicInstance + Send,
@@ -71,16 +62,14 @@ pub struct RadioTest<
 > where
     UART::Interrupt: Send,
 {
-    queue_tx: UartWriteQueue<'static, UART, TxDma, LEN_TX, DEPTH_TX>,
-    queue_rx: UartReadQueue<'static, UART, RxDma, LEN_RX, DEPTH_RX>,
+    queue_tx: &'static UartWriteQueue<UART, TxDma, LEN_TX, DEPTH_TX>,
+    queue_rx: &'static UartReadQueue<UART, RxDma, LEN_RX, DEPTH_RX>,
     task: TaskStorage<
         ControlTaskFuture<UART, RxDma, TxDma, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, ResetPin>,
     >,
     latest_control: Mutex<CriticalSectionRawMutex, Option<BasicControl>>,
     latest_params: Mutex<CriticalSectionRawMutex, Option<ParameterCommand>>,
-    radio: Option<
-        RobotRadio<'static, UART, RxDma, TxDma, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, ResetPin>,
-    >,
+    radio: Option<RobotRadio<'static, UART, RxDma, TxDma, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>>,
 }
 
 impl<
@@ -97,12 +86,12 @@ where
     UART::Interrupt: Send,
 {
     pub const fn new(
-        tx_buffer: &'static mut [queue::Buffer<LEN_TX>; DEPTH_TX],
-        rx_buffer: &'static mut [queue::Buffer<LEN_RX>; DEPTH_RX],
+        tx_queue: &'static UartWriteQueue<UART, TxDma, LEN_TX, DEPTH_TX>,
+        rx_queue: &'static UartReadQueue<UART, RxDma, LEN_RX, DEPTH_RX>,
     ) -> Self {
         RadioTest {
-            queue_rx: UartReadQueue::new(rx_buffer),
-            queue_tx: UartWriteQueue::new(tx_buffer),
+            queue_rx: rx_queue,
+            queue_tx: tx_queue,
             task: TaskStorage::new(),
             latest_control: Mutex::new(None),
             latest_params: Mutex::new(None),
@@ -115,13 +104,13 @@ where
     pub async fn setup(
         &'static mut self,
         spawner: &SendSpawner,
-        uart: usart::Uart<'static, UART, TxDma, RxDma>,
-        reset_pin: impl Peripheral<P = ResetPin> + 'static,
+        uart: usart::Uart<'static, UART, Async>,
+        reset_pin: impl Pin,
         id: u8,
         team: TeamColor,
         wifi_network: WifiNetwork,
     ) -> SpawnToken<impl Sized> {
-        let (tx, rx) = uart.split();
+        let (tx, rx) = Uart::split(uart);
 
         spawner.spawn(self.queue_rx.spawn_task(rx)).unwrap();
         spawner.spawn(self.queue_tx.spawn_task(tx)).unwrap();
@@ -175,8 +164,7 @@ where
             LEN_TX,
             LEN_RX,
             DEPTH_TX,
-            DEPTH_RX,
-            ResetPin,
+            DEPTH_RX
         >,
         latest_control: &'static Mutex<CriticalSectionRawMutex, Option<BasicControl>>,
         latest_param_cmd: &'static Mutex<CriticalSectionRawMutex, Option<ParameterCommand>>,

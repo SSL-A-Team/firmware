@@ -1,10 +1,12 @@
 use ateam_control_board::{
     include_external_cpp_bin,
-    queue::Buffer,
     motion::robot_model::{RobotConstants, RobotModel},
     stm32_interface::Stm32Interface,
     stspin_motor::{DribblerMotor, WheelMotor},
-    uart_queue::{UartReadQueue, UartWriteQueue},
+};
+use ateam_lib_stm32::{
+    queue::Buffer,
+    uart::queue::{UartReadQueue, UartWriteQueue},
 };
 use embassy_executor::SendSpawner;
 use embassy_stm32::{
@@ -14,7 +16,7 @@ use embassy_stm32::{
 use embassy_time::{Duration, Timer};
 use nalgebra::{Vector3, Vector4};
 
-use crate::pins::*;
+use ateam_control_board::pins::*;
 
 include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}

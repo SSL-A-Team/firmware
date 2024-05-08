@@ -1,11 +1,11 @@
-use ateam_common_packets::bindings_radio::{BasicControl, BasicTelemetry, ControlDebugTelemetry, ParameterCommand, ParameterName};
 use embassy_executor::SendSpawner;
 use embassy_stm32::{
-    gpio::{Level, Output, Speed},
-    usart::Uart,
+    gpio::{Level, Output, Speed}, mode::Async, usart::Uart
 };
+use embassy_sync::pubsub::Subscriber;
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_time::{Duration, Timer};
-use ateam_control_board::{
+use crate::{
     include_external_cpp_bin,
     stm32_interface::Stm32Interface,
     stspin_motor::{WheelMotor, DribblerMotor},
@@ -13,15 +13,26 @@ use ateam_control_board::{
         robot_model::{RobotConstants, RobotModel},
         robot_controller::BodyVelocityController
     },
-    BATTERY_MIN_VOLTAGE, parameter_interface::ParameterInterface
+    BATTERY_MIN_VOLTAGE,
+    parameter_interface::ParameterInterface
 };
-use ateam_lib_stm32::queue::Buffer;
-use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
+
 use nalgebra::{Vector3, Vector4};
 
-use embassy_sync::pubsub::Subscriber;
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use ateam_control_board::pins::*;
+use ateam_lib_stm32::{
+    make_uart_queues,
+    queue::Buffer
+};
+
+use ateam_common_packets::bindings_radio::{
+    BasicControl,
+    BasicTelemetry,
+    ControlDebugTelemetry,
+    ParameterCommand,
+    ParameterName
+};
+
+use crate::pins::*;
 
 
 include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
@@ -41,70 +52,35 @@ const RX_BUF_DEPTH: usize = 20;
 
 const TICKS_WITHOUT_PACKET_STOP: u16 = 25;
 
-// buffers for front right
-#[link_section = ".axisram.buffers"]
-static mut FRONT_RIGHT_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
-    [Buffer::EMPTY; TX_BUF_DEPTH];
-static FRONT_RIGHT_QUEUE_TX: UartWriteQueue<MotorFRUart, MotorFRDmaTx, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
-    UartWriteQueue::new(unsafe { &mut FRONT_RIGHT_BUFFERS_TX });
+make_uart_queues!(FRONT_LEFT,
+    MotorFLUart, MotorFLDmaRx, MotorFLDmaTx,
+    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
+    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
+    #[link_section = ".axisram.buffers"]);
 
-#[link_section = ".axisram.buffers"]
-static mut FRONT_RIGHT_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
-    [Buffer::EMPTY; RX_BUF_DEPTH];
-static FRONT_RIGHT_QUEUE_RX: UartReadQueue<MotorFRUart, MotorFRDmaRx, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
-    UartReadQueue::new(unsafe { &mut FRONT_RIGHT_BUFFERS_RX });
+make_uart_queues!(BACK_LEFT,
+    MotorBLUart, MotorBLDmaRx, MotorBLDmaTx,
+    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
+    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
+    #[link_section = ".axisram.buffers"]);
 
-// buffers for front left
-#[link_section = ".axisram.buffers"]
-static mut FRONT_LEFT_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
-    [Buffer::EMPTY; TX_BUF_DEPTH];
-static FRONT_LEFT_QUEUE_TX: UartWriteQueue<MotorFLUart, MotorFLDmaTx, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
-    UartWriteQueue::new(unsafe { &mut FRONT_LEFT_BUFFERS_TX });
+make_uart_queues!(BACK_RIGHT,
+    MotorBRUart, MotorBRDmaRx, MotorBRDmaTx,
+    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
+    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
+    #[link_section = ".axisram.buffers"]);
 
-#[link_section = ".axisram.buffers"]
-static mut FRONT_LEFT_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
-    [Buffer::EMPTY; RX_BUF_DEPTH];
-static FRONT_LEFT_QUEUE_RX: UartReadQueue<MotorFLUart, MotorFLDmaRx, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
-    UartReadQueue::new(unsafe { &mut FRONT_LEFT_BUFFERS_RX });
+make_uart_queues!(FRONT_RIGHT,
+    MotorFRUart, MotorFRDmaRx, MotorFRDmaTx,
+    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
+    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
+    #[link_section = ".axisram.buffers"]);
 
-// buffers for back left
-#[link_section = ".axisram.buffers"]
-static mut BACK_LEFT_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
-    [Buffer::EMPTY; TX_BUF_DEPTH];
-static BACK_LEFT_QUEUE_TX: UartWriteQueue<MotorBLUart, MotorBLDmaTx, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
-    UartWriteQueue::new(unsafe { &mut BACK_LEFT_BUFFERS_TX });
-
-#[link_section = ".axisram.buffers"]
-static mut BACK_LEFT_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
-    [Buffer::EMPTY; RX_BUF_DEPTH];
-static BACK_LEFT_QUEUE_RX: UartReadQueue<MotorBLUart, MotorBLDmaRx, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
-    UartReadQueue::new(unsafe { &mut BACK_LEFT_BUFFERS_RX });
-
-// buffers for back right
-#[link_section = ".axisram.buffers"]
-static mut BACK_RIGHT_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
-    [Buffer::EMPTY; TX_BUF_DEPTH];
-static BACK_RIGHT_QUEUE_TX: UartWriteQueue<MotorBRUart, MotorBRDmaTx, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
-    UartWriteQueue::new(unsafe { &mut BACK_RIGHT_BUFFERS_TX });
-
-#[link_section = ".axisram.buffers"]
-static mut BACK_RIGHT_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
-    [Buffer::EMPTY; RX_BUF_DEPTH];
-static BACK_RIGHT_QUEUE_RX: UartReadQueue<MotorBRUart, MotorBRDmaRx, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
-    UartReadQueue::new(unsafe { &mut BACK_RIGHT_BUFFERS_RX });
-
-// buffers for dribbler
-#[link_section = ".axisram.buffers"]
-static mut DRIB_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
-    [Buffer::EMPTY; TX_BUF_DEPTH];
-static DRIB_QUEUE_TX: UartWriteQueue<MotorDUart, MotorDDmaTx, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
-    UartWriteQueue::new(unsafe { &mut DRIB_BUFFERS_TX });
-
-#[link_section = ".axisram.buffers"]
-static mut DRIB_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
-    [Buffer::EMPTY; RX_BUF_DEPTH];
-static DRIB_QUEUE_RX: UartReadQueue<MotorDUart, MotorDDmaRx, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
-    UartReadQueue::new(unsafe { &mut DRIB_BUFFERS_RX });
+make_uart_queues!(DRIB,
+    MotorDUart, MotorDDmaRx, MotorDDmaTx,
+    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
+    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
+    #[link_section = ".axisram.buffers"]);
 
 const WHEEL_ANGLES_DEG: Vector4<f32> = Vector4::new(30.0, 150.0, 225.0, 315.0);
 const WHEEL_RADIUS_M: f32 = 0.049 / 2.0; // wheel dia 49mm
@@ -123,9 +99,7 @@ pub struct Control<'a> {
         MAX_RX_PACKET_SIZE,
         MAX_TX_PACKET_SIZE,
         RX_BUF_DEPTH,
-        TX_BUF_DEPTH,
-        MotorFRBootPin,
-        MotorFRResetPin,
+        TX_BUF_DEPTH
     >,
     front_left_motor: WheelMotor<
         'static,
@@ -135,9 +109,7 @@ pub struct Control<'a> {
         MAX_RX_PACKET_SIZE,
         MAX_TX_PACKET_SIZE,
         RX_BUF_DEPTH,
-        TX_BUF_DEPTH,
-        MotorFLBootPin,
-        MotorFLResetPin,
+        TX_BUF_DEPTH
     >,
     back_left_motor: WheelMotor<
         'static,
@@ -147,9 +119,7 @@ pub struct Control<'a> {
         MAX_RX_PACKET_SIZE,
         MAX_TX_PACKET_SIZE,
         RX_BUF_DEPTH,
-        TX_BUF_DEPTH,
-        MotorBLBootPin,
-        MotorBLResetPin,
+        TX_BUF_DEPTH
     >,
     back_right_motor: WheelMotor<
         'static,
@@ -159,9 +129,7 @@ pub struct Control<'a> {
         MAX_RX_PACKET_SIZE,
         MAX_TX_PACKET_SIZE,
         RX_BUF_DEPTH,
-        TX_BUF_DEPTH,
-        MotorBRBootPin,
-        MotorBRResetPin,
+        TX_BUF_DEPTH
     >,
     drib_motor: DribblerMotor<
         'static,
@@ -171,9 +139,7 @@ pub struct Control<'a> {
         MAX_RX_PACKET_SIZE,
         MAX_TX_PACKET_SIZE,
         RX_BUF_DEPTH,
-        TX_BUF_DEPTH,
-        MotorDBootPin,
-        MotorDResetPin,
+        TX_BUF_DEPTH
     >,
     ticks_since_packet: u16,
     gyro_sub: Subscriber<'static, ThreadModeRawMutex, f32, 2, 2, 2>,
@@ -185,11 +151,11 @@ pub struct Control<'a> {
 impl<'a> Control<'a> {
     pub fn new(
         spawner: &SendSpawner,
-        front_right_usart: Uart<'static, MotorFRUart, MotorFRDmaTx, MotorFRDmaRx>,
-        front_left_usart: Uart<'static, MotorFLUart, MotorFLDmaTx, MotorFLDmaRx>,
-        back_left_usart: Uart<'static, MotorBLUart, MotorBLDmaTx, MotorBLDmaRx>,
-        back_right_usart: Uart<'static, MotorBRUart, MotorBRDmaTx, MotorBRDmaRx>,
-        drib_usart: Uart<'static, MotorDUart, MotorDDmaTx, MotorDDmaRx>,
+        front_right_usart: Uart<'static, MotorFRUart, Async>,
+        front_left_usart: Uart<'static, MotorFLUart, Async>,
+        back_left_usart: Uart<'static, MotorBLUart, Async>,
+        back_right_usart: Uart<'static, MotorBRUart, Async>,
+        drib_usart: Uart<'static, MotorDUart, Async>,
         front_right_boot0_pin: MotorFRBootPin,
         front_left_boot0_pin: MotorFLBootPin,
         back_left_boot0_pin: MotorBLBootPin,
@@ -231,115 +197,71 @@ impl<'a> Control<'a> {
             Output::new(drib_reset_pin, Level::Low, Speed::Medium); // reset active
 
         spawner
-            .spawn(FRONT_RIGHT_QUEUE_RX.spawn_task(front_right_rx))
+            .spawn(FRONT_RIGHT_RX_UART_QUEUE.spawn_task(front_right_rx))
             .unwrap();
         spawner
-            .spawn(FRONT_RIGHT_QUEUE_TX.spawn_task(front_right_tx))
+            .spawn(FRONT_RIGHT_TX_UART_QUEUE.spawn_task(front_right_tx))
             .unwrap();
         spawner
-            .spawn(FRONT_LEFT_QUEUE_RX.spawn_task(front_left_rx))
+            .spawn(FRONT_LEFT_RX_UART_QUEUE.spawn_task(front_left_rx))
             .unwrap();
         spawner
-            .spawn(FRONT_LEFT_QUEUE_TX.spawn_task(front_left_tx))
+            .spawn(FRONT_LEFT_TX_UART_QUEUE.spawn_task(front_left_tx))
             .unwrap();
         spawner
-            .spawn(BACK_LEFT_QUEUE_RX.spawn_task(back_left_rx))
+            .spawn(BACK_LEFT_RX_UART_QUEUE.spawn_task(back_left_rx))
             .unwrap();
-        spawner                    // // // info!("{:?}", defmt::Debug2Format(&mrp.data.motion));
-        // // info!("\n");
-        // // // info!("vel set {:?}", mrp.data.motion.vel_setpoint + 0.);
-        // info!("vel enc {:?}", mrp.data.motion.vel_enc_estimate + 0.);
-        // // // info!("vel hall {:?}", mrp.data.motion.vel_hall_estimate +                    // // // info!("{:?}", defmt::Debug2Format(&mrp.data.motion));
-                    // // info!("\n");
-                    // // // info!("vel set {:?}", mrp.data.motion.vel_setpoint + 0.);
-                    // info!("vel enc {:?}", mrp.data.motion.vel_enc_estimate + 0.);
-                    // // // info!("vel hall {:?}", mrp.data.motion.vel_hall_estimate + 0.);
-                    // info!("master_error {:?}", mrp.data.motion.master_error());
-                    // info!("{:?}", &mrp.data.motion._bitfield_1.get(0, 32));
-                    // info!("hall_power_error {:?}", mrp.data.motion.hall_power_error());
-                    // info!("hall_disconnected_error {:?}", mrp.data.motion.hall_disconnected_error());
-                    // info!("bldc_transition_error {:?}", mrp.data.motion.bldc_transition_error());
-                    // info!("bldc_commutation_watchdog_error {:?}", mrp.data.motion.bldc_commutation_watchdog_error());
-                    // info!("enc_disconnected_error {:?}", mrp.data.motion.enc_disconnected_error());
-                    // info!("enc_decoding_error {:?}", mrp.data.motion.enc_decoding_error());
-                    // info!("hall_enc_vel_disagreement_error {:?}", mrp.data.motion.hall_enc_vel_disagreement_error());
-                    // info!("overcurrent_error {:?}", mrp.data.motion.overcurrent_error());
-                    // info!("undervoltage_error {:?}", mrp.data.motion.undervoltage_error());
-                    // info!("overvoltage_error {:?}", mrp.data.motion.overvoltage_error());
-                    // info!("torque_limited {:?}", mrp.data.motion.torque_limited());
-                    // info!("control_loop_time_error {:?}", mrp.data.motion.control_loop_time_error());
-                    // info!("reset_watchdog_independent {:?}", mrp.data.motion.reset_watchdog_independent());
-                    // info!("reset_watchdog_window {:?}", mrp.data.motion.reset_watchdog_window());
-                    // info!("reset_low_power {:?}", mrp.data.motion.reset_low_power());
-                    // info!("reset_software {:?}", mrp.data.motion.reset_software()); 0.);
-        // info!("master_error {:?}", mrp.data.motion.master_error());
-        // info!("{:?}", &mrp.data.motion._bitfield_1.get(0, 32));
-        // info!("hall_power_error {:?}", mrp.data.motion.hall_power_error());
-        // info!("hall_disconnected_error {:?}", mrp.data.motion.hall_disconnected_error());
-        // info!("bldc_transition_error {:?}", mrp.data.motion.bldc_transition_error());
-        // info!("bldc_commutation_watchdog_error {:?}", mrp.data.motion.bldc_commutation_watchdog_error());
-        // info!("enc_disconnected_error {:?}", mrp.data.motion.enc_disconnected_error());
-        // info!("enc_decoding_error {:?}", mrp.data.motion.enc_decoding_error());
-        // info!("hall_enc_vel_disagreement_error {:?}", mrp.data.motion.hall_enc_vel_disagreement_error());
-        // info!("overcurrent_error {:?}", mrp.data.motion.overcurrent_error());
-        // info!("undervoltage_error {:?}", mrp.data.motion.undervoltage_error());
-        // info!("overvoltage_error {:?}", mrp.data.motion.overvoltage_error());
-        // info!("torque_limited {:?}", mrp.data.motion.torque_limited());
-        // info!("control_loop_time_error {:?}", mrp.data.motion.control_loop_time_error());
-        // info!("reset_watchdog_independent {:?}", mrp.data.motion.reset_watchdog_independent());
-        // info!("reset_watchdog_window {:?}", mrp.data.motion.reset_watchdog_window());
-        // info!("reset_low_power {:?}", mrp.data.motion.reset_low_power());
-        // info!("reset_software {:?}", mrp.data.motion.reset_software());
-            .spawn(BACK_LEFT_QUEUE_TX.spawn_task(back_left_tx))
+        spawner                    
+            .spawn(BACK_LEFT_TX_UART_QUEUE.spawn_task(back_left_tx))
             .unwrap();
         spawner
-            .spawn(BACK_RIGHT_QUEUE_RX.spawn_task(back_right_rx))
+            .spawn(BACK_RIGHT_RX_UART_QUEUE.spawn_task(back_right_rx))
             .unwrap();
         spawner
-            .spawn(BACK_RIGHT_QUEUE_TX.spawn_task(back_right_tx))
+            .spawn(BACK_RIGHT_TX_UART_QUEUE.spawn_task(back_right_tx))
             .unwrap();
         spawner
-            .spawn(DRIB_QUEUE_RX.spawn_task(drib_rx))
+            .spawn(DRIB_RX_UART_QUEUE.spawn_task(drib_rx))
             .unwrap();
         spawner
-            .spawn(DRIB_QUEUE_TX.spawn_task(drib_tx))
+            .spawn(DRIB_TX_UART_QUEUE.spawn_task(drib_tx))
             .unwrap();
 
         let front_right_stm32_interface = Stm32Interface::new(
-            &FRONT_RIGHT_QUEUE_RX,
-            &FRONT_RIGHT_QUEUE_TX,
+            &FRONT_RIGHT_RX_UART_QUEUE,
+            &FRONT_RIGHT_TX_UART_QUEUE,
             Some(front_right_boot0_pin),
             Some(front_right_reset_pin),
         );
         let front_right_motor = WheelMotor::new(front_right_stm32_interface, wheel_firmware_image);
 
         let front_left_stm32_interface = Stm32Interface::new(
-            &FRONT_LEFT_QUEUE_RX,
-            &FRONT_LEFT_QUEUE_TX,
+            &FRONT_LEFT_RX_UART_QUEUE,
+            &FRONT_LEFT_TX_UART_QUEUE,
             Some(front_left_boot0_pin),
             Some(front_left_reset_pin),
         );
         let front_left_motor = WheelMotor::new(front_left_stm32_interface, wheel_firmware_image);
         
         let back_left_stm32_interface = Stm32Interface::new(
-            &BACK_LEFT_QUEUE_RX,
-            &BACK_LEFT_QUEUE_TX,
+            &BACK_LEFT_RX_UART_QUEUE,
+            &BACK_LEFT_TX_UART_QUEUE,
             Some(back_left_boot0_pin),
             Some(back_left_reset_pin),
         );
         let back_left_motor = WheelMotor::new(back_left_stm32_interface, wheel_firmware_image);
 
         let back_right_stm32_interface = Stm32Interface::new(
-            &BACK_RIGHT_QUEUE_RX,
-            &BACK_RIGHT_QUEUE_TX,
+            &BACK_RIGHT_RX_UART_QUEUE,
+            &BACK_RIGHT_TX_UART_QUEUE,
             Some(back_right_boot0_pin),
             Some(back_right_reset_pin),
         );
         let back_right_motor = WheelMotor::new(back_right_stm32_interface, wheel_firmware_image);
 
         let drib_stm32_interface = Stm32Interface::new(
-            &DRIB_QUEUE_RX,
-            &DRIB_QUEUE_TX,
+            &DRIB_RX_UART_QUEUE,
+            &DRIB_TX_UART_QUEUE,
             Some(drib_boot0_pin),
             Some(drib_reset_pin),
         );

@@ -9,22 +9,22 @@ use embassy_time::{Duration, Ticker, Timer};
 use panic_probe as _;
 
 use apa102_spi::Apa102;
-use ateam_control_board::{colors::*, stm32_interface::get_bootloader_uart_config};
+use ateam_control_board::{
+    colors::*,
+    stm32_interface::get_bootloader_uart_config};
 use embassy_stm32::{
     dma::NoDma,
-    executor::InterruptExecutor,
     gpio::{Input, Level, Output, Pull, Speed},
-    interrupt::{self, InterruptExt},
+    interrupt,
     spi,
     time::{hz, mhz},
     usart::Uart,
 };
-use futures_util::StreamExt;
+use embassy_executor::InterruptExecutor;
 use smart_leds::SmartLedsWrite;
 use static_cell::StaticCell;
 
 mod control;
-mod pins;
 
 static EXECUTOR_UART_QUEUE: StaticCell<InterruptExecutor<interrupt::CEC>> = StaticCell::new();
 

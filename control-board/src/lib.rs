@@ -11,10 +11,28 @@
 #![feature(const_mut_refs)]
 #![feature(ptr_metadata)]
 #![feature(const_fn_floating_point_arithmetic)]
+#![feature(sync_unsafe_cell)]
+
+use embassy_stm32::{
+    rcc::{
+        mux::{
+            Adcsel, Saisel, Sdmmcsel, Spi6sel, Usart16910sel, Usart234578sel, Usbsel
+        },
+        AHBPrescaler,
+        APBPrescaler,
+        Hse, HseMode,
+        Pll, PllDiv, PllMul, PllPreDiv, PllSource,
+        Sysclk,
+        VoltageScale
+    },
+    time::Hertz,
+    Config
+};
 
 // pub mod fw_images;
 pub mod motion;
 pub mod pins;
+pub mod radio;
 pub mod stm32_interface;
 pub mod stspin_motor;
 pub mod parameter_interface;
@@ -42,10 +60,11 @@ macro_rules! include_external_cpp_bin {
 #[macro_export]
 macro_rules! include_kicker_bin {
     ($var_name:ident, $bin_file:literal) => {
-        pub static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../kicker-board/target/thumbv7em-none-eabi/release/", $bin_file)).len()]
-            = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../kicker-board/target/thumbv7em-none-eabi/release/", $bin_file));
+        pub static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../kicker-board/target/thumbv7em-none-eabihf/release/", $bin_file)).len()]
+            = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../kicker-board/target/thumbv7em-none-eabihf/release/", $bin_file));
     }
 }
+
 pub const BATTERY_MIN_VOLTAGE: f32 = 19.0;
 pub const BATTERY_MAX_VOLTAGE: f32 = 25.2;
 pub const BATTERY_BUFFER_SIZE: usize = 10;
@@ -59,4 +78,70 @@ pub const fn adc_v_to_battery_voltage(adc_mv: f32) -> f32 {
     (adc_mv / 2.762) * BATTERY_MAX_VOLTAGE
 }
 
+pub fn get_system_config() -> Config {
+    let mut config = Config::default();
+
+    // we have an 8Mhz external crystal
+    config.rcc.hse = Some(Hse {
+        freq: Hertz(8_000_000),
+        mode: HseMode::Oscillator,
+    });
+
+    // I'm not actually sure what this does. We dont select it but other
+    // examples also don't use it in a mux selection, but they still turn
+    // it on.
+    config.rcc.csi = true;
+
+    // turn on the hsi48 as a primordial ADC source
+    config.rcc.hsi48 = Some(Default::default());
+
+    // configure the PLLs
+    // validated in ST Cube MX
+    config.rcc.pll1 = Some(Pll {
+        source: PllSource::HSI,
+        prediv: PllPreDiv::DIV1,
+        mul: PllMul::MUL68,
+        divp: Some(PllDiv::DIV1), // 544 MHz
+        divq: Some(PllDiv::DIV4), // 136 MHz
+        divr: Some(PllDiv::DIV2)  // 272 MHz
+    });
+    config.rcc.pll2 = Some(Pll {
+        source: PllSource::HSI,
+        prediv: PllPreDiv::DIV1,
+        mul: PllMul::MUL31,
+        divp: Some(PllDiv::DIV5), // 49.6 MHz
+        divq: Some(PllDiv::DIV2), // 124 MHz
+        divr: Some(PllDiv::DIV1)  // 248 MHz
+    });
+    config.rcc.pll3 = Some(Pll {
+        source: PllSource::HSI,
+        prediv: PllPreDiv::DIV2,
+        mul: PllMul::MUL93,
+        divp: Some(PllDiv::DIV2), // 186 Mhz
+        divq: Some(PllDiv::DIV3), // 124 MHz
+        divr: Some(PllDiv::DIV3)  // 124 MHz
+    });
+
+    // configure 
+    config.rcc.sys = Sysclk::PLL1_P; // 544 MHz
+    config.rcc.d1c_pre = AHBPrescaler::DIV1; // 544 MHz
+    config.rcc.ahb_pre = AHBPrescaler::DIV2; // 272 MHz
+
+    config.rcc.apb1_pre = APBPrescaler::DIV2; // 136 MHz
+    config.rcc.apb2_pre = APBPrescaler::DIV2; // 136 MHz
+    config.rcc.apb3_pre = APBPrescaler::DIV2; // 136 MHz
+    config.rcc.apb4_pre = APBPrescaler::DIV2; // 136 MHz
+
+    config.rcc.mux.spi123sel = Saisel::PLL1_Q; // 136 MHz
+    config.rcc.mux.usart234578sel = Usart234578sel::PCLK1; // 136 MHz
+    config.rcc.mux.usart16910sel = Usart16910sel::PCLK2; // 136 MHz
+    config.rcc.mux.spi6sel = Spi6sel::PCLK4; // 136 MHz
+    config.rcc.mux.sdmmcsel = Sdmmcsel::PLL2_R; // 248 MHz
+    config.rcc.mux.adcsel = Adcsel::PLL3_R; // 124 MHz
+    config.rcc.mux.usbsel = Usbsel::PLL3_Q; // 124 MHz
+
+    config.rcc.voltage_scale = VoltageScale::Scale0;
+
+    config
+}
 
