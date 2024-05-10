@@ -30,15 +30,14 @@ use crate::queue::{
 #[macro_export]
 macro_rules! make_uart_queues {
     ($name:ident, $uart:ty, $uart_rx_dma:ty, $uart_tx_dma:ty, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr, $(#[$m:meta])*) => {
-        use $crate::paste;
-        paste::paste! {
+        $crate::paste::paste! {
         // shared mutex allowing safe runtime update to UART config
         const [<$name _UART_PERI_MUTEX>]: embassy_sync::mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, bool> = 
             embassy_sync::mutex::Mutex::new(false);
 
         // tx buffer
         const [<$name _CONST_TX_BUF_VAL>]: core::cell::SyncUnsafeCell<$crate::queue::Buffer<$tx_buffer_size>> = 
-            core::cell::SyncUnsafeCell::new(Buffer::EMPTY);
+            core::cell::SyncUnsafeCell::new($crate::queue::Buffer::EMPTY);
         $(#[$m])*
         static [<$name _TX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::queue::Buffer<$tx_buffer_size>>; $tx_buffer_depth] = 
             [[<$name _CONST_TX_BUF_VAL>]; $tx_buffer_depth];
@@ -47,7 +46,7 @@ macro_rules! make_uart_queues {
 
         // rx buffer
         const [<$name _CONST_RX_BUF_VAL>]: core::cell::SyncUnsafeCell<$crate::queue::Buffer<$rx_buffer_size>> = 
-            core::cell::SyncUnsafeCell::new(Buffer::EMPTY);
+            core::cell::SyncUnsafeCell::new($crate::queue::Buffer::EMPTY);
         $(#[$m])*
         static [<$name _RX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::queue::Buffer<$rx_buffer_size>>; $rx_buffer_depth] = 
         [[<$name _CONST_RX_BUF_VAL>]; $rx_buffer_depth];

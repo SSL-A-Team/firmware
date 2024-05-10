@@ -1,15 +1,33 @@
 #![allow(dead_code)]
 
+use ateam_common_packets::radio::{DataPacket, TelemetryPacket};
 use embassy_stm32::peripherals::*;
+use embassy_sync::{
+    blocking_mutex::raw::ThreadModeRawMutex,
+    pubsub::{Publisher, Subscriber}};
+
+/////////////////////
+//  Pub Sub Types  //
+/////////////////////
+
+const COMMANDS_PUBSUB_DEPTH: usize = 1;
+const TELEMETRY_PUBSUB_DEPTH: usize = 3;
+pub type CommandsPublisher = Publisher<'static, ThreadModeRawMutex, DataPacket, COMMANDS_PUBSUB_DEPTH, 1, 1>;
+pub type TelemetrySubcriber = Subscriber<'static, ThreadModeRawMutex, TelemetryPacket, TELEMETRY_PUBSUB_DEPTH, 1, 1>;
 
 /////////////
 //  Radio  //
 /////////////
 
 pub type RadioUART = USART10;
+pub type RadioUartRxPin = PE2;
+pub type RadioUartTxPin = PE3;
+pub type RadioUartCtsPin = PG13;
+pub type RadioUartRtsPin = PG14;
 pub type RadioTxDMA = DMA2_CH0;
 pub type RadioRxDMA = DMA2_CH1;
-pub type RadioReset = PC13;
+pub type RadioResetPin = PC13;
+pub type RadioNDetectPin = PE4;
 
 
 //////////////

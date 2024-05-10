@@ -80,6 +80,10 @@ impl<
         }
     }
 
+    pub async fn update_uart_config(&self, config: usart::Config) {
+        self.writer.update_uart_config(config).await;
+    }
+
     pub async fn wait_startup(&self) -> Result<(), ()> {
         self.reader
             .dequeue(|buf| {

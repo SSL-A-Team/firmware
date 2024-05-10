@@ -120,7 +120,8 @@ where
             .unwrap();
 
         info!("radio created");
-        radio.connect_to_network(wifi_network).await.unwrap();
+        defmt::panic!("radio temporarily left unconnected");
+        // radio.connect_to_network(wifi_network).await.unwrap();
         info!("radio connected");
 
         radio.open_multicast().await.unwrap();

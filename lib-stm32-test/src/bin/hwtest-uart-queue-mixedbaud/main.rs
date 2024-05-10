@@ -16,7 +16,7 @@ use panic_probe as _;
 
 use static_cell::StaticCell;
 
-use ateam_lib_stm32::{make_uart_queues, queue::Buffer, uart::queue::{UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{make_uart_queues, uart::queue::{UartReadQueue, UartWriteQueue}};
 
 type ComsUartModule = USART2;
 type ComsUartTxDma = DMA1_CH0;
