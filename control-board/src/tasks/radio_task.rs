@@ -11,7 +11,7 @@ use embassy_stm32::{
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::Timer;
 
-use crate::{drivers::radio::{RobotRadio, WifiNetwork}, pins::*, SystemIrqs};
+use crate::{drivers::radio::RobotRadio, pins::*, SystemIrqs};
 
 pub const RADIO_MAX_TX_PACKET_SIZE: usize = 256;
 pub const RADIO_TX_BUF_DEPTH: usize = 4;
@@ -26,7 +26,7 @@ make_uart_queues!(RADIO,
 
 
 #[embassy_executor::task]
-pub async fn radio_task_entry(
+async fn radio_task_entry(
     command_publisher: CommandsPublisher,
     mut telemetry_subscriber: TelemetrySubcriber,
     wifi_network: WifiCredential,

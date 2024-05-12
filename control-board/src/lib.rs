@@ -15,11 +15,8 @@
 
 use embassy_stm32::{
     bind_interrupts, peripherals, rcc::{
-        mux::{
-            Adcsel, Saisel, Sdmmcsel, Spi6sel, Usart16910sel, Usart234578sel, Usbsel
-        },
-        AHBPrescaler,
-        APBPrescaler,
+        mux::{Adcsel, Saisel, Sdmmcsel, Spi6sel, Usart16910sel, Usart234578sel, Usbsel},
+        AHBPrescaler, APBPrescaler,
         Hse, HseMode,
         Pll, PllDiv, PllMul, PllPreDiv, PllSource,
         Sysclk,
@@ -27,15 +24,15 @@ use embassy_stm32::{
     }, time::Hertz, usart, Config
 };
 
-// pub mod fw_images;
-pub mod motion;
+pub mod parameter_interface;
 pub mod pins;
 pub mod radio;
 pub mod stm32_interface;
 pub mod stspin_motor;
-pub mod parameter_interface;
 
 pub mod drivers;
+pub mod motion;
+pub mod tasks;
 
 bind_interrupts!(struct SystemIrqs {
     USART10 => usart::InterruptHandler<peripherals::USART10>;
@@ -130,16 +127,20 @@ pub fn get_system_config() -> Config {
         divr: Some(PllDiv::DIV3)  // 124 MHz
     });
 
-    // configure 
+    // configure core busses
     config.rcc.sys = Sysclk::PLL1_P; // 544 MHz
     config.rcc.d1c_pre = AHBPrescaler::DIV1; // 544 MHz
     config.rcc.ahb_pre = AHBPrescaler::DIV2; // 272 MHz
 
+    // configure peripheral busses
     config.rcc.apb1_pre = APBPrescaler::DIV2; // 136 MHz
     config.rcc.apb2_pre = APBPrescaler::DIV2; // 136 MHz
     config.rcc.apb3_pre = APBPrescaler::DIV2; // 136 MHz
     config.rcc.apb4_pre = APBPrescaler::DIV2; // 136 MHz
 
+    // configure peripheral subgroup clock selection muxes
+    // this is non exhaustive, if other things are turned on
+    // add an entry
     config.rcc.mux.spi123sel = Saisel::PLL1_Q; // 136 MHz
     config.rcc.mux.usart234578sel = Usart234578sel::PCLK1; // 136 MHz
     config.rcc.mux.usart16910sel = Usart16910sel::PCLK2; // 136 MHz
