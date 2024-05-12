@@ -8,7 +8,13 @@ use core::{
 };
 
 use embassy_stm32::{
-    bind_interrupts, exti::ExtiInput, gpio::{Level, Output, Pull, Speed}, interrupt, pac::Interrupt, peripherals::{self, *}, usart::{self, *}
+    bind_interrupts,
+    exti::ExtiInput,
+    gpio::{Level, Output, Pull, Speed},
+    interrupt,
+    pac::Interrupt,
+    peripherals::{self, *},
+    usart::{self, *}
 };
 use embassy_executor::{Executor, InterruptExecutor};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};

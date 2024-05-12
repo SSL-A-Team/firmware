@@ -33,6 +33,8 @@ const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 64;
 const RX_BUF_DEPTH: usize = 20;
 
+create_uart_
+
 // buffers for front right
 #[link_section = ".axisram.buffers"]
 static mut FRONT_RIGHT_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
