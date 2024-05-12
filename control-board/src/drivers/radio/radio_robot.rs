@@ -5,6 +5,7 @@ use ateam_common_packets::bindings_radio::{
 };
 use ateam_common_packets::radio::DataPacket;
 use const_format::formatcp;
+use credentials::WifiCredential;
 use core::fmt::Write;
 use core::mem::size_of;
 use embassy_futures::select::{select, Either};
@@ -99,29 +100,8 @@ impl<
         reset_pin: impl Pin,
     ) -> Result<RobotRadio<'a, UART, DmaRx, DmaTx, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>, ()>
     {
-        let mut reset_pin = Output::new(reset_pin, Level::High, Speed::Medium);
-        Timer::after(Duration::from_micros(100)).await;
-        reset_pin.set_low();
-
-        let mut radio = Radio::new(read_queue, write_queue);
-        radio.wait_startup().await?;
-
-        let baudrate = 5_250_000;
-        radio.set_echo(false).await?;
-        radio.config_uart(baudrate, false, 8, true).await?;
-
-        let mut radio_uart_config = usart::Config::default();
-        radio_uart_config.baudrate = 2_000_000;
-        radio_uart_config.parity = usart::Parity::ParityEven;
-        write_queue.update_uart_config(radio_uart_config).await;
-
-        // Datasheet says wait at least 40ms after UART config change
-        Timer::after(Duration::from_millis(50)).await;
-
-        // Datasheet says wait at least 50ms after entering data mode
-        radio.enter_edm().await?;
-        radio.wait_edm_startup().await?;
-        Timer::after(Duration::from_millis(50)).await;
+        let reset_pin = Output::new(reset_pin, Level::High, Speed::Medium);
+        let radio = Radio::new(read_queue, write_queue);
 
         Ok(Self {
             radio,
@@ -130,32 +110,50 @@ impl<
         })
     }
 
-    pub async fn connect_to_network(&mut self, wifi_network: WifiNetwork) -> Result<(), ()> {
+    pub async fn connect_uart(&mut self) -> Result<(), ()> {
+        self.reset_pin.set_high();
+        Timer::after(Duration::from_micros(100)).await;
+        self.reset_pin.set_low();
+
+        self.radio.wait_startup().await?;
+
+        let baudrate = 5_250_000;
+        self.radio.set_echo(false).await?;
+        self.radio.config_uart(baudrate, false, 8, true).await?;
+
+        let mut radio_uart_config = usart::Config::default();
+        radio_uart_config.baudrate = 5_250_000;
+        radio_uart_config.parity = usart::Parity::ParityEven;
+        self.radio.update_uart_config(radio_uart_config).await;
+
+        // Datasheet says wait at least 40ms after UART config change
+        Timer::after(Duration::from_millis(50)).await;
+
+        // Datasheet says wait at least 50ms after entering data mode
+        self.radio.enter_edm().await?;
+        self.radio.wait_edm_startup().await?;
+        Timer::after(Duration::from_millis(50)).await;
+
+        Ok(())
+    }
+
+    pub async fn connect_to_network(&mut self, wifi_credential: WifiCredential) -> Result<(), ()> {
+        // set radio hardware name enumeration
         let mut s = String::<17>::new();
         core::write!(&mut s, "A-Team Robot {:04X}", get_uuid()).unwrap();
         self.radio.set_host_name(s.as_str()).await?;
-        let wifi_ssid = match wifi_network {
-            WifiNetwork::Team => TEAM_WIFI_SSID,
-            WifiNetwork::CompMain => COMP_MAIN_WIFI_SSID,
-            WifiNetwork::CompPractice => COMP_PRACTICE_WIFI_SSID
-        };
 
-        let wifi_pass = match wifi_network {
-            WifiNetwork::Team => TEAM_WIFI_PASS,
-            WifiNetwork::CompMain => COMP_MAIN_WIFI_PASS,
-            WifiNetwork::CompPractice => COMP_PRACTICE_WIFI_PASS
+        // load the wifi network configuration into config slot 1
+        let wifi_ssid = wifi_credential.get_ssid();
+        let wifi_pass = WifiAuth::WPA {
+            passphrase: wifi_credential.get_password(),
         };
+        self.radio.config_wifi(1, wifi_ssid,wifi_pass).await?;
 
-        self.radio
-            .config_wifi(
-                1,
-                wifi_ssid,
-                WifiAuth::WPA {
-                    passphrase: wifi_pass,
-                },
-            )
-            .await?;
+        // connect to config slot 1
         self.radio.connect_wifi(1).await?;
+
+        // if we made it this far, we're connected
         Ok(())
     }
 

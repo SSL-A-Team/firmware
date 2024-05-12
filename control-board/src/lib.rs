@@ -14,30 +14,35 @@
 #![feature(sync_unsafe_cell)]
 
 use embassy_stm32::{
-    rcc::{
-        mux::{
-            Adcsel, Saisel, Sdmmcsel, Spi6sel, Usart16910sel, Usart234578sel, Usbsel
-        },
-        AHBPrescaler,
-        APBPrescaler,
+    bind_interrupts, peripherals, rcc::{
+        mux::{Adcsel, Saisel, Sdmmcsel, Spi6sel, Usart16910sel, Usart234578sel, Usbsel},
+        AHBPrescaler, APBPrescaler,
         Hse, HseMode,
         Pll, PllDiv, PllMul, PllPreDiv, PllSource,
         Sysclk,
         VoltageScale
-    },
-    time::Hertz,
-    Config
+    }, time::Hertz, usart, Config
 };
 
-// pub mod fw_images;
-pub mod motion;
+pub mod parameter_interface;
 pub mod pins;
 pub mod radio;
 pub mod stm32_interface;
 pub mod stspin_motor;
-pub mod parameter_interface;
 
 pub mod drivers;
+pub mod motion;
+pub mod tasks;
+
+bind_interrupts!(struct SystemIrqs {
+    USART10 => usart::InterruptHandler<peripherals::USART10>;
+    USART6 => usart::InterruptHandler<peripherals::USART6>;
+    USART1 => usart::InterruptHandler<peripherals::USART1>;
+    UART4 => usart::InterruptHandler<peripherals::UART4>;
+    UART7 => usart::InterruptHandler<peripherals::UART7>;
+    UART8 => usart::InterruptHandler<peripherals::UART8>;
+    UART5 => usart::InterruptHandler<peripherals::UART5>;
+});
 
 pub mod colors {
     use smart_leds::RGB8;
@@ -98,7 +103,7 @@ pub fn get_system_config() -> Config {
     // configure the PLLs
     // validated in ST Cube MX
     config.rcc.pll1 = Some(Pll {
-        source: PllSource::HSI,
+        source: PllSource::HSE,
         prediv: PllPreDiv::DIV1,
         mul: PllMul::MUL68,
         divp: Some(PllDiv::DIV1), // 544 MHz
@@ -106,7 +111,7 @@ pub fn get_system_config() -> Config {
         divr: Some(PllDiv::DIV2)  // 272 MHz
     });
     config.rcc.pll2 = Some(Pll {
-        source: PllSource::HSI,
+        source: PllSource::HSE,
         prediv: PllPreDiv::DIV1,
         mul: PllMul::MUL31,
         divp: Some(PllDiv::DIV5), // 49.6 MHz
@@ -114,7 +119,7 @@ pub fn get_system_config() -> Config {
         divr: Some(PllDiv::DIV1)  // 248 MHz
     });
     config.rcc.pll3 = Some(Pll {
-        source: PllSource::HSI,
+        source: PllSource::HSE,
         prediv: PllPreDiv::DIV2,
         mul: PllMul::MUL93,
         divp: Some(PllDiv::DIV2), // 186 Mhz
@@ -122,16 +127,20 @@ pub fn get_system_config() -> Config {
         divr: Some(PllDiv::DIV3)  // 124 MHz
     });
 
-    // configure 
+    // configure core busses
     config.rcc.sys = Sysclk::PLL1_P; // 544 MHz
     config.rcc.d1c_pre = AHBPrescaler::DIV1; // 544 MHz
     config.rcc.ahb_pre = AHBPrescaler::DIV2; // 272 MHz
 
+    // configure peripheral busses
     config.rcc.apb1_pre = APBPrescaler::DIV2; // 136 MHz
     config.rcc.apb2_pre = APBPrescaler::DIV2; // 136 MHz
     config.rcc.apb3_pre = APBPrescaler::DIV2; // 136 MHz
     config.rcc.apb4_pre = APBPrescaler::DIV2; // 136 MHz
 
+    // configure peripheral subgroup clock selection muxes
+    // this is non exhaustive, if other things are turned on
+    // add an entry
     config.rcc.mux.spi123sel = Saisel::PLL1_Q; // 136 MHz
     config.rcc.mux.usart234578sel = Usart234578sel::PCLK1; // 136 MHz
     config.rcc.mux.usart16910sel = Usart16910sel::PCLK2; // 136 MHz

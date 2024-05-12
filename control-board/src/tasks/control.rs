@@ -19,10 +19,7 @@ use crate::{
 
 use nalgebra::{Vector3, Vector4};
 
-use ateam_lib_stm32::{
-    make_uart_queues,
-    queue::Buffer
-};
+use ateam_lib_stm32::make_uart_queues;
 
 use ateam_common_packets::bindings_radio::{
     BasicControl,
