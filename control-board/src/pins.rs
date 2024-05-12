@@ -4,17 +4,27 @@ use ateam_common_packets::radio::{DataPacket, TelemetryPacket};
 use embassy_stm32::peripherals::*;
 use embassy_sync::{
     blocking_mutex::raw::ThreadModeRawMutex,
-    pubsub::{Publisher, Subscriber}};
+    pubsub::{PubSubChannel, Publisher, Subscriber}};
 
 /////////////////////
 //  Pub Sub Types  //
 /////////////////////
 
-const COMMANDS_PUBSUB_DEPTH: usize = 1;
-const TELEMETRY_PUBSUB_DEPTH: usize = 3;
+const COMMANDS_PUBSUB_DEPTH: usize = 4;
+const TELEMETRY_PUBSUB_DEPTH: usize = 4;
+const GYRO_DATA_PUBSUB_DEPTH: usize = 1;
+const ACCEL_DATA_PUBSUB_DEPTH: usize = 1;
+
 pub type CommandsPublisher = Publisher<'static, ThreadModeRawMutex, DataPacket, COMMANDS_PUBSUB_DEPTH, 1, 1>;
+
 pub type TelemetrySubcriber = Subscriber<'static, ThreadModeRawMutex, TelemetryPacket, TELEMETRY_PUBSUB_DEPTH, 1, 1>;
 
+pub type GyroDataPubSub = PubSubChannel<ThreadModeRawMutex, nalgebra::Vector3<f32>, GYRO_DATA_PUBSUB_DEPTH, 1, 1>;
+pub type GyroDataPublisher = Publisher<'static, ThreadModeRawMutex, nalgebra::Vector3<f32>, GYRO_DATA_PUBSUB_DEPTH, 1, 1>;
+pub type GyroDataSubscriber = Subscriber<'static, ThreadModeRawMutex, nalgebra::Vector3<f32>, GYRO_DATA_PUBSUB_DEPTH, 1, 1>;
+pub type AccelDataPubSub = PubSubChannel<ThreadModeRawMutex, nalgebra::Vector3<f32>, ACCEL_DATA_PUBSUB_DEPTH, 1, 1>;
+pub type AccelDataPublisher = Publisher<'static, ThreadModeRawMutex, nalgebra::Vector3<f32>, ACCEL_DATA_PUBSUB_DEPTH, 1, 1>;
+pub type AccelDataSubscriber = Subscriber<'static, ThreadModeRawMutex, nalgebra::Vector3<f32>, ACCEL_DATA_PUBSUB_DEPTH, 1, 1>;
 
 /////////////
 //  Radio  //
