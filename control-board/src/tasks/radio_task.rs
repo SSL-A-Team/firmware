@@ -100,6 +100,12 @@ async fn radio_task_entry(
                                         defmt::warn!("radio task failed to send control debug telemetry packet. Is the backing queue too small?");
                                     }
                                 }
+                                TelemetryPacket::ParameterCommandResponse(param_resp) => {
+                                    let res = radio.send_parameter_response(param_resp).await;
+                                    if res.is_err() {
+                                        defmt::warn!("radio task failed to send param resp packet. Is the backing queue too small?")
+                                    }
+                                }
                             }
                         }
                     }
