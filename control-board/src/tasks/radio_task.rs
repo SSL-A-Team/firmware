@@ -41,7 +41,8 @@ async fn radio_task_entry(
         RobotRadio::new(&RADIO_RX_UART_QUEUE, &RADIO_TX_UART_QUEUE, radio_reset_pin).await.unwrap();
 
     #[allow(unused_labels)]
-    'connect_loop: loop {
+    'connect_loop: 
+    loop {
         if radio_ndet.is_high() {
             defmt::error!("radio appears unplugged.");
             Timer::after_millis(1000).await;
@@ -70,7 +71,8 @@ async fn radio_task_entry(
         defmt::info!("multicast open");
 
         // TODO add inbound timeout somewhere, maybe not here.
-        'process_packets: loop {
+        'process_packets: 
+        loop {
             match select(radio.read_packet(), telemetry_subscriber.next_message()).await {
                 Either::First(res) => {
                     if let Ok(c2_pkt) = res {

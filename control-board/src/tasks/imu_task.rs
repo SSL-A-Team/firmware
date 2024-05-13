@@ -1,29 +1,27 @@
-use embassy_executor::{SpawnError, Spawner};
+use embassy_executor::Spawner;
 use embassy_futures::select::{select, Either};
 use embassy_stm32::Peripheral;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Pull;
 use embassy_stm32::spi::{SckPin, MisoPin, MosiPin};
-use embassy_sync::pubsub::{PubSubChannel, Error};
 
 use embassy_time::Timer;
 use nalgebra::Vector3;
 
 use static_cell::ConstStaticCell;
 
-use ateam_lib_stm32::drivers::imu::bmi085::{Bmi085, GyroRange, GyroBandwidth, GyroIntMap, GyroIntPinActiveState, GyroIntPinMode, AccelRange, AccelConfOdr, AccelConfBwp};
+use ateam_lib_stm32::drivers::imu::bmi323::{self, *};
 
-use crate::pins::{
-    AccelDataPublisher, ExtImuNDetPin, ExtImuSpiNss1Pin, ExtImuSpiNss2Pin, ExtImuSpiNss3Pin, GyroDataPublisher, ImuSpi, ImuSpiInt1Exti, ImuSpiInt1Pin, ImuSpiInt2Exti, ImuSpiInt2Pin, ImuSpiMisoPin, ImuSpiMosiPin, ImuSpiNss0Pin, ImuSpiRxDma, ImuSpiSckPin, ImuSpiTxDma};
+use crate::pins::*;
 
 #[link_section = ".axisram.buffers"]
-static IMU_BUFFER_CELL: ConstStaticCell<[u8; 8]> = ConstStaticCell::new([0; 8]);
+static IMU_BUFFER_CELL: ConstStaticCell<[u8; bmi323::SPI_MIN_BUF_LEN]> = ConstStaticCell::new([0; bmi323::SPI_MIN_BUF_LEN]);
 
 #[embassy_executor::task]
 async fn imu_task_entry(
         accel_pub: AccelDataPublisher,
         gyro_pub: GyroDataPublisher,
-        mut imu: Bmi085<'static, 'static, ImuSpi>,
+        mut imu: Bmi323<'static, 'static, ImuSpi>,
         mut _accel_int: ExtiInput<'static>,
         mut gyro_int: ExtiInput<'static>) {
 
@@ -39,28 +37,36 @@ async fn imu_task_entry(
             continue 'imu_configuration_loop;
         }
     
-        // set measurement ranges
-        imu.accel_set_range(AccelRange::Range2g).await;  // range +- 19.6 m/s^2
-        imu.accel_set_bandwidth(AccelConfBwp::OverSampling2Fold, AccelConfOdr::OutputDataRate400p0).await;  // bandwidth 80Hz
-    
-        // set interrupt config
-        imu.gyro_set_int_config(GyroIntPinActiveState::ActiveLow,
-            GyroIntPinMode::OpenDrain,
-            GyroIntPinActiveState::ActiveLow,
-            GyroIntPinMode::OpenDrain).await;
-        // enable BMI085 Gyro INT3 which is electrically wired to IMU breakout INT2 named gyro_int_pin
-        imu.gyro_set_int_map(GyroIntMap::Int3).await;
-    
-        imu.gyro_set_range(GyroRange::PlusMinus2000DegPerSec).await;
-        imu.gyro_set_bandwidth(GyroBandwidth::FilterBw64Hz).await;
-    
-        // enable interrupts
-        imu.gyro_enable_interrupts().await;
-    
-        // BMI085 internally shares a SPI bus so we can't actually asynchronously read both the IMU and Accel
-        // unless we used a mutex but that's still a lot of overhead. We'll just sync on the Gyro INT since
-        // that gyro data is far more critical for control. When the gyro has an update, we'll also grab the 
-        // accel update/
+        // configure the gyro, map int to int pin 2
+        let gyro_config_res = imu.set_gyro_config(GyroMode::ContinuousHighPerformance,
+            GyroRange::PlusMinus2000DegPerSec,
+            Bandwidth3DbCutoffFreq::AccOdrOver2,
+            OutputDataRate::Odr6400p0,
+            DataAveragingWindow::Average64Samples).await;
+        imu.set_gyro_interrupt_mode(InterruptMode::MappedToInt2).await;
+
+        if gyro_config_res.is_err() {
+            defmt::error!("gyro configration failed.");
+        }
+        
+        // configure the gyro, map int to int pin 1
+        let acc_config_res = imu.set_accel_config(AccelMode::ContinuousHighPerformance,
+            AccelRange::Range2g,
+            Bandwidth3DbCutoffFreq::AccOdrOver2,
+            OutputDataRate::Odr6400p0,
+            DataAveragingWindow::Average64Samples).await;
+        imu.set_accel_interrupt_mode(InterruptMode::MappedToInt1).await;
+
+        if acc_config_res.is_err() {
+            defmt::error!("accel configration failed.");
+        }
+
+        // configure the phys properties of the int pins
+        imu.set_int1_pin_config(IntPinLevel::ActiveLow, IntPinDriveMode::OpenDrain).await;
+        imu.set_int2_pin_config(IntPinLevel::ActiveLow, IntPinDriveMode::OpenDrain).await;
+
+        // enable gyro int
+        imu.set_int2_enabled(true).await;
     
         'imu_data_loop:
         loop {
@@ -98,16 +104,17 @@ pub fn start_imu_task(
         miso: impl Peripheral<P = impl MisoPin<ImuSpi>> + 'static,
         txdma: impl Peripheral<P = ImuSpiTxDma> + 'static,
         rxdma: impl Peripheral<P = ImuSpiRxDma> + 'static,
-        accel_cs: ExtImuSpiNss1Pin,
-        gyro_cs: ExtImuSpiNss2Pin,
+        bmi323_nss: ImuSpiNss0Pin,
+        _ext_nss1_pin: ExtImuSpiNss1Pin,
+        _ext_nss2_pin: ExtImuSpiNss2Pin,
         accel_int_pin: impl Peripheral<P = ImuSpiInt1Pin> + 'static,
         gyro_int_pin: impl Peripheral<P = ImuSpiInt2Pin> + 'static,
         accel_int: impl Peripheral<P = <ImuSpiInt1Pin as embassy_stm32::gpio::Pin>::ExtiChannel> + 'static,
         gyro_int: impl Peripheral<P = <ImuSpiInt2Pin as embassy_stm32::gpio::Pin>::ExtiChannel> + 'static,
-        ext_imu_det_pin: ExtImuNDetPin) {
+        _ext_imu_det_pin: ExtImuNDetPin) {
     let imu_buf = IMU_BUFFER_CELL.take();
 
-    let imu = Bmi085::new_from_pins(peri, sck, mosi, miso, txdma, rxdma, accel_cs, gyro_cs, imu_buf);
+    let imu = Bmi323::new_from_pins(peri, sck, mosi, miso, txdma, rxdma, bmi323_nss, imu_buf);
 
     // IMU breakout INT2 is directly connected to the MCU with no hardware PU/PD. Select software Pull::Up and
     // imu open drain
