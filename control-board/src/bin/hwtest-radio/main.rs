@@ -5,8 +5,7 @@ use ateam_common_packets::{bindings_radio::{BasicTelemetry, ParameterCommandCode
 use embassy_executor::InterruptExecutor;
 use embassy_futures::select::{self, Either};
 use embassy_stm32::{
-    interrupt,
-    pac::Interrupt
+    interrupt, pac::Interrupt
 };
 use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 
