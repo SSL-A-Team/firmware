@@ -27,6 +27,7 @@ use embassy_stm32::{
 pub mod parameter_interface;
 pub mod pins;
 pub mod radio;
+pub mod robot_state;
 pub mod stm32_interface;
 pub mod stspin_motor;
 

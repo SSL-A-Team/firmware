@@ -149,10 +149,10 @@ pub type UsrLed1Pin = PF2;
 pub type UsrLed2Pin = PF1;
 pub type UsrLed3Pin = PF0;
 
-pub type RobotIdIndicator0FrPin = PD0;
-pub type RobotIdIndicator1FfPin = PD1;
-pub type RobotIdIndicator2BlPin = PD3;
-pub type RobotIdIndicator3BrPin = PD4;
+pub type RobotIdIndicator0FlPin = PD0;
+pub type RobotIdIndicator1BlPin = PD1;
+pub type RobotIdIndicator2BrPin = PD3;
+pub type RobotIdIndicator3FrPin = PD4;
 pub type RobotIdIndicator4TeamIsBluePin = PD14;
 
 pub type DotstarSpi = SPI6;
