@@ -41,7 +41,7 @@ pub struct BodyVelocityController<'a> {
     body_velocity_limit: Vector3<f32>,
     body_acceleration_limit: Vector3<f32>,
     wheel_acceleration_limits: Vector4<f32>,
-    prev_setpoint: Vector3<f32>,
+    prev_output: Vector3<f32>,
     cmd_wheel_velocities: Vector4<f32>,
     debug_telemetry: ControlDebugTelemetry,
 }
@@ -62,7 +62,7 @@ impl<'a> BodyVelocityController<'a> {
             body_velocity_limit: Vector3::zeros(),
             body_acceleration_limit: Vector3::zeros(),
             wheel_acceleration_limits: Vector4::zeros(),
-            prev_setpoint: Vector3::zeros(),
+            prev_output: Vector3::zeros(),
             cmd_wheel_velocities: Vector4::zeros(),
             debug_telemetry: ControlDebugTelemetry { 
                 motor_fl: MotorDebugTelemetry { 
@@ -119,7 +119,7 @@ impl<'a> BodyVelocityController<'a> {
             body_velocity_limit: bv_limit,
             body_acceleration_limit: ba_limit,
             wheel_acceleration_limits: wa_limit,
-            prev_setpoint: Vector3::zeros(),
+            prev_output: Vector3::zeros(),
             cmd_wheel_velocities: Vector4::zeros(),
             debug_telemetry: ControlDebugTelemetry { 
                 motor_fl: MotorDebugTelemetry { 
@@ -170,18 +170,6 @@ impl<'a> BodyVelocityController<'a> {
 
         // TODO there are a few discrete time intergrals and derivatives in here
         // these should probably be genericized/templated some how
-
-        // Determine commanded body acceleration based on previous setpoint, and clamp and maintain the direction of acceleration.
-        let body_acc_setpoint = (body_vel_setpoint - self.prev_setpoint) / self.loop_dt_s;
-        let body_acc_setpoint_clamp = clamp_vector_keep_dir(&body_acc_setpoint, &self.body_acceleration_limit);
-        
-        // Convert back to body velocity
-        let body_vel_setpoint_acc_clamp = self.prev_setpoint + (body_acc_setpoint_clamp * self.loop_dt_s);
-
-        // Clamp and maintain direction of setpoint body velocity.
-        let body_vel_setpoint_full_clamp = clamp_vector_keep_dir(&body_vel_setpoint_acc_clamp, &self.body_velocity_limit);
-        self.prev_setpoint = body_vel_setpoint_full_clamp;
-        self.debug_telemetry.clamped_commanded_body_velocity.copy_from_slice(body_vel_setpoint_full_clamp.as_slice());
         
         // Build measurement vector for CGKF.
         let mut measurement: Vector5<f32> = Vector5::new(wheel_velocities[0], wheel_velocities[1], wheel_velocities[2], wheel_velocities[3], gyro_theta); 
@@ -203,28 +191,44 @@ impl<'a> BodyVelocityController<'a> {
         self.debug_telemetry.cgkf_body_velocity_state_estimate.copy_from_slice(body_vel_estimate.as_slice());
 
         // Apply control policy.
-        let body_vel_control_output = self.body_vel_controller.calculate(&body_vel_setpoint_full_clamp, &body_vel_estimate, self.loop_dt_s);
-        self.debug_telemetry.body_velocity_u.copy_from_slice(body_vel_control_output.as_slice());
+        let body_vel_control_pid = self.body_vel_controller.calculate(&body_vel_setpoint, &body_vel_estimate, self.loop_dt_s);
+        
+        // Add the commanded setpoint as a feedforward component.
+        let body_vel_output = body_vel_control_pid + body_vel_setpoint;
+        self.debug_telemetry.body_velocity_u.copy_from_slice(body_vel_output.as_slice());
+
+        // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
+        // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
+        let body_acc_output = (body_vel_output - self.prev_output) / self.loop_dt_s;
+        let body_acc_output_clamp = clamp_vector_keep_dir(&body_acc_output, &self.body_acceleration_limit);
+
+        // Convert back to body velocity
+        let body_vel_output_acc_clamp = self.prev_output + (body_acc_output_clamp * self.loop_dt_s);
+
+        // Clamp and maintain direction of control body velocity.
+        let body_vel_output_full_clamp = clamp_vector_keep_dir(&body_vel_output_acc_clamp, &self.body_velocity_limit);
+        self.prev_output = body_vel_output_full_clamp;
+        self.debug_telemetry.clamped_commanded_body_velocity.copy_from_slice(body_vel_output_full_clamp.as_slice());
 
         // Transform body velocity commands into the wheel velocity domain.
-        let wheel_control_output = self.robot_model.robot_vel_to_wheel_vel(&body_vel_control_output);
-        self.debug_telemetry.wheel_velocity_u.copy_from_slice(wheel_control_output.as_slice());
+        let wheel_vel_output = self.robot_model.robot_vel_to_wheel_vel(&body_vel_output_full_clamp);
+        self.debug_telemetry.wheel_velocity_u.copy_from_slice(wheel_vel_output.as_slice());
 
         // Use control law adjusted value to predict the next cycle's state.
-        self.body_vel_filter.predict(&wheel_control_output);
+        self.body_vel_filter.predict(&wheel_vel_output);
 
         // determine commanded wheel accleration, and clamp-scale the the control input
         // TODO a linear clamp after the non-linear domain transformation is probably locally valid
         // and globally invalid. Investiage this later. If problems are suspected, disable this section
         // and lower the body acc limit (maybe something anatgonist based on 45/30 deg wheel angles?)
         // TODO cross check in the future against wheel angle plots and analysis
-        let wheel_acc_setpoint = (wheel_control_output - self.cmd_wheel_velocities) / self.loop_dt_s;
+        let wheel_acc_setpoint = (wheel_vel_output - self.cmd_wheel_velocities) / self.loop_dt_s;
         let wheel_acc_setpoint_clamp = clamp_vector_keep_dir(&wheel_acc_setpoint, &WHEEL_ACC_LIM);
-        let wheel_u_clamp = self.cmd_wheel_velocities + (wheel_acc_setpoint_clamp * self.loop_dt_s);
-        self.debug_telemetry.wheel_velocity_clamped_u.copy_from_slice(wheel_u_clamp.as_slice());
+        let wheel_vel_output_clamp = self.cmd_wheel_velocities + (wheel_acc_setpoint_clamp * self.loop_dt_s);
+        self.debug_telemetry.wheel_velocity_clamped_u.copy_from_slice(wheel_vel_output_clamp.as_slice());
 
         // Save command state.
-        self.cmd_wheel_velocities = wheel_u_clamp;
+        self.cmd_wheel_velocities = wheel_vel_output_clamp;
     }
 
     pub fn get_wheel_velocities(&self) -> Vector4<f32> {

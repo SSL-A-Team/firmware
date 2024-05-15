@@ -493,7 +493,6 @@ impl<'a> Control<'a> {
                 );
 
                 // torque values are computed on the spin but put in the current variable
-                // TODO update this when packet/var names are updated to match software
                 let wheel_torques = Vector4::new(
                     self.front_left_motor.read_current(),
                     self.back_left_motor.read_current(),
