@@ -26,7 +26,7 @@ use embassy_stm32::{
 
 pub mod parameter_interface;
 pub mod pins;
-pub mod radio;
+// pub mod radio;
 pub mod robot_state;
 pub mod stm32_interface;
 pub mod stspin_motor;
@@ -106,7 +106,7 @@ pub fn get_system_config() -> Config {
     config.rcc.pll1 = Some(Pll {
         source: PllSource::HSE,
         prediv: PllPreDiv::DIV1,
-        mul: PllMul::MUL68,
+        mul: PllMul::MUL64, // PllMul::MUL68,
         divp: Some(PllDiv::DIV1), // 544 MHz
         divq: Some(PllDiv::DIV4), // 136 MHz
         divr: Some(PllDiv::DIV2)  // 272 MHz

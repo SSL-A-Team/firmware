@@ -1,7 +1,8 @@
 use ateam_lib_stm32::drivers::switches::dip::DipSwitch;
 use ateam_lib_stm32::drivers::switches::rotary_encoder::RotaryEncoder;
-use embassy_executor::Spawner;
+use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::gpio::{AnyPin, Pull};
+use embassy_time::Timer;
 
 use crate::drivers::shell_indicator::ShellIndicator;
 use crate::robot_state::RobotState;
@@ -13,16 +14,37 @@ use crate::pins::*;
 async fn user_io_task_entry(robot_state: &'static RobotState,
     dip_switch: DipSwitch<'static, 7>,
     robot_id_rotary: RotaryEncoder<'static, 4>,
-    robot_id_indicator: ShellIndicator<'static>,
+    mut robot_id_indicator: ShellIndicator<'static>,
 ) {
     loop {
-        // TODO read switches
+        // read switches
+        let robot_id = robot_id_rotary.read_value();
+        let robot_team_isblue = dip_switch.read_pin(6);
 
-        // TODO publish updates to robot_state
+        // publish updates to robot_state
+        let glob_robot_id = robot_state.get_hw_robot_id();
+        let glob_robot_is_blue = robot_state.hw_robot_team_is_blue();
+        if robot_id != glob_robot_id {
+            robot_state.set_hw_robot_id(robot_id);
+            defmt::debug!("updated robot id {} -> {}", glob_robot_id, robot_id);
+        }
+
+        if robot_team_isblue != glob_robot_is_blue {
+            robot_state.set_hw_robot_team_is_blue(robot_team_isblue);
+            defmt::debug!("updated robot team is blue {} -> {}", glob_robot_is_blue, robot_team_isblue);
+        }
 
         // TODO read messages
 
-        // TODO update indicators
+        // update indicators
+        robot_id_indicator.set(robot_id, robot_team_isblue);
+
+        if !robot_state.hw_init_state_valid() {
+            defmt::info!("loaded robot state: robot id: {}, team: {}", robot_id, robot_team_isblue);
+            robot_state.set_hw_init_state_valid(true);
+        }
+
+        Timer::after_millis(100).await;
     }
 }
 

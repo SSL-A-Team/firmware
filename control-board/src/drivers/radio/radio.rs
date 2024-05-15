@@ -87,6 +87,7 @@ impl<
     pub async fn wait_startup(&self) -> Result<(), ()> {
         self.reader
             .dequeue(|buf| {
+                defmt::info!("dequeueing");
                 if let EdmPacket::ATResponse(ATResponse::Other("+STARTUP")) = self.to_packet(buf)? {
                     Ok(())
                 } else {
@@ -145,11 +146,20 @@ impl<
         Ok(())
     }
 
-    pub async fn enter_edm(&mut self) -> Result<(), ()> {
-        self.send_command("ATO2").await?;
-        self.read_ok().await?;
+    pub async fn enter_edm(&mut self) -> Result<bool, ()> {
+        if self.send_command("ATO2").await.is_err() {
+            return Err(());
+        }
+
+        // TODO this is getting CR LF O K CR LF [EDM START, 0, 2, 0, 113, EDM END]
+        // 0, 2 decodes as payload length 2
+        // 0 113 decodes as payload event EDM_START
+        // this appear valid, we just captured two events at once.
+        // write a new function to handle this
+        // self.read_ok().await?;
+        let res = self.read_ok_at_edm_transition().await;
         self.mode = RadioMode::ExtendedDataMode;
-        Ok(())
+        return res;
     }
 
     pub async fn set_host_name(&self, host_name: &str) -> Result<(), ()> {
@@ -414,6 +424,23 @@ impl<
                 }
             })
             .await
+    }
+
+    async fn read_ok_at_edm_transition(&self) -> Result<bool, ()> {
+        let transition_buf: [u8; 12] = [13, 10, 79, 75, 13, 10, 170, 0, 2, 0, 113, 85];
+        let res = self.reader.dequeue(|buf| {
+            if buf.iter().zip(transition_buf.iter()).all(|(a,b)| a == b) {
+                Ok(true)
+            } else {
+                if let EdmPacket::ATResponse(ATResponse::Ok("")) = self.to_packet(buf)? {
+                    Ok(false)
+                } else {
+                    Err(())
+                }
+            }
+        }).await;
+
+        return res;
     }
 
     fn to_packet<'b>(&self, buf: &'b [u8]) -> Result<EdmPacket<'b>, ()> {

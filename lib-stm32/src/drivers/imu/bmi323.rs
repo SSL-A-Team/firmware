@@ -9,7 +9,7 @@ use core::{cmp::min, f32::consts::PI};
 use embassy_stm32::{
     gpio::{Level, Output, Pin, Speed},
     mode::Async,
-    spi::{self, MisoPin, MosiPin, SckPin},
+    spi::{self, MisoPin, Mode, MosiPin, SckPin},
     time::hz,
     Peripheral
 };
@@ -267,7 +267,7 @@ impl<'a, 'buf, SpiPeri: spi::Instance>
     ) -> Self {
         let mut spi_config = spi::Config::default();
         // Bmi323 max SPI frequency is 10MHz
-        spi_config.frequency = hz(10_000_000);
+        spi_config.frequency = hz(1_000_000);
 
         let imu_spi = spi::Spi::new(
             peri,
@@ -307,6 +307,7 @@ impl<'a, 'buf, SpiPeri: spi::Instance>
     }
 
     async fn read(&mut self, reg: ImuRegisters) -> u16 {
+        self.select();
         // addresses are 7 bits with MSB flagging read/!write
         // data is 16 bits
 
@@ -314,10 +315,13 @@ impl<'a, 'buf, SpiPeri: spi::Instance>
         self.spi_buf[1] = 0x00;
         let _ = self.spi.transfer_in_place(&mut self.spi_buf[..4]).await;
 
-        ((self.spi_buf[2] as u16) << 8) | self.spi_buf[3] as u16
+        self.deselect();
+
+        ((self.spi_buf[3] as u16) << 8) | self.spi_buf[2] as u16
     }
 
     async fn burst_read(&mut self, reg: ImuRegisters, dest: &mut [u16]) {
+        self.select();
         // the transaction length is either the dest buf size * 2 + 2 
         // (the start addr + N data bytes) + 1 spurious byte for data to settle (or something)
         // OR upper bounded by internal length of the buffer.
@@ -330,17 +334,25 @@ impl<'a, 'buf, SpiPeri: spi::Instance>
         for (i, dword) in dest.iter_mut().enumerate() {
             *dword = (self.spi_buf[(i * 2) + 2 + 1] as u16) << 8 | self.spi_buf[(i * 2) + 2 + 0] as u16;
         }
+
+        self.deselect();
     }
 
     async fn write(&mut self, reg: ImuRegisters, val: u16) {
-        self.spi_buf[0] = reg as u8 & !READ_BIT;
+        self.select();
+
+        self.spi_buf[0] = reg as u8;
         self.spi_buf[1] = (val & 0x00FF) as u8;
         self.spi_buf[2] = ((val & 0xFF00) >> 8) as u8;
-        let _ = self.spi.transfer_in_place(&mut self.spi_buf[..2]).await;
+        let _ = self.spi.transfer_in_place(&mut self.spi_buf[..3]).await;
+
+        self.deselect();
     }
 
     #[allow(dead_code)]
     async fn burst_write(&mut self, reg: ImuRegisters, data: &[u16]) {
+        self.select();
+
         // the transaction length is either the dest buf size * 2 + 2 
         // (the start addr + N data bytes) + 1 spurious byte for data to settle (or something)
         // OR upper bounded by internal length of the buffer.
@@ -354,6 +366,8 @@ impl<'a, 'buf, SpiPeri: spi::Instance>
         }
 
         let _ = self.spi.transfer_in_place(&mut self.spi_buf[..trx_len]).await;
+
+        self.deselect();
     }
 
     pub async fn init(&mut self) {
@@ -379,12 +393,12 @@ impl<'a, 'buf, SpiPeri: spi::Instance>
     pub async fn self_test(&mut self) -> Result<(), ()> {
         let mut has_self_test_error = Ok(());
 
-        self.deselect();
-        Timer::after_millis(10).await;
-        self.select();
+        // self.deselect();
+        // Timer::after_millis(10).await;
+        // self.select();
 
         let _ = self.read(ImuRegisters::CHIP_ID).await;
-        let chip_id = self.read(ImuRegisters::CHIP_ID).await;
+        let chip_id = self.read(ImuRegisters::CHIP_ID).await & 0x00FF;
         if chip_id != BMI323_CHIP_ID {
             defmt::warn!("read IMU ID (0x{:x}) does not match expected BMI323 ID (0x{:x})", chip_id, BMI323_CHIP_ID);
             has_self_test_error = Err(());

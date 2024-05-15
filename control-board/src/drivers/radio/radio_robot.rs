@@ -10,7 +10,7 @@ use core::fmt::Write;
 use core::mem::size_of;
 use embassy_futures::select::{select, Either};
 use embassy_stm32::gpio::{Level, Pin, Speed, Output};
-use embassy_stm32::usart;
+use embassy_stm32::usart::{self, DataBits, StopBits};
 use embassy_time::{Duration, Timer};
 use heapless::String;
 
@@ -94,20 +94,19 @@ impl<
         const DEPTH_RX: usize,
     > RobotRadio<'a, UART, DmaRx, DmaTx, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>
 {
-    pub async fn new(
+    pub fn new(
         read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
         write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
         reset_pin: impl Pin,
-    ) -> Result<RobotRadio<'a, UART, DmaRx, DmaTx, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>, ()>
-    {
+    ) -> RobotRadio<'a, UART, DmaRx, DmaTx, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX> {
         let reset_pin = Output::new(reset_pin, Level::High, Speed::Medium);
         let radio = Radio::new(read_queue, write_queue);
 
-        Ok(Self {
+        Self {
             radio,
             reset_pin,
             peer: None,
-        })
+        }
     }
 
     pub async fn connect_uart(&mut self) -> Result<(), ()> {
@@ -115,23 +114,55 @@ impl<
         Timer::after(Duration::from_micros(100)).await;
         self.reset_pin.set_low();
 
-        self.radio.wait_startup().await?;
+        if self.radio.wait_startup().await.is_err() {
+            defmt::debug!("error processing radio wait startup command");
+            return Err(())
+        }
+
+        defmt::info!("increasing link speed");
 
         let baudrate = 5_250_000;
-        self.radio.set_echo(false).await?;
-        self.radio.config_uart(baudrate, false, 8, true).await?;
+        if self.radio.set_echo(false).await.is_err() {
+            defmt::debug!("error disabling echo on radio");
+            return Err(());
+        }
+        
+        if self.radio.config_uart(baudrate, false, 8, true).await.is_err() {
+            defmt::debug!("error increasing radio baud rate.");
+            return Err(())
+        }
+        defmt::info!("configured radio link speed");
+
 
         let mut radio_uart_config = usart::Config::default();
         radio_uart_config.baudrate = 5_250_000;
+        radio_uart_config.stop_bits = StopBits::STOP1;
+        radio_uart_config.data_bits = DataBits::DataBits9;
         radio_uart_config.parity = usart::Parity::ParityEven;
         self.radio.update_uart_config(radio_uart_config).await;
+        defmt::info!("configured host link speed");
+
 
         // Datasheet says wait at least 40ms after UART config change
         Timer::after(Duration::from_millis(50)).await;
 
         // Datasheet says wait at least 50ms after entering data mode
-        self.radio.enter_edm().await?;
-        self.radio.wait_edm_startup().await?;
+        if let Ok(got_edm_startup) = self.radio.enter_edm().await {
+            defmt::info!("entered edm at high link speed");
+
+            if ! got_edm_startup {
+                if self.radio.wait_edm_startup().await.is_err() {
+                    defmt::debug!("error waiting for EDM startup after uart baudrate increase");
+                    return Err(());
+                } else {
+                    defmt::info!("got EDM startup command");
+                }
+            }
+        } else {
+            defmt::debug!("error entering EDM mode after uart baudrate increase");
+            return Err(())
+        }
+
         Timer::after(Duration::from_millis(50)).await;
 
         Ok(())

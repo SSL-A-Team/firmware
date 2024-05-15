@@ -62,12 +62,12 @@ async fn imu_task_entry(
         }
 
         // configure the phys properties of the int pins
-        imu.set_int1_pin_config(IntPinLevel::ActiveLow, IntPinDriveMode::OpenDrain).await;
-        imu.set_int2_pin_config(IntPinLevel::ActiveLow, IntPinDriveMode::OpenDrain).await;
+        imu.set_int1_pin_config(IntPinLevel::ActiveLow, IntPinDriveMode::PushPull).await;
+        imu.set_int2_pin_config(IntPinLevel::ActiveLow, IntPinDriveMode::PushPull).await;
 
         // enable gyro int
         imu.set_int2_enabled(true).await;
-    
+
         'imu_data_loop:
         loop {
             // block on gyro interrupt, active low
@@ -118,8 +118,8 @@ pub fn start_imu_task(
 
     // IMU breakout INT2 is directly connected to the MCU with no hardware PU/PD. Select software Pull::Up and
     // imu open drain
-    let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::Down);
-    let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::Up);
+    let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::None);
+    let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::None);
 
     imu_task_spawner.spawn(imu_task_entry(accel_data_publisher, gyro_data_publisher, imu, accel_int, gyro_int)).unwrap();
 }

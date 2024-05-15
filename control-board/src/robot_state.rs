@@ -25,7 +25,7 @@ pub struct RobotState {
 }
 
 impl RobotState {
-    pub fn new() -> RobotState {
+    pub const fn new() -> RobotState {
         RobotState {
             hw_init_state_valid: AtomicBool::new(false),
             hw_robot_id: AtomicU8::new(0),
@@ -62,5 +62,9 @@ impl RobotState {
 
     pub fn hw_robot_team_is_blue(&self) -> bool {
         self.hw_robot_team_is_blue.load(Ordering::Relaxed)
+    }
+
+    pub fn set_hw_robot_team_is_blue(&self, is_blue: bool) {
+        self.hw_robot_team_is_blue.store(is_blue, Ordering::Relaxed);
     }
 }

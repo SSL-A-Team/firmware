@@ -6,12 +6,12 @@ use embassy_executor::{SendSpawner, Spawner};
 use embassy_futures::select::{select, Either};
 use embassy_stm32::{
     gpio::{Input, Pull},
-    usart::{self, Uart}
+    usart::{self, DataBits, Parity, StopBits, Uart}
 };
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::Timer;
 
-use crate::{drivers::radio::RobotRadio, pins::*, SystemIrqs};
+use crate::{drivers::radio::RobotRadio, pins::*, robot_state::RobotState, SystemIrqs};
 
 pub const RADIO_MAX_TX_PACKET_SIZE: usize = 256;
 pub const RADIO_TX_BUF_DEPTH: usize = 4;
@@ -27,6 +27,7 @@ make_uart_queues!(RADIO,
 
 #[embassy_executor::task]
 async fn radio_task_entry(
+    robot_state: &'static RobotState,
     command_publisher: CommandsPublisher,
     mut telemetry_subscriber: TelemetrySubcriber,
     wifi_network: WifiCredential,
@@ -38,24 +39,42 @@ async fn radio_task_entry(
     let radio_ndet = Input::new(radio_ndet_pin, Pull::None);
 
     let mut radio: RobotRadio<'static, RadioUART, RadioRxDMA, RadioTxDMA, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH> = 
-        RobotRadio::new(&RADIO_RX_UART_QUEUE, &RADIO_TX_UART_QUEUE, radio_reset_pin).await.unwrap();
+        RobotRadio::new(&RADIO_RX_UART_QUEUE, &RADIO_TX_UART_QUEUE, radio_reset_pin);
+
+    let mut startup_radio_uart_config = usart::Config::default();
+    startup_radio_uart_config.baudrate = 115_200;
+    startup_radio_uart_config.data_bits = DataBits::DataBits8;
+    startup_radio_uart_config.stop_bits = StopBits::STOP1;
+    startup_radio_uart_config.parity = Parity::ParityNone;
 
     #[allow(unused_labels)]
     'connect_loop: 
     loop {
+        RADIO_TX_UART_QUEUE.update_uart_config(startup_radio_uart_config).await;
+        // TODO fix me this doesn't block
+
         if radio_ndet.is_high() {
             defmt::error!("radio appears unplugged.");
             Timer::after_millis(1000).await;
             continue 'connect_loop;
         }
 
-        let res = radio.connect_uart().await;
-        if res.is_err() {
-            defmt::error!("failed to establish radio UART connection.");
-            Timer::after_millis(1000).await;
-            continue 'connect_loop;
+        defmt::info!("connecting radio uart");
+        match select(radio.connect_uart(), Timer::after_millis(10000)).await {
+            Either::First(res) => {
+                if res.is_err() {
+                    defmt::error!("failed to establish radio UART connection.");
+                    Timer::after_millis(1000).await;
+                    continue 'connect_loop;
+                } else {
+                    defmt::debug!("established radio uart coms");
+                }
+            }
+            Either::Second(_) => {
+                defmt::error!("initial radio uart connection timed out");
+                continue 'connect_loop;
+            }
         }
-        defmt::info!("established radio uart coms");
 
         while radio.connect_to_network(wifi_network).await.is_err() {
             defmt::error!("failed to connect to wifi network.");
@@ -122,6 +141,7 @@ async fn radio_task_entry(
 
 pub fn start_radio_task(radio_task_spawner: SendSpawner,
         queue_spawner: Spawner,
+        robot_state: &'static RobotState,
         command_publisher: CommandsPublisher,
         telemetry_subscriber: TelemetrySubcriber,
         wifi_network: WifiCredential,
@@ -134,12 +154,18 @@ pub fn start_radio_task(radio_task_spawner: SendSpawner,
         radio_uart_tx_dma: RadioTxDMA,
         radio_reset_pin: RadioResetPin,
         radio_ndet_pin: RadioNDetectPin) {
-    let radio_uart_config = usart::Config::default();
+
+    let mut radio_uart_config = usart::Config::default();
+    radio_uart_config.baudrate = 115_200;
+    radio_uart_config.data_bits = DataBits::DataBits8;
+    radio_uart_config.stop_bits = StopBits::STOP1;
+    radio_uart_config.parity = Parity::ParityNone;
+
     let radio_uart = Uart::new(radio_uart, radio_uart_rx_pin, radio_uart_tx_pin, SystemIrqs, radio_uart_tx_dma, radio_uart_rx_dma, radio_uart_config).unwrap();
     let (radio_uart_tx, radio_uart_rx) = Uart::split(radio_uart);
 
     queue_spawner.spawn(RADIO_RX_UART_QUEUE.spawn_task(radio_uart_rx)).unwrap();
     queue_spawner.spawn(RADIO_TX_UART_QUEUE.spawn_task(radio_uart_tx)).unwrap();
 
-    radio_task_spawner.spawn(radio_task_entry(command_publisher, telemetry_subscriber, wifi_network, radio_reset_pin, radio_ndet_pin)).unwrap();
+    radio_task_spawner.spawn(radio_task_entry(robot_state, command_publisher, telemetry_subscriber, wifi_network, radio_reset_pin, radio_ndet_pin)).unwrap();
 }

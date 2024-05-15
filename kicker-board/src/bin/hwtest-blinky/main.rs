@@ -105,25 +105,36 @@ async fn dotstar_lerp_task(dotstar_spi: DotstarSpi,
     let mut dotstar_spi_config = Config::default();
     dotstar_spi_config.frequency = mhz(1);
 
-    let dotstar_spi = Spi::new_txonly(
+    let mut dotstar_spi = Spi::new_txonly(
         dotstar_spi,
         dotstar_sck_pin,
         dotstar_mosi_pin,
         dotstar_tx_dma,
         dotstar_spi_config);
 
-    let mut dotstar = Apa102::new(dotstar_spi);
+    // let mut dotstar = Apa102::new(dotstar_spi);
 
+    // dotstar.write([RGB8 {r: 10, g: 10, b: 10}, RGB8 {r: 10, g: 10, b: 10}]);
+
+    let mut counting_up: bool = true;
     let mut val = 0;
     loop {
-        let _ = dotstar.write([RGB8 { r: val, g: val, b: val }, RGB8 { r: val / 2, g: val / 2, b: val / 2 }].iter().cloned());
-        val += 1;
-
-        if val == 255 {
-            val = 0;
+        // let _ = dotstar.write([RGB8 { r: val, g: val, b: val }, RGB8 { r: val / 2, g: val / 2, b: val / 2 }].iter().cloned());
+        let _ = dotstar_spi.write(&[0x00 as u8, 0x00, 0x00, 0x00, 0xE7, val, 0x00, val, 0xE7, val, 0x00, val, 0xFF, 0xFF, 0xFF, 0xFF]).await;
+        
+        if counting_up {
+            val += 1;
+        } else {
+            val -= 1;
         }
 
-        Timer::after_millis(10).await;
+        if val == 255 {
+            counting_up = false;
+        } else if val == 0 {
+            counting_up = true;
+        }
+
+        Timer::after_millis(5).await;
     }
 }
 
