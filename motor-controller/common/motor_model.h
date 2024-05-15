@@ -11,6 +11,8 @@ typedef struct MotorModel {
     float torque_to_current_linear_model_b;
     float current_to_torque_linear_model_m;
     float current_to_torque_linear_model_b;
+    float rads_to_dc_linear_map_m;
+    float rads_to_dc_linear_map_b;
 } MotorModel_t;
 
 void mm_initialize(MotorModel_t *mm);

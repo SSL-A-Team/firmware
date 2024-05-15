@@ -27,7 +27,6 @@ fi
 
 UDEV_RULE_FILES_LOCATION=/etc/udev/rules.d
 
-any_rules_file_installed=false
 for udev_rule_file in $SCRIPT_DIR/udev/*.rules; do
     udev_rule_file_basename=$(basename $udev_rule_file)
     echo "Found candidate STLink rules file: $udev_rule_file_basename"
@@ -58,16 +57,12 @@ for udev_rule_file in $SCRIPT_DIR/udev/*.rules; do
         # set permission to root RW, othes R (644)
         chmod 644 $rulefile_install_path
 
-        any_rules_file_installed=true
         echo -e "Done."
     fi
 done
 
-if [ $any_rules_file_installed = true ]; then
-    echo "One or more rules file was installed. Reloading udevadm..."
-    udevadm control --reload
-    udevadm trigger
-    echo "Done."
-else
-    echo "No rules files were installed. No further actions to complete."
-fi
+echo "Reloading udevadm..."
+service udev restart
+udevadm control --reload
+udevadm trigger
+echo "Done."

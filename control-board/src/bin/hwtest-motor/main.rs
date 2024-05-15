@@ -119,20 +119,20 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let ball_detected_thresh = 1.0;
     let mut control = Control::new(
         &spawner,
-        front_right_usart,
         front_left_usart,
         back_left_usart,
         back_right_usart,
+        front_right_usart,
         drib_usart,
-        p.PD8,
         p.PC1,
         p.PF8,
         p.PB9,
+        p.PD8,
         p.PD13,
-        p.PD9,
         p.PC0,
         p.PF9,
         p.PB8,
+        p.PD9,
         p.PD12,
         ball_detected_thresh,
     );
