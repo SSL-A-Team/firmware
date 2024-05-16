@@ -14,8 +14,8 @@ use embassy_executor::{
 
 use embassy_futures::select::{select, Either};
 use embassy_sync::{
-    blocking_mutex::raw::CriticalSectionRawMutex,
-    mutex::Mutex
+    blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex},
+    mutex::Mutex, signal::Signal
 };
 use embassy_time::Timer;
 
@@ -63,6 +63,7 @@ pub struct UartReadQueue<
     const DEPTH: usize,
 > {
     uart_mutex: Mutex<CriticalSectionRawMutex, bool>,
+    uart_config_update_signal: Signal<CriticalSectionRawMutex, bool>,
     queue_rx: Queue<LENGTH, DEPTH>,
     task: TaskStorage<ReadTaskFuture<UART, DMA, LENGTH, DEPTH>>,
 }
@@ -93,9 +94,10 @@ impl<
         const DEPTH: usize,
     > UartReadQueue<UART, DMA, LENGTH, DEPTH>
 {
-    pub const fn new(buffers: &'static[SyncUnsafeCell<Buffer<LENGTH>>; DEPTH], uart_mutex: Mutex<CriticalSectionRawMutex, bool>) -> Self {
+    pub const fn new(buffers: &'static[SyncUnsafeCell<Buffer<LENGTH>>; DEPTH], uart_mutex: Mutex<CriticalSectionRawMutex, bool>, uart_config_update_signal: Signal<CriticalSectionRawMutex, bool>) -> Self {
         Self {
             uart_mutex: uart_mutex,
+            uart_config_update_signal: uart_config_update_signal,
             queue_rx: Queue::new(buffers),
             task: TaskStorage::new(),
         }
@@ -107,15 +109,31 @@ impl<
         mut rx: UartRx<'static, UART, Async>,
     ) -> ReadTaskFuture<UART, DMA, LENGTH, DEPTH> {
         async move {
-            loop {
+            let mut block_for_config_update = false;
+
+            loop {                
+                /*
+                 * Multitasking Logic:
+                 * 
+                 * 
+                 */
+
+                if block_for_config_update {
+                    // block until we receive a signal telling to unpause the task because a config update is not active
+                    while self.uart_config_update_signal.wait().await { }
+                    defmt::trace!("UartReadQueue - standing down from rx thread pause for config update.");
+
+                    block_for_config_update = false;
+                }
+
                 let mut buf = queue_rx.enqueue().await.unwrap();
-                
+
                 {
                     let _rw_tasks_config_lock = self.uart_mutex.lock().await;
 
                     // NOTE: this really shouldn't be a timeout, it should be a signal from tx side that a new config
                     // is desired. This works for now but the timeout is hacky.
-                    match select(rx.read_until_idle(buf.data()), Timer::after_millis(2000)).await {
+                    match select(rx.read_until_idle(buf.data()), self.uart_config_update_signal.wait()).await {
                         Either::First(len) => {
                             if let Ok(len) = len {
                                 if len == 0 {
@@ -130,9 +148,15 @@ impl<
                                 buf.cancel();
                             }
                         },
-                        Either::Second(_) => {
-                            defmt::trace!("UartReadQueue - Read to idle timed out");
+                        Either::Second(block_for_config) => {
+                            defmt::trace!("UartReadQueue - read to idle cancelled to update config.");
                             buf.cancel();
+
+                            block_for_config_update = block_for_config;
+
+                            if !block_for_config {
+                                defmt::warn!("UartReadQueue - config update standdown cancelled read to idle. Should this event sequence occur?");
+                            }
                         }
                     }
                 } // frees the inter-task uart config lock
@@ -164,6 +188,8 @@ pub struct UartWriteQueue<
     const DEPTH: usize,
 > {
     uart_mutex: Mutex<CriticalSectionRawMutex, bool>,
+    uart_config_update_signal: Signal<CriticalSectionRawMutex, bool>,
+    uart_config_applied_update_signal: Signal<CriticalSectionRawMutex, bool>,
     queue_tx: Queue<LENGTH, DEPTH>,
     has_new_uart_config: AtomicBool,
     new_uart_config: Mutex<CriticalSectionRawMutex, Option<usart::Config>>,
@@ -185,9 +211,11 @@ impl<
         const DEPTH: usize,
     > UartWriteQueue<UART, DMA, LENGTH, DEPTH>
 {
-    pub const fn new(buffers: &'static [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH],  uart_mutex: Mutex<CriticalSectionRawMutex, bool>) -> Self {
+    pub const fn new(buffers: &'static [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH],  uart_mutex: Mutex<CriticalSectionRawMutex, bool>, uart_config_update_signal: Signal<CriticalSectionRawMutex, bool>) -> Self {
         Self {
             uart_mutex: uart_mutex,
+            uart_config_update_signal: uart_config_update_signal,
+            uart_config_applied_update_signal: Signal::new(),
             queue_tx: Queue::new(buffers),
             has_new_uart_config: AtomicBool::new(false),
             new_uart_config: Mutex::new(None),
@@ -207,8 +235,16 @@ impl<
                 if self.has_new_uart_config.load(Ordering::Relaxed) {
                     // acquire the lock on the config
                     let new_config = self.new_uart_config.lock().await;
+
+                    // rx task probably has a uart read_to_idle pending, meaning it also holds the uart_mutex lock
+                    // signal the rx task to break the read_to_idle and spin waiting for a resume signal
+                    self.uart_config_update_signal.signal(true);
+
+                    // rx task is now idling an will shortly release the uart_mutex
                     // acquire the lock on the shared UART config
                     let _rw_tasks_config_lock = self.uart_mutex.lock().await;
+
+                    // now that we have exclusive control over the shared hardware, update the config
 
                     let config_res = tx.set_config(&new_config.unwrap());
                     if config_res.is_err() {
@@ -217,8 +253,17 @@ impl<
                         defmt::debug!("updated config in uart write queue");
                     }
 
-                    self.has_new_uart_config.store(false, Ordering::Relaxed)
-                } // frees the inter-task uart config lock
+                    // now that the config has taken hold
+                    // tell the rx task to resume
+                    self.uart_config_update_signal.signal(false);
+
+                    // clear the update pending flag
+                    self.has_new_uart_config.store(false, Ordering::Relaxed);
+
+                    // signal the async task that requested the config update it can resume
+                    // knowing the config has been applied
+                    self.uart_config_applied_update_signal.signal(true);
+                } // frees the config update lock and the inter-task uart config lock
 
                 // defmt::info!("invoking API write");
                 tx.write(buf.data()).await.unwrap(); // we are blocked here!
@@ -256,6 +301,8 @@ impl<
             let _ = new_config.insert(config);
         }
         self.has_new_uart_config.store(true, Ordering::Relaxed);
+
+        self.uart_config_applied_update_signal.wait().await;
     }
 }
 
