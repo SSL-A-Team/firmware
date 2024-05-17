@@ -87,6 +87,17 @@ macro_rules! queue_pair_tx_task {
     }
 }
 
+#[macro_export]
+macro_rules! queue_pair_register_and_spawn {
+    ($spawner:ident, $name:ident, $uart_rx:ident, $uart_tx:ident) => {
+        $crate::paste::paste! {
+        $crate::queue_pair_register_signals!($name);
+        $spawner.spawn($crate::queue_pair_rx_task!($name, $uart_rx)).unwrap();
+        $spawner.spawn($crate::queue_pair_tx_task!($name, $uart_tx)).unwrap();
+        }
+    };
+}
+
 pub type UartQueueSyncPubSub = PubSubChannel<CriticalSectionRawMutex, UartTaskCommand, 1, 3, 2>;
 type UartQueueConfigSyncPub = Publisher<'static, CriticalSectionRawMutex, UartTaskCommand, 1, 3, 2>;
 type UartQueueConfigSyncSub = Subscriber<'static, CriticalSectionRawMutex, UartTaskCommand, 1, 3, 2>;

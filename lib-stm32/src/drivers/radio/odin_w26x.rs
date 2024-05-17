@@ -2,7 +2,7 @@ use core::fmt::Write;
 use embassy_stm32::usart;
 use heapless::String;
 
-use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
+use crate::uart::queue::{UartReadQueue, UartWriteQueue};
 
 use super::at_protocol::{ATEvent, ATResponse};
 use super::edm_protocol::EdmPacket;
@@ -54,7 +54,6 @@ pub struct Radio<
     reader: &'a UartReadQueue<UART, RxDma, LEN_RX, DEPTH_RX>,
     writer: &'a UartWriteQueue<UART, TxDma, LEN_TX, DEPTH_TX>,
     mode: RadioMode,
-    wifi_connected: bool,
 }
 
 impl<
@@ -76,12 +75,11 @@ impl<
             reader,
             writer,
             mode: RadioMode::CommandMode,
-            wifi_connected: false,
         }
     }
 
-    pub async fn update_uart_config(&self, config: usart::Config) {
-        self.writer.update_uart_config(config).await;
+    pub async fn update_host_uart_config(&self, config: usart::Config) -> Result<(), ()> {
+        self.writer.update_uart_config(config).await
     }
 
     pub async fn wait_startup(&self) -> Result<(), ()> {
@@ -356,15 +354,19 @@ impl<
     }
 
     pub async fn send_data(&self, channel_id: u8, data: &[u8]) -> Result<(), ()> {
-        self.writer
-            .enqueue(|buf| {
+        let res = self.writer.enqueue(|buf| {
                 EdmPacket::DataCommand {
                     channel: channel_id,
                     data: data,
                 }
-                .write(buf)
-                .unwrap()
-            }); // TODO: unwrap
+                .write(buf).unwrap()
+            });
+
+        if res.is_err() {
+            // queue was full
+            return Err(());
+        }
+
         Ok(())
     }
 
@@ -385,17 +387,27 @@ impl<
     pub async fn send_command(&self, cmd: &str) -> Result<(), ()> {
         match self.mode {
             RadioMode::CommandMode => {
-                self.writer
-                    .enqueue(|buf| {
+                let res = self.writer.enqueue(|buf| {
                         buf[..cmd.len()].clone_from_slice(cmd.as_bytes());
                         buf[cmd.len()] = b'\r';
                         cmd.len() + 1
                     });
+
+                if res.is_err() {
+                    // queue was full
+                    return Err(())
+                }
+                
                 Ok(())
             }
             RadioMode::ExtendedDataMode => {
-                self.writer
-                    .enqueue(|buf| EdmPacket::ATRequest(cmd).write(buf).unwrap());
+                let res = self.writer.enqueue(|buf| EdmPacket::ATRequest(cmd).write(buf).unwrap());
+
+                if res.is_err() {
+                    // queue was full
+                    return Err(())
+                }
+
                 Ok(())
             }
             _ => Err(()),

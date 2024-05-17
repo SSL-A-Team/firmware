@@ -14,6 +14,7 @@ dependencies = [
  "embassy-stm32",
  "embassy-sync",
  "embassy-time",
+ "heapless",
  "paste",
 ]
 

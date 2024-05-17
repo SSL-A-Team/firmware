@@ -1,4 +1,4 @@
-use super::radio::{PeerConnection, Radio, WifiAuth};
+use ateam_lib_stm32::drivers::radio::odin_w26x::{PeerConnection, Radio, WifiAuth};
 use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
 use ateam_common_packets::bindings_radio::{
     self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data, BasicTelemetry, ControlDebugTelemetry, ParameterCommand,
@@ -6,6 +6,7 @@ use ateam_common_packets::bindings_radio::{
 use ateam_common_packets::radio::DataPacket;
 use const_format::formatcp;
 use credentials::WifiCredential;
+use embassy_stm32::uid;
 use core::fmt::Write;
 use core::mem::size_of;
 use embassy_futures::select::{select, Either};
@@ -17,15 +18,6 @@ use heapless::String;
 const MULTICAST_IP: &str = "224.4.20.69";
 const MULTICAST_PORT: u16 = 42069;
 const LOCAL_PORT: u16 = 42069;
-const TEAM_WIFI_SSID: &str = "A-Team Field";
-const COMP_MAIN_WIFI_SSID: &str = "T3_SSL_RBC23";
-const COMP_PRACTICE_WIFI_SSID: &str = "T1_SSL_RBC23";
-// const WIFI_SSID: &str = "PROMISED_LAN_DC_DEVEL";
-
-const TEAM_WIFI_PASS: &str = "plancomestogether";
-const COMP_MAIN_WIFI_PASS: &str = "1fNrzxtSHG5o9";
-const COMP_PRACTICE_WIFI_PASS: &str = "e568Cwg0PjwcI";
-// const WIFI_PASS: &str = "plddevel";
 
 #[derive(Copy, Clone)]
 pub enum WifiNetwork {
@@ -40,8 +32,22 @@ pub enum TeamColor {
     Blue,
 }
 
-fn get_uuid() -> u16 {
-    unsafe { *(0x1FF1_E800 as *const u16) }
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum RobotRadioError {
+    ConnectUartBadStartup,
+    ConnectUartBadEcho,
+    ConnectUartBadRadioConfigUpdate,
+    ConnectUartBadHostConfigUpdate,
+    ConnectUartCannotEnterEdm,
+    ConnectUartNoEdmStartup,
+
+    ConnectWifiBadHostName,
+    ConnectWifiBadConfig,
+    ConnectWifiConnectionFailed,
+
+    OpenMulticastError,
+
+
 }
 
 unsafe impl<
@@ -53,12 +59,9 @@ unsafe impl<
         const LEN_TX: usize,
         const DEPTH_TX: usize,
         const DEPTH_RX: usize,
-    > Send for RobotRadio<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_TX, DEPTH_RX>
-{
-}
+    > Send for RobotRadio<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_TX, DEPTH_RX> {}
 
-// suppresses unused reset_pin warning. Even if unused, the radio should certainly own its own reset pin
-#[allow(dead_code)]
+
 pub struct RobotRadio<
     'a,
     UART: usart::BasicInstance,
@@ -109,29 +112,30 @@ impl<
         }
     }
 
-    pub async fn connect_uart(&mut self) -> Result<(), ()> {
+    pub async fn connect_uart(&mut self) -> Result<(), RobotRadioError> {
+        // reset the radio so we can listen for the startup event
         self.reset_pin.set_high();
         Timer::after(Duration::from_micros(100)).await;
         self.reset_pin.set_low();
 
+        // wait until startup event is received
         if self.radio.wait_startup().await.is_err() {
             defmt::debug!("error processing radio wait startup command");
-            return Err(())
+            return Err(RobotRadioError::ConnectUartBadStartup);
         }
-
-        defmt::info!("increasing link speed");
+        defmt::trace!("increasing link speed");
 
         let baudrate = 5_250_000;
         if self.radio.set_echo(false).await.is_err() {
             defmt::debug!("error disabling echo on radio");
-            return Err(());
+            return Err(RobotRadioError::ConnectUartBadEcho);
         }
         
         if self.radio.config_uart(baudrate, false, 8, true).await.is_err() {
             defmt::debug!("error increasing radio baud rate.");
-            return Err(())
+            return Err(RobotRadioError::ConnectUartBadRadioConfigUpdate);
         }
-        defmt::info!("configured radio link speed");
+        defmt::trace!("configured radio link speed");
 
 
         let mut radio_uart_config = usart::Config::default();
@@ -139,8 +143,11 @@ impl<
         radio_uart_config.stop_bits = StopBits::STOP1;
         radio_uart_config.data_bits = DataBits::DataBits9;
         radio_uart_config.parity = usart::Parity::ParityEven;
-        self.radio.update_uart_config(radio_uart_config).await;
-        defmt::info!("configured host link speed");
+        if self.radio.update_host_uart_config(radio_uart_config).await.is_err() {
+            defmt::debug!("error increasing host baud rate.");
+            return Err(RobotRadioError::ConnectUartBadHostConfigUpdate);
+        }
+        defmt::trace!("configured host link speed");
 
 
         // Datasheet says wait at least 40ms after UART config change
@@ -148,19 +155,19 @@ impl<
 
         // Datasheet says wait at least 50ms after entering data mode
         if let Ok(got_edm_startup) = self.radio.enter_edm().await {
-            defmt::info!("entered edm at high link speed");
+            defmt::trace!("entered edm at high link speed");
 
             if ! got_edm_startup {
                 if self.radio.wait_edm_startup().await.is_err() {
                     defmt::debug!("error waiting for EDM startup after uart baudrate increase");
-                    return Err(());
+                    return Err(RobotRadioError::ConnectUartNoEdmStartup);
                 } else {
                     defmt::info!("got EDM startup command");
                 }
             }
         } else {
             defmt::debug!("error entering EDM mode after uart baudrate increase");
-            return Err(())
+            return Err(RobotRadioError::ConnectUartCannotEnterEdm)
         }
 
         Timer::after(Duration::from_millis(50)).await;
@@ -168,34 +175,46 @@ impl<
         Ok(())
     }
 
-    pub async fn connect_to_network(&mut self, wifi_credential: WifiCredential) -> Result<(), ()> {
+    pub async fn connect_to_network(&mut self, wifi_credential: WifiCredential, robot_number: u8) -> Result<(), RobotRadioError> {
         // set radio hardware name enumeration
-        let mut s = String::<17>::new();
-        core::write!(&mut s, "A-Team Robot {:04X}", get_uuid()).unwrap();
-        self.radio.set_host_name(s.as_str()).await?;
+        let uid = uid::uid();
+        let uid_u16 = (uid[1] as u16) << 8 | uid[0] as u16;
+
+        let mut s = String::<23>::new();
+        core::write!(&mut s, "A-Team Robot #{:02X} ({:04X})", robot_number, uid_u16).unwrap();
+        if self.radio.set_host_name(s.as_str()).await.is_err() {
+            return Err(RobotRadioError::ConnectWifiBadHostName);
+        }
 
         // load the wifi network configuration into config slot 1
         let wifi_ssid = wifi_credential.get_ssid();
         let wifi_pass = WifiAuth::WPA {
             passphrase: wifi_credential.get_password(),
         };
-        self.radio.config_wifi(1, wifi_ssid,wifi_pass).await?;
+        if self.radio.config_wifi(1, wifi_ssid,wifi_pass).await.is_err() {
+            return Err(RobotRadioError::ConnectWifiBadConfig);
+        }
 
         // connect to config slot 1
-        self.radio.connect_wifi(1).await?;
+        if self.radio.connect_wifi(1).await.is_err() {
+            return Err(RobotRadioError::ConnectWifiConnectionFailed);
+        }
 
         // if we made it this far, we're connected
         Ok(())
     }
 
-    pub async fn open_multicast(&mut self) -> Result<(), ()> {
-        let peer = self
-            .radio
-            .connect_peer(formatcp!(
+    pub async fn open_multicast(&mut self) -> Result<(), RobotRadioError> {
+        let peer = self.radio.connect_peer(formatcp!(
                 "udp://{MULTICAST_IP}:{MULTICAST_PORT}/?flags=1&local_port={LOCAL_PORT}"
             ))
-            .await?;
-        self.peer = Some(peer);
+            .await;
+
+        if peer.is_err() {
+            return Err(RobotRadioError::OpenMulticastError);
+        }
+
+        self.peer = Some(peer.unwrap());
         Ok(())
     }
 

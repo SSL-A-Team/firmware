@@ -1,5 +1,3 @@
-use core::borrow::BorrowMut;
-
 use embassy_stm32::gpio::{Level, Output, Pin, Speed};
 
 pub struct ShellIndicator<'a> {
