@@ -1,6 +1,6 @@
 
 use ateam_common_packets::radio::TelemetryPacket;
-use ateam_lib_stm32::make_uart_queues;
+use ateam_lib_stm32::make_uart_queue_pair;
 use credentials::WifiCredential;
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_futures::select::{select, Either};
@@ -18,7 +18,7 @@ pub const RADIO_TX_BUF_DEPTH: usize = 4;
 pub const RADIO_MAX_RX_PACKET_SIZE: usize = 256;
 pub const RADIO_RX_BUF_DEPTH: usize = 4;
 
-make_uart_queues!(RADIO,
+make_uart_queue_pair!(RADIO,
     RadioUART, RadioRxDMA, RadioTxDMA,
     RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH,
     RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH,

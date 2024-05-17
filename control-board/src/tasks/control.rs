@@ -19,7 +19,7 @@ use crate::{
 
 use nalgebra::{Vector3, Vector4};
 
-use ateam_lib_stm32::make_uart_queues;
+use ateam_lib_stm32::make_uart_queue_pair;
 
 use ateam_common_packets::bindings_radio::{
     BasicControl,
@@ -49,31 +49,31 @@ const RX_BUF_DEPTH: usize = 20;
 
 const TICKS_WITHOUT_PACKET_STOP: u16 = 25;
 
-make_uart_queues!(FRONT_LEFT,
+make_uart_queue_pair!(FRONT_LEFT,
     MotorFLUart, MotorFLDmaRx, MotorFLDmaTx,
     MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
     MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
     #[link_section = ".axisram.buffers"]);
 
-make_uart_queues!(BACK_LEFT,
+make_uart_queue_pair!(BACK_LEFT,
     MotorBLUart, MotorBLDmaRx, MotorBLDmaTx,
     MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
     MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
     #[link_section = ".axisram.buffers"]);
 
-make_uart_queues!(BACK_RIGHT,
+make_uart_queue_pair!(BACK_RIGHT,
     MotorBRUart, MotorBRDmaRx, MotorBRDmaTx,
     MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
     MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
     #[link_section = ".axisram.buffers"]);
 
-make_uart_queues!(FRONT_RIGHT,
+make_uart_queue_pair!(FRONT_RIGHT,
     MotorFRUart, MotorFRDmaRx, MotorFRDmaTx,
     MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
     MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
     #[link_section = ".axisram.buffers"]);
 
-make_uart_queues!(DRIB,
+make_uart_queue_pair!(DRIB,
     MotorDUart, MotorDDmaRx, MotorDDmaTx,
     MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
     MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,

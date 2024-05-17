@@ -28,7 +28,7 @@ use smart_leds::{SmartLedsWrite, RGB8};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
 
-use ateam_lib_stm32::make_uart_queues;
+use ateam_lib_stm32::make_uart_queue_pair;
 
 use ateam_control_board::motion::tasks::control;
 use ateam_control_board::pins::*;
@@ -63,13 +63,13 @@ pub const KICKER_TX_BUF_DEPTH: usize = 4;
 pub const KICKER_MAX_RX_PACKET_SIZE: usize = 256;
 pub const KICKER_RX_BUF_DEPTH: usize = 4;
 
-make_uart_queues!(RADIO,
+make_uart_queue_pair!(RADIO,
     RadioUART, RadioRxDMA, RadioTxDMA,
     RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH,
     RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH,
     #[link_section = ".axisram.buffers"]);
 
-make_uart_queues!(KICKER,
+make_uart_queue_pair!(KICKER,
     KickerUart, KickerRxDma, KickerTxDma,
     KICKER_MAX_RX_PACKET_SIZE, KICKER_RX_BUF_DEPTH,
     KICKER_MAX_TX_PACKET_SIZE, KICKER_TX_BUF_DEPTH,

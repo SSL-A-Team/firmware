@@ -2,7 +2,8 @@
 
 use core::{
     cell::SyncUnsafeCell,
-    future::Future, sync::atomic::{AtomicBool, Ordering}};
+    future::Future,
+};
 
 use embassy_stm32::{
     mode::Async,
@@ -14,10 +15,10 @@ use embassy_executor::{
 
 use embassy_futures::select::{select, Either};
 use embassy_sync::{
-    blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex},
-    mutex::Mutex, signal::Signal
+    blocking_mutex::raw::CriticalSectionRawMutex,
+    mutex::Mutex,
+    pubsub::{PubSubChannel, Publisher, Subscriber, WaitResult},
 };
-use embassy_time::Timer;
 
 use crate::queue::{
     self,
@@ -28,12 +29,13 @@ use crate::queue::{
 };
 
 #[macro_export]
-macro_rules! make_uart_queues {
+macro_rules! make_uart_queue_pair {
     ($name:ident, $uart:ty, $uart_rx_dma:ty, $uart_tx_dma:ty, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr, $(#[$m:meta])*) => {
         $crate::paste::paste! {
         // shared mutex allowing safe runtime update to UART config
         const [<$name _UART_PERI_MUTEX>]: embassy_sync::mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, bool> = 
             embassy_sync::mutex::Mutex::new(false);
+        static [<$name _UART_SYNC_PUBSUB>]: $crate::uart::queue::UartQueueSyncPubSub = embassy_sync::pubsub::PubSubChannel::new();
 
         // tx buffer
         const [<$name _CONST_TX_BUF_VAL>]: core::cell::SyncUnsafeCell<$crate::queue::Buffer<$tx_buffer_size>> = 
@@ -56,6 +58,46 @@ macro_rules! make_uart_queues {
     };
 }
 
+#[macro_export]
+macro_rules! queue_pair_register_signals {
+    ($name:ident) => {
+        $crate::paste::paste! {
+        [<$name _TX_UART_QUEUE>].attach_pubsub(
+            [<$name _UART_SYNC_PUBSUB>].publisher().unwrap(),
+            [<$name _UART_SYNC_PUBSUB>].subscriber().unwrap()).await;
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! queue_pair_rx_task {
+    ($name:ident, $uart_rx:ident) => {
+        $crate::paste::paste! {
+        [<$name _RX_UART_QUEUE>].spawn_task_with_pubsub($uart_rx, &[<$name _UART_SYNC_PUBSUB>])
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! queue_pair_tx_task {
+    ($name:ident, $uart_tx:ident) => {
+        $crate::paste::paste! {
+        [<$name _TX_UART_QUEUE>].spawn_task_with_pubsub($uart_tx, &[<$name _UART_SYNC_PUBSUB>])
+        }
+    }
+}
+
+pub type UartQueueSyncPubSub = PubSubChannel<CriticalSectionRawMutex, UartTaskCommand, 1, 3, 2>;
+type UartQueueConfigSyncPub = Publisher<'static, CriticalSectionRawMutex, UartTaskCommand, 1, 3, 2>;
+type UartQueueConfigSyncSub = Subscriber<'static, CriticalSectionRawMutex, UartTaskCommand, 1, 3, 2>;
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum UartTaskCommand {
+    Pause,
+    UnpauseSuccess,
+    UnpauseFailure,
+}
+
 pub struct UartReadQueue<
     UART: usart::BasicInstance,
     DMA: usart::RxDma<UART>,
@@ -63,7 +105,6 @@ pub struct UartReadQueue<
     const DEPTH: usize,
 > {
     uart_mutex: Mutex<CriticalSectionRawMutex, bool>,
-    uart_config_update_signal: Signal<CriticalSectionRawMutex, bool>,
     queue_rx: Queue<LENGTH, DEPTH>,
     task: TaskStorage<ReadTaskFuture<UART, DMA, LENGTH, DEPTH>>,
 }
@@ -94,10 +135,10 @@ impl<
         const DEPTH: usize,
     > UartReadQueue<UART, DMA, LENGTH, DEPTH>
 {
-    pub const fn new(buffers: &'static[SyncUnsafeCell<Buffer<LENGTH>>; DEPTH], uart_mutex: Mutex<CriticalSectionRawMutex, bool>, uart_config_update_signal: Signal<CriticalSectionRawMutex, bool>) -> Self {
+    pub const fn new(buffers: &'static[SyncUnsafeCell<Buffer<LENGTH>>; DEPTH],
+            uart_mutex: Mutex<CriticalSectionRawMutex, bool>        ) -> Self {
         Self {
             uart_mutex: uart_mutex,
-            uart_config_update_signal: uart_config_update_signal,
             queue_rx: Queue::new(buffers),
             task: TaskStorage::new(),
         }
@@ -107,25 +148,32 @@ impl<
         &'static self,
         queue_rx: &'static Queue<LENGTH, DEPTH>,
         mut rx: UartRx<'static, UART, Async>,
+        mut uart_config_signal_subscriber: UartQueueConfigSyncSub,
     ) -> ReadTaskFuture<UART, DMA, LENGTH, DEPTH> {
         async move {
-            let mut block_for_config_update = false;
+            // if you panic here you spawned multiple ReadQueues from the same instance
+            // that isn't allowed
+            let mut pause_task_for_config_update = false;
 
             loop {                
-                /*
-                 * Multitasking Logic:
-                 * 
-                 * 
-                 */
+                // block if/until we receive a signal telling to unpause the task because a config update is not active
+                while pause_task_for_config_update {
+                    defmt::trace!("UartReadQueue - pausing rx task for config update");
 
-                if block_for_config_update {
-                    // block until we receive a signal telling to unpause the task because a config update is not active
-                    while self.uart_config_update_signal.wait().await { }
-                    defmt::trace!("UartReadQueue - standing down from rx thread pause for config update.");
+                    match uart_config_signal_subscriber.next_message().await { 
+                        WaitResult::Lagged(amnt) => {
+                            defmt::debug!("UartReadQueue - lagged {} processing config signal", amnt)
+                        }
+                        WaitResult::Message(task_command) => {
+                            if task_command == UartTaskCommand::UnpauseSuccess || task_command == UartTaskCommand::UnpauseFailure {
+                                defmt::trace!("UartReadQueue - resuming rx thread paused for config update.");
+                                pause_task_for_config_update = false;
+                            }
+                        }
+                    }
+                } 
 
-                    block_for_config_update = false;
-                }
-
+                // get enqueue ref to pass to the DMA layer
                 let mut buf = queue_rx.enqueue().await.unwrap();
 
                 {
@@ -133,7 +181,7 @@ impl<
 
                     // NOTE: this really shouldn't be a timeout, it should be a signal from tx side that a new config
                     // is desired. This works for now but the timeout is hacky.
-                    match select(rx.read_until_idle(buf.data()), self.uart_config_update_signal.wait()).await {
+                    match select(rx.read_until_idle(buf.data()), uart_config_signal_subscriber.next_message()).await {
                         Either::First(len) => {
                             if let Ok(len) = len {
                                 if len == 0 {
@@ -148,15 +196,24 @@ impl<
                                 buf.cancel();
                             }
                         },
-                        Either::Second(block_for_config) => {
+                        Either::Second(config_signal_result) => {
                             defmt::trace!("UartReadQueue - read to idle cancelled to update config.");
+                            // clear the buffer record keeping, the transaction may have been interrupted
                             buf.cancel();
 
-                            block_for_config_update = block_for_config;
-
-                            if !block_for_config {
-                                defmt::warn!("UartReadQueue - config update standdown cancelled read to idle. Should this event sequence occur?");
+                            match config_signal_result {
+                                WaitResult::Lagged(amnt) => {
+                                    defmt::trace!("UartReadQueue - lagged {} processing config update signal while blocked on read_to_idle", amnt);
+                                }
+                                WaitResult::Message(task_command) => {
+                                    if task_command == UartTaskCommand::Pause {
+                                        pause_task_for_config_update = true;
+                                    } else {
+                                        defmt::warn!("UartReadQueue - config update standdown cancelled read to idle. Should this event sequence occur?");
+                                    }
+                                }
                             }
+
                         }
                     }
                 } // frees the inter-task uart config lock
@@ -167,8 +224,17 @@ impl<
     pub fn spawn_task(
         &'static self,
         rx: UartRx<'static, UART, Async>,
+        uart_config_signal_subscriber: UartQueueConfigSyncSub
     ) -> SpawnToken<impl Sized> {
-        self.task.spawn(|| self.read_task(&self.queue_rx, rx))
+        self.task.spawn(|| self.read_task(&self.queue_rx, rx, uart_config_signal_subscriber))
+    }
+
+    pub fn spawn_task_with_pubsub(
+        &'static self,
+        rx: UartRx<'static, UART, Async>,
+        uart_config_signal_pubsub: &'static UartQueueSyncPubSub
+    ) -> SpawnToken<impl Sized> {
+        self.task.spawn(|| self.read_task(&self.queue_rx, rx, uart_config_signal_pubsub.subscriber().unwrap()))
     }
 
     pub fn try_dequeue(&self) -> Result<DequeueRef<LENGTH, DEPTH>, Error> {
@@ -188,10 +254,9 @@ pub struct UartWriteQueue<
     const DEPTH: usize,
 > {
     uart_mutex: Mutex<CriticalSectionRawMutex, bool>,
-    uart_config_update_signal: Signal<CriticalSectionRawMutex, bool>,
-    uart_config_applied_update_signal: Signal<CriticalSectionRawMutex, bool>,
+    uart_config_signal_publisher: Mutex<CriticalSectionRawMutex, Option<UartQueueConfigSyncPub>>,
+    uart_config_signal_subscriber: Mutex<CriticalSectionRawMutex, Option<UartQueueConfigSyncSub>>,
     queue_tx: Queue<LENGTH, DEPTH>,
-    has_new_uart_config: AtomicBool,
     new_uart_config: Mutex<CriticalSectionRawMutex, Option<usart::Config>>,
     task: TaskStorage<WriteTaskFuture<UART, DMA, LENGTH, DEPTH>>,
 }
@@ -211,74 +276,128 @@ impl<
         const DEPTH: usize,
     > UartWriteQueue<UART, DMA, LENGTH, DEPTH>
 {
-    pub const fn new(buffers: &'static [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH],  uart_mutex: Mutex<CriticalSectionRawMutex, bool>, uart_config_update_signal: Signal<CriticalSectionRawMutex, bool>) -> Self {
+    pub const fn new(buffers: &'static [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH],
+            uart_mutex: Mutex<CriticalSectionRawMutex, bool>
+            ) -> Self {
         Self {
             uart_mutex: uart_mutex,
-            uart_config_update_signal: uart_config_update_signal,
-            uart_config_applied_update_signal: Signal::new(),
+            uart_config_signal_publisher: Mutex::new(None),
+            uart_config_signal_subscriber: Mutex::new(None),
             queue_tx: Queue::new(buffers),
-            has_new_uart_config: AtomicBool::new(false),
             new_uart_config: Mutex::new(None),
             task: TaskStorage::new(),
         }
+    }
+
+    pub async fn attach_pubsub(&self,
+        uart_config_signal_publisher: UartQueueConfigSyncPub,
+        uart_config_signal_subscriber: UartQueueConfigSyncSub
+    ) {
+        let mut pb = self.uart_config_signal_publisher.lock().await;
+        *pb = Some(uart_config_signal_publisher);
+
+        let mut sub = self.uart_config_signal_subscriber.lock().await;
+        *sub = Some(uart_config_signal_subscriber);
     }
 
     fn write_task(
         &'static self,
         queue_tx: &'static Queue<LENGTH, DEPTH>,
         mut tx: UartTx<'static, UART, Async>,
+        uart_config_signal_publisher: UartQueueConfigSyncPub,
+        mut uart_config_signal_subscriber: UartQueueConfigSyncSub,
     ) -> WriteTaskFuture<UART, DMA, LENGTH, DEPTH> {
         async move {
             loop {
-                let buf = queue_tx.dequeue().await.unwrap();
+                // the tx task primarily blocks on queue_tx.queue(), e.g. waiting for other async tasks
+                // to enqueue data. Use a select to break waiting if another task signals there's a UART
+                // config update. They probably want the update before the next data is enqueued
+                match select(queue_tx.dequeue(), uart_config_signal_subscriber.next_message()).await {
+                    // we are dequeing data
+                    Either::First(dq_res) => {
+                        if let Ok(buf) = dq_res {
+                            // write the message to the DMA
+                            tx.write(buf.data()).await.unwrap(); // we are blocked here!
 
-                if self.has_new_uart_config.load(Ordering::Relaxed) {
-                    // acquire the lock on the config
-                    let new_config = self.new_uart_config.lock().await;
+                            // drop the buffer, cleans up queue
+                            drop(buf);
 
-                    // rx task probably has a uart read_to_idle pending, meaning it also holds the uart_mutex lock
-                    // signal the rx task to break the read_to_idle and spin waiting for a resume signal
-                    self.uart_config_update_signal.signal(true);
-
-                    // rx task is now idling an will shortly release the uart_mutex
-                    // acquire the lock on the shared UART config
-                    let _rw_tasks_config_lock = self.uart_mutex.lock().await;
-
-                    // now that we have exclusive control over the shared hardware, update the config
-
-                    let config_res = tx.set_config(&new_config.unwrap());
-                    if config_res.is_err() {
-                        defmt::warn!("failed to apply uart config in uart write queue");
-                    } else {
-                        defmt::debug!("updated config in uart write queue");
+                            // NOTE: we used to check for DMA transaction complete here, but embassy added
+                            // it some time ago. Doing it twice causes lockup. 
+                        } else {
+                            defmt::warn!("UartWriteQueue - result of dequeue for DMA TX was error");
+                        }
                     }
+                    // we are processing a request to update the UART hardware config
+                    Either::Second(config_signal_res) => {
+                        match config_signal_res {
+                            WaitResult::Lagged(amnt) => {
+                                defmt::trace!("UartWriteQueue - lagged {} while processing signal to pause for config update", amnt);
+                            }
+                            WaitResult::Message(task_command) => {
+                                // we received a task command, possible asking us to pasue for a new config 
+                                let mut success = false;
+                                if task_command == UartTaskCommand::Pause {
+                                    { // open a scope so we can explicitly track the config mutex lifetime
+                                        // acquire the lock on the config
+                                        defmt::debug!("UartWriteQueue - waiting for config lock");
+                                        let mut new_config = self.new_uart_config.lock().await;
 
-                    // now that the config has taken hold
-                    // tell the rx task to resume
-                    self.uart_config_update_signal.signal(false);
+                                        // rx task should have also received the pause request and is now (or will be shortly) 
+                                        // idling and will release the uart config mutex which it nominally holds during read_to_idle
+                                        // we can now acquire the lock on the shared UART config
+                                        defmt::debug!("UartWriteQueue - waiting for hardware lock");
+                                        let _rw_tasks_config_lock = self.uart_mutex.lock().await;
+                                    
+                                        // now that we have exclusive control over the shared hardware, update the config
+                                        defmt::debug!("UartWriteQueue - applying new hardware config");
+                                        if new_config.is_some() {
+                                            let config_res = tx.set_config(&new_config.unwrap());
+                                            if config_res.is_err() {
+                                                defmt::warn!("UartWriteQueue - failed to apply uart config in uart write queue");
+                                            } else {
+                                                defmt::debug!("UartWriteQueue - updated config in uart write queue");
+                                                success = true;
+                                            }
+                                        } else {
+                                            defmt::warn!("UartWriteQueue - task was signaled to update config but none was provided.")
+                                        }
 
-                    // clear the update pending flag
-                    self.has_new_uart_config.store(false, Ordering::Relaxed);
+                                        // clear config
+                                        *new_config = None;
+                                    } // free uart hardware config and new config mutexes
 
-                    // signal the async task that requested the config update it can resume
-                    // knowing the config has been applied
-                    self.uart_config_applied_update_signal.signal(true);
-                } // frees the config update lock and the inter-task uart config lock
+                                    defmt::debug!("UartWriteQueue - released locks");
 
-                // defmt::info!("invoking API write");
-                tx.write(buf.data()).await.unwrap(); // we are blocked here!
-                // defmt::info!("passed API write");
-
-                drop(buf);
-
-                // NOTE: we used to check for DMA transaction complete here, but embassy added
-                // it some time ago. Doing it twice causes lockup. 
+                                    // we've either succeeded or not succeeded
+                                    // regardless, clean up by signaling other tasks to unpause
+                                    if success {
+                                        uart_config_signal_publisher.publish(UartTaskCommand::UnpauseSuccess).await;
+                                    } else {
+                                        uart_config_signal_publisher.publish(UartTaskCommand::UnpauseFailure).await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
-    pub fn spawn_task(&'static self, tx: UartTx<'static, UART, Async>) -> SpawnToken<impl Sized> {
-        self.task.spawn(|| self.write_task(&self.queue_tx, tx))
+    pub fn spawn_task(&'static self, 
+        tx: UartTx<'static, UART, Async>,
+        uart_config_signal_publisher: UartQueueConfigSyncPub,
+        uart_config_signal_subscriber: UartQueueConfigSyncSub,
+    ) -> SpawnToken<impl Sized> {
+        self.task.spawn(|| self.write_task(&self.queue_tx, tx, uart_config_signal_publisher, uart_config_signal_subscriber))
+    }
+
+    pub fn spawn_task_with_pubsub(&'static self, 
+        tx: UartTx<'static, UART, Async>,
+        uart_config_signal_pubsub: &'static UartQueueSyncPubSub
+    ) -> SpawnToken<impl Sized> {
+        self.task.spawn(|| self.write_task(&self.queue_tx, tx, uart_config_signal_pubsub.publisher().unwrap(), uart_config_signal_pubsub.subscriber().unwrap()))
     }
 
     pub fn enqueue(&self, fn_write: impl FnOnce(&mut [u8]) -> usize) -> Result<(), queue::Error> {
@@ -295,14 +414,52 @@ impl<
         })
     }
 
-    pub async fn update_uart_config(&self, config: usart::Config) {
+    pub async fn update_uart_config(&self, config: usart::Config) -> Result<(), ()> {
+        // acquire the config lock and insert the config
         {
             let mut new_config = self.new_uart_config.lock().await;
             let _ = new_config.insert(config);
-        }
-        self.has_new_uart_config.store(true, Ordering::Relaxed);
+        } // drop config lock
 
-        self.uart_config_applied_update_signal.wait().await;
+        // signal the tasks to pause and apply the config before the next write
+        // tx task will acquire the config lock and do the application once the rx task
+        // releases the hardware uart lock predominantly held by read_to_idle.
+        {
+            let config_signal_pub = self.uart_config_signal_publisher.lock().await;
+            config_signal_pub.as_ref().unwrap().publish(UartTaskCommand::Pause).await;
+        }
+
+        // multiple tasks (not the queues) could call this from a multi-prio context
+        // so we need to acquire the lock on the subscriber
+        #[allow(unused_assignments)] // value isn't read but is retunred
+        let mut ret_val: Result<(), ()> = Err(());
+        {
+            let mut success_subscriber = self.uart_config_signal_subscriber.lock().await;
+            
+            // wait for tasks to indicate success
+            loop {
+                let success_result = success_subscriber.as_mut().unwrap().next_message().await;
+                match success_result { 
+                    WaitResult::Lagged(amnt) => {
+                        defmt::debug!("UartQueue - lagged {} waiting for status response from config update", amnt);
+                    }
+                    WaitResult::Message(task_command_reply) => {
+                        if task_command_reply == UartTaskCommand::Pause {
+                            // we are probably back processing our own command to Pause
+                            defmt::debug!("UartQueue - received spurious value waiting for response");
+                        }
+
+                        // tx thread will release locks and send the Unpause command indicating success
+                        if task_command_reply == UartTaskCommand::UnpauseSuccess {
+                            ret_val = Ok(());
+                            break;
+                        }
+                    }
+                }
+            }
+        } // subscriber lock freed here
+
+        return ret_val;
     }
 }
 

@@ -16,7 +16,7 @@ use panic_probe as _;
 
 use static_cell::StaticCell;
 
-use ateam_lib_stm32::{make_uart_queues, uart::queue::{UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_signals, queue_pair_rx_task, queue_pair_tx_task, uart::queue::{UartReadQueue, UartWriteQueue}};
 
 type ComsUartModule = USART2;
 type ComsUartTxDma = DMA1_CH0;
@@ -33,7 +33,7 @@ const RX_BUF_DEPTH: usize = 5;
 const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 5;
 
-make_uart_queues!(COMS,
+make_uart_queue_pair!(COMS,
     ComsUartModule, ComsUartRxDma, ComsUartTxDma,
     MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
     MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
@@ -146,7 +146,10 @@ async fn handle_btn_press(usr_btn_pin: UserBtnPin,
             BAUD_RATE.store(115_200, core::sync::atomic::Ordering::SeqCst);
         };
 
-        coms_writer.update_uart_config(coms_uart_config).await;
+        let baud_update_res = coms_writer.update_uart_config(coms_uart_config).await;
+        if baud_update_res.is_err() {
+            defmt::panic!("failed to update baud rate");
+        }
     }
 }
 
@@ -195,8 +198,12 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
 
     let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
 
-    unwrap!(high_pri_spawner.spawn(COMS_RX_UART_QUEUE.spawn_task(coms_uart_rx)));
-    unwrap!(high_pri_spawner.spawn(COMS_TX_UART_QUEUE.spawn_task(coms_uart_tx)));
+    // COMS_TX_UART_QUEUE.attach_pubsub(COMS_UART_SYNC_PUBSUB.publisher().unwrap(), COMS_UART_SYNC_PUBSUB.subscriber().unwrap()).await;
+    // unwrap!(high_pri_spawner.spawn(COMS_RX_UART_QUEUE.spawn_task_with_pubsub(coms_uart_rx, &COMS_UART_SYNC_PUBSUB)));
+    // unwrap!(high_pri_spawner.spawn(COMS_TX_UART_QUEUE.spawn_task_with_pubsub(coms_uart_tx, &COMS_UART_SYNC_PUBSUB)));
+    queue_pair_register_signals!(COMS);
+    unwrap!(high_pri_spawner.spawn(queue_pair_rx_task!(COMS, coms_uart_rx)));
+    unwrap!(high_pri_spawner.spawn(queue_pair_tx_task!(COMS, coms_uart_tx)));
 
 
     // MIGHT should put queues in mix prio, this could elicit the bug

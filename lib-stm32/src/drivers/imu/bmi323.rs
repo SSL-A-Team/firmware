@@ -9,11 +9,10 @@ use core::{cmp::min, f32::consts::PI};
 use embassy_stm32::{
     gpio::{Level, Output, Pin, Speed},
     mode::Async,
-    spi::{self, MisoPin, Mode, MosiPin, SckPin},
+    spi::{self, MisoPin, MosiPin, SckPin},
     time::hz,
     Peripheral
 };
-use embassy_time::Timer;
 
 pub const SPI_MIN_BUF_LEN: usize = 14;
 
