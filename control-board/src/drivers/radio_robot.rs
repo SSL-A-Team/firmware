@@ -180,9 +180,12 @@ impl<
         let uid = uid::uid();
         let uid_u16 = (uid[1] as u16) << 8 | uid[0] as u16;
 
-        let mut s = String::<23>::new();
-        core::write!(&mut s, "A-Team Robot #{:02X} ({:04X})", robot_number, uid_u16).unwrap();
+        // let mut s = String::<23>::new();
+        // core::write!(&mut s, "A-Team Robot #{:02X} ({:04X})", robot_number, uid_u16).unwrap();
+        let mut s = String::<15>::new();
+        core::write!(&mut s, "A-Team Robot {:02X}", robot_number).unwrap();
         if self.radio.set_host_name(s.as_str()).await.is_err() {
+            defmt::trace!("could not set radio host name");
             return Err(RobotRadioError::ConnectWifiBadHostName);
         }
 
@@ -192,11 +195,13 @@ impl<
             passphrase: wifi_credential.get_password(),
         };
         if self.radio.config_wifi(1, wifi_ssid,wifi_pass).await.is_err() {
+            defmt::trace!("could not configure wifi profile");
             return Err(RobotRadioError::ConnectWifiBadConfig);
         }
 
         // connect to config slot 1
         if self.radio.connect_wifi(1).await.is_err() {
+            defmt::trace!("could not connect to wifi");
             return Err(RobotRadioError::ConnectWifiConnectionFailed);
         }
 

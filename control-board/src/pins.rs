@@ -80,31 +80,41 @@ pub type KickerPowerOnPin = PG8;
 //  Motors  //
 //////////////
 
-pub type MotorFRUart = USART1;
-pub type MotorFRDmaTx = DMA1_CH0;
-pub type MotorFRDmaRx = DMA1_CH1;
-pub type MotorFRBootPin = PD8;
-pub type MotorFRResetPin = PD9;
-
 pub type MotorFLUart = UART4;
+pub type MotorFLUartRxPin = PA1;
+pub type MotorFLUartTxPin = PA0;
 pub type MotorFLDmaTx = DMA1_CH2;
 pub type MotorFLDmaRx = DMA1_CH3;
 pub type MotorFLBootPin = PC1;
 pub type MotorFLResetPin = PC0;
 
 pub type MotorBLUart = UART7;
+pub type MotorBLUartRxPin = PF6;
+pub type MotorBLUartTxPin = PF7;
 pub type MotorBLDmaTx = DMA1_CH4;
 pub type MotorBLDmaRx = DMA1_CH5;
 pub type MotorBLBootPin = PF8;
 pub type MotorBLResetPin = PF9;
 
 pub type MotorBRUart = UART8;
+pub type MotorBRUartRxPin = PE0;
+pub type MotorBRUartTxPin = PE1;
 pub type MotorBRDmaTx = DMA1_CH6;
 pub type MotorBRDmaRx = DMA1_CH7;
 pub type MotorBRBootPin = PB9;
 pub type MotorBRResetPin = PB8;
 
+pub type MotorFRUart = USART1;
+pub type MotorFRUartRxPin = PB15;
+pub type MotorFRUartTxPin = PB14;
+pub type MotorFRDmaTx = DMA1_CH0;
+pub type MotorFRDmaRx = DMA1_CH1;
+pub type MotorFRBootPin = PD8;
+pub type MotorFRResetPin = PD9;
+
 pub type MotorDUart = UART5;
+pub type MotorDUartRxPin = PB12;
+pub type MotorDUartTxPin = PB13;
 pub type MotorDDmaTx = DMA2_CH2;
 pub type MotorDDmaRx = DMA2_CH3;
 pub type MotorDBootPin = PD13;

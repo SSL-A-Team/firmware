@@ -163,6 +163,7 @@ impl<
     pub async fn set_host_name(&self, host_name: &str) -> Result<(), ()> {
         let mut str: String<64> = String::new();
         write!(str, "AT+UNHN=\"{host_name}\"").or(Err(()))?;
+        defmt::trace!("host configuration string: {}", str.as_str());
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
         Ok(())
