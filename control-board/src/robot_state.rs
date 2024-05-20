@@ -67,4 +67,12 @@ impl RobotState {
     pub fn set_hw_robot_team_is_blue(&self, is_blue: bool) {
         self.hw_robot_team_is_blue.store(is_blue, Ordering::Relaxed);
     }
+
+    pub fn hw_in_debug_mode(&self) -> bool {
+        self.hw_debug_mode.load(Ordering::Relaxed)
+    }
+
+    pub fn set_hw_in_debug_mode(&self, in_debug_mode: bool) {
+        self.hw_debug_mode.store(in_debug_mode, Ordering::Relaxed);
+    }
 }

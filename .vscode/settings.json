@@ -18,5 +18,9 @@
     // don't show notifications for unlinked Cargo.toml files. This is misleads folks into
     // including projects under incorrect ABIs.
     "rust-analyzer.showUnlinkedFileNotification": false,
+    // disable type hints by default
+    // this gnarly in too many files
+    // ctrl + alt to show
+    "editor.inlayHints.enabled": "offUnlessPressed",
     "ros.distro": "humble"
 }

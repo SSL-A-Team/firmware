@@ -1,5 +1,6 @@
 use core::{mem::MaybeUninit, f32::consts::PI};
 
+use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
 use defmt::*;
 use embassy_stm32::{
     gpio::Pin,
@@ -18,7 +19,7 @@ use ateam_common_packets::bindings_stspin::{
     MotorResponse_Motion_Packet, MotorResponse_Params_Packet,
 };
 
-use crate::stm32_interface::Stm32Interface;
+use crate::stm32_interface::{self, Stm32Interface};
 
 pub struct WheelMotor<
     'a,
@@ -113,6 +114,44 @@ impl<
         }
     }
 
+    pub fn new_from_pins(
+        read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        boot0_pin: impl Pin,
+        reset_pin: impl Pin,
+        firmware_image: &'a [u8],
+    ) -> WheelMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
+    {
+        let stm32_interface = Stm32Interface::new_from_pins(read_queue, write_queue, boot0_pin, reset_pin, false);
+
+        let start_state: MotorResponse_Motion_Packet =
+            { unsafe { MaybeUninit::zeroed().assume_init() } };
+
+        let start_params_state: MotorResponse_Params_Packet =
+            { unsafe { MaybeUninit::zeroed().assume_init() } };
+
+        WheelMotor {
+            stm32_uart_interface: stm32_interface,
+            firmware_image,
+
+            version_major: 0,
+            version_minor: 0,
+            version_patch: 0,
+            current_state: start_state,
+            current_params_state: start_params_state,
+            vel_pid_constants: Vector3::new(0.0, 0.0, 0.0),
+            vel_pid_i_max: 0.0,
+            torque_pid_constants: Vector3::new(0.0, 0.0, 0.0),
+            torque_pid_i_max: 0.0,
+            torque_limit: 0.0,
+
+            setpoint: 0.0,
+            motion_type: OPEN_LOOP,
+            reset_flagged: false,
+            telemetry_enabled: false,
+        }
+    }
+
     pub async fn reset(&mut self) {
         self.stm32_uart_interface.hard_reset().await;
     }
@@ -142,7 +181,7 @@ impl<
         Timer::after(Duration::from_millis(1)).await;
 
         // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
-        self.stm32_uart_interface.leave_reset().await?;
+        self.stm32_uart_interface.leave_reset().await;
 
         return res;
     }
@@ -386,6 +425,47 @@ impl<
         }
     }
 
+    pub fn new_from_pins(
+        read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        boot0_pin: impl Pin,
+        reset_pin: impl Pin,
+        firmware_image: &'a [u8],
+        ball_detected_thresh: f32,
+    ) -> DribblerMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
+    {
+        let stm32_interface = Stm32Interface::new_from_pins(read_queue, write_queue, boot0_pin, reset_pin, false);
+
+        let start_state: MotorResponse_Motion_Packet =
+            { unsafe { MaybeUninit::zeroed().assume_init() } };
+
+        let start_params_state: MotorResponse_Params_Packet =
+            { unsafe { MaybeUninit::zeroed().assume_init() } };
+
+        DribblerMotor {
+            stm32_uart_interface: stm32_interface,
+            firmware_image,
+
+            version_major: 0,
+            version_minor: 0,
+            version_patch: 0,
+            current_state: start_state,
+            current_params_state: start_params_state,
+            vel_pid_constants: Vector3::new(0.0, 0.0, 0.0),
+            vel_pid_i_max: 0.0,
+            torque_pid_constants: Vector3::new(0.0, 0.0, 0.0),
+            torque_pid_i_max: 0.0,
+            torque_limit: 0.0,
+
+            setpoint: 0.0,
+            motion_type: OPEN_LOOP,
+            reset_flagged: false,
+            telemetry_enabled: false,
+
+            ball_detected_thresh: ball_detected_thresh,
+        }
+    }
+
     pub async fn reset(&mut self) {
         self.stm32_uart_interface.hard_reset().await;
     }
@@ -408,14 +488,11 @@ impl<
         // it will begin issueing telemetry updates
         // these are the only packets it sends so any blocked process should get the data it now needs
         info!("update config");
-        unsafe {
-            self.stm32_uart_interface
-                .update_uart_config(2_000_000, Parity::ParityEven)
-        };
+        self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven);
         Timer::after(Duration::from_millis(1)).await;
 
         // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
-        self.stm32_uart_interface.leave_reset().await?;
+        self.stm32_uart_interface.leave_reset().await;
 
         return res;
     }

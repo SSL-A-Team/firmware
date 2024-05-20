@@ -3,7 +3,7 @@ use core::cmp::min;
 use defmt_rtt as _;
 use defmt::*;
 
-use embassy_stm32::gpio::{Output, Pin};
+use embassy_stm32::gpio::{Level, Output, Pin, Speed};
 use embassy_stm32::pac;
 use embassy_stm32::usart::{self, Parity, Config};
 use embassy_time::{Duration, Timer};
@@ -50,8 +50,8 @@ pub struct Stm32Interface<
 > {
     reader: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
     writer: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
-    boot0_pin: Option<Output<'a>>,
-    reset_pin: Option<Output<'a>>,
+    boot0_pin: Output<'a>,
+    reset_pin: Output<'a>,
 
     reset_pin_noninverted: bool,
 
@@ -72,49 +72,42 @@ impl<
     pub fn new(        
         read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
         write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
-        boot0_pin: Option<Output<'a>>,
-        reset_pin: Option<Output<'a>>
-    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
-        // let the user set the initial state
-        // if boot0_pin.is_some() {
-        //     boot0_pin.as_mut().unwrap().set_low();
-        // }
-
-        // if reset_pin.is_some() {
-        //     reset_pin.as_mut().unwrap().set_high();
-        // }
-        
+        boot0_pin: Output<'a>,
+        reset_pin: Output<'a>,
+        reset_polarity_high: bool,
+    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {        
         Stm32Interface {
             reader: read_queue,
             writer: write_queue,
             boot0_pin,
             reset_pin,
-            reset_pin_noninverted: false,
+            reset_pin_noninverted: reset_polarity_high,
             in_bootloader: false,
         }
     }
 
-    pub fn new_noninverted_reset(        
+    pub fn new_from_pins(        
         read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
         write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
-        boot0_pin: Option<Output<'a>>,
-        reset_pin: Option<Output<'a>>
-    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
-        // let the user set the initial state
-        // if boot0_pin.is_some() {
-        //     boot0_pin.as_mut().unwrap().set_low();
-        // }
-
-        // if reset_pin.is_some() {
-        //     reset_pin.as_mut().unwrap().set_high();
-        // }
+        boot0_pin: impl Pin,
+        reset_pin: impl Pin,
+        reset_polarity_high: bool,
+    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {        
+        let boot0_output = Output::new(boot0_pin, Level::Low, Speed::Medium);        
         
+        let initial_reset_level = if reset_polarity_high {
+            Level::Low
+        } else {
+            Level::High
+        };
+        let reset_output = Output::new(reset_pin, initial_reset_level, Speed::Medium);
+
         Stm32Interface {
             reader: read_queue,
             writer: write_queue,
-            boot0_pin,
-            reset_pin,
-            reset_pin_noninverted: true,
+            boot0_pin: boot0_output,
+            reset_pin: reset_output,
+            reset_pin_noninverted: reset_polarity_high,
             in_bootloader: false,
         }
     }
@@ -123,57 +116,35 @@ impl<
         defmt::panic!("implement soft reset if needed.");
     }
 
-    pub async fn enter_reset(&mut self) -> Result<(), ()> {
-        if self.reset_pin.is_none() {
-            return Err(());
-        }
-
+    pub async fn enter_reset(&mut self) {
         if self.reset_pin_noninverted {
-            self.reset_pin.as_mut().unwrap().set_high();
+            self.reset_pin.set_high();
         } else {
-            self.reset_pin.as_mut().unwrap().set_low();
+            self.reset_pin.set_low();
         }
         Timer::after(Duration::from_micros(100)).await;
-        
-        Ok(())
     }
 
-    pub async fn leave_reset(&mut self) -> Result<(), ()> {
-        if self.reset_pin.is_none() {
-            return Err(());
-        }
-
+    pub async fn leave_reset(&mut self) {
         if self.reset_pin_noninverted {
-            self.reset_pin.as_mut().unwrap().set_low();
+            self.reset_pin.set_low();
         } else {
-            self.reset_pin.as_mut().unwrap().set_high();
+            self.reset_pin.set_high();
         }
         Timer::after(Duration::from_micros(100)).await;
-
-        Ok(())
     }
 
-    pub async fn hard_reset(&mut self) -> Result<(), ()> {
-        if self.reset_pin.is_none() {
-            return Err(());
-        }
-
-        self.enter_reset().await?;
-        self.leave_reset().await?;
-
-        Ok(())
+    pub async fn hard_reset(&mut self) {
+        self.enter_reset().await;
+        self.leave_reset().await;
     }
 
     pub async fn reset_into_bootloader(&mut self) -> Result<(), ()> {
-        if self.boot0_pin.is_none() || self.reset_pin.is_none() {
-            return Err(());
-        }
-
         // set the boot0 line high to enter the UART bootloader upon reset
-        self.boot0_pin.as_mut().unwrap().set_high();
+        self.boot0_pin.set_high();
 
         // reset the device
-        self.hard_reset().await?;
+        self.hard_reset().await;
 
         // ensure it has time to setup it's bootloader
         // this time isn't documented and can possibly be lowered.
@@ -213,24 +184,18 @@ impl<
         res
     }
 
-    pub async fn reset_into_program(&mut self, stay_in_reset: bool) -> Result<(), ()> {
-        if self.boot0_pin.is_none() || self.reset_pin.is_none() {
-            return Err(());
-        }
-
+    pub async fn reset_into_program(&mut self, stay_in_reset: bool) {
         // set the boot0 line low to disable startup bootloader
-        self.boot0_pin.as_mut().unwrap().set_low();
+        self.boot0_pin.set_low();
         Timer::after(Duration::from_millis(5)).await;
 
         if stay_in_reset {
             // nrst, so reset and hold
-            self.enter_reset().await?;
+            self.enter_reset().await;
         } else {
             // reset the device
-            self.hard_reset().await?;
+            self.hard_reset().await;
         }
-
-        Ok(())
     }
 
     pub async fn update_uart_config(&self, baudrate: u32, parity: Parity) {
@@ -558,20 +523,14 @@ impl<
             return Err(err);
         }
 
-        info!("before reset");
-
-        if let Err(err) = self.reset_into_program(false).await {
-            return Err(err);
-        }
-
-        info!("after reset");
+        self.reset_into_program(false).await;
         
         Ok(())
     }
 
     pub async fn execute_code(&mut self, start_address: Option<u32>) -> Result<(), ()> {
         defmt::info!("firmware jump/go command implementation not working. will reset part.");
-        self.reset_into_program(false).await?;
+        self.reset_into_program(false).await;
         return Ok(());
 
         if !self.in_bootloader {
@@ -585,7 +544,7 @@ impl<
 
         // set the boot0 line low to disable startup bootloader
         // not needed for command, but makes sense on principle
-        self.boot0_pin.as_mut().unwrap().set_low();
+        self.boot0_pin.set_low();
 
         defmt::debug!("sending the go command...");
         self.writer
