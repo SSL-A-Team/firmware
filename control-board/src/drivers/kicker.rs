@@ -153,15 +153,15 @@ impl<
     //////////////////////////////////
 
     pub async fn reset(&mut self) {
-        self.stm32_uart_interface.hard_reset().await.unwrap();
+        self.stm32_uart_interface.hard_reset().await;
     }
 
     pub async fn enter_reset(&mut self) {
-        self.stm32_uart_interface.enter_reset().await.unwrap();
+        self.stm32_uart_interface.enter_reset().await;
     }
 
     pub async fn leave_reset(&mut self) {
-        self.stm32_uart_interface.leave_reset().await.unwrap();
+        self.stm32_uart_interface.leave_reset().await;
     }
 
     pub async fn load_firmware_image(&mut self, _fw_image_bytes: &[u8]) -> Result<(), ()> {
@@ -173,7 +173,7 @@ impl<
         Timer::after(Duration::from_millis(1)).await;
 
         // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
-        self.stm32_uart_interface.leave_reset().await?;
+        self.stm32_uart_interface.leave_reset().await;
 
         return Ok(());
     }

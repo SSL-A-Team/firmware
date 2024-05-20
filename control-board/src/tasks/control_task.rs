@@ -46,7 +46,7 @@ make_uart_queue_pair!(DRIB,
 
 #[embassy_executor::task]
 async fn control_task_entry(
-    robot_state: RobotState,
+    robot_state: &'static RobotState,
     command_subscriber: CommandsSubscriber,
     telemetry_publisher: TelemetryPublisher,
     mut motor_fl: WheelMotor<'static, MotorFLUart, MotorFLDmaRx, MotorFLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
@@ -65,20 +65,35 @@ async fn control_task_entry(
     if robot_state.hw_in_debug_mode() {
         defmt::info!("flashing firmware");
 
-        motor_fl.load_default_firmware_image().await;
-        defmt::info!("FL flashed");
+        if motor_fl.load_default_firmware_image().await.is_err() {
+            defmt::error!("failed to flash FL");
+        } else {
+            defmt::info!("FL flashed");
+        }
 
-        motor_bl.load_default_firmware_image().await;
-        defmt::info!("BL flashed");
+        if motor_bl.load_default_firmware_image().await.is_err() {
+            defmt::error!("failed to flash BL");
+        } else {
+            defmt::info!("BL flashed");
+        }
 
-        motor_br.load_default_firmware_image().await;
-        defmt::info!("BR flashed");
+        if motor_br.load_default_firmware_image().await.is_err() {
+            defmt::error!("failed to flash BR");
+        } else {
+            defmt::info!("BR flashed");
+        }
 
-        motor_fr.load_default_firmware_image().await;
-        defmt::info!("FR flashed");
+        if motor_fr.load_default_firmware_image().await.is_err() {
+            defmt::error!("failed to flash FR");
+        } else {
+            defmt::info!("FR flashed");
+        }
 
-        motor_drib.load_default_firmware_image().await;
-        defmt::info!("DRIB flashed");
+        if motor_drib.load_default_firmware_image().await.is_err() {
+            defmt::error!("failed to flash DRIB");
+        } else {
+            defmt::info!("DRIB flashed");
+        }
     } else {
         let _res = embassy_futures::join::join5(
             motor_fl.load_default_firmware_image(),
@@ -92,6 +107,7 @@ async fn control_task_entry(
         defmt::debug!("motor firmware flashed");
     }
 
+
     embassy_futures::join::join5(
         motor_fl.leave_reset(),
         motor_bl.leave_reset(),
@@ -101,16 +117,31 @@ async fn control_task_entry(
     )
     .await;
 
+    motor_fl.set_telemetry_enabled(true);
+    motor_bl.set_telemetry_enabled(true);
+    motor_br.set_telemetry_enabled(true);
+    motor_fr.set_telemetry_enabled(true);
+    motor_drib.set_telemetry_enabled(true);
+
+    Timer::after_millis(10).await;
+
     loop {
-        Timer::after_millis(1000);
-        defmt::info!("motor firmware flashed");
+        motor_fl.process_packets();
+
+        let rads = motor_fl.read_rads();
+        defmt::info!("read motor rads {}", rads);
+        motor_fl.set_setpoint(3.1415 * 10.0);
+
+        motor_fl.send_motion_command();
+
+        Timer::after_millis(10).await;
     }
 }
 
 pub async fn start_control_task(
     uart_queue_spawner: SendSpawner,
     control_task_spawner: Spawner,
-    robot_state: RobotState,
+    robot_state: &'static RobotState,
     command_subscriber: CommandsSubscriber,
     telemetry_publisher: TelemetryPublisher,
     motor_fl_uart: MotorFLUart, motor_fl_rx_pin: MotorFLUartRxPin, motor_fl_tx_pin: MotorFLUartTxPin, motor_fl_rx_dma: MotorFLDmaRx, motor_fl_tx_dma: MotorFLDmaTx, motor_fl_boot0_pin: MotorFLBootPin, motor_fl_nrst_pin: MotorFLResetPin,

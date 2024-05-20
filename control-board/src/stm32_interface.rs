@@ -167,11 +167,11 @@ impl<
         let sync_res = with_timeout(Duration::from_millis(100), self.reader.read(|buf| {
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
-                    defmt::info!("bootloader replied with ACK after calibration.");
+                    defmt::debug!("bootloader replied with ACK after calibration.");
                     self.in_bootloader = true;
                     res = Ok(());
                 } else {
-                    defmt::error!("bootloader replied with NACK after calibration.");
+                    defmt::debug!("bootloader replied with NACK after calibration.");
                 }
             }
         })).await;
@@ -203,7 +203,9 @@ impl<
         config.baudrate = baudrate;
         config.parity = parity;
 
-        self.writer.update_uart_config(config).await;
+        if self.writer.update_uart_config(config).await.is_err() {
+            defmt::panic!("failed to update uart config");
+        }
     }
 
     pub async fn read_latest_packet(&self) {
@@ -304,11 +306,11 @@ impl<
                 res = Err(());
             } else if buf.len() == 5 && buf[1] == 1 && buf[4] == STM32_BOOTLOADER_ACK {
                 let pid: u16 = buf[3] as u16;
-                defmt::info!("found 1 byte pid {:?}", pid);
+                defmt::trace!("found 1 byte pid {:?}", pid);
                 res = Ok(pid);
             } else if buf.len() == 5 && buf[1] == 2 && buf[4] == STM32_BOOTLOADER_ACK {
                 let pid: u16 = ((buf[2] as u16) << 8) | (buf[3] as u16);
-                defmt::info!("found 2 byte pid {:?}", pid);
+                defmt::trace!("found 2 byte pid {:?}", pid);
                 res = Ok(pid);
             } else {
                 defmt::error!("malformed response in device ID read.");
@@ -438,7 +440,7 @@ impl<
             addr += step_size as u32;
         }
 
-        defmt::info!("wrote device memory");
+        defmt::debug!("wrote device memory");
 
         Ok(())
     }
@@ -460,7 +462,7 @@ impl<
 
         let mut res = Err(());
         self.reader.read(|buf| {
-            defmt::info!("extended erase reply {:?}", buf);
+            defmt::trace!("extended erase reply {:?}", buf);
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
                     res = Ok(());
@@ -482,10 +484,10 @@ impl<
 
         let mut res = Err(());
         self.reader.read(|buf| {
-            defmt::info!("erase reply {:?}", buf);
+            defmt::debug!("erase reply {:?}", buf);
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
-                    defmt::info!("flash erased");
+                    defmt::debug!("flash erased");
                     res = Ok(());
                 } else {
                     defmt::error!("bootloader replied with NACK");
@@ -529,7 +531,7 @@ impl<
     }
 
     pub async fn execute_code(&mut self, start_address: Option<u32>) -> Result<(), ()> {
-        defmt::info!("firmware jump/go command implementation not working. will reset part.");
+        defmt::debug!("firmware jump/go command implementation not working. will reset part.");
         self.reset_into_program(false).await;
         return Ok(());
 

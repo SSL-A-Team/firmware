@@ -1,7 +1,7 @@
 use ateam_lib_stm32::drivers::switches::dip::DipSwitch;
 use ateam_lib_stm32::drivers::switches::rotary_encoder::RotaryEncoder;
 use embassy_executor::{SendSpawner, Spawner};
-use embassy_stm32::gpio::{AnyPin, Pull};
+use embassy_stm32::gpio::{AnyPin, Level, Output, Pull, Speed};
 use embassy_time::Timer;
 
 use crate::drivers::shell_indicator::ShellIndicator;
@@ -14,26 +14,42 @@ use crate::pins::*;
 async fn user_io_task_entry(robot_state: &'static RobotState,
     dip_switch: DipSwitch<'static, 7>,
     robot_id_rotary: RotaryEncoder<'static, 4>,
+    mut debug_led0: Output<'static>,
     mut robot_id_indicator: ShellIndicator<'static>,
 ) {
     loop {
         // read switches
         let robot_id = robot_id_rotary.read_value();
         let robot_team_isblue = dip_switch.read_pin(6);
+        let robot_debug_mode = dip_switch.read_pin(5);
+
+        let glob_robot_debug = robot_state.hw_in_debug_mode();
+        if robot_debug_mode != glob_robot_debug {
+            robot_state.set_hw_in_debug_mode(robot_debug_mode);
+            if robot_debug_mode {
+                defmt::info!("robot entered debug mode");
+            }
+        }
+
+        if robot_debug_mode {
+            debug_led0.set_high();
+        } else {
+            debug_led0.set_low();
+        }
 
         // publish updates to robot_state
         let glob_robot_id = robot_state.get_hw_robot_id();
         let glob_robot_is_blue = robot_state.hw_robot_team_is_blue();
         if robot_id != glob_robot_id {
             robot_state.set_hw_robot_id(robot_id);
-            defmt::debug!("updated robot id {} -> {}", glob_robot_id, robot_id);
+            defmt::info!("updated robot id {} -> {}", glob_robot_id, robot_id);
         }
 
         if robot_team_isblue != glob_robot_is_blue {
             robot_state.set_hw_robot_team_is_blue(robot_team_isblue);
-            defmt::debug!("updated robot team is blue {} -> {}", glob_robot_is_blue, robot_team_isblue);
+            defmt::info!("updated robot team is blue {} -> {}", glob_robot_is_blue, robot_team_isblue);
         }
-
+        
         // TODO read messages
 
         // update indicators
@@ -67,7 +83,9 @@ pub fn start_io_task(spawner: Spawner,
     let robot_id_selector_pins: [AnyPin; 4] = [robot_id_selector3_pin.into(), robot_id_selector2_pin.into(), robot_id_selector1_pin.into(), robot_id_selector0_pin.into()];
     let robot_id_rotary = RotaryEncoder::new_from_pins(robot_id_selector_pins, Pull::None, None);
 
+    let debug_led0 = Output::new(usr_led0_pin, Level::Low, Speed::Low);
+
     let robot_id_indicator = ShellIndicator::new(robot_id_indicator_fr, robot_id_indicator_fl, robot_id_indicator_br, robot_id_indicator_bl, Some(robot_id_indicator_isblue));
 
-    spawner.spawn(user_io_task_entry(robot_state, dip_switch, robot_id_rotary, robot_id_indicator)).unwrap();
+    spawner.spawn(user_io_task_entry(robot_state, dip_switch, robot_id_rotary, debug_led0, robot_id_indicator)).unwrap();
 }

@@ -20,7 +20,7 @@ pub type CommandsPublisher = Publisher<'static, ThreadModeRawMutex, DataPacket, 
 pub type CommandsSubscriber = Subscriber<'static, ThreadModeRawMutex, DataPacket, COMMANDS_PUBSUB_DEPTH, 1, 1>;
 
 pub type TelemetryPubSub = PubSubChannel<ThreadModeRawMutex, TelemetryPacket, TELEMETRY_PUBSUB_DEPTH, 1, 1>;
-pub type TelemetryPublisher = Publisher<'static, ThreadModeRawMutex, DataPacket, COMMANDS_PUBSUB_DEPTH, 1, 1>;
+pub type TelemetryPublisher = Publisher<'static, ThreadModeRawMutex, TelemetryPacket, COMMANDS_PUBSUB_DEPTH, 1, 1>;
 pub type TelemetrySubcriber = Subscriber<'static, ThreadModeRawMutex, TelemetryPacket, TELEMETRY_PUBSUB_DEPTH, 1, 1>;
 
 pub type GyroDataPubSub = PubSubChannel<ThreadModeRawMutex, nalgebra::Vector3<f32>, GYRO_DATA_PUBSUB_DEPTH, 1, 1>;

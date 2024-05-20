@@ -19,7 +19,7 @@ use ateam_common_packets::bindings_stspin::{
     MotorResponse_Motion_Packet, MotorResponse_Params_Packet,
 };
 
-use crate::stm32_interface::{self, Stm32Interface};
+use crate::stm32_interface::Stm32Interface;
 
 pub struct WheelMotor<
     'a,
@@ -173,11 +173,8 @@ impl<
         // this is safe because load firmware image call will reset the target device
         // it will begin issueing telemetry updates
         // these are the only packets it sends so any blocked process should get the data it now needs
-        info!("update config");
-        unsafe {
-            self.stm32_uart_interface
-                .update_uart_config(2_000_000, Parity::ParityEven)
-        };
+        defmt::debug!("update config");
+        self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
         Timer::after(Duration::from_millis(1)).await;
 
         // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
@@ -487,8 +484,8 @@ impl<
         // this is safe because load firmware image call will reset the target device
         // it will begin issueing telemetry updates
         // these are the only packets it sends so any blocked process should get the data it now needs
-        info!("update config");
-        self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven);
+        defmt::debug!("update config");
+        self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
         Timer::after(Duration::from_millis(1)).await;
 
         // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
