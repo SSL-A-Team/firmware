@@ -115,7 +115,7 @@ impl<
     pub async fn connect_uart(&mut self) -> Result<(), RobotRadioError> {
         // reset the radio so we can listen for the startup event
         self.reset_pin.set_high();
-        Timer::after(Duration::from_micros(100)).await;
+        Timer::after(Duration::from_millis(1)).await;
         self.reset_pin.set_low();
 
         // wait until startup event is received
@@ -161,9 +161,9 @@ impl<
                 if self.radio.wait_edm_startup().await.is_err() {
                     defmt::debug!("error waiting for EDM startup after uart baudrate increase");
                     return Err(RobotRadioError::ConnectUartNoEdmStartup);
-                } else {
-                    defmt::info!("got EDM startup command");
-                }
+                } 
+            } else {
+                defmt::trace!("got EDM startup command");
             }
         } else {
             defmt::debug!("error entering EDM mode after uart baudrate increase");
@@ -180,9 +180,9 @@ impl<
         let uid = uid::uid();
         let uid_u16 = (uid[1] as u16) << 8 | uid[0] as u16;
 
-        // let mut s = String::<23>::new();
+        // let mut s = String::<24>::new();
         // core::write!(&mut s, "A-Team Robot #{:02X} ({:04X})", robot_number, uid_u16).unwrap();
-        let mut s = String::<15>::new();
+        let mut s = String::<16>::new();
         core::write!(&mut s, "A-Team Robot {:02X}", robot_number).unwrap();
         if self.radio.set_host_name(s.as_str()).await.is_err() {
             defmt::trace!("could not set radio host name");
@@ -210,12 +210,16 @@ impl<
     }
 
     pub async fn open_multicast(&mut self) -> Result<(), RobotRadioError> {
+        defmt::warn!("trigger scope");
+        Timer::after_millis(5000).await;
+
         let peer = self.radio.connect_peer(formatcp!(
                 "udp://{MULTICAST_IP}:{MULTICAST_PORT}/?flags=1&local_port={LOCAL_PORT}"
             ))
             .await;
 
         if peer.is_err() {
+            defmt::debug!("failed to connect peer");
             return Err(RobotRadioError::OpenMulticastError);
         }
 

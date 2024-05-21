@@ -16,7 +16,7 @@ use embassy_executor::{
 use embassy_futures::select::{select, Either};
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex,
-    mutex::Mutex,
+    mutex::{Mutex, MutexGuard},
     pubsub::{PubSubChannel, Publisher, Subscriber, WaitResult},
 };
 
@@ -166,10 +166,17 @@ impl<
             // that isn't allowed
             let mut pause_task_for_config_update = false;
 
+            // look like this might be taking too long to acquire between read_to_idle calls
+            // need to acquire this upfront and be smarter about releasing and reacq it
+            let mut rw_tasks_config_lock: Option<MutexGuard<'static, CriticalSectionRawMutex, bool>> = Some(self.uart_mutex.lock().await);
+
             loop {                
                 // block if/until we receive a signal telling to unpause the task because a config update is not active
                 while pause_task_for_config_update {
                     defmt::trace!("UartReadQueue - pausing rx task for config update");
+
+                    // release the uart hw mutex lock by dropping the MutexGuard
+                    drop(rw_tasks_config_lock.take().unwrap());
 
                     match uart_config_signal_subscriber.next_message().await { 
                         WaitResult::Lagged(amnt) => {
@@ -179,6 +186,9 @@ impl<
                             if task_command == UartTaskCommand::UnpauseSuccess || task_command == UartTaskCommand::UnpauseFailure {
                                 defmt::trace!("UartReadQueue - resuming rx thread paused for config update.");
                                 pause_task_for_config_update = false;
+
+                                // we are told to resume, reacquire the lock
+                                rw_tasks_config_lock = Some(self.uart_mutex.lock().await);
                             }
                         }
                     }
@@ -186,48 +196,40 @@ impl<
 
                 // get enqueue ref to pass to the DMA layer
                 let mut buf = queue_rx.enqueue().await.unwrap();
-
-                {
-                    let _rw_tasks_config_lock = self.uart_mutex.lock().await;
-
-                    // NOTE: this really shouldn't be a timeout, it should be a signal from tx side that a new config
-                    // is desired. This works for now but the timeout is hacky.
-                    match select(rx.read_until_idle(buf.data()), uart_config_signal_subscriber.next_message()).await {
-                        Either::First(len) => {
-                            if let Ok(len) = len {
-                                if len == 0 {
-                                    defmt::debug!("uart zero");
-                                    buf.cancel();
-                                } else {
-                                    *buf.len() = len;
-                                }
-                            } else {
-                                // Framing and Parity Error occur here
-                                defmt::warn!("{}", len);
+                match select(rx.read_until_idle(buf.data()), uart_config_signal_subscriber.next_message()).await {
+                    Either::First(len) => {
+                        if let Ok(len) = len {
+                            if len == 0 {
+                                defmt::debug!("uart zero");
                                 buf.cancel();
+                            } else {
+                                *buf.len() = len;
                             }
-                        },
-                        Either::Second(config_signal_result) => {
-                            defmt::trace!("UartReadQueue - read to idle cancelled to update config.");
-                            // clear the buffer record keeping, the transaction may have been interrupted
+                        } else {
+                            // Framing and Parity Error occur here
+                            defmt::warn!("{}", len);
                             buf.cancel();
+                        }
+                    },
+                    Either::Second(config_signal_result) => {
+                        defmt::trace!("UartReadQueue - read to idle cancelled to update config.");
+                        // clear the buffer record keeping, the transaction may have been interrupted
+                        buf.cancel();
 
-                            match config_signal_result {
-                                WaitResult::Lagged(amnt) => {
-                                    defmt::trace!("UartReadQueue - lagged {} processing config update signal while blocked on read_to_idle", amnt);
-                                }
-                                WaitResult::Message(task_command) => {
-                                    if task_command == UartTaskCommand::Pause {
-                                        pause_task_for_config_update = true;
-                                    } else {
-                                        defmt::warn!("UartReadQueue - config update standdown cancelled read to idle. Should this event sequence occur?");
-                                    }
+                        match config_signal_result {
+                            WaitResult::Lagged(amnt) => {
+                                defmt::trace!("UartReadQueue - lagged {} processing config update signal while blocked on read_to_idle", amnt);
+                            }
+                            WaitResult::Message(task_command) => {
+                                if task_command == UartTaskCommand::Pause {
+                                    pause_task_for_config_update = true;
+                                } else {
+                                    defmt::warn!("UartReadQueue - config update standdown cancelled read to idle. Should this event sequence occur?");
                                 }
                             }
-
                         }
                     }
-                } // frees the inter-task uart config lock
+                }
             }
         }
     }

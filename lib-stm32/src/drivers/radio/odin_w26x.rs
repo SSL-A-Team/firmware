@@ -82,10 +82,13 @@ impl<
         self.writer.update_uart_config(config).await
     }
 
-    pub async fn wait_startup(&self) -> Result<(), ()> {
+    pub async fn wait_startup(&mut self) -> Result<(), ()> {
+        // if were waiting for startup, we fellback to command mode
+        self.mode = RadioMode::CommandMode;
+
         self.reader
             .dequeue(|buf| {
-                defmt::info!("dequeueing");
+                defmt::info!("dequeueing {}", buf);
                 if let EdmPacket::ATResponse(ATResponse::Other("+STARTUP")) = self.to_packet(buf)? {
                     Ok(())
                 } else {
@@ -156,7 +159,12 @@ impl<
         // write a new function to handle this
         // self.read_ok().await?;
         let res = self.read_ok_at_edm_transition().await;
-        self.mode = RadioMode::ExtendedDataMode;
+        if res.is_err() {
+            defmt::trace!("failed to enter EDM mode!");
+        } else {
+            self.mode = RadioMode::ExtendedDataMode;
+        }
+
         return res;
     }
 
@@ -165,7 +173,10 @@ impl<
         write!(str, "AT+UNHN=\"{host_name}\"").or(Err(()))?;
         defmt::trace!("host configuration string: {}", str.as_str());
         self.send_command(str.as_str()).await?;
+        defmt::trace!("sent configuration command");
         self.read_ok().await?;
+        defmt::trace!("read OK");
+
         Ok(())
     }
 
@@ -275,7 +286,13 @@ impl<
         while peer_id.is_none() || !peer_connected_ip || channel_ret.is_none() {
             self.reader
                 .dequeue(|buf| {
-                    match self.to_packet(buf)? {
+                    defmt::info!("buf contents: {} ", {buf});
+                    let pkt = self.to_packet(buf);
+                    if pkt.is_err() {
+                        defmt::error!("got undecodable pkt {}", buf);
+                    }
+
+                    match pkt? {
                         EdmPacket::ATEvent(ATEvent::PeerConnectedIP {
                             peer_handle: _,
                             is_ipv6: _,
@@ -285,15 +302,21 @@ impl<
                             remote_address: _,
                             remote_port: _,
                         }) => {
+                            defmt::info!("AT event");
+
                             peer_connected_ip = true;
                         }
                         EdmPacket::ConnectEvent {
                             channel,
                             event_type: _,
                         } => {
+                            defmt::info!("connect event");
+
                             channel_ret = Some(channel);
                         }
                         EdmPacket::ATResponse(ATResponse::Ok(resp)) => {
+                            defmt::info!("AT resp connect event");
+
                             if let Some(i) = resp.find("+UDCP:") {
                                 peer_id = Some(resp[i + 6..].parse::<u8>().or(Err(()))?);
                             } else {
@@ -430,6 +453,7 @@ impl<
     async fn read_ok(&self) -> Result<(), ()> {
         self.reader
             .dequeue(|buf| {
+                defmt::trace!("read ok got {}", buf);
                 if let EdmPacket::ATResponse(ATResponse::Ok("")) = self.to_packet(buf)? {
                     Ok(())
                 } else {
@@ -442,7 +466,7 @@ impl<
     async fn read_ok_at_edm_transition(&self) -> Result<bool, ()> {
         let transition_buf: [u8; 12] = [13, 10, 79, 75, 13, 10, 170, 0, 2, 0, 113, 85];
         let res = self.reader.dequeue(|buf| {
-            if buf.iter().zip(transition_buf.iter()).all(|(a,b)| a == b) {
+            if buf.len() == transition_buf.len() && buf.iter().zip(transition_buf.iter()).all(|(a,b)| a == b) {
                 Ok(true)
             } else {
                 if let EdmPacket::ATResponse(ATResponse::Ok("")) = self.to_packet(buf)? {

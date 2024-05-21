@@ -53,7 +53,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     // uart queue executor should be highest priority
     // NOTE: maybe this should be all DMA tasks? No computation tasks here
-    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CEC, embassy_stm32::interrupt::Priority::P6);
+    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CEC, embassy_stm32::interrupt::Priority::P5);
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(Interrupt::CEC);
 
     //////////////////////////////////////
@@ -72,7 +72,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  start tasks  //
     ///////////////////
 
-    let wifi_network = wifi_credentials[0];
+    let wifi_network = wifi_credentials[1];
+    defmt::info!("connecting with {}, {}", wifi_network.get_ssid(), wifi_network.get_password());
     start_radio_task(
         uart_queue_spawner, main_spawner,
         robot_state,
