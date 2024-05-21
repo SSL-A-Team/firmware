@@ -142,8 +142,8 @@ async fn radio_task_entry(
     }
 }
 
-pub async fn start_radio_task(radio_task_spawner: SendSpawner,
-        queue_spawner: Spawner,
+pub async fn start_radio_task(radio_task_spawner: Spawner,
+        queue_spawner: SendSpawner,
         robot_state: &'static RobotState,
         command_publisher: CommandsPublisher,
         telemetry_subscriber: TelemetrySubcriber,
@@ -165,6 +165,7 @@ pub async fn start_radio_task(radio_task_spawner: SendSpawner,
     radio_uart_config.parity = Parity::ParityNone;
 
     let radio_uart = Uart::new(radio_uart, radio_uart_rx_pin, radio_uart_tx_pin, SystemIrqs, radio_uart_tx_dma, radio_uart_rx_dma, radio_uart_config).unwrap();
+    // let radio_uart = Uart::new_with_rtscts(radio_uart, radio_uart_rx_pin, radio_uart_tx_pin, SystemIrqs, _radio_uart_rts_pin, _radio_uart_cts_pin, radio_uart_tx_dma, radio_uart_rx_dma, radio_uart_config).unwrap();
     let (radio_uart_tx, radio_uart_rx) = Uart::split(radio_uart);
 
     queue_pair_register_and_spawn!(queue_spawner, RADIO, radio_uart_rx, radio_uart_tx);

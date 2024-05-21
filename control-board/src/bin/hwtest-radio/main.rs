@@ -75,7 +75,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let wifi_network = wifi_credentials[1];
     defmt::info!("connecting with {}, {}", wifi_network.get_ssid(), wifi_network.get_password());
     start_radio_task(
-        uart_queue_spawner, main_spawner,
+        main_spawner, uart_queue_spawner,
         robot_state,
         radio_command_publisher, radio_telemetry_subscriber,
         wifi_network,

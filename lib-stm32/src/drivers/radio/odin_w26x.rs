@@ -286,10 +286,10 @@ impl<
         while peer_id.is_none() || !peer_connected_ip || channel_ret.is_none() {
             self.reader
                 .dequeue(|buf| {
-                    defmt::info!("buf contents: {} ", {buf});
+                    // defmt::info!("buf contents: {} ", {buf});
                     let pkt = self.to_packet(buf);
                     if pkt.is_err() {
-                        defmt::error!("got undecodable pkt {}", buf);
+                        // defmt::error!("got undecodable pkt {}", buf);
                     }
 
                     match pkt? {
@@ -302,7 +302,7 @@ impl<
                             remote_address: _,
                             remote_port: _,
                         }) => {
-                            defmt::info!("AT event");
+                            // defmt::info!("AT event");
 
                             peer_connected_ip = true;
                         }
@@ -310,12 +310,12 @@ impl<
                             channel,
                             event_type: _,
                         } => {
-                            defmt::info!("connect event");
+                            // defmt::info!("connect event");
 
                             channel_ret = Some(channel);
                         }
                         EdmPacket::ATResponse(ATResponse::Ok(resp)) => {
-                            defmt::info!("AT resp connect event");
+                            // defmt::info!("AT resp connect event");
 
                             if let Some(i) = resp.find("+UDCP:") {
                                 peer_id = Some(resp[i + 6..].parse::<u8>().or(Err(()))?);
