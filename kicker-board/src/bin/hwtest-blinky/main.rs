@@ -178,7 +178,7 @@ async fn main(_spawner: Spawner) -> ! {
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        unwrap!(spawner.spawn(shutdown_int(p.PD5, p.EXTI5, p.PD6)));
+        // unwrap!(spawner.spawn(shutdown_int(p.PD5, p.EXTI5, p.PD6)));
         unwrap!(spawner.spawn(blink(p.PE4, p.PE1, p.PE0, p.PE2, p.PE3, p.PD4, adc, p.PC0, p.PC1, p.PC3, p.PC2)));
         unwrap!(spawner.spawn(dotstar_lerp_task(p.SPI1, p.PA5, p.PA7, p.DMA2_CH3)));
     });

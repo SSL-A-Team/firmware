@@ -9,9 +9,9 @@ use embassy_stm32::{
     usart::{self, DataBits, Parity, StopBits, Uart}
 };
 use embassy_sync::pubsub::WaitResult;
-use embassy_time::Timer;
+use embassy_time::{Duration, Timer};
 
-use crate::{drivers::radio_robot::RobotRadio, pins::*, robot_state::RobotState, SystemIrqs};
+use crate::{drivers::radio_robot::{RobotRadio, TeamColor}, pins::*, robot_state::RobotState, SystemIrqs};
 
 pub const RADIO_MAX_TX_PACKET_SIZE: usize = 256;
 pub const RADIO_TX_BUF_DEPTH: usize = 4;
@@ -23,7 +23,6 @@ make_uart_queue_pair!(RADIO,
     RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH,
     RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH,
     #[link_section = ".axisram.buffers"]);
-
 
 #[embassy_executor::task]
 async fn radio_task_entry(
@@ -91,6 +90,37 @@ async fn radio_task_entry(
             continue 'connect_loop;
         }
         defmt::info!("multicast open");
+
+        'connect_hello:
+        loop {
+            defmt::info!("sending hello");
+
+            let robot_id = robot_state.get_hw_robot_id();
+            let team_color = if robot_state.hw_robot_team_is_blue() {
+                TeamColor::Blue
+            } else {
+                TeamColor::Yellow
+            };
+            radio.send_hello(robot_id, team_color).await.unwrap();
+            let hello = radio.wait_hello(Duration::from_millis(1000)).await;
+
+            match hello {
+                Ok(hello) => {
+                    defmt::info!(
+                        "recieved hello resp to: {}.{}.{}.{}:{}",
+                        hello.ipv4[0], hello.ipv4[1], hello.ipv4[2], hello.ipv4[3], hello.port
+                    );
+                    radio.close_peer().await.unwrap();
+                    defmt::info!("multicast peer closed");
+
+                    radio.open_unicast(hello.ipv4, hello.port).await.unwrap();
+                    defmt::info!("unicast open");
+
+                    break 'connect_hello;
+                }
+                Err(_) => {}
+            }
+        }
 
         // TODO add inbound timeout somewhere, maybe not here.
         'process_packets: 

@@ -69,6 +69,7 @@ debug-assertions = false
 
 [profile.release]
 debug = true
+opt-level = 3
 lto = 'fat'
 
 [lib]

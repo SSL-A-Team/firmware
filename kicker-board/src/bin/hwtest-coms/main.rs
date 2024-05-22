@@ -4,8 +4,6 @@
 #![feature(const_mut_refs)]
 #![feature(sync_unsafe_cell)]
 
-use core::cell::SyncUnsafeCell;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use static_cell::StaticCell;
 
 use defmt::*;
@@ -13,7 +11,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 use cortex_m_rt::entry;
 
-use embassy_executor::{Executor, InterruptExecutor};
+use embassy_executor::{Executor, InterruptExecutor, Spawner};
 use embassy_stm32::{
     adc::{Adc, Resolution, SampleTime},
     gpio::{Level, Output, Speed},
@@ -25,7 +23,7 @@ use embassy_stm32::{
 };
 use embassy_stm32::{bind_interrupts, peripherals, usart};
 
-use embassy_time::{Duration, Instant, Ticker};
+use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use ateam_kicker_board::{
     adc_200v_to_rail_voltage, adc_raw_to_v,
@@ -35,7 +33,7 @@ use ateam_kicker_board::{
     pins::*
 };
 
-use ateam_lib_stm32::queue::Buffer;
+use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
 use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
 
 use ateam_common_packets::bindings_kicker::{KickerControl, KickerTelemetry, KickRequest};
@@ -45,24 +43,12 @@ const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 3;
 
-// control communications tx buffer
-const COMS_BUFFER_MUTEX: Mutex<CriticalSectionRawMutex, bool> = Mutex::new(false);
-const COMS_BUFFER_VAL_TX: SyncUnsafeCell<Buffer<MAX_TX_PACKET_SIZE>> = 
-    SyncUnsafeCell::new(Buffer::EMPTY);
-#[link_section = ".bss"]
-static COMS_BUFFERS_TX: [SyncUnsafeCell<Buffer<MAX_TX_PACKET_SIZE>>; TX_BUF_DEPTH] = 
-    [COMS_BUFFER_VAL_TX; TX_BUF_DEPTH];
-static COMS_QUEUE_TX: UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = 
-    UartWriteQueue::new(&COMS_BUFFERS_TX, COMS_BUFFER_MUTEX);
+make_uart_queue_pair!(COMS,
+    ComsUartModule, ComsUartRxDma, ComsUartTxDma,
+    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
+    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
+    #[link_section = ".axisram.buffers"]);
 
-// control communications rx buffer
-const COMS_BUFFER_VAL_RX: SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>> = 
-    SyncUnsafeCell::new(Buffer::EMPTY);
-#[link_section = ".bss"]
-static COMS_BUFFERS_RX: [SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>>; RX_BUF_DEPTH] = 
-    [COMS_BUFFER_VAL_RX; RX_BUF_DEPTH];
-static COMS_QUEUE_RX: UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> = 
-    UartReadQueue::new(&COMS_BUFFERS_RX, COMS_BUFFER_MUTEX);
 
 fn get_empty_control_packet() -> KickerControl {
     KickerControl {
@@ -230,8 +216,8 @@ bind_interrupts!(struct Irqs {
     USART1 => usart::InterruptHandler<peripherals::USART1>;
 });
 
-#[entry]
-fn main() -> ! {
+#[embassy_executor::main]
+async fn main(spawner: Spawner) -> ! {
     let mut stm32_config: embassy_stm32::Config = Default::default();
     stm32_config.rcc.hsi = true;
     stm32_config.rcc.pll_src = PllSource::HSI; // internal 16Mhz source
@@ -261,9 +247,7 @@ fn main() -> ! {
     // High-priority executor: I2C1, priority level 6
     // TODO CHECK THIS IS THE HIGHEST PRIORITY
     embassy_stm32::interrupt::TIM2.set_priority(embassy_stm32::interrupt::Priority::P6);
-    let spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
-
-    unwrap!(spawner.spawn(high_pri_kick_task(&COMS_QUEUE_RX, &COMS_QUEUE_TX, adc, p.PE4, p.PE5, p.PE6, p.PC0, p.PE1, p.PE2, p.PE3)));
+    let hp_spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
 
     //////////////////////////////////
     //  COMMUNICATIONS TASKS SETUP  //
@@ -285,12 +269,12 @@ fn main() -> ! {
     ).unwrap();
 
     let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
+    queue_pair_register_and_spawn!(spawner, COMS, coms_uart_rx, coms_uart_tx);
 
-    // low priority executor handles coms and user IO
-    // Low priority executor: runs in thread mode, using WFE/SEV
-    let lp_executor = EXECUTOR_LOW.init(Executor::new());
-    lp_executor.run(|spawner| {
-        unwrap!(spawner.spawn(COMS_QUEUE_TX.spawn_task(coms_uart_tx)));
-        unwrap!(spawner.spawn(COMS_QUEUE_RX.spawn_task(coms_uart_rx)));
-    });
+    hp_spawner.spawn(high_pri_kick_task(&COMS_RX_UART_QUEUE, &COMS_TX_UART_QUEUE, adc, p.PE4, p.PE5, p.PE6, p.PC0, p.PE1, p.PE2, p.PE3)).unwrap();
+
+
+    loop {
+        Timer::after_millis(1000).await;
+    }
 }

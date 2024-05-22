@@ -164,9 +164,9 @@ impl<
         self.stm32_uart_interface.leave_reset().await;
     }
 
-    pub async fn load_firmware_image(&mut self, _fw_image_bytes: &[u8]) -> Result<(), ()> {
-        defmt::warn!("currently skipping kicker firmware flash");
-        // self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await?;
+    pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
+        // defmt::warn!("currently skipping kicker firmware flash");
+        self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await?;
 
         self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
 

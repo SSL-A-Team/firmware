@@ -2,117 +2,93 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 #![feature(const_mut_refs)]
+#![feature(sync_unsafe_cell)]
 
-use apa102_spi::Apa102;
+
 use ateam_control_board::{
-    drivers::kicker::Kicker,
-    include_kicker_bin,
-    queue::Buffer,
-    stm32_interface::{get_bootloader_uart_config, Stm32Interface},
-    uart_queue::{UartReadQueue, UartWriteQueue},
+    drivers::kicker::Kicker, get_system_config, include_kicker_bin, pins::{KickerRxDma, KickerTxDma, KickerUart}, stm32_interface::{self, get_bootloader_uart_config, Stm32Interface},
 };
+use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
 use defmt::info;
+use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
-    dma::NoDma,
-    executor::InterruptExecutor,
-    gpio::{Input, Level, Output, Speed, Pull},
-    interrupt::{self, InterruptExt},
-    peripherals::{DMA2_CH4, DMA2_CH5, USART6},
-    spi,
-    time::{hz, mhz},
-    usart::Uart,
+    gpio::{Input, Level, Output, Pull, Speed}, interrupt, pac::Interrupt, usart::Uart
 };
 use embassy_time::{Duration, Ticker, Timer};
-use futures_util::StreamExt;
 use panic_probe as _;
-use smart_leds::{SmartLedsWrite, RGB8};
-use static_cell::StaticCell;
 
-include_kicker_bin! {KICKER_FW_IMG, "hwtest-coms.bin"}
+include_kicker_bin! {KICKER_FW_IMG, "hwtest-blinky.bin"}
 
 const MAX_TX_PACKET_SIZE: usize = 16;
 const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 20;
 
-#[link_section = ".axisram.buffers"]
-static mut KICKER_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
-    [Buffer::EMPTY; TX_BUF_DEPTH];
-static KICKER_QUEUE_TX: UartWriteQueue<USART6, DMA2_CH4, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> =
-    UartWriteQueue::new(unsafe { &mut KICKER_BUFFERS_TX });
+make_uart_queue_pair!(KICKER,
+    KickerUart, KickerRxDma, KickerTxDma,
+    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
+    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
+    #[link_section = ".axisram.buffers"]);
 
-#[link_section = ".axisram.buffers"]
-static mut KICKER_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
-    [Buffer::EMPTY; RX_BUF_DEPTH];
-static KICKER_QUEUE_RX: UartReadQueue<USART6, DMA2_CH5, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> =
-    UartReadQueue::new(unsafe { &mut KICKER_BUFFERS_RX });
 
-static EXECUTOR_UART_QUEUE: StaticCell<InterruptExecutor<interrupt::CEC>> = StaticCell::new();
+static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
+
+#[interrupt]
+unsafe fn CEC() {
+    UART_QUEUE_EXECUTOR.on_interrupt();
+}
 
 #[embassy_executor::main]
 async fn main(_spawner: embassy_executor::Spawner) {
-    let mut stm32_config: embassy_stm32::Config = Default::default();
-    stm32_config.rcc.hse = Some(mhz(8));
-    stm32_config.rcc.sys_ck = Some(mhz(400));
-    stm32_config.rcc.hclk = Some(mhz(200));
-    stm32_config.rcc.pclk1 = Some(mhz(100));
-
+    let stm32_config = get_system_config();
     let p = embassy_stm32::init(stm32_config);
 
-    // Delay so dotstar can turn on
-    Timer::after(Duration::from_millis(50)).await;
+    defmt::info!("Kicker system init");
 
-    let irq = interrupt::take!(CEC);
-    irq.set_priority(interrupt::Priority::P6);
-    let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
-    let spawner = executor.start();
+    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CEC, embassy_stm32::interrupt::Priority::P5);
+    let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(Interrupt::CEC);
 
-    let dotstar_spi_config = spi::Config::default();
-    dotstar_spi_config.frequency = mhz(1);
+    // let kicker_det = Input::new(p.PG8, Pull::Up);
+    // if kicker_det.is_high() {
+    //     defmt::warn!("kicker appears unplugged!");
+    // }
 
-    let dotstar_spi = spi::Spi::new_txonly(
-        p.SPI3,
-        p.PB3,
-        p.PB5,
-        NoDma,
-        dotstar_spi_config,
-    );
-    let mut dotstar = Apa102::new(dotstar_spi);
-    let _ = dotstar.write([RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
+    let mut kicker_pwr_pin = Output::new(p.PG8, Level::Low, Speed::Medium);
 
-    info!("booted");
+    // defmt::info!("attempting to power on kicker.");
+    // Timer::after_millis(1000).await;
+    // kicker_pwr_pin.set_high();
+    // Timer::after_millis(200).await;
+    // kicker_pwr_pin.set_low();
+    // defmt::info!("power on attempt done");
 
-    let kicker_det = Input::new(p.PG8, Pull::Up);
-    if kicker_det.is_high() {
-        defmt::warn!("kicker appears unplugged!");
-    }
+    // loop {
+    //     Timer::after_millis(1000).await;
+    // }
 
-    let kicker_int = interrupt::take!(USART6);
     let kicker_usart = Uart::new(
         p.USART6,
         p.PC7,
         p.PC6,
-        kicker_int,
+        ateam_control_board::SystemIrqs,
         p.DMA2_CH4,
         p.DMA2_CH5,
-        get_bootloader_uart_config(),
-    );
-    let (kicker_tx, kicker_rx) = kicker_usart.split();
-    let kicker_boot0_pin = Output::new(p.PA8, Level::Low, Speed::Medium);
-    let kicker_reset_pin = Output::new(p.PA9, Level::Low, Speed::Medium);
+        stm32_interface::get_bootloader_uart_config(),
+    ).unwrap();
 
-    spawner
-        .spawn(KICKER_QUEUE_RX.spawn_task(kicker_rx))
-        .unwrap();
-    spawner
-        .spawn(KICKER_QUEUE_TX.spawn_task(kicker_tx))
-        .unwrap();
+    defmt::info!("init uart");
 
-    let kicker_stm32_interface = Stm32Interface::new_noninverted_reset(
-        &KICKER_QUEUE_RX,
-        &KICKER_QUEUE_TX,
-        Some(kicker_boot0_pin),
-        Some(kicker_reset_pin),
+    let (kicker_tx, kicker_rx) = Uart::split(kicker_usart);
+    queue_pair_register_and_spawn!(uart_queue_spawner, KICKER, kicker_rx, kicker_tx);
+
+    defmt::info!("start qs");
+
+    let kicker_stm32_interface = Stm32Interface::new_from_pins(
+        &KICKER_RX_UART_QUEUE,
+        &KICKER_TX_UART_QUEUE,
+        p.PA8,
+        p.PA9,
+        true
     );
 
     info!("flashing kicker...");
@@ -128,9 +104,20 @@ async fn main(_spawner: embassy_executor::Spawner) {
         info!("kicker flash complete");
     }
 
-    kicker.set_telemetry_enabled(true);
+    Timer::after_millis(3000).await;
 
-    let _ = dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 10, b: 0 }].iter().cloned());
+    // defmt::info!("attempting to power off kicker.");
+    // Timer::after_millis(1000).await;
+    // kicker_pwr_pin.set_high();
+    // Timer::after_millis(2000).await;
+    // kicker_pwr_pin.set_low();
+    // defmt::info!("power off attempt done");
+
+    loop {
+        Timer::after_millis(1000).await;
+    }
+
+    kicker.set_telemetry_enabled(true);
 
     let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
     loop {

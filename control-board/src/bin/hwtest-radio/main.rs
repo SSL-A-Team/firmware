@@ -72,7 +72,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  start tasks  //
     ///////////////////
 
-    let wifi_network = wifi_credentials[1];
+    let wifi_network = wifi_credentials[0];
     defmt::info!("connecting with {}, {}", wifi_network.get_ssid(), wifi_network.get_password());
     start_radio_task(
         main_spawner, uart_queue_spawner,
@@ -90,10 +90,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p.PG12, p.PG11, p.PG10, p.PG9,
         p.PF3, p.PF2, p.PF1, p.PF0,
         p.PD0, p.PD1, p.PD3, p.PD4, p.PD14);
-
-    loop {
-        Timer::after_millis(1000).await;
-    }
 
     loop {
         match select::select(control_command_subscriber.next_message(), Timer::after_millis(1000)).await {

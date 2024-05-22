@@ -286,7 +286,6 @@ impl<
         while peer_id.is_none() || !peer_connected_ip || channel_ret.is_none() {
             self.reader
                 .dequeue(|buf| {
-                    // defmt::info!("buf contents: {} ", {buf});
                     let pkt = self.to_packet(buf);
                     if pkt.is_err() {
                         // defmt::error!("got undecodable pkt {}", buf);
@@ -453,7 +452,6 @@ impl<
     async fn read_ok(&self) -> Result<(), ()> {
         self.reader
             .dequeue(|buf| {
-                defmt::trace!("read ok got {}", buf);
                 if let EdmPacket::ATResponse(ATResponse::Ok("")) = self.to_packet(buf)? {
                     Ok(())
                 } else {

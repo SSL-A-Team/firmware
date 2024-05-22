@@ -202,7 +202,7 @@ impl<
                 let read_to_idle_start_time = Instant::now();
                 match select(rx.read_until_idle(buf.data()), uart_config_signal_subscriber.next_message()).await {
                     Either::First(len) => {
-                        defmt::info!("elapsed time to process and restart read_to_idle was: {}", read_to_idle_start_time - time_ended_trx);
+                        // defmt::info!("elapsed time to process and restart read_to_idle was: {}", read_to_idle_start_time - time_ended_trx);
 
                         time_ended_trx = Instant::now();
 

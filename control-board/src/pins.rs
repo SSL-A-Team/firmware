@@ -74,6 +74,8 @@ pub type KickerUart = USART6;
 pub type KickerRxDma = DMA2_CH5;
 pub type KickerTxDma = DMA2_CH4;
 pub type KickerPowerOnPin = PG8;
+pub type KickerBootPin = PA8;
+pub type KickerResetPIn = PA9;
 
 
 //////////////

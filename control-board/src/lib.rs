@@ -35,7 +35,7 @@ pub mod drivers;
 pub mod motion;
 pub mod tasks;
 
-bind_interrupts!(struct SystemIrqs {
+bind_interrupts!(pub struct SystemIrqs {
     USART10 => usart::InterruptHandler<peripherals::USART10>;
     USART6 => usart::InterruptHandler<peripherals::USART6>;
     USART1 => usart::InterruptHandler<peripherals::USART1>;

@@ -320,17 +320,12 @@ impl<'b> ATResponse<'b> {
     const RESP_ERROR: &'static str = "ERROR";
 
     pub fn new<'a>(buf: &'a [u8]) -> Result<ATResponse<'a>, ()> {
-        defmt::trace!("new AT Response: {}", buf);
+        // TODO: error handling in this function is bad
         let s = core::str::from_utf8(buf).or(Err(()))?;
         
-        defmt::trace!("searching for CR_LF: {}", s);
         let i_echo = s.find(Self::CR_LF).ok_or(())?;
-        defmt::trace!("i_echo: {}", i_echo);
-        //let _echo = &s[..i_echo];
-        //defmt::trace!("_echo: {}", _echo)
 
         let s = &s[i_echo + Self::CR_LF.len()..];
-        defmt::trace!("s: {}", s);
         if !s.ends_with(Self::CR_LF) {
             return Err(());
         }

@@ -180,10 +180,10 @@ impl<
         let uid = uid::uid();
         let uid_u16 = (uid[1] as u16) << 8 | uid[0] as u16;
 
-        // let mut s = String::<24>::new();
-        // core::write!(&mut s, "A-Team Robot #{:02X} ({:04X})", robot_number, uid_u16).unwrap();
-        let mut s = String::<16>::new();
-        core::write!(&mut s, "A-Team Robot {:02X}", robot_number).unwrap();
+        let mut s = String::<25>::new();
+        core::write!(&mut s, "A-Team Robot #{:02X} ({:04X})", robot_number, uid_u16).unwrap();
+        // let mut s = String::<16>::new();
+        // core::write!(&mut s, "A-Team Robot {:02X}", robot_number).unwrap();
         if self.radio.set_host_name(s.as_str()).await.is_err() {
             defmt::trace!("could not set radio host name");
             return Err(RobotRadioError::ConnectWifiBadHostName);
@@ -210,9 +210,6 @@ impl<
     }
 
     pub async fn open_multicast(&mut self) -> Result<(), RobotRadioError> {
-        defmt::warn!("trigger scope");
-        Timer::after_millis(5000).await;
-
         let peer = self.radio.connect_peer(formatcp!(
                 "udp://{MULTICAST_IP}:{MULTICAST_PORT}/?flags=1&local_port={LOCAL_PORT}"
             ))
@@ -423,7 +420,7 @@ impl<
             }
 
             let mut data_copy = [0u8; size_of::<RadioPacket>()];
-            data_copy.clone_from_slice(&data[0..PACKET_SIZE]);
+            data_copy[0..PACKET_SIZE].clone_from_slice(&data[0..PACKET_SIZE]);
 
             let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
 
@@ -450,7 +447,7 @@ impl<
 
             if data.len() == CONTROL_PACKET_SIZE {
                 let mut data_copy = [0u8; size_of::<RadioPacket>()];
-                data_copy.clone_from_slice(&data[0..CONTROL_PACKET_SIZE]);
+                data_copy[0..CONTROL_PACKET_SIZE].clone_from_slice(&data[0..CONTROL_PACKET_SIZE]);
     
                 let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
     
@@ -461,7 +458,7 @@ impl<
                 Ok(unsafe { DataPacket::BasicControl(packet.data.control) })
             } else if data.len() == PARAMERTER_PACKET_SIZE {
                 let mut data_copy = [0u8; size_of::<RadioPacket>()];
-                data_copy.clone_from_slice(&data[0..PARAMERTER_PACKET_SIZE]);
+                data_copy[0..PARAMERTER_PACKET_SIZE].clone_from_slice(&data[0..PARAMERTER_PACKET_SIZE]);
     
                 let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
     

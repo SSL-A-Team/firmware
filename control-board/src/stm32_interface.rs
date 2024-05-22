@@ -142,6 +142,7 @@ impl<
     pub async fn reset_into_bootloader(&mut self) -> Result<(), ()> {
         // set the boot0 line high to enter the UART bootloader upon reset
         self.boot0_pin.set_high();
+        Timer::after_millis(1).await;
 
         // reset the device
         self.hard_reset().await;
