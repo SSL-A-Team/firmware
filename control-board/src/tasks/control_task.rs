@@ -3,7 +3,7 @@ use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::Uart;
 use embassy_time::Timer;
 
-use crate::{include_external_cpp_bin, pins::*, robot_state::{self, RobotState}, stm32_interface::{self, Stm32Interface}, stspin_motor::{DribblerMotor, WheelMotor}, SystemIrqs};
+use crate::{include_external_cpp_bin, pins::*, robot_state::{self, SharedRobotState}, stm32_interface::{self, Stm32Interface}, stspin_motor::{DribblerMotor, WheelMotor}, SystemIrqs};
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
@@ -46,7 +46,7 @@ make_uart_queue_pair!(DRIB,
 
 #[embassy_executor::task]
 async fn control_task_entry(
-    robot_state: &'static RobotState,
+    robot_state: &'static SharedRobotState,
     command_subscriber: CommandsSubscriber,
     telemetry_publisher: TelemetryPublisher,
     mut motor_fl: WheelMotor<'static, MotorFLUart, MotorFLDmaRx, MotorFLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
@@ -141,7 +141,7 @@ async fn control_task_entry(
 pub async fn start_control_task(
     uart_queue_spawner: SendSpawner,
     control_task_spawner: Spawner,
-    robot_state: &'static RobotState,
+    robot_state: &'static SharedRobotState,
     command_subscriber: CommandsSubscriber,
     telemetry_publisher: TelemetryPublisher,
     motor_fl_uart: MotorFLUart, motor_fl_rx_pin: MotorFLUartRxPin, motor_fl_tx_pin: MotorFLUartTxPin, motor_fl_rx_dma: MotorFLDmaRx, motor_fl_tx_dma: MotorFLDmaTx, motor_fl_boot0_pin: MotorFLBootPin, motor_fl_nrst_pin: MotorFLResetPin,

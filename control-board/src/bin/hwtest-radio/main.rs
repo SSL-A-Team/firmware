@@ -11,7 +11,7 @@ use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{get_system_config, pins::{CommandsPubSub, TelemetryPubSub}, robot_state::RobotState, tasks::{radio_task::start_radio_task, user_io_task::start_io_task}};
+use ateam_control_board::{get_system_config, pins::{CommandsPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::{radio_task::start_radio_task, user_io_task::start_io_task}};
 
 
 // load credentials from correct crate
@@ -25,7 +25,7 @@ use embassy_time::Timer;
 use panic_probe as _;
 use static_cell::ConstStaticCell;
 
-static ROBOT_STATE: ConstStaticCell<RobotState> = ConstStaticCell::new(RobotState::new());
+static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
 
 static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
 static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
@@ -72,13 +72,13 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  start tasks  //
     ///////////////////
 
-    let wifi_network = wifi_credentials[0];
-    defmt::info!("connecting with {}, {}", wifi_network.get_ssid(), wifi_network.get_password());
+    // let wifi_network = wifi_credentials[0];
+    // defmt::info!("connecting with {}, {}", wifi_network.get_ssid(), wifi_network.get_password());
     start_radio_task(
         main_spawner, uart_queue_spawner,
         robot_state,
         radio_command_publisher, radio_telemetry_subscriber,
-        wifi_network,
+        &wifi_credentials,
         p.USART10, p.PE2, p.PE3, p.PG13, p.PG14,
         p.DMA2_CH1, p.DMA2_CH0,
         p.PC13, p.PE4).await;

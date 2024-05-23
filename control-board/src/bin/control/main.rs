@@ -9,7 +9,7 @@ use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{get_system_config, pins::{AccelDataPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::RobotState, tasks::{control_task::start_control_task, imu_task::start_imu_task, radio_task::start_radio_task, user_io_task::start_io_task}};
+use ateam_control_board::{get_system_config, pins::{AccelDataPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::{control_task::start_control_task, imu_task::start_imu_task, radio_task::start_radio_task, user_io_task::start_io_task}};
 
 
 // load credentials from correct crate
@@ -23,7 +23,7 @@ use embassy_time::Timer;
 use panic_probe as _;
 use static_cell::ConstStaticCell;
 
-static ROBOT_STATE: ConstStaticCell<RobotState> = ConstStaticCell::new(RobotState::new());
+static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
 
 static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
 static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();

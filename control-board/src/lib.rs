@@ -12,6 +12,7 @@
 #![feature(ptr_metadata)]
 #![feature(const_fn_floating_point_arithmetic)]
 #![feature(sync_unsafe_cell)]
+#![feature(inherent_associated_types)]
 
 use embassy_stm32::{
     bind_interrupts, peripherals, rcc::{

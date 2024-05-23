@@ -11,7 +11,7 @@ use core::fmt::Write;
 use core::mem::size_of;
 use embassy_futures::select::{select, Either};
 use embassy_stm32::gpio::{Level, Pin, Speed, Output};
-use embassy_stm32::usart::{self, DataBits, StopBits};
+use embassy_stm32::usart::{self, DataBits, Parity, StopBits};
 use embassy_time::{Duration, Timer};
 use heapless::String;
 
@@ -112,7 +112,30 @@ impl<
         }
     }
 
+    pub fn get_startup_uart_config(&self) -> usart::Config {
+        let mut startup_radio_uart_config = usart::Config::default();
+        startup_radio_uart_config.baudrate = 115_200;
+        startup_radio_uart_config.data_bits = DataBits::DataBits8;
+        startup_radio_uart_config.stop_bits = StopBits::STOP1;
+        startup_radio_uart_config.parity = Parity::ParityNone;
+
+        startup_radio_uart_config
+    }
+
+    pub fn get_highspeed_uart_config(&self) -> usart::Config {
+        let mut highspeed_radio_uart_config = usart::Config::default();
+        highspeed_radio_uart_config.baudrate = 5_250_000;
+        highspeed_radio_uart_config.stop_bits = StopBits::STOP1;
+        highspeed_radio_uart_config.data_bits = DataBits::DataBits9;
+        highspeed_radio_uart_config.parity = usart::Parity::ParityEven;
+
+        highspeed_radio_uart_config
+    }
+
     pub async fn connect_uart(&mut self) -> Result<(), RobotRadioError> {
+        // were about to reset the radio, so we also need to reset the uart queue config to match the startup config
+        self.radio.update_host_uart_config(self.get_startup_uart_config());
+
         // reset the radio so we can listen for the startup event
         self.reset_pin.set_high();
         Timer::after(Duration::from_millis(1)).await;
