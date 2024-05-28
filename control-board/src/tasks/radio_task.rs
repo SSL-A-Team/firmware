@@ -60,8 +60,6 @@ pub struct RadioTask<
 
     connection_state: RadioConnectionState,
     wifi_credentials: &'static [WifiCredential],
-
-    // task: TaskStorage<RadioTaskFuture<UartPeripherial, UartRxDma, UartTxDma, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH>>,
 }
 
 impl<
@@ -139,6 +137,10 @@ impl<
                 // we ar at least connected to Wifi and the wifi network id changed
                 if self.connection_state > RadioConnectionState::ConnectNetwork 
                 && cur_robot_state.hw_wifi_network_index != last_robot_state.hw_wifi_network_index {
+                    if self.radio.disconnect_network().await.is_err() {
+                        defmt::error!("failed to cleanly disconnect - consider radio reboot");
+                    }
+
                     self.connection_state = RadioConnectionState::ConnectNetwork;
                     defmt::info!("dip state change triggering wifi network change");
                 }

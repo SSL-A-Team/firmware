@@ -47,7 +47,7 @@ pub enum RobotRadioError {
 
     OpenMulticastError,
 
-
+    DisconnectFailed,
 }
 
 unsafe impl<
@@ -201,15 +201,27 @@ impl<
     }
 
     pub async fn disconnect_network(&mut self) -> Result<(), RobotRadioError> {
-        let _ = self.radio.disconnect_wifi(1).await;
+        let mut had_error = false;
+        if let Some(peer) = self.peer.take() {
+            if self.radio.close_peer(peer.peer_id).await.is_err() {
+                defmt::warn!("failed to close peer on network dc");
+                had_error = true;
+            }
+        }
 
-        Ok(())
+        if self.radio.disconnect_wifi(1).await.is_err() {
+            defmt::warn!("failed to disconnect network.");
+            had_error = true;
+        }
+
+        if had_error {
+            Err(RobotRadioError::DisconnectFailed)
+        } else {
+            Ok(())
+        }
     }
 
     pub async fn connect_to_network(&mut self, wifi_credential: WifiCredential, robot_number: u8) -> Result<(), RobotRadioError> {
-        // TODO better error handling here
-        let _ = self.disconnect_network().await;
-
         // set radio hardware name enumeration
         let uid = uid::uid();
         let uid_u16 = (uid[1] as u16) << 8 | uid[0] as u16;
@@ -228,7 +240,7 @@ impl<
         let wifi_pass = WifiAuth::WPA {
             passphrase: wifi_credential.get_password(),
         };
-        if self.radio.config_wifi(1, wifi_ssid,wifi_pass).await.is_err() {
+        if self.radio.config_wifi(1, wifi_ssid, wifi_pass).await.is_err() {
             defmt::trace!("could not configure wifi profile");
             return Err(RobotRadioError::ConnectWifiBadConfig);
         }

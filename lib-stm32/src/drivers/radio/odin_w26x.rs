@@ -246,6 +246,7 @@ impl<
                     return res;
                 },
                 embassy_futures::select::Either::Second(_) => {
+                    defmt::warn!("disconnect timed out");
                     return Err(());
                 },
             }
