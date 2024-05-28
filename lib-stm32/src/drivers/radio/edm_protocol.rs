@@ -5,6 +5,7 @@ use super::at_protocol::*;
 // Data to/from radio is in big endian mode, ensure proper conversions are done
 
 #[repr(C)]
+#[derive(Debug)]
 struct EdmPacketRaw<P: ?Sized = [u8]> {
     payload_length: u16, // actually only 12bits, 4 bits reserved
     identifier: u16,

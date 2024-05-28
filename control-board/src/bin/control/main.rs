@@ -3,13 +3,13 @@
 
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
-    gpio::OutputType, interrupt, pac::Interrupt, time::{hz, khz}, timer::{simple_pwm::{PwmPin, SimplePwm}, Channel}
+    interrupt, pac::Interrupt, time::{hz, khz}, timer::{simple_pwm::{PwmPin, SimplePwm}, Channel}
 };
 use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{get_system_config, pins::{AccelDataPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::{control_task::start_control_task, imu_task::start_imu_task, radio_task::start_radio_task, user_io_task::start_io_task}};
+use ateam_control_board::{create_imu_task, create_io_task, create_radio_task, get_system_config, pins::{AccelDataPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::control_task::start_control_task};
 
 
 // load credentials from correct crate
@@ -91,31 +91,14 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //     Timer::after_millis(1000).await;
     // }
 
-    start_io_task(main_spawner,
+    create_radio_task!(main_spawner, uart_queue_spawner,
         robot_state,
-        p.PD6, p.PD5, p.EXTI6, p.EXTI5,
-        p.PG7, p.PG6, p.PG5, p.PG4, p.PG3, p.PG2, p.PD15,
-        p.PG12, p.PG11, p.PG10, p.PG9,
-        p.PF3, p.PF2, p.PF1, p.PF0,
-        p.PD0, p.PD1, p.PD3, p.PD4, p.PD14);
+        radio_command_publisher, radio_telemetry_subscriber,
+        wifi_credentials, p);
+            
+    create_io_task!(main_spawner, robot_state, p);
 
-    let wifi_network = wifi_credentials[0];
-    // start_radio_task(
-    //     uart_queue_spawner, main_spawner,
-    //     robot_state,
-    //     radio_command_publisher, radio_telemetry_subscriber,
-    //     wifi_network,
-    //     p.USART10, p.PE2, p.PE3, p.PG13, p.PG14,
-    //     p.DMA2_CH1, p.DMA2_CH0,
-    //     p.PC13, p.PE4);
-
-    // start_imu_task(&main_spawner,
-    //     imu_gyro_data_publisher, imu_accel_data_publisher,
-    //     p.SPI1, p.PA5, p.PA7, p.PA6,
-    //     p.DMA2_CH7, p.DMA2_CH6,
-    //     p.PA4, p.PC4, p.PC5,
-    //     p.PB1, p.PB2, p.EXTI1, p.EXTI2,
-    //     p.PF11);
+    create_imu_task!(main_spawner, imu_gyro_data_publisher, imu_accel_data_publisher, p);
 
     start_control_task(
         uart_queue_spawner, main_spawner, 

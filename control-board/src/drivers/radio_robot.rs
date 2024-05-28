@@ -203,15 +203,21 @@ impl<
     pub async fn disconnect_network(&mut self) -> Result<(), RobotRadioError> {
         let mut had_error = false;
         if let Some(peer) = self.peer.take() {
+            defmt::debug!("closing peer..");
             if self.radio.close_peer(peer.peer_id).await.is_err() {
                 defmt::warn!("failed to close peer on network dc");
                 had_error = true;
+            } else {
+                defmt::debug!("closed peer.")
             }
         }
 
+        defmt::debug!("closing wifi.");
         if self.radio.disconnect_wifi(1).await.is_err() {
             defmt::warn!("failed to disconnect network.");
             had_error = true;
+        } else {
+            defmt::debug!("disconnected wifi.")
         }
 
         if had_error {
@@ -248,6 +254,12 @@ impl<
         // connect to config slot 1
         if self.radio.connect_wifi(1).await.is_err() {
             defmt::trace!("could not connect to wifi");
+
+            // can never configure a profile that "active" even when unconnected
+            // we're not really in a known state with out a lot more effort
+            // so ignore the result
+            let _ = self.disconnect_network().await;
+
             return Err(RobotRadioError::ConnectWifiConnectionFailed);
         }
 

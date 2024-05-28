@@ -6,7 +6,7 @@ use heapless::String;
 
 use crate::uart::queue::{UartReadQueue, UartWriteQueue};
 
-use super::at_protocol::{ATEvent, ATResponse};
+use super::at_protocol::{ATEvent, ATResponse, WifiLinkDisconnectedReason};
 use super::edm_protocol::EdmPacket;
 
 #[allow(dead_code)]
@@ -233,17 +233,34 @@ impl<
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
 
-        match select(self.reader.dequeue(|buf| {
-                    let packet = self.to_packet(buf)?;
-                    if let EdmPacket::ATEvent(ATEvent::NetworkDown { interface_id: 0 }) = packet {
-                        return Ok(());
-                    } else {
-                        return Err(());
-                    }
-                }),
-            Timer::after_millis(250)).await {
-                embassy_futures::select::Either::First(res) => {
-                    return res;
+        match select(
+            async move {
+                let mut run = true;
+                while run {
+                    let _ = self.reader.dequeue(|buf| {
+                        // defmt::warn!("buf {}", buf);
+                        let packet = self.to_packet(buf);
+                        if packet.is_err() {
+                            defmt::warn!("parsed invalid packet");
+                        } else {
+                            let packet = packet.unwrap();
+                            if let EdmPacket::ATEvent(ATEvent::NetworkDown { interface_id: 0 }) = packet {
+                                defmt::debug!("got network down event.");
+                                run = false;
+                            } else if let EdmPacket::ATEvent(ATEvent::WifiLinkDisconnected { conn_id:_, reason: WifiLinkDisconnectedReason::NetworkDisabled }) = packet {
+                                run = false;
+                            } else if let EdmPacket::ATResponse(ATResponse::Ok(_)) = packet {
+                                run = false;
+                            } else {
+                                defmt::warn!("got edm packet: {}", packet);
+                            }
+                        }
+                        }).await;
+                }
+            },
+            Timer::after_millis(2500)).await {
+                embassy_futures::select::Either::First(_) => {
+                    return Ok(());
                 },
                 embassy_futures::select::Either::Second(_) => {
                     defmt::warn!("disconnect timed out");
@@ -477,16 +494,80 @@ impl<
     }
 
     async fn read_ok(&self) -> Result<(), ()> {
-        self.reader
-            .dequeue(|buf| {
-                if let EdmPacket::ATResponse(ATResponse::Ok("")) = self.to_packet(buf)? {
-                    Ok(())
+        let mut res = Err(());
+        loop {
+            let brk = self.reader.dequeue(|buf| {
+                // defmt::warn!("buf: {}", buf);
+                let brk = if let Ok(packet) = self.to_packet(buf) {
+                    match packet {
+                        EdmPacket::ConnectEvent { channel, event_type } => false,
+                        EdmPacket::DisconnectEvent { channel } => false,
+                        EdmPacket::ATResponse(at_resp) => {
+                            match at_resp {
+                                ATResponse::Ok(_) => {
+                                    res = Ok(());
+                                    true
+                                },
+                                ATResponse::Error => return true,
+                                ATResponse::Other(_) => {
+                                    defmt::debug!("unhandled ATResponse in read_ok()");
+                                    false
+                                },
+                            }
+                        },
+                        EdmPacket::ATEvent(at_event) => {
+                            match at_event {
+                                ATEvent::PeerConnectedIP { peer_handle, is_ipv6, protocol, local_address, local_port, remote_address, remote_port } => false,
+                                ATEvent::PeerDisconnected { peer_handle } => false,
+                                ATEvent::WifiLinkConnected { conn_id, bssid, channel } => false,
+                                ATEvent::WifiLinkDisconnected { conn_id, reason } => false,
+                                ATEvent::WifiAccessPointUp { id } => false,
+                                ATEvent::WifiAccessPointDown { id } => false,
+                                ATEvent::WifiAccessPointStationConnected { id, mac_addr } => false,
+                                ATEvent::WifiAccessPointStationDisconnected { id } => false,
+                                ATEvent::NetworkUp { interface_id } => false,
+                                ATEvent::NetworkDown { interface_id } => false,
+                                ATEvent::NetworkError { interface_id, code } => false,
+                                _ => {
+                                    defmt::debug!("ignoring ATEvent in read_ok(). event: {}", at_event);
+                                    false
+                                }
+                            }
+                        },
+                        _ => {
+                            defmt::debug!("ignoring unhandled EdmPacket variant in read_ok(), variant: {}", packet);
+                            false
+                        }
+                    }
                 } else {
-                    Err(())
-                }
+                    defmt::debug!("read ok could not parse packet");
+                    false
+                };
+
+                return brk;
             })
-            .await
+            .await;
+
+            if brk {
+                break;
+            }
+            
+        }
+
+        return res;
     }
+
+    // async fn read_ok(&self) -> Result<(), ()> {
+    //     self.reader
+    //         .dequeue(|buf| {
+    //             if let EdmPacket::ATResponse(ATResponse::Ok("")) = self.to_packet(buf)? {
+    //                 Ok(())
+    //             } else {
+    //                 Err(())
+    //             }
+    //         })
+    //         .await
+    // }
 
     async fn read_ok_at_edm_transition(&self) -> Result<bool, ()> {
         let transition_buf: [u8; 12] = [13, 10, 79, 75, 13, 10, 170, 0, 2, 0, 113, 85];

@@ -8,7 +8,7 @@ use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{get_system_config, pins::{AccelDataPubSub, GyroDataPubSub}, tasks::imu_task::start_imu_task};
+use ateam_control_board::{create_imu_task, get_system_config, pins::{AccelDataPubSub, GyroDataPubSub}};
 
 use embassy_time::Timer;
 // provide embedded panic probe
@@ -50,13 +50,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  start tasks  //
     ///////////////////
 
-    start_imu_task(&main_spawner,
-        imu_gyro_data_publisher, imu_accel_data_publisher,
-        p.SPI1, p.PA5, p.PA7, p.PA6,
-        p.DMA2_CH7, p.DMA2_CH6,
-        p.PA4, p.PC4, p.PC5,
-        p.PB1, p.PB2, p.EXTI1, p.EXTI2,
-        p.PF11);
+    create_imu_task!(main_spawner, imu_gyro_data_publisher, imu_accel_data_publisher, p);
 
     loop {
         match select::select3(imu_gyro_data_subscriber.next_message(), imu_accel_data_subscriber.next_message(), Timer::after_millis(1000)).await {

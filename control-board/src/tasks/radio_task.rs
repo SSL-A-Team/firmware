@@ -1,8 +1,8 @@
 
 use ateam_common_packets::radio::TelemetryPacket;
-use ateam_lib_stm32::{drivers::radio::odin_w26x::Radio, make_uart_queue_pair, queue_pair_register_and_spawn, uart::{self, queue::{UartReadQueue, UartWriteQueue}}};
+use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn, uart::queue::{UartReadQueue, UartWriteQueue}};
 use credentials::WifiCredential;
-use embassy_executor::{raw::TaskStorage, SendSpawner, SpawnToken, Spawner};
+use embassy_executor::{SendSpawner, Spawner};
 use embassy_futures::select::{select, Either};
 use embassy_stm32::{
     gpio::{Input, Pin, Pull},
@@ -10,9 +10,24 @@ use embassy_stm32::{
 };
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Timer};
-use futures_util::Future;
 
-use crate::{drivers::radio_robot::{RobotRadio, TeamColor}, pins::*, robot_state::{RobotState, SharedRobotState}, SystemIrqs};
+use crate::{drivers::radio_robot::{RobotRadio, TeamColor}, pins::*, robot_state::SharedRobotState, SystemIrqs};
+
+#[macro_export]
+macro_rules! create_radio_task {
+    ($main_spawner:ident, $uart_queue_spawner:ident, $robot_state:ident,
+        $radio_command_publisher:ident, $radio_telemetry_subscriber:ident,
+        $wifi_credentials:ident, $p:ident) => {
+        ateam_control_board::tasks::radio_task::start_radio_task(
+            $main_spawner, $uart_queue_spawner,
+            $robot_state,
+            $radio_command_publisher, $radio_telemetry_subscriber,
+            &$wifi_credentials,
+            $p.USART10, $p.PE2, $p.PE3, $p.PG13, $p.PG14,
+            $p.DMA2_CH1, $p.DMA2_CH0,
+            $p.PC13, $p.PE4).await; 
+    };
+}
 
 pub const RADIO_MAX_TX_PACKET_SIZE: usize = 256;
 pub const RADIO_TX_BUF_DEPTH: usize = 4;
@@ -135,14 +150,18 @@ impl<
                 }
 
                 // we ar at least connected to Wifi and the wifi network id changed
-                if self.connection_state > RadioConnectionState::ConnectNetwork 
+                if self.connection_state >= RadioConnectionState::ConnectNetwork 
                 && cur_robot_state.hw_wifi_network_index != last_robot_state.hw_wifi_network_index {
+                    defmt::info!("dip state change triggering wifi network change");
+
                     if self.radio.disconnect_network().await.is_err() {
+                        // this is really only an error if we think we're connected
+                        // this separation is really poorly handled right now
+                        // TODO move all statefulness down into driver
                         defmt::error!("failed to cleanly disconnect - consider radio reboot");
                     }
 
                     self.connection_state = RadioConnectionState::ConnectNetwork;
-                    defmt::info!("dip state change triggering wifi network change");
                 }
             }
             last_robot_state = cur_robot_state;

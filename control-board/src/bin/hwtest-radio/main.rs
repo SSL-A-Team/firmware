@@ -11,7 +11,7 @@ use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{get_system_config, pins::{CommandsPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::{radio_task::start_radio_task, user_io_task::start_io_task}};
+use ateam_control_board::{create_io_task, create_radio_task, get_system_config, pins::{CommandsPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
 
 
 // load credentials from correct crate
@@ -72,24 +72,12 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  start tasks  //
     ///////////////////
 
-    // let wifi_network = wifi_credentials[0];
-    // defmt::info!("connecting with {}, {}", wifi_network.get_ssid(), wifi_network.get_password());
-    start_radio_task(
-        main_spawner, uart_queue_spawner,
-        robot_state,
-        radio_command_publisher, radio_telemetry_subscriber,
-        &wifi_credentials,
-        p.USART10, p.PE2, p.PE3, p.PG13, p.PG14,
-        p.DMA2_CH1, p.DMA2_CH0,
-        p.PC13, p.PE4).await;
+    create_radio_task!(main_spawner, uart_queue_spawner,
+            robot_state,
+            radio_command_publisher, radio_telemetry_subscriber,
+            wifi_credentials, p);
 
-    start_io_task(main_spawner,
-        robot_state,
-        p.PD6, p.PD5, p.EXTI6, p.EXTI5,
-        p.PG7, p.PG6, p.PG5, p.PG4, p.PG3, p.PG2, p.PD15,
-        p.PG12, p.PG11, p.PG10, p.PG9,
-        p.PF3, p.PF2, p.PF1, p.PF0,
-        p.PD0, p.PD1, p.PD3, p.PD4, p.PD14);
+    create_io_task!(main_spawner, robot_state, p);
 
     loop {
         match select::select(control_command_subscriber.next_message(), Timer::after_millis(1000)).await {

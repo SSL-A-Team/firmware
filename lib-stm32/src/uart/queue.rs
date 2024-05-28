@@ -19,7 +19,6 @@ use embassy_sync::{
     mutex::{Mutex, MutexGuard},
     pubsub::{PubSubChannel, Publisher, Subscriber, WaitResult},
 };
-use embassy_time::{Duration, Instant, Timer};
 
 use crate::queue::{
     self,
@@ -170,7 +169,6 @@ impl<
             // look like this might be taking too long to acquire between read_to_idle calls
             // need to acquire this upfront and be smarter about releasing and reacq it
             let mut rw_tasks_config_lock: Option<MutexGuard<'static, CriticalSectionRawMutex, bool>> = Some(self.uart_mutex.lock().await);
-            let mut time_ended_trx = Instant::now();
 
             loop {                
                 // block if/until we receive a signal telling to unpause the task because a config update is not active
@@ -199,13 +197,8 @@ impl<
 
                 // get enqueue ref to pass to the DMA layer
                 let mut buf = queue_rx.enqueue().await.unwrap();
-                let read_to_idle_start_time = Instant::now();
                 match select(rx.read_until_idle(buf.data()), uart_config_signal_subscriber.next_message()).await {
                     Either::First(len) => {
-                        // defmt::info!("elapsed time to process and restart read_to_idle was: {}", read_to_idle_start_time - time_ended_trx);
-
-                        time_ended_trx = Instant::now();
-
                         if let Ok(len) = len {
                             if len == 0 {
                                 defmt::debug!("uart zero");

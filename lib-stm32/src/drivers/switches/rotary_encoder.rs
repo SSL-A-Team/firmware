@@ -7,12 +7,15 @@ pub struct RotaryEncoder<'a, const PIN_CT: usize> {
 }
 
 impl<'a, const PIN_CT: usize> RotaryEncoder<'a, PIN_CT> {
-    pub const fn new_from_inputs(inputs: [Input<'a>; PIN_CT], inversion_map: Option<[bool; PIN_CT]>) -> RotaryEncoder<'a, PIN_CT> {
-        let inversion_map = if let Some(map) = inversion_map {
+    pub fn new_from_inputs(mut inputs: [Input<'a>; PIN_CT], inversion_map: Option<[bool; PIN_CT]>) -> RotaryEncoder<'a, PIN_CT> {
+        let mut inversion_map = if let Some(map) = inversion_map {
             map
         } else { 
             [false; PIN_CT]
         };
+
+        inputs.reverse();
+        inversion_map.reverse();
 
         RotaryEncoder {
             pins: inputs,

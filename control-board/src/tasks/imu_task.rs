@@ -14,6 +14,19 @@ use ateam_lib_stm32::drivers::imu::bmi323::{self, *};
 
 use crate::pins::*;
 
+#[macro_export]
+macro_rules! create_imu_task {
+    ($main_spawner:ident, $imu_gyro_data_publisher:ident, $imu_accel_data_publisher:ident, $p:ident) => {
+        ateam_control_board::tasks::imu_task::start_imu_task(&$main_spawner,
+            $imu_gyro_data_publisher, $imu_accel_data_publisher,
+            $p.SPI1, $p.PA5, $p.PA7, $p.PA6,
+            $p.DMA2_CH7, $p.DMA2_CH6,
+            $p.PA4, $p.PC4, $p.PC5,
+            $p.PB1, $p.PB2, $p.EXTI1, $p.EXTI2,
+            $p.PF11);
+    };
+}
+
 #[link_section = ".axisram.buffers"]
 static IMU_BUFFER_CELL: ConstStaticCell<[u8; bmi323::SPI_MIN_BUF_LEN]> = ConstStaticCell::new([0; bmi323::SPI_MIN_BUF_LEN]);
 
