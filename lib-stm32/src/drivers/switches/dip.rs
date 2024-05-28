@@ -1,4 +1,4 @@
-use core::{cmp::min, ops::Range};
+use core::{cmp::{max, min}, ops::Range};
 
 use embassy_stm32::gpio::{AnyPin, Input, Pull};
 
@@ -38,13 +38,18 @@ impl<'a, const PIN_CT: usize> DipSwitch<'a, PIN_CT> {
         }
     }
 
-    pub fn read_block(&self, r: &mut Range<i32>) -> u8 {
-        if !r.all(|val| 0 <= val && val < PIN_CT as i32) {
+    pub fn read_block(&self, mut pin_range: Range<i32>) -> u8 {
+        if !pin_range.all(|val| 0 <= val && val < PIN_CT as i32) {
+            defmt::warn!("dip switch block read outside valid range");
             return 0;
         }
 
+        // since pins are physical, we'll use an inclusive range
+        let start_pin = min(pin_range.start, pin_range.end);
+        let end_pin = max(pin_range.start, pin_range.end) + 1; 
+
         let mut val: u8 = 0;
-        for i in r.enumerate() {
+        for i in (start_pin..end_pin).enumerate() {
             val |= (self.read_pin(i.1 as usize) as u8 & 0x1) << i.0;
         }
 

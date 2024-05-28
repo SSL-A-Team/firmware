@@ -142,7 +142,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 }
             }
             Either::Second(_) => {
-                defmt::warn!("packet processing timed out.");
+                // defmt::warn!("packet processing timed out.");
             }
         }
     }

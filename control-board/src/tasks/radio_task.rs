@@ -120,7 +120,7 @@ impl<
 
         // allow default fallback state transition of none
         #[allow(unused_assignments)]
-        let mut next_connection_state = self.connection_state;
+        // let mut next_connection_state = self.connection_state;
         loop {
 
             // check for hardware config changes that affect radio connection
@@ -133,12 +133,14 @@ impl<
                         || cur_robot_state.hw_robot_team_is_blue != last_robot_state.hw_robot_team_is_blue) {
                     // enter software connect state (disconnecting)
                     self.connection_state = RadioConnectionState::ConnectSoftware;
+                    defmt::info!("shell state change triggering software reconnect");
                 }
 
                 // we ar at least connected to Wifi and the wifi network id changed
                 if self.connection_state > RadioConnectionState::ConnectNetwork 
                 && cur_robot_state.hw_wifi_network_index != last_robot_state.hw_wifi_network_index {
                     self.connection_state = RadioConnectionState::ConnectNetwork;
+                    defmt::info!("dip state change triggering wifi network change");
                 }
             }
             last_robot_state = cur_robot_state;
@@ -147,30 +149,30 @@ impl<
 
             if self.radio_ndet_input.is_high() {
                 defmt::error!("radio appears unplugged.");
-                next_connection_state = RadioConnectionState::ConnectPhys;
+                self.connection_state = RadioConnectionState::ConnectPhys;
             }
 
             // execute on the connection state
 
             match self.connection_state {
                 RadioConnectionState::Unconnected => {
-                    next_connection_state = RadioConnectionState::ConnectPhys;
+                    self.connection_state = RadioConnectionState::ConnectPhys;
                 },
                 RadioConnectionState::ConnectPhys => {
                     if self.radio_ndet_input.is_high() {
                         Timer::after_millis(Self::RETRY_DELAY_MS).await;
-                        next_connection_state = RadioConnectionState::ConnectPhys;
+                        self.connection_state = RadioConnectionState::ConnectPhys;
                     } else {
-                        next_connection_state = RadioConnectionState::ConnectUart;
+                        self.connection_state = RadioConnectionState::ConnectUart;
                     }
                 },
                 RadioConnectionState::ConnectUart => {
                     if self.connect_uart().await.is_err() {
                         Timer::after_millis(Self::RETRY_DELAY_MS).await;
                         // failed to connect, go back to physical connection check
-                        next_connection_state = RadioConnectionState::ConnectPhys;
+                        self.connection_state = RadioConnectionState::ConnectPhys;
                     } else {
-                        next_connection_state = RadioConnectionState::ConnectNetwork;
+                        self.connection_state = RadioConnectionState::ConnectNetwork;
                     }
                 },
                 RadioConnectionState::ConnectNetwork => {
@@ -187,13 +189,13 @@ impl<
                         // TODO make error handling smarter, e.g. if we get a timeout or low level errors
                         // we should fall back to ConnectPhys or ConnectUart, not keep retrying forever
                     } else {
-                        next_connection_state = RadioConnectionState::ConnectSoftware
+                        self.connection_state = RadioConnectionState::ConnectSoftware;
                     }
                 },
                 RadioConnectionState::ConnectSoftware => {
                     if let Ok(connected) = self.connect_software(cur_robot_state.hw_robot_id, cur_robot_state.hw_robot_team_is_blue).await {
                         if connected {
-                            next_connection_state = RadioConnectionState::Connected;
+                            self.connection_state = RadioConnectionState::Connected;
                         } else {
                             // software didn't respond to our hello, it may not be started yet
                             Timer::after_millis(1000).await;
@@ -210,9 +212,6 @@ impl<
                     // no delay to imediately process the next one
                 },
             }
-
-            // update state
-            self.connection_state = next_connection_state;
         }
 
     }

@@ -18,42 +18,48 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
     mut robot_id_indicator: ShellIndicator<'static>,
 ) {
     loop {
+        let cur_robot_state = robot_state.get_state();
+
         // read switches
         let robot_id = robot_id_rotary.read_value();
-        let robot_team_isblue = dip_switch.read_pin(0);
-        let robot_debug_mode = dip_switch.read_pin(1);
 
-        let glob_robot_debug = robot_state.hw_in_debug_mode();
-        if robot_debug_mode != glob_robot_debug {
-            robot_state.set_hw_in_debug_mode(robot_debug_mode);
-            if robot_debug_mode {
+        let robot_team_isblue = dip_switch.read_pin(0);
+        let hw_debug_mode = dip_switch.read_pin(1);
+        let robot_network_index = dip_switch.read_block(6..4);
+
+        if hw_debug_mode != cur_robot_state.hw_debug_mode {
+            robot_state.set_hw_in_debug_mode(hw_debug_mode);
+            if hw_debug_mode {
                 defmt::info!("robot entered debug mode");
             }
         }
 
-        if robot_debug_mode {
-            debug_led0.set_high();
-        } else {
-            debug_led0.set_low();
-        }
-
         // publish updates to robot_state
-        let glob_robot_id = robot_state.get_hw_robot_id();
-        let glob_robot_is_blue = robot_state.hw_robot_team_is_blue();
-        if robot_id != glob_robot_id {
+        if robot_id != cur_robot_state.hw_robot_id {
             robot_state.set_hw_robot_id(robot_id);
-            defmt::info!("updated robot id {} -> {}", glob_robot_id, robot_id);
+            defmt::info!("updated robot id {} -> {}", cur_robot_state.hw_robot_id, robot_id);
         }
 
-        if robot_team_isblue != glob_robot_is_blue {
+        if robot_team_isblue != cur_robot_state.hw_robot_team_is_blue {
             robot_state.set_hw_robot_team_is_blue(robot_team_isblue);
-            defmt::info!("updated robot team is blue {} -> {}", glob_robot_is_blue, robot_team_isblue);
+            defmt::info!("updated robot team is blue {} -> {}", cur_robot_state.hw_robot_team_is_blue, robot_team_isblue);
         }
-        
+
+        if robot_network_index != cur_robot_state.hw_wifi_network_index as u8 {
+            robot_state.set_hw_network_index(robot_network_index);
+            defmt::info!("updated robot network index {} -> {}", cur_robot_state.hw_wifi_network_index, robot_network_index);
+        }
+
         // TODO read messages
 
         // update indicators
         robot_id_indicator.set(robot_id, robot_team_isblue);
+
+        if hw_debug_mode {
+            debug_led0.set_high();
+        } else {
+            debug_led0.set_low();
+        }
 
         if !robot_state.hw_init_state_valid() {
             defmt::info!("loaded robot state: robot id: {}, team: {}", robot_id, robot_team_isblue);

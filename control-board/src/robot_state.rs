@@ -49,7 +49,7 @@ impl SharedRobotState {
             hw_init_state_valid: self.hw_init_state_valid(),
             hw_robot_id: self.get_hw_robot_id(),
             hw_robot_team_is_blue: self.hw_robot_team_is_blue(),
-            hw_wifi_network_index: 0,
+            hw_wifi_network_index: self.hw_wifi_network_index(),
             hw_debug_mode: self.hw_in_debug_mode(),
 
             radio_inop: true,
@@ -90,6 +90,14 @@ impl SharedRobotState {
         self.hw_robot_team_is_blue.store(is_blue, Ordering::Relaxed);
     }
 
+    pub fn hw_wifi_network_index(&self) -> usize {
+        self.hw_wifi_network_index.load(Ordering::Relaxed) as usize
+    }
+
+    pub fn set_hw_network_index(&self, ind: u8) {
+        self.hw_wifi_network_index.store(ind, Ordering::Relaxed);
+    }
+ 
     pub fn hw_in_debug_mode(&self) -> bool {
         self.hw_debug_mode.load(Ordering::Relaxed)
     }
@@ -105,7 +113,7 @@ pub struct RobotState {
 
     pub hw_robot_id: u8,
     pub hw_robot_team_is_blue: bool,
-    pub hw_wifi_network_index: u8,
+    pub hw_wifi_network_index: usize,
     pub hw_debug_mode: bool,
 
     pub radio_inop: bool,

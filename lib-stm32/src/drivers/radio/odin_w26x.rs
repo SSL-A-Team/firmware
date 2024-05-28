@@ -1,5 +1,7 @@
 use core::fmt::Write;
+use embassy_futures::select::select;
 use embassy_stm32::usart;
+use embassy_time::Timer;
 use heapless::String;
 
 use crate::uart::queue::{UartReadQueue, UartWriteQueue};
@@ -223,6 +225,30 @@ impl<
         _dns_server2: Option<&str>,
     ) -> Result<(), ()> {
         todo!("implement if needed");
+    }
+
+    pub async fn disconnect_wifi(&self, config_id: u8) -> Result<(), ()> {
+        let mut str: String<64> = String::new();
+        write!(str, "AT+UWSCA={config_id},4").or(Err(()))?;
+        self.send_command(str.as_str()).await?;
+        self.read_ok().await?;
+
+        match select(self.reader.dequeue(|buf| {
+                    let packet = self.to_packet(buf)?;
+                    if let EdmPacket::ATEvent(ATEvent::NetworkDown { interface_id: 0 }) = packet {
+                        return Ok(());
+                    } else {
+                        return Err(());
+                    }
+                }),
+            Timer::after_millis(250)).await {
+                embassy_futures::select::Either::First(res) => {
+                    return res;
+                },
+                embassy_futures::select::Either::Second(_) => {
+                    return Err(());
+                },
+            }
     }
 
     pub async fn connect_wifi(&self, config_id: u8) -> Result<(), ()> {

@@ -134,7 +134,9 @@ impl<
 
     pub async fn connect_uart(&mut self) -> Result<(), RobotRadioError> {
         // were about to reset the radio, so we also need to reset the uart queue config to match the startup config
-        self.radio.update_host_uart_config(self.get_startup_uart_config());
+        if self.radio.update_host_uart_config(self.get_startup_uart_config()).await.is_err() {
+            defmt::debug!("failed to reset host uart to startup config.");
+        }
 
         // reset the radio so we can listen for the startup event
         self.reset_pin.set_high();
@@ -198,7 +200,16 @@ impl<
         Ok(())
     }
 
+    pub async fn disconnect_network(&mut self) -> Result<(), RobotRadioError> {
+        let _ = self.radio.disconnect_wifi(1).await;
+
+        Ok(())
+    }
+
     pub async fn connect_to_network(&mut self, wifi_credential: WifiCredential, robot_number: u8) -> Result<(), RobotRadioError> {
+        // TODO better error handling here
+        let _ = self.disconnect_network().await;
+
         // set radio hardware name enumeration
         let uid = uid::uid();
         let uid_u16 = (uid[1] as u16) << 8 | uid[0] as u16;
