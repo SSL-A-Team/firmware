@@ -137,21 +137,21 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
         }
     }
 
-    pub async fn remote_power_btn_press(&mut self) {
+    async fn remote_power_btn_press(&mut self) {
         self.remote_power_btn.set_high();
         Timer::after_millis(200).await;
         self.remote_power_btn.set_low();
         Timer::after_millis(10).await;
     }
 
-    pub async fn remote_power_btn_hold(&mut self) {
+    async fn remote_power_btn_hold(&mut self) {
         self.remote_power_btn.set_high();
         Timer::after_millis(1500).await;
         self.remote_power_btn.set_low();
         Timer::after_millis(10).await;
     }
 
-    pub async fn connected_poll_loop(&mut self) {
+    async fn connected_poll_loop(&mut self) {
         if let Some(pkt) = self.commands_subscriber.try_next_message() {
             match pkt {
                 WaitResult::Lagged(amnt) => {
