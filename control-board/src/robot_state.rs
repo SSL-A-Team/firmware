@@ -22,6 +22,8 @@ pub struct SharedRobotState {
 
     battery_pct: AtomicU8,
     battery_ok: AtomicBool,
+
+    shutdown_requested: AtomicBool,
 }
 
 impl SharedRobotState {
@@ -41,6 +43,7 @@ impl SharedRobotState {
             radio_connection_ok: AtomicBool::new(false), 
             battery_pct: AtomicU8::new(0),
             battery_ok: AtomicBool::new(false),
+            shutdown_requested: AtomicBool::new(false),
         }
     }
 
@@ -63,6 +66,8 @@ impl SharedRobotState {
         
             battery_pct: 0,
             battery_ok: false,
+
+            shutdown_requested: self.shutdown_requested(),
         }
     }
 
@@ -105,6 +110,14 @@ impl SharedRobotState {
     pub fn set_hw_in_debug_mode(&self, in_debug_mode: bool) {
         self.hw_debug_mode.store(in_debug_mode, Ordering::Relaxed);
     }
+
+    pub fn shutdown_requested(&self) -> bool {
+        self.shutdown_requested.load(Ordering::Relaxed)
+    }
+
+    pub fn flag_shutdown_requested(&self) {
+        self.shutdown_requested.store(true, Ordering::Relaxed);
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -127,4 +140,6 @@ pub struct RobotState {
 
     pub battery_pct: u8,
     pub battery_ok: bool,
+
+    pub shutdown_requested: bool,
 }

@@ -71,11 +71,15 @@ pub type ExtImuNDetPin = PF11;
 //////////////
 
 pub type KickerUart = USART6;
+pub type KickerUartRxPin = PC7;
+pub type KickerUartTxPin = PC6;
 pub type KickerRxDma = DMA2_CH5;
 pub type KickerTxDma = DMA2_CH4;
 pub type KickerPowerOnPin = PG8;
 pub type KickerBootPin = PA8;
-pub type KickerResetPIn = PA9;
+pub type KickerResetPin = PA9;
+// pub type KickerNDetPin = ;
+
 
 
 //////////////

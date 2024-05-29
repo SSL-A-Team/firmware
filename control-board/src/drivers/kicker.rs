@@ -1,4 +1,5 @@
-use embassy_stm32::usart::{self, Parity};
+use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
+use embassy_stm32::{gpio::Pin, usart::{self, Parity}};
 use embassy_time::{Duration, Timer};
 
 use crate::stm32_interface::Stm32Interface;
@@ -66,6 +67,17 @@ impl<
 
             telemetry_enabled: false,
         }
+    }
+
+    pub fn new_from_pins(read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        boot0_pin: impl Pin,
+        reset_pin: impl Pin,
+        firmware_image: &'a [u8]) -> Self {
+
+        let stm32_interface = Stm32Interface::new_from_pins(read_queue, write_queue, boot0_pin, reset_pin, true);
+
+        Self::new(stm32_interface, firmware_image)
     }
 
     pub fn process_telemetry(&mut self) {
