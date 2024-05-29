@@ -2,6 +2,7 @@ use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::Uart;
 use embassy_time::Timer;
+use nalgebra::{Vector3, Vector4};
 
 use crate::{include_external_cpp_bin, pins::*, robot_state::{self, SharedRobotState}, stm32_interface::{self, Stm32Interface}, stspin_motor::{DribblerMotor, WheelMotor}, SystemIrqs};
 
@@ -124,6 +125,100 @@ async fn control_task_entry(
     motor_drib.set_telemetry_enabled(true);
 
     Timer::after_millis(10).await;
+
+    // loop {
+    //     motor_fl.process_packets();
+    //     motor_bl.process_packets();
+    //     motor_br.process_packets();
+    //     motor_fr.process_packets();
+    //     motor_drib.process_packets();
+
+    //     motor_fl.log_reset("FL");
+    //     motor_bl.log_reset("BL");
+    //     motor_br.log_reset("BR");
+    //     motor_fr.log_reset("FR");
+    //     motor_drib.log_reset("DRIB");
+
+    //     if motor_drib.ball_detected() {
+    //         defmt::info!("ball detected");
+    //     }
+
+    //     if let Some(latest_control) = &latest_control {
+    //         let cmd_vel = Vector3::new(
+    //             latest_control.vel_x_linear,
+    //             latest_control.vel_y_linear,
+    //             latest_control.vel_z_angular,
+    //         );
+    //         self.cmd_vel = cmd_vel;
+    //         self.drib_vel = latest_control.dribbler_speed;
+    //         self.ticks_since_packet = 0;
+    //     } else {
+    //         self.ticks_since_packet += 1;
+    //         if self.ticks_since_packet >= TICKS_WITHOUT_PACKET_STOP {
+    //             self.cmd_vel = Vector3::new(0., 0., 0.);
+    //             self.ticks_since_packet = 0;
+    //         }
+    //     }
+
+    //     // now we have setpoint r(t) in self.cmd_vel
+    //     let battery_v = self.battery_sub.next_message_pure().await as f32;
+    //     let controls_enabled = true;
+    //     let gyro_rads = (self.gyro_sub.next_message_pure().await as f32) * 2.0 * core::f32::consts::PI / 360.0;
+    //     let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
+    //         if controls_enabled 
+    //         {
+    //             // TODO check order
+    //             let wheel_vels = Vector4::new(
+    //                 motor_fr.read_rads(),
+    //                 motor_fl.read_rads(),
+    //                 motor_bl.read_rads(),
+    //                 motor_br.read_rads()
+    //             );
+
+    //             // torque values are computed on the spin but put in the current variable
+    //             // TODO update this when packet/var names are updated to match software
+    //             let wheel_torques = Vector4::new(
+    //                 self.front_right_motor.read_current(),
+    //                 self.front_left_motor.read_current(),
+    //                 self.back_left_motor.read_current(),
+    //                 self.back_right_motor.read_current()
+    //             );
+            
+    //             // TODO read from channel or something
+
+    //             self.robot_controller.control_update(&self.cmd_vel, &wheel_vels, &wheel_torques, gyro_rads);
+            
+    //             self.robot_controller.get_wheel_velocities()
+    //         } 
+    //         else 
+    //         {
+    //             self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel)
+    //         }
+    //     }
+    //     else
+    //     {
+    //         // Battery is too low, set velocity to zero
+    //         Vector4::new(
+    //             0.0,
+    //             0.0,
+    //             0.0,
+    //             0.0)
+    //     };
+
+    //     self.front_right_motor.set_setpoint(wheel_vels[0]);
+    //     self.front_left_motor.set_setpoint(wheel_vels[1]);
+    //     self.back_left_motor.set_setpoint(wheel_vels[2]);
+    //     self.back_right_motor.set_setpoint(wheel_vels[3]);
+
+    //     let drib_dc = -1.0 * self.drib_vel / 1000.0;
+    //     self.drib_motor.set_setpoint(drib_dc);
+
+    //     self.front_right_motor.send_motion_command();
+    //     self.front_left_motor.send_motion_command();
+    //     self.back_left_motor.send_motion_command();
+    //     self.back_right_motor.send_motion_command();
+    //     self.drib_motor.send_motion_command();
+    // }
 
     loop {
         motor_fl.process_packets();
