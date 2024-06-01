@@ -1,4 +1,6 @@
 
+use ateam_lib_stm32::anim::{AnimInterface, AnimRepeatMode, Blink, Lerp};
+use ateam_lib_stm32::drivers::led::apa102::Apa102;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{AnyPin, Level, Output, Pull, Speed};
 use embassy_stm32::spi::{Config, Spi};
@@ -8,11 +10,10 @@ use embassy_time::{Duration, Timer};
 use smart_leds::RGB8;
 use static_cell::ConstStaticCell;
 
-use ateam_lib_stm32::drivers::led::apa102::{Apa102, Apa102AnimationRepeat, Apa102AnimationTrait, Apa102Blink};
+// use ateam_lib_stm32::drivers::led::apa102::{Apa102, Apa102AnimationRepeat, Apa102AnimationTrait, Apa102Blink};
 use ateam_lib_stm32::drivers::switches::button::AdvExtiButton;
 use ateam_lib_stm32::drivers::switches::dip::DipSwitch;
 use ateam_lib_stm32::drivers::switches::rotary_encoder::RotaryEncoder;
-use ateam_lib_stm32::math::lerp::{Lerp, TimeLerp};
 
 use crate::drivers::shell_indicator::ShellIndicator;
 use crate::robot_state::SharedRobotState;
@@ -51,14 +52,22 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
 ) {
     defmt::info!("user io task initialized");
 
-    dotstars.set_drv_str_all(128);
+    dotstars.set_drv_str_all(8);
 
-    let mut color_lerp = TimeLerp::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(10000));
-    color_lerp.start();
+    // let mut color_lerp = TimeLerp::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(10000));
+    // color_lerp.start();
 
-    let mut animation = Apa102Blink::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(800), Duration::from_millis(200), Apa102AnimationRepeat::RepeatForever);
-    animation.start_animation();
-    dotstars.set_animation(animation, 1);
+    let mut anim0 = Lerp::new(RGB8 { r: 255, g: 255, b: 255 }, RGB8 { r: 0, g: 0, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::Forever);
+    anim0.start_animation();
+    dotstars.set_animation(anim0, 0);
+
+    let mut anim1 = Lerp::new(RGB8 { r: 0, g: 0, b: 0}, RGB8 { r: 255, g: 255, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::Forever);
+    anim1.start_animation();
+    dotstars.set_animation(anim1, 1);
+
+    // let mut blink_anim = Blink::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(800), Duration::from_millis(200), AnimRepeatMode::Forever);
+    // blink_anim.start_animation();
+    // dotstars.set_animation(blink_anim, 1);
 
     loop {
         let cur_robot_state = robot_state.get_state();
@@ -104,8 +113,8 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
             debug_led0.set_low();
         }
 
-        let color = color_lerp.update();
-        dotstars.set_color(color, 0);
+        // let color = color_lerp.update();
+        // dotstars.set_color(color, 0);
         // dotstars.set_color(RGB8 { r: 0, g: 0, b: 0 }, 1);
         dotstars.update().await;
 
@@ -115,7 +124,7 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
             robot_state.set_hw_init_state_valid(true);
         }
 
-        Timer::after_millis(100).await;
+        Timer::after_millis(50).await;
     }
 }
 

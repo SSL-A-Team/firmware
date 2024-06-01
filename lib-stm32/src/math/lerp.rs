@@ -1,20 +1,44 @@
 use core::marker::PhantomData;
 
 use embassy_time::{Duration, Instant};
-use num_traits::{clamp, Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedSub, FromPrimitive, ToPrimitive};
+use num_traits::{clamp, Bounded, FromPrimitive};
 use smart_leds::RGB8;
 
-pub fn lerp<N: Copy + Bounded + FromPrimitive + ToPrimitive + CheckedAdd<Output=N> + CheckedSub<Output=N> + CheckedMul<Output=N> + CheckedDiv<Output=N>>(a: N, b: N, t: N) -> N {
-    let t_pct = t.to_f32().unwrap() / N::max_value().to_f32().unwrap();
-    return N::from_f32(lerp_f(a.to_f32().unwrap(), b.to_f32().unwrap(), t_pct)).unwrap();
+pub trait LerpNumeric = Copy + Bounded + FromPrimitive;
+
+// pub trait LerpNumeric = Copy + Bounded + FromPrimitive + ToPrimitive;
+// pub trait LerpTrait = Copy + Sized + Lerp<LerpNumeric>;
+
+// pub fn lerp<N: Copy + Bounded + FromPrimitive + ToPrimitive + CheckedAdd<Output=N> + CheckedSub<Output=N> + CheckedMul<Output=N> + CheckedDiv<Output=N>>(a: N, b: N, t: N) -> N {
+// {
+//     let t_pct = t.to_f32().unwrap() / N::max_value().to_f32().unwrap();
+//     return N::from_f32(lerp_f(a.to_f32().unwrap(), b.to_f32().unwrap(), t_pct)).unwrap();
+// }
+
+pub fn lerp<N>(a: N, b: N, t: N) -> N 
+where N: FromPrimitive + Copy + Bounded,
+      f32: core::convert::From<N>
+{
+    let t_pct = Into::<f32>::into(t) / Into::<f32>::into(N::max_value());
+    return N::from_f32(f_lerp_f(Into::<f32>::into(a), Into::<f32>::into(b), t_pct)).unwrap();
 }
 
-pub fn lerp_f(a: f32, b: f32, t: f32) -> f32 {
+pub fn lerp_f<N>(a: N, b: N, t: f32) -> N 
+where N: FromPrimitive + Copy + Bounded,
+      f32: core::convert::From<N>
+{
+    return N::from_f32(f_lerp_f(Into::<f32>::into(a), Into::<f32>::into(b), t)).unwrap();
+}
+
+pub fn f_lerp_f(a: f32, b: f32, t: f32) -> f32 {
     let t = clamp(t, 0.0, 1.0);
     return a + (b - a) * t;
 }
 
-pub trait Lerp<N: Copy + Bounded + CheckedAdd<Output=N> + CheckedSub<Output=N> + CheckedMul<Output=N> + CheckedDiv<Output=N>> {
+pub trait Lerp<N>: Clone + Copy
+where N: FromPrimitive + Copy + Bounded,
+      f32: core::convert::From<N> 
+{
     fn lerp(a: Self, b: Self, t: N) -> Self;
     fn lerp_f(a: Self, b: Self, t: f32) -> Self;
 }
@@ -30,14 +54,17 @@ impl Lerp<u8> for RGB8 {
 
     fn lerp_f(a: RGB8, b: RGB8, t: f32) -> RGB8 {
         RGB8 {
-            r: lerp_f(a.r as f32, b.r as f32, t) as u8,
-            g: lerp_f(a.g as f32, b.g as f32, t) as u8,
-            b: lerp_f(a.b as f32, b.b as f32, t) as u8,
+            r: f_lerp_f(a.r as f32, b.r as f32, t) as u8,
+            g: f_lerp_f(a.g as f32, b.g as f32, t) as u8,
+            b: f_lerp_f(a.b as f32, b.b as f32, t) as u8,
         }
     }
 }
 
-pub struct TimeLerp<'a, N: Copy + Bounded + CheckedAdd<Output=N> + CheckedSub<Output=N> + CheckedMul<Output=N> + CheckedDiv<Output=N>, L: Copy + Sized + Lerp<N>> {
+pub struct TimeLerp<'a, N, L: Lerp<N>> 
+where N: FromPrimitive + Copy + Bounded,
+      f32: core::convert::From<N> 
+{
     a: L,
     b: L,
 
@@ -47,7 +74,11 @@ pub struct TimeLerp<'a, N: Copy + Bounded + CheckedAdd<Output=N> + CheckedSub<Ou
     pd2: PhantomData<&'a N>,
 }
 
-impl<'a, N: Copy + Bounded + CheckedAdd<Output=N> + CheckedSub<Output=N> + CheckedMul<Output=N> + CheckedDiv<Output=N>, L: Copy + Sized + Lerp<N>> TimeLerp<'a, N, L> {
+impl<'a, N, L> TimeLerp<'a, N, L> 
+where N: FromPrimitive + Copy + Bounded,
+f32: core::convert::From<N>,
+L: Lerp<N> 
+{
     pub fn new(a: L, b: L, duration: Duration) -> TimeLerp<'a, N, L> {
         TimeLerp {
             a: a,

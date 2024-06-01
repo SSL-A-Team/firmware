@@ -8,6 +8,7 @@
 #![feature(ptr_metadata)]
 #![feature(trait_alias)]
 
+pub mod anim;
 pub mod drivers;
 pub mod math;
 pub mod uart;
