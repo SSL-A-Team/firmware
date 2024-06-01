@@ -112,11 +112,11 @@ L: crate::math::lerp::Lerp<N>
     }
 }
 
-pub struct CompositeAnimation<N, L, const LEN: usize> 
+pub struct CompositeAnimation<'a, N, L> 
 where N: LerpNumeric,
 f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N> {
-    animations: [Animation<N, L>; LEN],
+    animations: &'a mut [Animation<N, L>],
     active_animation: usize,
 
     repeat_mode: AnimRepeatMode,
@@ -126,12 +126,12 @@ L: crate::math::lerp::Lerp<N> {
     last_value: L,
 }
 
-impl<N, L, const LEN: usize> CompositeAnimation<N, L, LEN> 
+impl<'a, N, L> CompositeAnimation<'a, N, L> 
 where N: LerpNumeric,
 f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N>
 {
-    pub fn new(animations: [Animation<N, L>; LEN], repeat_mode: AnimRepeatMode) -> Self {
+    pub fn new(animations: &'a mut [Animation<N, L>], repeat_mode: AnimRepeatMode) -> Self {
         let first_val = animations[0].get_value();
         CompositeAnimation {
             animations: animations,
@@ -144,7 +144,7 @@ L: crate::math::lerp::Lerp<N>
     }
 }
 
-impl<N, L, const LEN: usize> AnimInterface<L> for CompositeAnimation<N, L, LEN> 
+impl<'a, N, L> AnimInterface<L> for CompositeAnimation<'a, N, L> 
 where N: LerpNumeric,
 f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N>
@@ -152,6 +152,7 @@ L: crate::math::lerp::Lerp<N>
     fn start_animation(&mut self) {
         self.active_animation = 0;
         self.anim_state = AnimState::Running;
+        self.animations[self.active_animation].start_animation();
 
         if let AnimRepeatMode::Fixed(num) = self.repeat_mode {
             self.repeat_counter = num;
@@ -180,7 +181,7 @@ L: crate::math::lerp::Lerp<N>
             // advance to the next animation
             self.active_animation = self.active_animation + 1;
 
-            if self.active_animation >= LEN {
+            if self.active_animation >= self.animations.len() {
                 self.active_animation = 0;
 
                 // we've completed the last animation in the buffer
@@ -199,6 +200,10 @@ L: crate::math::lerp::Lerp<N>
                         // we've already reset the animation index so it'll loop around
                     },
                 }
+            }
+
+            if self.anim_state != AnimState::Completed {
+                self.animations[self.active_animation].start_animation();
             }
         }
     }

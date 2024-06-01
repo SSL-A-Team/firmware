@@ -11,7 +11,6 @@ pub struct Apa102<'a, 'buf, SpiPeri: spi::Instance, const NUM_LEDS: usize>
 where [(); (NUM_LEDS * 4) + 8]: {
     spi: spi::Spi<'a, SpiPeri, Async>,
     spi_buf: &'buf mut [u8; (NUM_LEDS * 4) + 8],
-    animation_buf: [Option<CompositeAnimation<u8, RGB8, 5>>; NUM_LEDS],
 }
 
 impl<'a, 'buf, SpiPeri: spi::Instance, const NUM_LEDS: usize> Apa102<'a, 'buf, SpiPeri, NUM_LEDS> 
@@ -35,7 +34,6 @@ where [(); (NUM_LEDS * 4) + 8]: {
         Apa102 { 
             spi: spi,
             spi_buf: spi_buf,
-            animation_buf: [None; NUM_LEDS],
         }
     }
 
@@ -111,14 +109,24 @@ where [(); (NUM_LEDS * 4) + 8]: {
         self.set_color_range(color, 0..NUM_LEDS)
     }
 
-    pub fn set_animation(&mut self, anim: Lerp<u8, RGB8>, led_index: usize) {
-        assert!(led_index < NUM_LEDS);
-        self.animation_buf[led_index] = Some(anim);
+    pub async fn update(&mut self) {
+        let _ = self.spi.write(self.spi_buf).await;
     }
+}
 
-    pub fn clear_animation(&mut self, led_index: usize) {
-        assert!(led_index < NUM_LEDS);
-        self.animation_buf[led_index] = None;
+pub struct Apa102Anim<'a, 'buf, 'ca, SpiPeri: spi::Instance, const NUM_LEDS: usize> 
+where [(); (NUM_LEDS * 4) + 8]: {
+    apa102_driver: Apa102<'a, 'buf, SpiPeri, NUM_LEDS>,
+    animation_buf: [Option<&'ca mut CompositeAnimation<'ca, u8, RGB8>>; NUM_LEDS],
+}
+
+impl<'a, 'buf, 'ca, SpiPeri: spi::Instance, const NUM_LEDS: usize> Apa102Anim<'a, 'buf, 'ca, SpiPeri, NUM_LEDS> 
+where [(); (NUM_LEDS * 4) + 8]: {
+    pub fn new(apa102: Apa102<'a, 'buf, SpiPeri, NUM_LEDS>) -> Self {
+        Apa102Anim {
+            apa102_driver: apa102,
+            animation_buf: [const { None }; NUM_LEDS],
+        }
     }
 
     pub async fn update(&mut self) {
@@ -132,11 +140,35 @@ where [(); (NUM_LEDS * 4) + 8]: {
         // set colors from animations
         for (i, anim) in self.animation_buf.iter().enumerate() {
             if let Some(anim) = anim {
-                self.set_color(anim.get_value(), i);
+                self.apa102_driver.set_color(anim.get_value(), i);
             }
         }
 
-        let _ = self.spi.write(self.spi_buf).await;
+        self.apa102_driver.update().await;
     }
+
+    pub fn set_animation(&mut self, anim: &'ca mut CompositeAnimation<'ca, u8, smart_leds::RGB<u8>>, led_index: usize) {
+        assert!(led_index < NUM_LEDS);
+        self.animation_buf[led_index] = Some(anim);
+    }
+
+    pub fn clear_animation(&mut self, led_index: usize) {
+        assert!(led_index < NUM_LEDS);
+        self.animation_buf[led_index] = None;
+    }
+
+    // pub fn start_animation(&mut self, led_index: usize) {    // pub fn start_animation(&mut self, led_index: usize) {
+    //     assert!(led_index < NUM_LEDS);
+        
+    //     if let Some(anim) = self.animation_buf[led_index].as_mut() {
+    //         anim.start_animation();
+    //     }
+    // }
+    //     assert!(led_index < NUM_LEDS);
+        
+    //     if let Some(anim) = self.animation_buf[led_index].as_mut() {
+    //         anim.start_animation();
+    //     }
+    // }
 }
 

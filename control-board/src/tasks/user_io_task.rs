@@ -1,6 +1,6 @@
 
-use ateam_lib_stm32::anim::{AnimInterface, AnimRepeatMode, Blink, Lerp};
-use ateam_lib_stm32::drivers::led::apa102::Apa102;
+use ateam_lib_stm32::anim::{self, AnimInterface, AnimRepeatMode, Blink, CompositeAnimation, Lerp};
+use ateam_lib_stm32::drivers::led::apa102::{Apa102, Apa102Anim};
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{AnyPin, Level, Output, Pull, Speed};
 use embassy_stm32::spi::{Config, Spi};
@@ -52,18 +52,34 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
 ) {
     defmt::info!("user io task initialized");
 
-    dotstars.set_drv_str_all(8);
+    let anim0 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 255, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
+    let anim1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 0, g: 255, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
+    let anim2 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 0, g: 0, b: 255 }, RGB8 { r: 255, g: 0, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
+    let mut anim_seq = [anim0, anim1, anim2];
+    let mut composite_anim0 = CompositeAnimation::new(&mut anim_seq, AnimRepeatMode::Forever);
+    composite_anim0.start_animation();
+
+    let anim0_1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 255, g: 255, b: 0 }, RGB8 { r: 0, g: 255, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
+    let anim1_1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 0, g: 255, b: 255 }, RGB8 { r: 255, g: 0, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
+    let anim2_1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 255, g: 0, b: 255 }, RGB8 { r: 255, g: 255, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
+    let mut anim_seq = [anim0_1, anim1_1, anim2_1];
+    let mut composite_anim1 = CompositeAnimation::new(&mut anim_seq, AnimRepeatMode::Forever);
+    composite_anim1.start_animation();
+
+    dotstars.set_drv_str_all(32);
+    let mut dotstars_anim = Apa102Anim::new(dotstars);
 
     // let mut color_lerp = TimeLerp::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(10000));
     // color_lerp.start();
 
-    let mut anim0 = Lerp::new(RGB8 { r: 255, g: 255, b: 255 }, RGB8 { r: 0, g: 0, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::Forever);
-    anim0.start_animation();
-    dotstars.set_animation(anim0, 0);
 
-    let mut anim1 = Lerp::new(RGB8 { r: 0, g: 0, b: 0}, RGB8 { r: 255, g: 255, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::Forever);
-    anim1.start_animation();
-    dotstars.set_animation(anim1, 1);
+
+    dotstars_anim.set_animation(&mut composite_anim0, 0);
+    dotstars_anim.set_animation(&mut composite_anim1, 1);
+
+    // let mut anim1 = Lerp::new(RGB8 { r: 0, g: 0, b: 0}, RGB8 { r: 255, g: 255, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::Forever);
+    // anim1.start_animation();
+    // dotstars_anim.set_animation(anim1, 1);
 
     // let mut blink_anim = Blink::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(800), Duration::from_millis(200), AnimRepeatMode::Forever);
     // blink_anim.start_animation();
@@ -116,7 +132,7 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
         // let color = color_lerp.update();
         // dotstars.set_color(color, 0);
         // dotstars.set_color(RGB8 { r: 0, g: 0, b: 0 }, 1);
-        dotstars.update().await;
+        dotstars_anim.update().await;
 
 
         if !robot_state.hw_init_state_valid() {
