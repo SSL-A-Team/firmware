@@ -125,7 +125,7 @@ pub fn start_imu_task(
         accel_int: impl Peripheral<P = <ImuSpiInt1Pin as embassy_stm32::gpio::Pin>::ExtiChannel> + 'static,
         gyro_int: impl Peripheral<P = <ImuSpiInt2Pin as embassy_stm32::gpio::Pin>::ExtiChannel> + 'static,
         _ext_imu_det_pin: ExtImuNDetPin) {
-    let imu_buf = IMU_BUFFER_CELL.take();
+    let imu_buf = IMU_BUFFER_CELL.take();    
 
     let imu = Bmi323::new_from_pins(peri, sck, mosi, miso, txdma, rxdma, bmi323_nss, imu_buf);
 

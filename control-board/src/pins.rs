@@ -131,9 +131,9 @@ pub type MotorDResetPin = PD12;
 //  Power Control  //
 /////////////////////
 
-pub type PowerBtnPressedIntPin = PE10;
+pub type PowerBtnPressedIntPin = PE11;
 pub type PowerBtnPressedIntExti = EXTI11;
-pub type PowerKillPin = PE11;
+pub type PowerKillPin = PE10;
 pub type ShutdownInitiatedLedPin = PF4;
 
 

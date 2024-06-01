@@ -7,7 +7,7 @@ description = "A common library for ateam stm32 targets"
 repository = "https://github.com/SSL-A-Team/firmware"
 
 [dependencies]
-embassy-stm32 = { version = "0.1.0", default-features = false }
+embassy-stm32 = { version = "0.1.0", default-features = false, features = ["exti"]}
 embassy-executor = { version = "0.5.0", default-features = false }
 embassy-sync = { version = "0.5.0" }
 embassy-futures = { version = "0.1.0" }
@@ -19,6 +19,9 @@ defmt-rtt = "0.3"
 critical-section = "1.1.1"
 
 heapless  = "0.8.0"
+
+num-traits = { verison = "0.2.19", default-features = false }
+smart-leds = "0.4.0"
 
 [features]
 default = ["embassy-stm32/stm32h723zg"]

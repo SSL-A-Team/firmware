@@ -69,7 +69,9 @@ dependencies = [
  "embassy-sync",
  "embassy-time",
  "heapless 0.8.0",
+ "num-traits",
  "paste",
+ "smart-leds",
 ]
 
 [[package]]

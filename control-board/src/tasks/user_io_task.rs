@@ -1,34 +1,65 @@
-use ateam_lib_stm32::drivers::switches::dip::DipSwitch;
-use ateam_lib_stm32::drivers::switches::rotary_encoder::RotaryEncoder;
+
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{AnyPin, Level, Output, Pull, Speed};
-use embassy_time::Timer;
+use embassy_stm32::spi::{Config, Spi};
+use embassy_stm32::time::mhz;
+use embassy_time::{Duration, Timer};
+
+use smart_leds::RGB8;
+use static_cell::ConstStaticCell;
+
+use ateam_lib_stm32::drivers::led::apa102::{Apa102, Apa102AnimationRepeat, Apa102AnimationTrait, Apa102Blink};
+use ateam_lib_stm32::drivers::switches::button::AdvExtiButton;
+use ateam_lib_stm32::drivers::switches::dip::DipSwitch;
+use ateam_lib_stm32::drivers::switches::rotary_encoder::RotaryEncoder;
+use ateam_lib_stm32::math::lerp::{Lerp, TimeLerp};
 
 use crate::drivers::shell_indicator::ShellIndicator;
 use crate::robot_state::SharedRobotState;
 
 use crate::pins::*;
 
+// #[link_section = ".sram4"]
+// static DOTSTAR_SPI_BUFFER_CELL: ConstStaticCell<[u8; 16]> = ConstStaticCell::new([0; 16]);
+
+#[link_section = ".sram4"]
+static mut DOTSTAR_SPI_BUFFER_CELL: [u8; 16] = [0; 16];
+
 #[macro_export]
 macro_rules! create_io_task {
     ($spawner:ident, $robot_state:ident, $p:ident) => {
-        ateam_control_board::tasks::user_io_task::start_io_task($spawner,
+        ateam_control_board::tasks::user_io_task::start_io_task(&$spawner,
             $robot_state,
             $p.PD6, $p.PD5, $p.EXTI6, $p.EXTI5,
             $p.PG7, $p.PG6, $p.PG5, $p.PG4, $p.PG3, $p.PG2, $p.PD15,
             $p.PG12, $p.PG11, $p.PG10, $p.PG9,
             $p.PF3, $p.PF2, $p.PF1, $p.PF0,
-            $p.PD0, $p.PD1, $p.PD3, $p.PD4, $p.PD14);
+            $p.PD0, $p.PD1, $p.PD3, $p.PD4, $p.PD14,
+            $p.SPI6, $p.PB3, $p.PB5, $p.BDMA_CH0).await;
     };
 }
 
 #[embassy_executor::task]
 async fn user_io_task_entry(robot_state: &'static SharedRobotState,
+    mut usr_btn0: AdvExtiButton,
+    mut usr_btn1: AdvExtiButton,
     dip_switch: DipSwitch<'static, 7>,
     robot_id_rotary: RotaryEncoder<'static, 4>,
     mut debug_led0: Output<'static>,
     mut robot_id_indicator: ShellIndicator<'static>,
+    mut dotstars: Apa102<'static, 'static, DotstarSpi, 2>,
 ) {
+    defmt::info!("user io task initialized");
+
+    dotstars.set_drv_str_all(128);
+
+    let mut color_lerp = TimeLerp::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(10000));
+    color_lerp.start();
+
+    let mut animation = Apa102Blink::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(800), Duration::from_millis(200), Apa102AnimationRepeat::RepeatForever);
+    animation.start_animation();
+    dotstars.set_animation(animation, 1);
+
     loop {
         let cur_robot_state = robot_state.get_state();
 
@@ -73,6 +104,12 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
             debug_led0.set_low();
         }
 
+        let color = color_lerp.update();
+        dotstars.set_color(color, 0);
+        // dotstars.set_color(RGB8 { r: 0, g: 0, b: 0 }, 1);
+        dotstars.update().await;
+
+
         if !robot_state.hw_init_state_valid() {
             defmt::info!("loaded robot state: robot id: {}, team: {}", robot_id, robot_team_isblue);
             robot_state.set_hw_init_state_valid(true);
@@ -82,9 +119,9 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
     }
 }
 
-pub fn start_io_task(spawner: Spawner,
+pub async fn start_io_task(spawner: &Spawner,
     robot_state: &'static SharedRobotState,
-    _usr_btn0_pin: UsrBtn0Pin, _usr_btn1_pin: UsrBtn1Pin, _usr_btn0_exti: UsrBtn0Exti, _usr_btn1_exti: UsrBtn1Exti,
+    usr_btn0_pin: UsrBtn0Pin, usr_btn1_pin: UsrBtn1Pin, usr_btn0_exti: UsrBtn0Exti, usr_btn1_exti: UsrBtn1Exti,
     usr_dip7_pin: UsrDip7IsBluePin, usr_dip6_pin: UsrDip6Pin, usr_dip5_pin: UsrDip5Pin, usr_dip4_pin: UsrDip4Pin,
     usr_dip3_pin: UsrDip3Pin, usr_dip2_pin: UsrDip2Pin, usr_dip1_pin: UsrDip1Pin,
     robot_id_selector3_pin: RobotIdSelector3Pin, robot_id_selector2_pin: RobotIdSelector2Pin,
@@ -93,7 +130,21 @@ pub fn start_io_task(spawner: Spawner,
     robot_id_indicator_fl: RobotIdIndicator0FlPin, robot_id_indicator_bl: RobotIdIndicator1BlPin,
     robot_id_indicator_br: RobotIdIndicator2BrPin, robot_id_indicator_fr: RobotIdIndicator3FrPin,
     robot_id_indicator_isblue: RobotIdIndicator4TeamIsBluePin,
+    dotstar_peri: DotstarSpi,
+    dotstar_sck_pin: DotstarSpiSck,
+    dotstar_mosi_pin: DotstarSpiMosi,
+    dotstar_tx_dma: DotstarTxDma,
     ) {
+
+    // defmt::info!("taking buf");
+    // let dotstar_spi_buf: &'static mut [u8; 16] = DOTSTAR_SPI_BUFFER_CELL.take();
+    // defmt::info!("took buf");
+
+    let dotstar_spi_buf: &'static mut [u8; 16] = unsafe { &mut DOTSTAR_SPI_BUFFER_CELL };
+    let dotstars = Apa102::<_, 2>::new_from_pins(dotstar_peri, dotstar_sck_pin, dotstar_mosi_pin, dotstar_tx_dma, dotstar_spi_buf.into());
+
+    let adv_usr_btn0: AdvExtiButton = AdvExtiButton::new_from_pins(usr_btn0_pin, usr_btn0_exti, false);
+    let adv_usr_btn1: AdvExtiButton = AdvExtiButton::new_from_pins(usr_btn1_pin, usr_btn1_exti, false);
 
     let dip_sw_pins: [AnyPin; 7] = [usr_dip7_pin.into(), usr_dip6_pin.into(), usr_dip5_pin.into(), usr_dip4_pin.into(), usr_dip3_pin.into(), usr_dip2_pin.into(), usr_dip1_pin.into()];
     let dip_switch = DipSwitch::new_from_pins(dip_sw_pins, Pull::None, None);
@@ -105,5 +156,6 @@ pub fn start_io_task(spawner: Spawner,
 
     let robot_id_indicator = ShellIndicator::new(robot_id_indicator_fr, robot_id_indicator_fl, robot_id_indicator_br, robot_id_indicator_bl, Some(robot_id_indicator_isblue));
 
-    spawner.spawn(user_io_task_entry(robot_state, dip_switch, robot_id_rotary, debug_led0, robot_id_indicator)).unwrap();
+
+    spawner.spawn(user_io_task_entry(robot_state, adv_usr_btn0, adv_usr_btn1, dip_switch, robot_id_rotary, debug_led0, robot_id_indicator, dotstars)).unwrap();
 }
