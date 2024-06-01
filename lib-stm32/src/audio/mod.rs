@@ -1,1 +1,3 @@
-pub mod pitch;
+pub mod note;
+
+pub mod pitches;
