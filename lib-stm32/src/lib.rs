@@ -9,6 +9,7 @@
 #![feature(trait_alias)]
 
 pub mod anim;
+pub mod audio;
 pub mod drivers;
 pub mod math;
 pub mod uart;
