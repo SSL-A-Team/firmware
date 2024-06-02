@@ -23,6 +23,8 @@ pub struct SharedRobotState {
     battery_pct: AtomicU8,
     battery_ok: AtomicBool,
 
+    robot_tipped: AtomicBool,
+
     shutdown_requested: AtomicBool,
 }
 
@@ -43,6 +45,7 @@ impl SharedRobotState {
             radio_connection_ok: AtomicBool::new(false), 
             battery_pct: AtomicU8::new(0),
             battery_ok: AtomicBool::new(false),
+            robot_tipped: AtomicBool::new(false),
             shutdown_requested: AtomicBool::new(false),
         }
     }
@@ -66,6 +69,8 @@ impl SharedRobotState {
         
             battery_pct: 0,
             battery_ok: false,
+
+            robot_tipped: false,
 
             shutdown_requested: self.shutdown_requested(),
         }
@@ -140,6 +145,8 @@ pub struct RobotState {
 
     pub battery_pct: u8,
     pub battery_ok: bool,
+
+    pub robot_tipped: bool,
 
     pub shutdown_requested: bool,
 }

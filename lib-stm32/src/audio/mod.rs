@@ -1,3 +1,4 @@
 pub mod note;
+pub mod tone_player;
 
-pub mod pitches;
+// pub mod pitches;

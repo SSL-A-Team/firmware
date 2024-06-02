@@ -1,4 +1,4 @@
-
+pub mod audio;
 pub mod flash;
 pub mod imu;
 pub mod led;
