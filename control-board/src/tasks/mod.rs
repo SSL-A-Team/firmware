@@ -1,4 +1,4 @@
-// pub mod control;
+pub mod audio_task;
 pub mod control_task;
 pub mod imu_task;
 pub mod kicker_task;

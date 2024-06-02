@@ -70,7 +70,7 @@ impl SharedRobotState {
             battery_pct: 0,
             battery_ok: false,
 
-            robot_tipped: false,
+            robot_tipped: self.robot_tipped(),
 
             shutdown_requested: self.shutdown_requested(),
         }
@@ -116,6 +116,14 @@ impl SharedRobotState {
         self.hw_debug_mode.store(in_debug_mode, Ordering::Relaxed);
     }
 
+    pub fn robot_tipped(&self) -> bool {
+        self.robot_tipped.load(Ordering::Relaxed)
+    }
+
+    pub fn set_robot_tipped(&self, tipped: bool) {
+        self.robot_tipped.store(tipped, Ordering::Relaxed);
+    }
+
     pub fn shutdown_requested(&self) -> bool {
         self.shutdown_requested.load(Ordering::Relaxed)
     }
@@ -123,6 +131,7 @@ impl SharedRobotState {
     pub fn flag_shutdown_requested(&self) {
         self.shutdown_requested.store(true, Ordering::Relaxed);
     }
+
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]

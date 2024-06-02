@@ -1,5 +1,21 @@
 use ateam_lib_stm32::audio::note::Beat;
 
+pub const TIPPED_WARNING_SONG: [Beat; 14] = [
+    Beat::Note { tone: 392, duration: 125_000 },
+    Beat::Rest(125_000),
+    Beat::Note { tone: 392, duration: 125_000 },
+    Beat::Rest(125_000),
+    Beat::Note { tone: 392, duration: 125_000 },
+    Beat::Rest(125_000),
+    Beat::Note { tone: 392, duration: 125_000 },
+    Beat::Rest(125_000),
+    Beat::Note { tone: 392, duration: 125_000 },
+    Beat::Rest(125_000),
+    Beat::Note { tone: 392, duration: 125_000 },
+    Beat::Rest(125_000),
+    Beat::Note { tone: 392, duration: 125_000 },
+    Beat::Rest(125_000),
+];
 
 pub const TEST_SONG: [Beat; 17] = [
     Beat::Note { tone: 392, duration: 250_000 },

@@ -102,6 +102,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p);
 
     create_imu_task!(main_spawner,
+        robot_state,
         imu_gyro_data_publisher, imu_accel_data_publisher,
         p);
 

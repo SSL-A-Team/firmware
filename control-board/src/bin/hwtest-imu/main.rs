@@ -8,11 +8,14 @@ use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{create_imu_task, get_system_config, pins::{AccelDataPubSub, GyroDataPubSub}};
+use ateam_control_board::{create_audio_task, create_imu_task, create_io_task, create_shutdown_task, get_system_config, pins::{AccelDataPubSub, GyroDataPubSub}, robot_state::SharedRobotState};
 
 use embassy_time::Timer;
 // provide embedded panic probe
 use panic_probe as _;
+use static_cell::ConstStaticCell;
+
+static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
 
 static GYRO_DATA_CHANNEL: GyroDataPubSub = PubSubChannel::new();
 static ACCEL_DATA_CHANNEL: AccelDataPubSub = PubSubChannel::new();
@@ -32,6 +35,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     defmt::info!("embassy HAL configured.");
 
+    let robot_state = ROBOT_STATE.take();
+
     ////////////////////////
     //  setup task pools  //
     ////////////////////////
@@ -50,7 +55,16 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  start tasks  //
     ///////////////////
 
-    create_imu_task!(main_spawner, imu_gyro_data_publisher, imu_accel_data_publisher, p);
+    create_io_task!(main_spawner, robot_state, p);
+
+    create_shutdown_task!(main_spawner, robot_state, p);
+
+    create_audio_task!(main_spawner, robot_state, p);
+
+    create_imu_task!(main_spawner,
+        robot_state,
+        imu_gyro_data_publisher, imu_accel_data_publisher,
+        p);
 
     loop {
         match select::select3(imu_gyro_data_subscriber.next_message(), imu_accel_data_subscriber.next_message(), Timer::after_millis(1000)).await {

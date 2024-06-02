@@ -13,11 +13,13 @@ use static_cell::ConstStaticCell;
 use ateam_lib_stm32::drivers::imu::bmi323::{self, *};
 
 use crate::pins::*;
+use crate::robot_state::SharedRobotState;
 
 #[macro_export]
 macro_rules! create_imu_task {
-    ($main_spawner:ident, $imu_gyro_data_publisher:ident, $imu_accel_data_publisher:ident, $p:ident) => {
+    ($main_spawner:ident, $robot_state:ident, $imu_gyro_data_publisher:ident, $imu_accel_data_publisher:ident, $p:ident) => {
         ateam_control_board::tasks::imu_task::start_imu_task(&$main_spawner,
+            $robot_state,
             $imu_gyro_data_publisher, $imu_accel_data_publisher,
             $p.SPI1, $p.PA5, $p.PA7, $p.PA6,
             $p.DMA2_CH7, $p.DMA2_CH6,
@@ -32,6 +34,7 @@ static IMU_BUFFER_CELL: ConstStaticCell<[u8; bmi323::SPI_MIN_BUF_LEN]> = ConstSt
 
 #[embassy_executor::task]
 async fn imu_task_entry(
+        robot_state: &'static SharedRobotState,
         accel_pub: AccelDataPublisher,
         gyro_pub: GyroDataPublisher,
         mut imu: Bmi323<'static, 'static, ImuSpi>,
@@ -94,6 +97,13 @@ async fn imu_task_entry(
                     // TODO: don't use raw data, impl conversion
                     let accel_data = imu.accel_get_raw_data().await;
                     accel_pub.publish_immediate(Vector3::new(accel_data[0] as f32, accel_data[1] as f32, accel_data[2] as f32));
+
+                    // TODO: magic number, fix after raw data conversion
+                    if accel_data[2] < 8000 {
+                        robot_state.set_robot_tipped(true);
+                    } else {
+                        robot_state.set_robot_tipped(false);
+                    }
                 }
                 Either::Second(_) => {
                     defmt::warn!("imu interrupt based data acq timed out.");
@@ -109,6 +119,7 @@ async fn imu_task_entry(
 
 pub fn start_imu_task(
         imu_task_spawner: &Spawner,
+        robot_state: &'static SharedRobotState,
         gyro_data_publisher: GyroDataPublisher,
         accel_data_publisher: AccelDataPublisher,
         peri: impl Peripheral<P = ImuSpi> + 'static,
@@ -134,6 +145,6 @@ pub fn start_imu_task(
     let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::None);
     let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::None);
 
-    imu_task_spawner.spawn(imu_task_entry(accel_data_publisher, gyro_data_publisher, imu, accel_int, gyro_int)).unwrap();
+    imu_task_spawner.spawn(imu_task_entry(robot_state, accel_data_publisher, gyro_data_publisher, imu, accel_int, gyro_int)).unwrap();
 }
 
