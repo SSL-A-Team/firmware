@@ -7,6 +7,7 @@ use embassy_stm32::spi::{Config, Spi};
 use embassy_stm32::time::mhz;
 use embassy_time::{Duration, Timer};
 
+use smart_leds::colors::{BLACK, WHITE};
 use smart_leds::RGB8;
 use static_cell::ConstStaticCell;
 
@@ -19,6 +20,7 @@ use crate::drivers::shell_indicator::ShellIndicator;
 use crate::robot_state::SharedRobotState;
 
 use crate::pins::*;
+use crate::tasks::shutdown_task::HARD_SHUTDOWN_TIME_MS;
 
 // #[link_section = ".sram4"]
 // static DOTSTAR_SPI_BUFFER_CELL: ConstStaticCell<[u8; 16]> = ConstStaticCell::new([0; 16]);
@@ -51,6 +53,10 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
     mut dotstars: Apa102<'static, 'static, DotstarSpi, 2>,
 ) {
     defmt::info!("user io task initialized");
+
+    let shutdown_anim = anim::Animation::Lerp(Lerp::new(WHITE, BLACK, Duration::from_millis(HARD_SHUTDOWN_TIME_MS), AnimRepeatMode::None));
+    let mut sd_anim_seq = [shutdown_anim];
+    let mut shutdown_anim = CompositeAnimation::new(&mut sd_anim_seq, AnimRepeatMode::None);
 
     let anim0 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 255, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
     let anim1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 0, g: 255, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
@@ -85,6 +91,7 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
     // blink_anim.start_animation();
     // dotstars.set_animation(blink_anim, 1);
 
+    let mut prev_robot_state = robot_state.get_state();
     loop {
         let cur_robot_state = robot_state.get_state();
 
@@ -128,6 +135,11 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
         } else {
             debug_led0.set_low();
         }
+
+        // if !prev_robot_state.shutdown_requested && cur_robot_state.shutdown_requested {
+        //     shutdown_anim.start_animation();
+        //     // dotstars_anim.set_animation(&shutdown_anim, 0);
+        // } 
 
         // let color = color_lerp.update();
         // dotstars.set_color(color, 0);
