@@ -1,10 +1,11 @@
+use ateam_common_packets::{bindings_radio::BasicTelemetry, radio::TelemetryPacket};
 use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::Uart;
 use embassy_time::Timer;
 use nalgebra::{Vector3, Vector4};
 
-use crate::{include_external_cpp_bin, pins::*, robot_state::{self, SharedRobotState}, stm32_interface::{self, Stm32Interface}, stspin_motor::{DribblerMotor, WheelMotor}, SystemIrqs};
+use crate::{include_external_cpp_bin, motion::{robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, pins::*, robot_state::{self, SharedRobotState}, stm32_interface::{self, Stm32Interface}, stspin_motor::{DribblerMotor, WheelMotor}, SystemIrqs};
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
@@ -44,12 +45,20 @@ make_uart_queue_pair!(DRIB,
     MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
     #[link_section = ".axisram.buffers"]);
 
+const TICKS_WITHOUT_PACKET_STOP: usize = 10;
+const BATTERY_MIN_VOLTAGE: f32 = 18.0;
+
+const WHEEL_ANGLES_DEG: Vector4<f32> = Vector4::new(30.0, 150.0, 225.0, 315.0);
+const WHEEL_RADIUS_M: f32 = 0.049 / 2.0; // wheel dia 49mm
+const WHEEL_DISTANCE_TO_ROBOT_CENTER_M: f32 = 0.085; // 85mm from center of wheel body to center of robot
+
 
 #[embassy_executor::task]
 async fn control_task_entry(
     robot_state: &'static SharedRobotState,
     command_subscriber: CommandsSubscriber,
     telemetry_publisher: TelemetryPublisher,
+    gyro_subscriber: GyroDataSubscriber,
     mut motor_fl: WheelMotor<'static, MotorFLUart, MotorFLDmaRx, MotorFLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
     mut motor_bl: WheelMotor<'static, MotorBLUart, MotorBLDmaRx, MotorBLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
     mut motor_br: WheelMotor<'static, MotorBRUart, MotorBRDmaRx, MotorBRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
@@ -126,99 +135,151 @@ async fn control_task_entry(
 
     Timer::after_millis(10).await;
 
-    // loop {
-    //     motor_fl.process_packets();
-    //     motor_bl.process_packets();
-    //     motor_br.process_packets();
-    //     motor_fr.process_packets();
-    //     motor_drib.process_packets();
+    let robot_model_constants: RobotConstants = RobotConstants {
+        wheel_angles_rad: Vector4::new(
+            WHEEL_ANGLES_DEG[0].to_radians(),
+            WHEEL_ANGLES_DEG[1].to_radians(),
+            WHEEL_ANGLES_DEG[2].to_radians(),
+            WHEEL_ANGLES_DEG[3].to_radians(),
+        ),
+        wheel_radius_m: Vector4::new(
+            WHEEL_RADIUS_M,
+            WHEEL_RADIUS_M,
+            WHEEL_RADIUS_M,
+            WHEEL_RADIUS_M,
+        ),
+        wheel_dist_to_cent_m: Vector4::new(
+            WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+            WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+            WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+            WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+        ),
+    };
 
-    //     motor_fl.log_reset("FL");
-    //     motor_bl.log_reset("BL");
-    //     motor_br.log_reset("BR");
-    //     motor_fr.log_reset("FR");
-    //     motor_drib.log_reset("DRIB");
+    let robot_model: RobotModel = RobotModel::new(robot_model_constants);
+    let robot_controller = BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
 
-    //     if motor_drib.ball_detected() {
-    //         defmt::info!("ball detected");
-    //     }
+    let mut cmd_vel = Vector3::new(0.0, 0.0, 0.0);
+    let mut drib_vel = 0.0;
+    let mut ticks_since_packet = 0;
+    loop {
+        motor_fl.process_packets();
+        motor_bl.process_packets();
+        motor_br.process_packets();
+        motor_fr.process_packets();
+        motor_drib.process_packets();
 
-    //     if let Some(latest_control) = &latest_control {
-    //         let cmd_vel = Vector3::new(
-    //             latest_control.vel_x_linear,
-    //             latest_control.vel_y_linear,
-    //             latest_control.vel_z_angular,
-    //         );
-    //         self.cmd_vel = cmd_vel;
-    //         self.drib_vel = latest_control.dribbler_speed;
-    //         self.ticks_since_packet = 0;
-    //     } else {
-    //         self.ticks_since_packet += 1;
-    //         if self.ticks_since_packet >= TICKS_WITHOUT_PACKET_STOP {
-    //             self.cmd_vel = Vector3::new(0., 0., 0.);
-    //             self.ticks_since_packet = 0;
-    //         }
-    //     }
+        motor_fl.log_reset("FL");
+        motor_bl.log_reset("BL");
+        motor_br.log_reset("BR");
+        motor_fr.log_reset("FR");
+        motor_drib.log_reset("DRIB");
 
-    //     // now we have setpoint r(t) in self.cmd_vel
-    //     let battery_v = self.battery_sub.next_message_pure().await as f32;
-    //     let controls_enabled = true;
-    //     let gyro_rads = (self.gyro_sub.next_message_pure().await as f32) * 2.0 * core::f32::consts::PI / 360.0;
-    //     let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
-    //         if controls_enabled 
-    //         {
-    //             // TODO check order
-    //             let wheel_vels = Vector4::new(
-    //                 motor_fr.read_rads(),
-    //                 motor_fl.read_rads(),
-    //                 motor_bl.read_rads(),
-    //                 motor_br.read_rads()
-    //             );
+        if motor_drib.ball_detected() {
+            defmt::info!("ball detected");
+        }
 
-    //             // torque values are computed on the spin but put in the current variable
-    //             // TODO update this when packet/var names are updated to match software
-    //             let wheel_torques = Vector4::new(
-    //                 self.front_right_motor.read_current(),
-    //                 self.front_left_motor.read_current(),
-    //                 self.back_left_motor.read_current(),
-    //                 self.back_right_motor.read_current()
-    //             );
+        if let Some(latest_packet) = command_subscriber.try_next_message_pure() {
+            match latest_packet {
+                ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
+                    let new_cmd_vel = Vector3::new(
+                        latest_control.vel_x_linear,
+                        latest_control.vel_y_linear,
+                        latest_control.vel_z_angular,
+                    );
+                    cmd_vel = new_cmd_vel;
+                    drib_vel = latest_control.dribbler_speed;
+                    ticks_since_packet = 0;
+                },
+                ateam_common_packets::radio::DataPacket::ParameterCommand(latest_param) => {
+                    defmt::warn!("param updates aren't supported yet");
+                },
+            }
+        } else {
+            ticks_since_packet += 1;
+            if ticks_since_packet >= TICKS_WITHOUT_PACKET_STOP {
+                cmd_vel = Vector3::new(0., 0., 0.);
+                // ticks_since_packet = 0;
+            }
+        }
+
+        // now we have setpoint r(t) in self.cmd_vel
+        let battery_v = battery_sub.next_message_pure().await as f32;
+        let controls_enabled = true;
+        let gyro_rads = (gyro_subscriber.next_message_pure().await[2] as f32) * 2.0 * core::f32::consts::PI / 360.0;
+        let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
+            if controls_enabled 
+            {
+                // TODO check order
+                let wheel_vels = Vector4::new(
+                    motor_fr.read_rads(),
+                    motor_fl.read_rads(),
+                    motor_bl.read_rads(),
+                    motor_br.read_rads()
+                );
+
+                // torque values are computed on the spin but put in the current variable
+                // TODO update this when packet/var names are updated to match software
+                let wheel_torques = Vector4::new(
+                    motor_fr.read_current(),
+                    motor_fl.read_current(),
+                    motor_bl.read_current(),
+                    motor_br.read_current()
+                );
             
-    //             // TODO read from channel or something
+                // TODO read from channel or something
 
-    //             self.robot_controller.control_update(&self.cmd_vel, &wheel_vels, &wheel_torques, gyro_rads);
-            
-    //             self.robot_controller.get_wheel_velocities()
-    //         } 
-    //         else 
-    //         {
-    //             self.robot_model.robot_vel_to_wheel_vel(self.cmd_vel)
-    //         }
-    //     }
-    //     else
-    //     {
-    //         // Battery is too low, set velocity to zero
-    //         Vector4::new(
-    //             0.0,
-    //             0.0,
-    //             0.0,
-    //             0.0)
-    //     };
+                robot_controller.control_update(&cmd_vel, &wheel_vels, &wheel_torques, gyro_rads);
+                robot_controller.get_wheel_velocities()
+            } else {
+                robot_model.robot_vel_to_wheel_vel(cmd_vel)
+            }
+        } else {
+            // Battery is too low, set velocity to zero
+            Vector4::new(
+                0.0,
+                0.0,
+                0.0,
+                0.0)
+        };
 
-    //     self.front_right_motor.set_setpoint(wheel_vels[0]);
-    //     self.front_left_motor.set_setpoint(wheel_vels[1]);
-    //     self.back_left_motor.set_setpoint(wheel_vels[2]);
-    //     self.back_right_motor.set_setpoint(wheel_vels[3]);
+        motor_fr.set_setpoint(wheel_vels[0]);
+        motor_fl.set_setpoint(wheel_vels[1]);
+        motor_bl.set_setpoint(wheel_vels[2]);
+        motor_br.set_setpoint(wheel_vels[3]);
 
-    //     let drib_dc = -1.0 * self.drib_vel / 1000.0;
-    //     self.drib_motor.set_setpoint(drib_dc);
+        let drib_dc = -1.0 * drib_vel / 1000.0;
+        motor_drib.set_setpoint(drib_dc);
 
-    //     self.front_right_motor.send_motion_command();
-    //     self.front_left_motor.send_motion_command();
-    //     self.back_left_motor.send_motion_command();
-    //     self.back_right_motor.send_motion_command();
-    //     self.drib_motor.send_motion_command();
-    // }
+        motor_fr.send_motion_command();
+        motor_fl.send_motion_command();
+        motor_bl.send_motion_command();
+        motor_br.send_motion_command();
+        motor_drib.send_motion_command();
+
+
+        let basic_telem = TelemetryPacket::Basic(BasicTelemetry {
+            sequence_number: 0,
+            robot_revision_major: 0,
+            robot_revision_minor: 0,
+            battery_level: battery_v,
+            battery_temperature: 0.,
+            _bitfield_align_1: [],
+            _bitfield_1: BasicTelemetry::new_bitfield_1(
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ),
+            motor_0_temperature: 0.,
+            motor_1_temperature: 0.,
+            motor_2_temperature: 0.,
+            motor_3_temperature: 0.,
+            motor_4_temperature: 0.,
+            kicker_charge_level: 0.,
+        });
+        telemetry_publisher.publish_immediate(basic_telem);
+
+        let control_debug_telem = TelemetryPacket::Control(robot_controller.get_control_debug_telem());
+        telemetry_publisher.publish_immediate(control_debug_telem);
+    }
 
     loop {
         motor_fl.process_packets();
