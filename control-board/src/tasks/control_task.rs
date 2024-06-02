@@ -56,9 +56,9 @@ const WHEEL_DISTANCE_TO_ROBOT_CENTER_M: f32 = 0.085; // 85mm from center of whee
 #[embassy_executor::task]
 async fn control_task_entry(
     robot_state: &'static SharedRobotState,
-    command_subscriber: CommandsSubscriber,
+    mut command_subscriber: CommandsSubscriber,
     telemetry_publisher: TelemetryPublisher,
-    gyro_subscriber: GyroDataSubscriber,
+    mut gyro_subscriber: GyroDataSubscriber,
     mut motor_fl: WheelMotor<'static, MotorFLUart, MotorFLDmaRx, MotorFLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
     mut motor_bl: WheelMotor<'static, MotorBLUart, MotorBLDmaRx, MotorBLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
     mut motor_br: WheelMotor<'static, MotorBRUart, MotorBRDmaRx, MotorBRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
@@ -157,7 +157,7 @@ async fn control_task_entry(
     };
 
     let robot_model: RobotModel = RobotModel::new(robot_model_constants);
-    let robot_controller = BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
+    let mut robot_controller = BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
 
     let mut cmd_vel = Vector3::new(0.0, 0.0, 0.0);
     let mut drib_vel = 0.0;
@@ -204,7 +204,8 @@ async fn control_task_entry(
         }
 
         // now we have setpoint r(t) in self.cmd_vel
-        let battery_v = battery_sub.next_message_pure().await as f32;
+        // let battery_v = battery_sub.next_message_pure().await as f32;
+        let battery_v = 0.0;
         let controls_enabled = true;
         let gyro_rads = (gyro_subscriber.next_message_pure().await[2] as f32) * 2.0 * core::f32::consts::PI / 360.0;
         let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
@@ -300,6 +301,7 @@ pub async fn start_control_task(
     robot_state: &'static SharedRobotState,
     command_subscriber: CommandsSubscriber,
     telemetry_publisher: TelemetryPublisher,
+    gyro_subscriber: GyroDataSubscriber,
     motor_fl_uart: MotorFLUart, motor_fl_rx_pin: MotorFLUartRxPin, motor_fl_tx_pin: MotorFLUartTxPin, motor_fl_rx_dma: MotorFLDmaRx, motor_fl_tx_dma: MotorFLDmaTx, motor_fl_boot0_pin: MotorFLBootPin, motor_fl_nrst_pin: MotorFLResetPin,
     motor_bl_uart: MotorBLUart, motor_bl_rx_pin: MotorBLUartRxPin, motor_bl_tx_pin: MotorBLUartTxPin, motor_bl_rx_dma: MotorBLDmaRx, motor_bl_tx_dma: MotorBLDmaTx, motor_bl_boot0_pin: MotorBLBootPin, motor_bl_nrst_pin: MotorBLResetPin,
     motor_br_uart: MotorBRUart, motor_br_rx_pin: MotorBRUartRxPin, motor_br_tx_pin: MotorBRUartTxPin, motor_br_rx_dma: MotorBRDmaRx, motor_br_tx_dma: MotorBRDmaTx, motor_br_boot0_pin: MotorBRBootPin, motor_br_nrst_pin: MotorBRResetPin,
@@ -346,6 +348,6 @@ pub async fn start_control_task(
     let motor_drib = DribblerMotor::new_from_pins(&DRIB_RX_UART_QUEUE,   &DRIB_TX_UART_QUEUE,        motor_d_boot0_pin,  motor_d_nrst_pin,  DRIB_FW_IMG, 1.0);
 
     control_task_spawner.spawn(control_task_entry(robot_state,
-        command_subscriber, telemetry_publisher,
+        command_subscriber, telemetry_publisher, gyro_subscriber,
     motor_fl, motor_bl, motor_br, motor_fr, motor_drib)).unwrap();
 }
