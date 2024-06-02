@@ -102,6 +102,11 @@ test = false
 harness = false
 
 [[bin]]
+name = "hwtest-piezo"
+test = false
+harness = false
+
+[[bin]]
 name = "hwtest-radio"
 test = false
 harness = false
