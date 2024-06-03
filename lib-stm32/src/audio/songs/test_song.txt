@@ -1,0 +1,7 @@
+# First line is tempo
+112
+# Any of the following lines are notes
+# Use numbers to define the number of beats per note
+0.25g4 0.25a4 0.25c4 0.25a4 0.75e5 0.75e5 1.5d5
+0.25g4 0.25a4 0.25b4 0.25g4 0.75d5 0.75d5 1.5c5
+0.25g4 0.25a4 0.25c4 0.25a4 1c5 0.5d5 1.5b4 1g4 0.5g4 1d5 2c5
