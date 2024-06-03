@@ -29,8 +29,12 @@ macro_rules! create_imu_task {
     };
 }
 
+// #[link_section = ".axisram.buffers"]
+// static IMU_BUFFER_CELL: ConstStaticCell<[u8; bmi323::SPI_MIN_BUF_LEN]> = ConstStaticCell::new([0; bmi323::SPI_MIN_BUF_LEN]);
+
 #[link_section = ".axisram.buffers"]
-static IMU_BUFFER_CELL: ConstStaticCell<[u8; bmi323::SPI_MIN_BUF_LEN]> = ConstStaticCell::new([0; bmi323::SPI_MIN_BUF_LEN]);
+static mut IMU_BUFFER_CELL: [u8; bmi323::SPI_MIN_BUF_LEN] = [0; bmi323::SPI_MIN_BUF_LEN];
+
 
 #[embassy_executor::task]
 async fn imu_task_entry(
@@ -136,7 +140,11 @@ pub fn start_imu_task(
         accel_int: impl Peripheral<P = <ImuSpiInt1Pin as embassy_stm32::gpio::Pin>::ExtiChannel> + 'static,
         gyro_int: impl Peripheral<P = <ImuSpiInt2Pin as embassy_stm32::gpio::Pin>::ExtiChannel> + 'static,
         _ext_imu_det_pin: ExtImuNDetPin) {
-    let imu_buf = IMU_BUFFER_CELL.take();    
+    defmt::debug!("starting imu task...");
+
+    // let imu_buf = IMU_BUFFER_CELL.take();
+
+    let imu_buf: &'static mut [u8; 14] = unsafe { &mut IMU_BUFFER_CELL };
 
     let imu = Bmi323::new_from_pins(peri, sck, mosi, miso, txdma, rxdma, bmi323_nss, imu_buf);
 

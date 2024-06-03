@@ -2,7 +2,7 @@ use ateam_common_packets::{bindings_radio::BasicTelemetry, radio::TelemetryPacke
 use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::Uart;
-use embassy_time::Timer;
+use embassy_time::{Duration, Ticker, Timer};
 use nalgebra::{Vector3, Vector4};
 
 use crate::{include_external_cpp_bin, motion::{robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, pins::*, robot_state::{self, SharedRobotState}, stm32_interface::{self, Stm32Interface}, stspin_motor::{DribblerMotor, WheelMotor}, SystemIrqs};
@@ -159,6 +159,8 @@ async fn control_task_entry(
     let robot_model: RobotModel = RobotModel::new(robot_model_constants);
     let mut robot_controller = BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
 
+    let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));
+
     let mut cmd_vel = Vector3::new(0.0, 0.0, 0.0);
     let mut drib_vel = 0.0;
     let mut ticks_since_packet = 0;
@@ -182,11 +184,15 @@ async fn control_task_entry(
         if let Some(latest_packet) = command_subscriber.try_next_message_pure() {
             match latest_packet {
                 ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
+
                     let new_cmd_vel = Vector3::new(
                         latest_control.vel_x_linear,
                         latest_control.vel_y_linear,
                         latest_control.vel_z_angular,
                     );
+
+                    defmt::info!("ControlTask - got c2 packet ({}, {}, {})", new_cmd_vel.x, new_cmd_vel.y, new_cmd_vel.z);
+
                     cmd_vel = new_cmd_vel;
                     drib_vel = latest_control.dribbler_speed;
                     ticks_since_packet = 0;
@@ -203,10 +209,13 @@ async fn control_task_entry(
             }
         }
 
+        defmt::info!("ControlTask - cmd_vel ({}, {}, {})", cmd_vel.x, cmd_vel.y, cmd_vel.z);
+
+
         // now we have setpoint r(t) in self.cmd_vel
         // let battery_v = battery_sub.next_message_pure().await as f32;
-        let battery_v = 0.0;
-        let controls_enabled = true;
+        let battery_v = 25.0;
+        let controls_enabled = false;
         let gyro_rads = (gyro_subscriber.next_message_pure().await[2] as f32) * 2.0 * core::f32::consts::PI / 360.0;
         let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
             if controls_enabled 
@@ -280,6 +289,8 @@ async fn control_task_entry(
 
         let control_debug_telem = TelemetryPacket::Control(robot_controller.get_control_debug_telem());
         telemetry_publisher.publish_immediate(control_debug_telem);
+
+        loop_rate_ticker.next().await;
     }
 
     loop {

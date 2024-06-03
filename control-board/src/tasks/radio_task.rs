@@ -1,5 +1,5 @@
 
-use ateam_common_packets::radio::TelemetryPacket;
+use ateam_common_packets::{bindings_radio::BasicTelemetry, radio::TelemetryPacket};
 use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn, uart::queue::{UartReadQueue, UartWriteQueue}};
 use credentials::WifiCredential;
 use embassy_executor::{SendSpawner, Spawner};
@@ -9,7 +9,7 @@ use embassy_stm32::{
     usart::{self, DataBits, Parity, StopBits, Uart}
 };
 use embassy_sync::pubsub::WaitResult;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Ticker, Timer};
 
 use crate::{drivers::radio_robot::{RobotRadio, TeamColor}, pins::*, robot_state::SharedRobotState, SystemIrqs};
 
@@ -28,6 +28,8 @@ macro_rules! create_radio_task {
             $p.PC13, $p.PE4).await; 
     };
 }
+
+pub const RADIO_LOOP_RATE_MS: u64 = 10;
 
 pub const RADIO_MAX_TX_PACKET_SIZE: usize = 256;
 pub const RADIO_TX_BUF_DEPTH: usize = 4;
@@ -75,6 +77,8 @@ pub struct RadioTask<
 
     connection_state: RadioConnectionState,
     wifi_credentials: &'static [WifiCredential],
+
+    last_basic_telemetry: BasicTelemetry,
 }
 
 impl<
@@ -105,7 +109,23 @@ impl<
             radio_ndet_input: radio_ndet_input,
             connection_state: RadioConnectionState::Unconnected,
             wifi_credentials: wifi_credentials,
-            // task: TaskStorage::new(),
+            last_basic_telemetry: BasicTelemetry {
+                sequence_number: 0,
+                robot_revision_major: 0,
+                robot_revision_minor: 0,
+                battery_level: 0.,
+                battery_temperature: 0.,
+                _bitfield_align_1: [],
+                _bitfield_1: BasicTelemetry::new_bitfield_1(
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ),
+                motor_0_temperature: 0.,
+                motor_1_temperature: 0.,
+                motor_2_temperature: 0.,
+                motor_3_temperature: 0.,
+                motor_4_temperature: 0.,
+                kicker_charge_level: 0.,
+            },
         }
     }
 
@@ -127,6 +147,8 @@ impl<
 
     async fn radio_task_entry(&mut self) {
         defmt::info!("radio task startup");
+
+        let mut radio_loop_rate_ticker = Ticker::every(Duration::from_millis(RADIO_LOOP_RATE_MS));
 
         // initialize a copy of the robot state so we can track updates
         let mut last_robot_state = self.shared_robot_state.get_state();
@@ -229,10 +251,12 @@ impl<
                     }
                 },
                 RadioConnectionState::Connected => {
-                    let _ = self.process_packet().await;
-                    // no delay to imediately process the next one
+                    let _ = self.process_packets2().await;
+                    // if we're stably connected, process packets at 100Hz
                 },
             }
+
+            radio_loop_rate_ticker.next().await;
         }
 
     }
@@ -307,7 +331,43 @@ impl<
         }
     }
 
-    async fn process_packet(&mut self) -> Result<(), ()> {
+    async fn process_packets2(&mut self) -> Result<(), ()> {
+        // read any packets
+        if let Ok(pkt) = self.radio.read_packet_nonblocking() {
+            if let Some(c2_pkt) = pkt {
+                self.command_publisher.publish_immediate(c2_pkt);
+            } 
+        } else {
+            defmt::warn!("RadioTask - error reading data packet");
+        }
+
+        if let Some(telemetry) = self.telemetry_subscriber.try_next_message_pure() {
+            match telemetry {
+                TelemetryPacket::Basic(basic) => {
+                    self.last_basic_telemetry = basic;
+                },
+                TelemetryPacket::Control(control) => {
+                    if self.radio.send_control_debug_telemetry(control).await.is_err() {
+                        defmt::warn!("RadioTask - failed to send control debug telemetry packet");
+                    }
+                },
+                TelemetryPacket::ParameterCommandResponse(pc_resp) => {
+                    if self.radio.send_parameter_response(pc_resp).await.is_err() {
+                        defmt::warn!("RadioTask - failed to send control parameter response packet");
+                    }
+                },
+            }
+        }
+
+        // always send the latest telemetry
+        if self.radio.send_telemetry(self.last_basic_telemetry).await.is_err() {
+            defmt::warn!("RadioTask - failed to send basic telem packet");
+        }
+
+        return Ok(())
+    }
+
+    async fn process_packets(&mut self) -> Result<(), ()> {
         match select(self.radio.read_packet(), self.telemetry_subscriber.next_message()).await {
             Either::First(res) => {
                 if let Ok(c2_pkt) = res {

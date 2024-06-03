@@ -1,4 +1,4 @@
-use ateam_lib_stm32::drivers::radio::odin_w26x::{PeerConnection, Radio, WifiAuth};
+use ateam_lib_stm32::drivers::radio::odin_w26x::{PeerConnection, OdinW262, WifiAuth};
 use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
 use ateam_common_packets::bindings_radio::{
     self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data, BasicTelemetry, ControlDebugTelemetry, ParameterCommand,
@@ -72,7 +72,7 @@ pub struct RobotRadio<
     const DEPTH_TX: usize,
     const DEPTH_RX: usize,
 > {
-    radio: Radio<
+    odin_driver: OdinW262<
         'a,
         UART,
         DmaTx,
@@ -103,10 +103,10 @@ impl<
         reset_pin: impl Pin,
     ) -> RobotRadio<'a, UART, DmaRx, DmaTx, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX> {
         let reset_pin = Output::new(reset_pin, Level::High, Speed::Medium);
-        let radio = Radio::new(read_queue, write_queue);
+        let radio = OdinW262::new(read_queue, write_queue);
 
         Self {
-            radio,
+            odin_driver: radio,
             reset_pin,
             peer: None,
         }
@@ -134,7 +134,7 @@ impl<
 
     pub async fn connect_uart(&mut self) -> Result<(), RobotRadioError> {
         // were about to reset the radio, so we also need to reset the uart queue config to match the startup config
-        if self.radio.update_host_uart_config(self.get_startup_uart_config()).await.is_err() {
+        if self.odin_driver.update_host_uart_config(self.get_startup_uart_config()).await.is_err() {
             defmt::debug!("failed to reset host uart to startup config.");
         }
 
@@ -144,19 +144,19 @@ impl<
         self.reset_pin.set_low();
 
         // wait until startup event is received
-        if self.radio.wait_startup().await.is_err() {
+        if self.odin_driver.wait_startup().await.is_err() {
             defmt::debug!("error processing radio wait startup command");
             return Err(RobotRadioError::ConnectUartBadStartup);
         }
         defmt::trace!("increasing link speed");
 
         let baudrate = 5_250_000;
-        if self.radio.set_echo(false).await.is_err() {
+        if self.odin_driver.set_echo(false).await.is_err() {
             defmt::debug!("error disabling echo on radio");
             return Err(RobotRadioError::ConnectUartBadEcho);
         }
         
-        if self.radio.config_uart(baudrate, false, 8, true).await.is_err() {
+        if self.odin_driver.config_uart(baudrate, false, 8, true).await.is_err() {
             defmt::debug!("error increasing radio baud rate.");
             return Err(RobotRadioError::ConnectUartBadRadioConfigUpdate);
         }
@@ -168,7 +168,7 @@ impl<
         radio_uart_config.stop_bits = StopBits::STOP1;
         radio_uart_config.data_bits = DataBits::DataBits9;
         radio_uart_config.parity = usart::Parity::ParityEven;
-        if self.radio.update_host_uart_config(radio_uart_config).await.is_err() {
+        if self.odin_driver.update_host_uart_config(radio_uart_config).await.is_err() {
             defmt::debug!("error increasing host baud rate.");
             return Err(RobotRadioError::ConnectUartBadHostConfigUpdate);
         }
@@ -179,11 +179,11 @@ impl<
         Timer::after(Duration::from_millis(50)).await;
 
         // Datasheet says wait at least 50ms after entering data mode
-        if let Ok(got_edm_startup) = self.radio.enter_edm().await {
+        if let Ok(got_edm_startup) = self.odin_driver.enter_edm().await {
             defmt::trace!("entered edm at high link speed");
 
             if ! got_edm_startup {
-                if self.radio.wait_edm_startup().await.is_err() {
+                if self.odin_driver.wait_edm_startup().await.is_err() {
                     defmt::debug!("error waiting for EDM startup after uart baudrate increase");
                     return Err(RobotRadioError::ConnectUartNoEdmStartup);
                 } 
@@ -204,7 +204,7 @@ impl<
         let mut had_error = false;
         if let Some(peer) = self.peer.take() {
             defmt::debug!("closing peer..");
-            if self.radio.close_peer(peer.peer_id).await.is_err() {
+            if self.odin_driver.close_peer(peer.peer_id).await.is_err() {
                 defmt::warn!("failed to close peer on network dc");
                 had_error = true;
             } else {
@@ -213,7 +213,7 @@ impl<
         }
 
         defmt::debug!("closing wifi.");
-        if self.radio.disconnect_wifi(1).await.is_err() {
+        if self.odin_driver.disconnect_wifi(1).await.is_err() {
             defmt::warn!("failed to disconnect network.");
             had_error = true;
         } else {
@@ -236,7 +236,7 @@ impl<
         core::write!(&mut s, "A-Team Robot #{:02X} ({:04X})", robot_number, uid_u16).unwrap();
         // let mut s = String::<16>::new();
         // core::write!(&mut s, "A-Team Robot {:02X}", robot_number).unwrap();
-        if self.radio.set_host_name(s.as_str()).await.is_err() {
+        if self.odin_driver.set_host_name(s.as_str()).await.is_err() {
             defmt::trace!("could not set radio host name");
             return Err(RobotRadioError::ConnectWifiBadHostName);
         }
@@ -246,13 +246,13 @@ impl<
         let wifi_pass = WifiAuth::WPA {
             passphrase: wifi_credential.get_password(),
         };
-        if self.radio.config_wifi(1, wifi_ssid, wifi_pass).await.is_err() {
+        if self.odin_driver.config_wifi(1, wifi_ssid, wifi_pass).await.is_err() {
             defmt::trace!("could not configure wifi profile");
             return Err(RobotRadioError::ConnectWifiBadConfig);
         }
 
         // connect to config slot 1
-        if self.radio.connect_wifi(1).await.is_err() {
+        if self.odin_driver.connect_wifi(1).await.is_err() {
             defmt::trace!("could not connect to wifi");
 
             // can never configure a profile that "active" even when unconnected
@@ -268,7 +268,7 @@ impl<
     }
 
     pub async fn open_multicast(&mut self) -> Result<(), RobotRadioError> {
-        let peer = self.radio.connect_peer(formatcp!(
+        let peer = self.odin_driver.connect_peer(formatcp!(
                 "udp://{MULTICAST_IP}:{MULTICAST_PORT}/?flags=1&local_port={LOCAL_PORT}"
             ))
             .await;
@@ -294,14 +294,15 @@ impl<
             port
         )
         .unwrap();
-        let peer = self.radio.connect_peer(s.as_str()).await?;
+
+        let peer = self.odin_driver.connect_peer(s.as_str()).await?;
         self.peer = Some(peer);
         Ok(())
     }
 
     pub async fn close_peer(&mut self) -> Result<(), ()> {
         if let Some(peer) = &self.peer {
-            self.radio.close_peer(peer.peer_id).await?;
+            self.odin_driver.close_peer(peer.peer_id).await?;
             self.peer = None;
             Ok(())
         } else {
@@ -311,7 +312,7 @@ impl<
 
     pub async fn send_data(&self, data: &[u8]) -> Result<(), ()> {
         if let Some(peer) = &self.peer {
-            self.radio.send_data(peer.channel_id, data).await
+            self.odin_driver.send_data(peer.channel_id, data).await
         } else {
             Err(())
         }
@@ -322,7 +323,29 @@ impl<
         FN: FnOnce(&[u8]) -> RET,
     {
         if self.peer.is_some() {
-            self.radio.read_data(fn_read).await
+            self.odin_driver.read_data(fn_read).await
+        } else {
+            Err(())
+        }
+    }
+
+    fn read_data_nonblocking<RET, FN>(&'a self, fn_read: FN) -> Result<Option<RET>, ()>
+    where
+        FN: FnOnce(&[u8]) -> RET,
+    {
+        if self.peer.is_some() {
+            if self.odin_driver.can_read_data() {
+                match self.odin_driver.try_read_data(fn_read) {
+                    Ok(ret) => {
+                        Ok(Some(ret))
+                    },
+                    Err(_) => {
+                        Err(())
+                    },
+                }
+            } else {
+                Ok(None)
+            }
         } else {
             Err(())
         }
@@ -496,39 +519,75 @@ impl<
         }
     }
 
-    pub async fn read_packet(&self) -> Result<DataPacket, ()> {
-        self.read_data(|data| {
-            const CONTROL_PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
-                + size_of::<BasicControl>();
-            const PARAMERTER_PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
-                + size_of::<ParameterCommand>();
+    pub fn parse_data_packet(&self, data: &[u8]) -> Result<DataPacket, ()> {
+        const CONTROL_PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+            + size_of::<BasicControl>();
+        const PARAMERTER_PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+            + size_of::<ParameterCommand>();
 
-            if data.len() == CONTROL_PACKET_SIZE {
-                let mut data_copy = [0u8; size_of::<RadioPacket>()];
-                data_copy[0..CONTROL_PACKET_SIZE].clone_from_slice(&data[0..CONTROL_PACKET_SIZE]);
-    
-                let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
-    
-                if packet.command_code != CommandCode::CC_CONTROL {
-                    return Err(());
-                }
-    
-                Ok(unsafe { DataPacket::BasicControl(packet.data.control) })
-            } else if data.len() == PARAMERTER_PACKET_SIZE {
-                let mut data_copy = [0u8; size_of::<RadioPacket>()];
-                data_copy[0..PARAMERTER_PACKET_SIZE].clone_from_slice(&data[0..PARAMERTER_PACKET_SIZE]);
-    
-                let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
-    
-                if packet.command_code != CommandCode::CC_ROBOT_PARAMETER_COMMAND {
-                    return Err(());
-                }
-    
-                Ok(unsafe { DataPacket::ParameterCommand(packet.data.robot_parameter_command) })
-            } else {
+        if data.len() == CONTROL_PACKET_SIZE {
+            let mut data_copy = [0u8; size_of::<RadioPacket>()];
+            data_copy[0..CONTROL_PACKET_SIZE].clone_from_slice(&data[0..CONTROL_PACKET_SIZE]);
+
+            let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
+
+            if packet.command_code != CommandCode::CC_CONTROL {
                 return Err(());
             }
+
+            Ok(unsafe { DataPacket::BasicControl(packet.data.control) })
+        } else if data.len() == PARAMERTER_PACKET_SIZE {
+            let mut data_copy = [0u8; size_of::<RadioPacket>()];
+            data_copy[0..PARAMERTER_PACKET_SIZE].clone_from_slice(&data[0..PARAMERTER_PACKET_SIZE]);
+
+            let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
+
+            if packet.command_code != CommandCode::CC_ROBOT_PARAMETER_COMMAND {
+                return Err(());
+            }
+
+            Ok(unsafe { DataPacket::ParameterCommand(packet.data.robot_parameter_command) })
+        } else {
+            return Err(());
+        }
+    }
+
+    pub async fn read_packet(&self) -> Result<DataPacket, ()> {
+        self.read_data(|data| {
+            self.parse_data_packet(data)
         })
         .await?
+    }
+
+    pub fn read_packet_nonblocking(&self) -> Result<Option<DataPacket>, ()> {
+        let res = self.read_data_nonblocking(|data| {
+            self.parse_data_packet(data)
+        });
+
+        match res {
+            Ok(res) => {
+                match res {
+                    Some(pkt) => {
+                        match pkt {
+                            Ok(pkt) => {
+                                return Ok(Some(pkt));
+                            },
+                            Err(_) => {
+                                // we got data that was a valid EDM DataPacket, but couldn't parse it
+                                // into any known A-Team packet format
+                                return Err(());
+                            },
+                        }
+                    },
+                    None => {
+                        return Ok(None)
+                    },
+                }
+            },
+            Err(_) => {
+                // read_data_nonblocking failed because the radio was in an invalid state
+                return Err(())
+            },
+        }
     }
 }

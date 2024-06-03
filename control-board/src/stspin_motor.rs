@@ -524,9 +524,9 @@ impl<
                 if mrp.type_ == MRP_MOTION {
                     self.current_state = mrp.data.motion;
 
-                    if mrp.data.motion.master_error() != 0 {
-                        error!("drib error: {:?}", &mrp.data.motion._bitfield_1.get(0, 32));
-                    }
+                    // if mrp.data.motion.master_error() != 0 {
+                    //     error!("drib error: {:?}", &mrp.data.motion._bitfield_1.get(0, 32));
+                    // }
                  
                     // // // info!("{:?}", defmt::Debug2Format(&mrp.data.motion));
                     // // info!("\n");

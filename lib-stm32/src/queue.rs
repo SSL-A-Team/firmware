@@ -108,6 +108,10 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
         }
     }
 
+    pub fn can_dequeue(&self) -> bool {
+        !self.read_in_progress.load(Ordering::Relaxed) && self.size.load(Ordering::Relaxed) > 0
+    }
+
     pub fn try_dequeue(&self) -> Result<DequeueRef<LENGTH, DEPTH>, Error> {
         critical_section::with(|_| {
             if self.read_in_progress.load(Ordering::SeqCst) {

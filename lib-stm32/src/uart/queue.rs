@@ -201,14 +201,14 @@ impl<
                     Either::First(len) => {
                         if let Ok(len) = len {
                             if len == 0 {
-                                defmt::debug!("uart zero");
+                                // defmt::debug!("uart zero");
                                 buf.cancel();
                             } else {
                                 *buf.len() = len;
                             }
                         } else {
                             // Framing and Parity Error occur here
-                            defmt::warn!("{}", len);
+                            // defmt::warn!("{}", len);
                             buf.cancel();
                         }
                     },
@@ -249,6 +249,10 @@ impl<
         uart_config_signal_pubsub: &'static UartQueueSyncPubSub
     ) -> SpawnToken<impl Sized> {
         self.task.spawn(|| self.read_task(&self.queue_rx, rx, uart_config_signal_pubsub.subscriber().unwrap()))
+    }
+
+    pub fn can_dequque(&self) -> bool {
+        self.queue_rx.can_dequeue()
     }
 
     pub fn try_dequeue(&self) -> Result<DequeueRef<LENGTH, DEPTH>, Error> {

@@ -9,7 +9,7 @@ use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{create_imu_task, create_io_task, create_radio_task, get_system_config, pins::{AccelDataPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::control_task::start_control_task};
+use ateam_control_board::{create_imu_task, create_io_task, create_radio_task, create_shutdown_task, get_system_config, pins::{AccelDataPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::control_task::start_control_task};
 
 
 // load credentials from correct crate
@@ -30,11 +30,17 @@ static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
 static GYRO_DATA_CHANNEL: GyroDataPubSub = PubSubChannel::new();
 static ACCEL_DATA_CHANNEL: AccelDataPubSub = PubSubChannel::new();
 
+static RADIO_UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
 #[interrupt]
 unsafe fn CEC() {
     UART_QUEUE_EXECUTOR.on_interrupt();
+}
+
+#[interrupt]
+unsafe fn CORDIC() {
+    RADIO_UART_QUEUE_EXECUTOR.on_interrupt();
 }
 
 #[embassy_executor::main]
@@ -51,9 +57,12 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  setup task pools  //
     ////////////////////////
 
+    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CORDIC, embassy_stm32::interrupt::Priority::P6);
+    let radio_uart_queue_spawner = RADIO_UART_QUEUE_EXECUTOR.start(Interrupt::CORDIC);
+
     // uart queue executor should be highest priority
     // NOTE: maybe this should be all DMA tasks? No computation tasks here
-    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CEC, embassy_stm32::interrupt::Priority::P6);
+    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CEC, embassy_stm32::interrupt::Priority::P7);
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(Interrupt::CEC);
 
     //////////////////////////////////////
@@ -93,14 +102,18 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //     Timer::after_millis(1000).await;
     // }
 
-    create_radio_task!(main_spawner, uart_queue_spawner,
+    create_io_task!(main_spawner,
+        robot_state,
+        p);
+
+    create_shutdown_task!(main_spawner,
+        robot_state,
+        p);
+
+    create_radio_task!(main_spawner, radio_uart_queue_spawner,
         robot_state,
         radio_command_publisher, radio_telemetry_subscriber,
         wifi_credentials,
-        p);
-            
-    create_io_task!(main_spawner,
-        robot_state,
         p);
 
     create_imu_task!(main_spawner,

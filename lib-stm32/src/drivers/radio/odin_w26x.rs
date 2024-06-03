@@ -4,6 +4,7 @@ use embassy_stm32::usart;
 use embassy_time::Timer;
 use heapless::String;
 
+use crate::queue;
 use crate::uart::queue::{UartReadQueue, UartWriteQueue};
 
 use super::at_protocol::{ATEvent, ATResponse, WifiLinkDisconnectedReason};
@@ -43,7 +44,7 @@ pub struct PeerConnection {
     pub channel_id: u8,
 }
 
-pub struct Radio<
+pub struct OdinW262<
     'a,
     UART: usart::BasicInstance,
     TxDma: usart::TxDma<UART>,
@@ -67,7 +68,7 @@ impl<
         const LEN_RX: usize,
         const DEPTH_TX: usize,
         const DEPTH_RX: usize,
-    > Radio<'a, UART, TxDma, RxDma, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>
+    > OdinW262<'a, UART, TxDma, RxDma, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>
 {
     pub fn new(
         reader: &'a UartReadQueue<UART, RxDma, LEN_RX, DEPTH_RX>,
@@ -330,9 +331,10 @@ impl<
         while peer_id.is_none() || !peer_connected_ip || channel_ret.is_none() {
             self.reader
                 .dequeue(|buf| {
+                    // defmt::trace!("connect peer buf {}", buf);
                     let pkt = self.to_packet(buf);
                     if pkt.is_err() {
-                        // defmt::error!("got undecodable pkt {}", buf);
+                        defmt::error!("got undecodable pkt {}", buf);
                     }
 
                     match pkt? {
@@ -449,6 +451,41 @@ impl<
                     Err(())
                 }
             }).await
+    }
+
+    pub fn can_read_data(&'a self) -> bool {
+        self.reader.can_dequque()
+    }
+
+    pub fn try_read_data<RET, FN>(&'a self, fn_read: FN) -> Result<RET, ()>
+    where FN: FnOnce(&[u8]) -> RET,
+    {
+        match self.reader.try_dequeue() {
+            Ok(buf) => {
+                match self.to_packet(buf.data()) {
+                    Ok(pkt) => {
+                        if let EdmPacket::DataEvent { channel: _ , data } = pkt {
+                            return Ok(fn_read(data))
+                        } else {
+                            return Err(());
+                        }
+                    },
+                    Err(_) => {
+                        return Err(());
+                    },
+                }
+                // we read something
+
+            },
+            Err(queue::Error::QueueFullEmpty) => {
+                // nothing to read
+                return Err(());
+            }
+            Err(queue::Error::InProgress) => {
+                // you did something illegal
+                return Err(());
+            },
+        }
     }
 
     pub async fn send_command(&self, cmd: &str) -> Result<(), ()> {
