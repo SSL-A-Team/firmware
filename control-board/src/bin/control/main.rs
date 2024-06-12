@@ -9,7 +9,7 @@ use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{create_imu_task, create_io_task, create_radio_task, create_shutdown_task, get_system_config, pins::{AccelDataPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::control_task::start_control_task};
+use ateam_control_board::{create_imu_task, create_io_task, create_radio_task, create_shutdown_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::control_task::start_control_task};
 
 
 // load credentials from correct crate
@@ -29,6 +29,7 @@ static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
 static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
 static GYRO_DATA_CHANNEL: GyroDataPubSub = PubSubChannel::new();
 static ACCEL_DATA_CHANNEL: AccelDataPubSub = PubSubChannel::new();
+static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
 
 static RADIO_UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
@@ -77,6 +78,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
     let radio_telemetry_subscriber = RADIO_TELEMETRY_CHANNEL.subscriber().unwrap();
 
+    // Battery Channel
+    let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
+    let mut battery_volt_subscriber = BATTERY_VOLT_CHANNEL.subscriber().unwrap();
+
     // TODO imu channel
     let imu_gyro_data_publisher = GYRO_DATA_CHANNEL.publisher().unwrap();
     let imu_accel_data_publisher = ACCEL_DATA_CHANNEL.publisher().unwrap();
@@ -104,6 +109,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     create_io_task!(main_spawner,
         robot_state,
+        battery_volt_publisher,
         p);
 
     create_shutdown_task!(main_spawner,
@@ -132,6 +138,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p.UART5, p.PB12, p.PB13, p.DMA2_CH3, p.DMA2_CH2, p.PD13, p.PD12).await;
 
     loop {
+        defmt::info!("{}", battery_volt_subscriber.next_message_pure().await);
         Timer::after_millis(10).await;
     }
 }

@@ -7,16 +7,16 @@ use smart_leds::RGB8;
 
 use crate::anim::{AnimInterface, Blink, CompositeAnimation, Lerp};
 
-pub struct Apa102<'a, 'buf, SpiPeri: spi::Instance, const NUM_LEDS: usize>
+pub struct Apa102<'a, 'buf, const NUM_LEDS: usize>
 where [(); (NUM_LEDS * 4) + 8]: {
-    spi: spi::Spi<'a, SpiPeri, Async>,
+    spi: spi::Spi<'a, Async>,
     spi_buf: &'buf mut [u8; (NUM_LEDS * 4) + 8],
 }
 
-impl<'a, 'buf, SpiPeri: spi::Instance, const NUM_LEDS: usize> Apa102<'a, 'buf, SpiPeri, NUM_LEDS> 
+impl<'a, 'buf, const NUM_LEDS: usize> Apa102<'a, 'buf, NUM_LEDS> 
 where [(); (NUM_LEDS * 4) + 8]: {
     pub fn new(
-        spi: spi::Spi<'a, SpiPeri, Async>, 
+        spi: spi::Spi<'a, Async>, 
         spi_buf: &'buf mut [u8; (NUM_LEDS * 4) + 8],
     ) -> Self {
         // set start frame
@@ -37,7 +37,7 @@ where [(); (NUM_LEDS * 4) + 8]: {
         }
     }
 
-    pub fn new_from_pins(
+    pub fn new_from_pins<SpiPeri: spi::Instance>(
         peri: impl Peripheral<P = SpiPeri> + 'a,
         sck_pin: impl Peripheral<P = impl SckPin<SpiPeri>> + 'a,
         mosi_pin: impl Peripheral<P = impl MosiPin<SpiPeri>> + 'a,
@@ -114,15 +114,15 @@ where [(); (NUM_LEDS * 4) + 8]: {
     }
 }
 
-pub struct Apa102Anim<'a, 'buf, 'ca, SpiPeri: spi::Instance, const NUM_LEDS: usize> 
+pub struct Apa102Anim<'a, 'buf, 'ca, const NUM_LEDS: usize> 
 where [(); (NUM_LEDS * 4) + 8]: {
-    apa102_driver: Apa102<'a, 'buf, SpiPeri, NUM_LEDS>,
+    apa102_driver: Apa102<'a, 'buf, NUM_LEDS>,
     animation_buf: [Option<&'ca mut CompositeAnimation<'ca, u8, RGB8>>; NUM_LEDS],
 }
 
-impl<'a, 'buf, 'ca, SpiPeri: spi::Instance, const NUM_LEDS: usize> Apa102Anim<'a, 'buf, 'ca, SpiPeri, NUM_LEDS> 
+impl<'a, 'buf, 'ca, const NUM_LEDS: usize> Apa102Anim<'a, 'buf, 'ca, NUM_LEDS> 
 where [(); (NUM_LEDS * 4) + 8]: {
-    pub fn new(apa102: Apa102<'a, 'buf, SpiPeri, NUM_LEDS>) -> Self {
+    pub fn new(apa102: Apa102<'a, 'buf, NUM_LEDS>) -> Self {
         Apa102Anim {
             apa102_driver: apa102,
             animation_buf: [const { None }; NUM_LEDS],

@@ -68,8 +68,8 @@ pub type ImuSpiInt2Pin = PB2;
 pub type ImuSpiInt1Exti = EXTI1;
 pub type ImuSpiInt2Exti = EXTI2;
 pub type ExtImuNDetPin = PF11;
-pub type BatteryAdcPin = PF5;
-pub type BatteryAdc = ADC3;
+pub type BatteryAdcPin = PF14;
+pub type BatteryAdc = ADC2;
 
 //////////////
 //  Kicker  //

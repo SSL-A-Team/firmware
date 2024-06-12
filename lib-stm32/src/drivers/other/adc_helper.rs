@@ -2,13 +2,14 @@
 use embassy_stm32::adc::{self, Adc, AdcChannel, Resolution, SampleTime, VrefInt, VREF_DEFAULT_MV};
 use embassy_stm32::Peripheral;
 
-pub struct AdcHelper<'a, T: adc::Instance, Ch: AdcChannel<T>> {
+pub struct AdcHelper<'a, T: adc::Instance, Ch: AdcChannel<T>> where VrefInt: AdcChannel<T> {
     inst: Adc<'a, T>,
     channel_pin: Ch,
     channel_vref: VrefInt
 }
 
-impl<'a, T: adc::Instance, Ch: AdcChannel<T>> AdcHelper<'a, T, Ch> {
+impl<'a, T: adc::Instance, Ch: AdcChannel<T>> AdcHelper<'a, T, Ch> 
+where VrefInt: AdcChannel<T> {
     pub fn new(
         peri: impl Peripheral<P = T> + 'a,
         channel_pin: Ch,
