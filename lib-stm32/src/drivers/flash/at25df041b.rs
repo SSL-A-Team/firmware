@@ -4,18 +4,18 @@ use embassy_stm32::{
     spi::{self, Error}
 };
 
-pub struct AT25DF041B<'buf, T: spi::Instance, const CS_POL_N: bool> {
-    spi: spi::Spi<'static, T, Async>,
+pub struct AT25DF041B<'buf, const CS_POL_N: bool> {
+    spi: spi::Spi<'static, Async>,
     chip_select: Output<'static>,
     tx_buf: &'buf mut [u8; 256],
     rx_buf: &'buf mut [u8; 256],
 }
 
-impl<'buf, T: spi::Instance, const CS_POL_N: bool> AT25DF041B<'buf, T, CS_POL_N> {
-    pub fn new(spi: spi::Spi<'static, T, Async>,
+impl<'buf, const CS_POL_N: bool> AT25DF041B<'buf, CS_POL_N> {
+    pub fn new(spi: spi::Spi<'static, Async>,
         chip_select: impl Pin,
         tx_buf: &'buf mut [u8; 256],
-        rx_buf: &'buf mut [u8; 256]) -> AT25DF041B<'buf, T, CS_POL_N> {
+        rx_buf: &'buf mut [u8; 256]) -> AT25DF041B<'buf, CS_POL_N> {
         AT25DF041B {
             spi,
             chip_select: Output::new(chip_select, Level::High, Speed::High),

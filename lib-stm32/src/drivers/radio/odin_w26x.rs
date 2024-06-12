@@ -46,7 +46,7 @@ pub struct PeerConnection {
 
 pub struct OdinW262<
     'a,
-    UART: usart::BasicInstance,
+    UART: usart::Instance,
     TxDma: usart::TxDma<UART>,
     RxDma: usart::RxDma<UART>,
     const LEN_TX: usize,
@@ -61,7 +61,7 @@ pub struct OdinW262<
 
 impl<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         TxDma: usart::TxDma<UART>,
         RxDma: usart::RxDma<UART>,
         const LEN_TX: usize,

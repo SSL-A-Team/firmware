@@ -15,6 +15,8 @@ use static_cell::ConstStaticCell;
 use ateam_lib_stm32::drivers::switches::button::AdvExtiButton;
 use ateam_lib_stm32::drivers::switches::dip::DipSwitch;
 use ateam_lib_stm32::drivers::switches::rotary_encoder::RotaryEncoder;
+use ateam_lib_stm32::drivers::other::adc_helper::AdcHelper;
+use embassy_stm32::adc::{SampleTime, Resolution};
 
 use crate::drivers::shell_indicator::ShellIndicator;
 use crate::robot_state::SharedRobotState;
@@ -43,9 +45,12 @@ macro_rules! create_io_task {
 }
 
 #[embassy_executor::task]
-async fn user_io_task_entry(robot_state: &'static SharedRobotState,
+async fn user_io_task_entry(
+    robot_state: &'static SharedRobotState,
     mut usr_btn0: AdvExtiButton,
     mut usr_btn1: AdvExtiButton,
+    battery_volt_publisher: BatteryVoltPublisher,
+    mut battery_volt_adc: AdcHelper<'static, BatteryAdc, BatteryAdcPin>,
     dip_switch: DipSwitch<'static, 7>,
     robot_id_rotary: RotaryEncoder<'static, 4>,
     mut debug_led0: Output<'static>,
@@ -125,6 +130,8 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
             defmt::info!("updated robot network index {} -> {}", cur_robot_state.hw_wifi_network_index, robot_network_index);
         }
 
+        battery_volt_publisher.publish_immediate(battery_volt_adc.read_f32());
+
         // TODO read messages
 
         // update indicators
@@ -158,7 +165,9 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
 
 pub async fn start_io_task(spawner: &Spawner,
     robot_state: &'static SharedRobotState,
-    usr_btn0_pin: UsrBtn0Pin, usr_btn1_pin: UsrBtn1Pin, usr_btn0_exti: UsrBtn0Exti, usr_btn1_exti: UsrBtn1Exti,
+    battery_volt_publisher: BatteryVoltPublisher,
+    battery_adc: BatteryAdc, battery_adc_pin: BatteryAdcPin, 
+    _usr_btn0_pin: UsrBtn0Pin, _usr_btn1_pin: UsrBtn1Pin, _usr_btn0_exti: UsrBtn0Exti, _usr_btn1_exti: UsrBtn1Exti,
     usr_dip7_pin: UsrDip7IsBluePin, usr_dip6_pin: UsrDip6Pin, usr_dip5_pin: UsrDip5Pin, usr_dip4_pin: UsrDip4Pin,
     usr_dip3_pin: UsrDip3Pin, usr_dip2_pin: UsrDip2Pin, usr_dip1_pin: UsrDip1Pin,
     robot_id_selector3_pin: RobotIdSelector3Pin, robot_id_selector2_pin: RobotIdSelector2Pin,
@@ -193,6 +202,7 @@ pub async fn start_io_task(spawner: &Spawner,
 
     let robot_id_indicator = ShellIndicator::new(robot_id_indicator_fr, robot_id_indicator_fl, robot_id_indicator_br, robot_id_indicator_bl, Some(robot_id_indicator_isblue));
 
+    let battery_volt_adc = AdcHelper::new(battery_adc, battery_adc_pin, SampleTime::CYCLES810_5, Resolution::BITS8);
 
-    spawner.spawn(user_io_task_entry(robot_state, adv_usr_btn0, adv_usr_btn1, dip_switch, robot_id_rotary, debug_led0, robot_id_indicator, dotstars)).unwrap();
+    spawner.spawn(user_io_task_entry(robot_state, adv_usr_btn0, adv_usr_btn1, battery_volt_publisher, battery_volt_adc, dip_switch, robot_id_rotary, debug_led0, robot_id_indicator)).unwrap();
 }

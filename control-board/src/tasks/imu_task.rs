@@ -41,7 +41,7 @@ async fn imu_task_entry(
         robot_state: &'static SharedRobotState,
         accel_pub: AccelDataPublisher,
         gyro_pub: GyroDataPublisher,
-        mut imu: Bmi323<'static, 'static, ImuSpi>,
+        mut imu: Bmi323<'static, 'static>,
         mut _accel_int: ExtiInput<'static>,
         mut gyro_int: ExtiInput<'static>) {
 

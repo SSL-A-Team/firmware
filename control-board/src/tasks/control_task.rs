@@ -295,6 +295,10 @@ async fn control_task_entry(
 
     loop {
         motor_fl.process_packets();
+        motor_bl.process_packets();
+        motor_br.process_packets();
+        motor_fr.process_packets();
+
 
         let rads = motor_fl.read_rads();
         defmt::info!("read motor rads {}", rads);

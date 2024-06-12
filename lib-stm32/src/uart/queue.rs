@@ -110,7 +110,7 @@ pub enum UartTaskCommand {
 }
 
 pub struct UartReadQueue<
-    UART: usart::BasicInstance,
+    UART: usart::Instance,
     DMA: usart::RxDma<UART>,
     const LENGTH: usize,
     const DEPTH: usize,
@@ -123,7 +123,7 @@ pub struct UartReadQueue<
 // TODO: pretty sure shouldn't do this
 unsafe impl<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         DMA: usart::RxDma<UART>,
         const LENGTH: usize,
         const DEPTH: usize,
@@ -132,7 +132,7 @@ unsafe impl<
 }
 
 pub type ReadTaskFuture<
-    UART: usart::BasicInstance,
+    UART: usart::Instance,
     DMA: usart::RxDma<UART>,
     const LENGTH: usize,
     const DEPTH: usize,
@@ -140,7 +140,7 @@ pub type ReadTaskFuture<
 
 impl<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         DMA: usart::RxDma<UART>,
         const LENGTH: usize,
         const DEPTH: usize,
@@ -158,7 +158,7 @@ impl<
     fn read_task(
         &'static self,
         queue_rx: &'static Queue<LENGTH, DEPTH>,
-        mut rx: UartRx<'static, UART, Async>,
+        mut rx: UartRx<'static, Async>,
         mut uart_config_signal_subscriber: UartQueueConfigSyncSub,
     ) -> ReadTaskFuture<UART, DMA, LENGTH, DEPTH> {
         async move {
@@ -237,7 +237,7 @@ impl<
 
     pub fn spawn_task(
         &'static self,
-        rx: UartRx<'static, UART, Async>,
+        rx: UartRx<'static, Async>,
         uart_config_signal_subscriber: UartQueueConfigSyncSub
     ) -> SpawnToken<impl Sized> {
         self.task.spawn(|| self.read_task(&self.queue_rx, rx, uart_config_signal_subscriber))
@@ -245,7 +245,7 @@ impl<
 
     pub fn spawn_task_with_pubsub(
         &'static self,
-        rx: UartRx<'static, UART, Async>,
+        rx: UartRx<'static, Async>,
         uart_config_signal_pubsub: &'static UartQueueSyncPubSub
     ) -> SpawnToken<impl Sized> {
         self.task.spawn(|| self.read_task(&self.queue_rx, rx, uart_config_signal_pubsub.subscriber().unwrap()))
@@ -266,7 +266,7 @@ impl<
 }
 
 pub struct UartWriteQueue<
-    UART: usart::BasicInstance,
+    UART: usart::Instance,
     DMA: usart::TxDma<UART>,
     const LENGTH: usize,
     const DEPTH: usize,
@@ -280,7 +280,7 @@ pub struct UartWriteQueue<
 }
 
 type WriteTaskFuture<
-    UART: usart::BasicInstance,
+    UART: usart::Instance,
     DMA: usart::TxDma<UART>,
     const LENGTH: usize,
     const DEPTH: usize,
@@ -288,7 +288,7 @@ type WriteTaskFuture<
 
 impl<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         DMA: usart::TxDma<UART>,
         const LENGTH: usize,
         const DEPTH: usize,
@@ -321,7 +321,7 @@ impl<
     fn write_task(
         &'static self,
         queue_tx: &'static Queue<LENGTH, DEPTH>,
-        mut tx: UartTx<'static, UART, Async>,
+        mut tx: UartTx<'static, Async>,
         uart_config_signal_publisher: UartQueueConfigSyncPub,
         mut uart_config_signal_subscriber: UartQueueConfigSyncSub,
     ) -> WriteTaskFuture<UART, DMA, LENGTH, DEPTH> {
@@ -404,7 +404,7 @@ impl<
     }
 
     pub fn spawn_task(&'static self, 
-        tx: UartTx<'static, UART, Async>,
+        tx: UartTx<'static, Async>,
         uart_config_signal_publisher: UartQueueConfigSyncPub,
         uart_config_signal_subscriber: UartQueueConfigSyncSub,
     ) -> SpawnToken<impl Sized> {
@@ -412,7 +412,7 @@ impl<
     }
 
     pub fn spawn_task_with_pubsub(&'static self, 
-        tx: UartTx<'static, UART, Async>,
+        tx: UartTx<'static, Async>,
         uart_config_signal_pubsub: &'static UartQueueSyncPubSub
     ) -> SpawnToken<impl Sized> {
         self.task.spawn(|| self.write_task(&self.queue_tx, tx, uart_config_signal_pubsub.publisher().unwrap(), uart_config_signal_pubsub.subscriber().unwrap()))
@@ -490,7 +490,7 @@ pub trait Writer {
 }
 
 impl<
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         Dma: usart::RxDma<UART>,
         const LEN: usize,
         const DEPTH: usize,
@@ -502,7 +502,7 @@ impl<
 }
 
 impl<
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         Dma: usart::TxDma<UART>,
         const LEN: usize,
         const DEPTH: usize,

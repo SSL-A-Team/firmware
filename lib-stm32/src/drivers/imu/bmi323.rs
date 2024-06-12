@@ -17,8 +17,8 @@ use embassy_stm32::{
 pub const SPI_MIN_BUF_LEN: usize = 14;
 
 /// SPI driver for the Bosch BMI085 IMU: Accel + Gyro
-pub struct Bmi323<'a, 'buf, SpiPeri: spi::Instance> {
-    spi: spi::Spi<'a, SpiPeri, Async>,
+pub struct Bmi323<'a, 'buf> {
+    spi: spi::Spi<'a, Async>,
     spi_cs: Output<'a>,
     spi_buf: &'buf mut [u8; SPI_MIN_BUF_LEN],
     accel_mode: AccelMode,
@@ -228,11 +228,11 @@ pub enum GyroMode {
 const BMI323_CHIP_ID: u16 = 0x0043;
 const READ_BIT: u8 = 0x80;
 
-impl<'a, 'buf, SpiPeri: spi::Instance> 
-    Bmi323<'a, 'buf, SpiPeri> {
+impl<'a, 'buf> 
+    Bmi323<'a, 'buf> {
     /// creates a new BMI323 instance from a pre-existing Spi peripheral
     pub fn new_from_spi(
-        spi: spi::Spi<'a, SpiPeri, Async>, 
+        spi: spi::Spi<'a, Async>, 
         spi_cs: Output<'a>, 
         spi_buf: &'buf mut [u8; SPI_MIN_BUF_LEN],
     ) -> Self {
@@ -254,7 +254,7 @@ impl<'a, 'buf, SpiPeri: spi::Instance>
     }
 
     ///t creates a new BMI085 instance from uninitialized pins
-    pub fn new_from_pins(
+    pub fn new_from_pins<SpiPeri: spi::Instance>(
         peri: impl Peripheral<P = SpiPeri> + 'a,
         sck_pin: impl Peripheral<P = impl SckPin<SpiPeri>> + 'a,
         mosi_pin: impl Peripheral<P = impl MosiPin<SpiPeri>> + 'a,
