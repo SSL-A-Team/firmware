@@ -9,8 +9,6 @@ use static_cell::StaticCell;
 use defmt::*;
 use {defmt_rtt as _, panic_probe as _};
 
-use cortex_m_rt::entry;
-
 use embassy_executor::{Executor, InterruptExecutor, Spawner};
 use embassy_stm32::{
     adc::{Adc, Resolution, SampleTime},
@@ -47,7 +45,7 @@ make_uart_queue_pair!(COMS,
     ComsUartModule, ComsUartRxDma, ComsUartTxDma,
     MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
     MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
+    #[link_section = ".bss"]);
 
 
 fn get_empty_control_packet() -> KickerControl {
