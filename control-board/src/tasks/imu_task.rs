@@ -34,7 +34,7 @@ static IMU_BUFFER_CELL: ConstStaticCell<[u8; bmi323::SPI_MIN_BUF_LEN]> = ConstSt
 async fn imu_task_entry(
         accel_pub: AccelDataPublisher,
         gyro_pub: GyroDataPublisher,
-        mut imu: Bmi323<'static, 'static, ImuSpi>,
+        mut imu: Bmi323<'static, 'static>,
         mut _accel_int: ExtiInput<'static>,
         mut gyro_int: ExtiInput<'static>) {
 

@@ -40,7 +40,7 @@ pub fn get_bootloader_uart_config() -> Config {
 
 pub struct Stm32Interface<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         DmaRx: usart::RxDma<UART>,
         DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
@@ -60,7 +60,7 @@ pub struct Stm32Interface<
 
 impl<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         DmaRx: usart::RxDma<UART>,
         DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,

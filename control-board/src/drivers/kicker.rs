@@ -7,7 +7,7 @@ use ateam_common_packets::bindings_kicker::{KickerControl, KickerTelemetry, Kick
 
 pub struct Kicker<
     'a,
-    UART: usart::BasicInstance,
+    UART: usart::Instance,
     DmaRx: usart::RxDma<UART>,
     DmaTx: usart::TxDma<UART>,
     const LEN_RX: usize,
@@ -35,7 +35,7 @@ pub struct Kicker<
 
 impl<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         DmaRx: usart::RxDma<UART>,
         DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,

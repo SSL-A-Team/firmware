@@ -45,7 +45,7 @@ pub struct PeerConnection {
 
 pub struct Radio<
     'a,
-    UART: usart::BasicInstance,
+    UART: usart::Instance,
     TxDma: usart::TxDma<UART>,
     RxDma: usart::RxDma<UART>,
     const LEN_TX: usize,
@@ -60,7 +60,7 @@ pub struct Radio<
 
 impl<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         TxDma: usart::TxDma<UART>,
         RxDma: usart::RxDma<UART>,
         const LEN_TX: usize,

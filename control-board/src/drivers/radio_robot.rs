@@ -52,7 +52,7 @@ pub enum RobotRadioError {
 
 unsafe impl<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         DmaRx: usart::RxDma<UART>,
         DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
@@ -64,7 +64,7 @@ unsafe impl<
 
 pub struct RobotRadio<
     'a,
-    UART: usart::BasicInstance,
+    UART: usart::Instance,
     DmaRx: usart::RxDma<UART>,
     DmaTx: usart::TxDma<UART>,
     const LEN_TX: usize,
@@ -88,7 +88,7 @@ pub struct RobotRadio<
 
 impl<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         DmaRx: usart::RxDma<UART>,
         DmaTx: usart::TxDma<UART>,
         const LEN_TX: usize,
