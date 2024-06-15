@@ -1,4 +1,3 @@
-use alloc::vec::Vec;
 use ateam_common_packets::{bindings_radio::BasicTelemetry, radio::TelemetryPacket};
 use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
 use embassy_executor::{SendSpawner, Spawner};
@@ -6,7 +5,7 @@ use embassy_stm32::usart::Uart;
 use embassy_time::{Duration, Ticker, Timer};
 use nalgebra::{Vector3, Vector4};
 
-use crate::{include_external_cpp_bin, motion::{self, robot_controller::{self, BodyVelocityController}, robot_model::{RobotConstants, RobotModel}}, pins::*, robot_state::{self, SharedRobotState}, stm32_interface::{self, Stm32Interface}, stspin_motor::{DribblerMotor, WheelMotor}, SystemIrqs};
+use crate::{include_external_cpp_bin, motion::{self, robot_controller::{self, BodyVelocityController}, robot_model::{RobotConstants, RobotModel}}, pins::*, robot_state::{self, SharedRobotState}, stm32_interface::{self, Stm32Interface}, stspin_motor::{DribblerMotor, WheelMotor}, tasks::control_task, SystemIrqs};
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
@@ -87,7 +86,7 @@ impl <
                 motor_br: WheelMotor<'static, MotorBRUart, MotorBRDmaRx, MotorBRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
                 motor_fr: WheelMotor<'static, MotorFRUart, MotorFRDmaRx, MotorFRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
                 motor_drib: DribblerMotor<'static, MotorDUart, MotorDDmaRx, MotorDDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH> 
-    ) -> Self {
+        ) -> Self {
             ControlTask {
                 shared_robot_state: robot_state,
                 command_subscriber: command_subscriber,
@@ -103,7 +102,8 @@ impl <
 
         fn do_control_update(&mut self, 
             robot_controller: &mut BodyVelocityController,
-            cmd_vel: Vector3<f32>
+            cmd_vel: Vector3<f32>,
+            gyro_rads: f32
         ) -> Vector4<f32>
         /*
             Provide the motion controller with the current wheel velocities
@@ -264,7 +264,7 @@ impl <
                     if controls_enabled 
                     {
                         // TODO check order
-                        self.do_control_update(&mut robot_controller, cmd_vel)
+                        self.do_control_update(&mut robot_controller, cmd_vel, gyro_rads)
                     } else {
                         robot_model.robot_vel_to_wheel_vel(cmd_vel)
                     }
@@ -366,6 +366,13 @@ impl <
         }
     }
     
+#[embassy_executor::task]
+async fn control_task_entry(mut control_task: ControlTask<MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>) {
+    loop {
+        control_task.control_task_entry().await;
+        defmt::error!("control task returned");
+    }
+}
 // #[embassy_executor::task]
 // async fn control_task_entry(
 //     robot_state: &'static SharedRobotState,
@@ -671,7 +678,9 @@ pub async fn start_control_task(
     let motor_fr = WheelMotor::new_from_pins(&FRONT_RIGHT_RX_UART_QUEUE, &FRONT_RIGHT_TX_UART_QUEUE, motor_fr_boot0_pin, motor_fr_nrst_pin, WHEEL_FW_IMG);
     let motor_drib = DribblerMotor::new_from_pins(&DRIB_RX_UART_QUEUE,   &DRIB_TX_UART_QUEUE,        motor_d_boot0_pin,  motor_d_nrst_pin,  DRIB_FW_IMG, 1.0);
 
-    control_task_spawner.spawn(control_task_entry(robot_state,
-        command_subscriber, telemetry_publisher, gyro_subscriber,
-    motor_fl, motor_bl, motor_br, motor_fr, motor_drib)).unwrap();
+    let control_task = ControlTask::new(
+        robot_state, command_subscriber, telemetry_publisher,
+        gyro_subscriber, motor_fl, motor_bl, motor_br, motor_fr, motor_drib);
+
+    control_task_spawner.spawn(control_task_entry(control_task)).unwrap();
 }
