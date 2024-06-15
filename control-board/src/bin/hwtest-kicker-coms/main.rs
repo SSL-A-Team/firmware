@@ -6,13 +6,13 @@
 
 
 use ateam_control_board::{
-    drivers::kicker::Kicker, get_system_config, include_kicker_bin, pins::{KickerRxDma, KickerTxDma, KickerUart}, stm32_interface::{self, get_bootloader_uart_config, Stm32Interface},
+    drivers::kicker::Kicker, get_system_config, include_kicker_bin, pins::{KickerRxDma, KickerTxDma, KickerUart}, stm32_interface::{self, Stm32Interface},
 };
 use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
 use defmt::info;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
-    gpio::{Input, Level, Output, Pull, Speed}, interrupt, pac::Interrupt, usart::Uart
+    gpio::{Level, Output, Speed}, interrupt, pac::Interrupt, usart::Uart
 };
 use embassy_time::{Duration, Ticker, Timer};
 use panic_probe as _;

@@ -1,10 +1,10 @@
 #![no_std]
 #![no_main]
 
-use ateam_lib_stm32::{audio::tone_player::{self, TonePlayer}, drivers::audio::buzzer::Buzzer};
+use ateam_lib_stm32::{audio::tone_player::TonePlayer, drivers::audio::buzzer::Buzzer};
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
-    gpio::OutputType, interrupt, peripherals::TIM15, time::{hz, khz}, timer::{simple_pwm::{PwmPin, SimplePwm}, Channel}
+    gpio::OutputType, interrupt, time::khz, timer::{simple_pwm::{PwmPin, SimplePwm}, Channel}
 };
 
 use defmt_rtt as _; 

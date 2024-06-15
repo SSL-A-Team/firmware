@@ -3,7 +3,7 @@
 
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
-    interrupt, pac::Interrupt, time::{hz, khz}, timer::{simple_pwm::{PwmPin, SimplePwm}, Channel}
+    interrupt, pac::Interrupt
 };
 use embassy_sync::pubsub::PubSubChannel;
 
@@ -86,21 +86,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     ///////////////////
     //  start tasks  //
     ///////////////////
-
-    // let ch2 = PwmPin::new_ch2(p.PE6, OutputType::PushPull);
-    // let mut pwm = SimplePwm::new(p.TIM15, None, Some(ch2), None, None, khz(2), Default::default());
-    // let max = pwm.get_max_duty();
-    // pwm.enable(Channel::Ch2);
-
-
-    // pwm.set_duty(Channel::Ch2, max / 2);
-
-    // loop {
-    //     pwm.set_frequency(hz(500));
-    //     Timer::after_millis(1000).await;
-    //     pwm.set_frequency(hz(2000));
-    //     Timer::after_millis(1000).await;
-    // }
 
     create_io_task!(main_spawner,
         robot_state,
