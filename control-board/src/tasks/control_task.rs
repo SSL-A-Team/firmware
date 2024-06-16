@@ -292,18 +292,6 @@ async fn control_task_entry(
 
         loop_rate_ticker.next().await;
     }
-
-    loop {
-        motor_fl.process_packets();
-
-        let rads = motor_fl.read_rads();
-        defmt::info!("read motor rads {}", rads);
-        motor_fl.set_setpoint(3.1415 * 10.0);
-
-        motor_fl.send_motion_command();
-
-        Timer::after_millis(10).await;
-    }
 }
 
 pub async fn start_control_task(

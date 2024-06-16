@@ -79,12 +79,12 @@ where N: FromPrimitive + Copy + Bounded,
 f32: core::convert::From<N>,
 L: Lerp<N> 
 {
-    pub fn new(a: L, b: L, duration: Duration) -> TimeLerp<'a, N, L> {
+    pub const fn new(a: L, b: L, duration: Duration) -> TimeLerp<'a, N, L> {
         TimeLerp {
             a: a,
             b: b,
             duration: duration,
-            start_time: Instant::now(),
+            start_time: Instant::MIN,
             pd2: PhantomData,
         }
     }
