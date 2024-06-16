@@ -5,7 +5,7 @@ use embassy_stm32::usart::Uart;
 use embassy_time::{Duration, Ticker, Timer};
 use nalgebra::{Vector3, Vector4};
 
-use crate::{include_external_cpp_bin, motion::{self, robot_controller::{self, BodyVelocityController}, robot_model::{RobotConstants, RobotModel}}, pins::*, robot_state::{self, SharedRobotState}, stm32_interface::{self, Stm32Interface}, stspin_motor::{DribblerMotor, WheelMotor}, tasks::control_task, SystemIrqs};
+use crate::{include_external_cpp_bin, motion::{self, robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, pins::*, robot_state::SharedRobotState, stm32_interface, stspin_motor::{DribblerMotor, WheelMotor}, SystemIrqs};
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
@@ -176,7 +176,7 @@ impl <
             }
  
             self.flash_motor_firmware(
-                self.shared_robot_state.hw_in_debug_mode());
+                self.shared_robot_state.hw_in_debug_mode()).await;
 
              
             embassy_futures::join::join5(
@@ -240,7 +240,7 @@ impl <
                             drib_vel = latest_control.dribbler_speed;
                             ticks_since_packet = 0;
                         },
-                        ateam_common_packets::radio::DataPacket::ParameterCommand(latest_param) => {
+                        ateam_common_packets::radio::DataPacket::ParameterCommand(_latest_param) => {
                             defmt::warn!("param updates aren't supported yet");
                         },
                     }

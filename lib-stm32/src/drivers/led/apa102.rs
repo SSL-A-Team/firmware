@@ -2,10 +2,9 @@
 use core::ops::Range;
 
 use embassy_stm32::{mode::Async, spi::{self, Config, MosiPin, SckPin, Spi}, time::mhz, Peripheral};
-use embassy_time::{Duration, Instant};
 use smart_leds::RGB8;
 
-use crate::anim::{AnimInterface, Blink, CompositeAnimation, Lerp};
+use crate::anim::{AnimInterface, CompositeAnimation};
 
 pub struct Apa102<'a, 'buf, SpiPeri: spi::Instance, const NUM_LEDS: usize>
 where [(); (NUM_LEDS * 4) + 8]: {
@@ -117,58 +116,124 @@ where [(); (NUM_LEDS * 4) + 8]: {
 pub struct Apa102Anim<'a, 'buf, 'ca, SpiPeri: spi::Instance, const NUM_LEDS: usize> 
 where [(); (NUM_LEDS * 4) + 8]: {
     apa102_driver: Apa102<'a, 'buf, SpiPeri, NUM_LEDS>,
-    animation_buf: [Option<&'ca mut CompositeAnimation<'ca, u8, RGB8>>; NUM_LEDS],
+    active_animation: [usize; NUM_LEDS],
+    animation_playbook_buf: [Option<&'ca mut [CompositeAnimation<'ca, u8, RGB8>]>; NUM_LEDS],
+    // animation_buf: [Option<&'ca mut [(u8, bool, &'ca mut CompositeAnimation<'ca, u8, RGB8>)]>; NUM_LEDS]
+    // animation_buf: [Option<&'ca mut CompositeAnimation<'ca, u8, RGB8>>; NUM_LEDS],
 }
 
 impl<'a, 'buf, 'ca, SpiPeri: spi::Instance, const NUM_LEDS: usize> Apa102Anim<'a, 'buf, 'ca, SpiPeri, NUM_LEDS> 
 where [(); (NUM_LEDS * 4) + 8]: {
-    pub fn new(apa102: Apa102<'a, 'buf, SpiPeri, NUM_LEDS>) -> Self {
+    pub fn new(apa102: Apa102<'a, 'buf, SpiPeri, NUM_LEDS>, anim_playbook_buf: [Option<&'ca mut [CompositeAnimation<'ca, u8, RGB8>]>; NUM_LEDS]) -> Self {
         Apa102Anim {
             apa102_driver: apa102,
-            animation_buf: [const { None }; NUM_LEDS],
+            active_animation: [0; NUM_LEDS],
+            animation_playbook_buf: anim_playbook_buf,
+        }
+    }
+
+    pub fn next_valid_anim(search_start_ind: usize, anim_playbook: &[CompositeAnimation<'ca, u8, RGB8>]) -> usize {
+        if anim_playbook.len() == 1 {
+            return 0;
+        }
+        
+        let mut cur_index = search_start_ind;
+        loop {
+            // inc and loop the index
+            cur_index = cur_index + 1 % anim_playbook.len();
+
+            // we incremented and found an enabled animation
+            // return the index
+            if anim_playbook[cur_index].enabled() {
+                return cur_index;
+            }
+
+            // we've searched everything and made it all the way around
+            // return the search start index
+            if cur_index == search_start_ind {
+                return search_start_ind;
+            }
         }
     }
 
     pub async fn update(&mut self) {
         // update animations
-        for anim in self.animation_buf.iter_mut() {
-            if let Some(anim) = anim {
-                anim.update();
-            }
-        }
+        for (led_index, anim_arr_opt) in self.animation_playbook_buf.iter_mut().enumerate() {
+            let mut led_color = RGB8 { r: 0, g: 0, b: 0 };
 
-        // set colors from animations
-        for (i, anim) in self.animation_buf.iter().enumerate() {
-            if let Some(anim) = anim {
-                self.apa102_driver.set_color(anim.get_value(), i);
+            // see if a playbook is loaded
+            if let Some(anim_playbook) = anim_arr_opt {
+                // check if any animation are enabled
+                if anim_playbook.iter().any(|comp_anim| comp_anim.enabled()) {
+                    // confirm the current animation is enabled
+                    let mut cur_active_anim = self.active_animation[led_index];
+                    if !anim_playbook[cur_active_anim].enabled() {
+                        // select and start the next animation
+                        let next_valid_anim = Self::next_valid_anim(cur_active_anim, anim_playbook);
+                        self.active_animation[led_index] = next_valid_anim;
+                        anim_playbook[next_valid_anim].start_animation();
+
+                        cur_active_anim = next_valid_anim;
+                    };
+
+                    // update the selected animation
+                    anim_playbook[cur_active_anim].update();
+                    // check if animation is completed
+                    if anim_playbook[cur_active_anim].animation_completed() {
+                        // reset the animation
+                        anim_playbook[cur_active_anim].reset_animation();
+
+                        // select and start the next animation
+                        let next_active_anim = Self::next_valid_anim(cur_active_anim, anim_playbook);
+                        anim_playbook[next_active_anim].start_animation();
+                        self.active_animation[led_index] = next_active_anim;
+
+                        cur_active_anim = next_active_anim;
+                    }
+
+                    // update led color
+                    led_color = anim_playbook[cur_active_anim].get_value();
+                }
             }
+
+            // set the color
+            self.apa102_driver.set_color(led_color, led_index);
         }
 
         self.apa102_driver.update().await;
     }
 
-    pub fn set_animation(&mut self, anim: &'ca mut CompositeAnimation<'ca, u8, smart_leds::RGB<u8>>, led_index: usize) {
-        assert!(led_index < NUM_LEDS);
-        self.animation_buf[led_index] = Some(anim);
+    fn set_animation_enabled(&mut self, led_index: usize, anim_id: usize, enable: bool) -> Result<(), ()> {
+        if led_index >= NUM_LEDS {
+            return Err(())
+        }
+
+        if let Some(animation_playbook) = self.animation_playbook_buf[led_index].as_deref_mut() {
+            for composite_animation in animation_playbook.iter_mut() {
+                defmt::info!("evaluating animation {}", composite_animation.get_id());
+
+                if composite_animation.get_id() == anim_id {
+                    if enable {
+                        defmt::info!("enabling animation");
+                        composite_animation.enable();
+                        composite_animation.start_animation();
+                    } else {
+                        composite_animation.reset_animation();
+                        composite_animation.disable();
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
-    pub fn clear_animation(&mut self, led_index: usize) {
-        assert!(led_index < NUM_LEDS);
-        self.animation_buf[led_index] = None;
+    pub fn enable_animation(&mut self, led_index: usize, anim_id: usize) -> Result<(), ()>  {
+        self.set_animation_enabled(led_index, anim_id, true)
     }
 
-    // pub fn start_animation(&mut self, led_index: usize) {    // pub fn start_animation(&mut self, led_index: usize) {
-    //     assert!(led_index < NUM_LEDS);
-        
-    //     if let Some(anim) = self.animation_buf[led_index].as_mut() {
-    //         anim.start_animation();
-    //     }
-    // }
-    //     assert!(led_index < NUM_LEDS);
-        
-    //     if let Some(anim) = self.animation_buf[led_index].as_mut() {
-    //         anim.start_animation();
-    //     }
-    // }
+    pub fn disable_animation(&mut self, led_index: usize, anim_id: usize) -> Result<(), ()>  {
+        self.set_animation_enabled(led_index, anim_id, false)
+    }
 }
 

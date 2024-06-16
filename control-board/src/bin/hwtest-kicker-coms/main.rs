@@ -6,18 +6,18 @@
 
 
 use ateam_control_board::{
-    drivers::kicker::Kicker, get_system_config, include_kicker_bin, pins::{KickerRxDma, KickerTxDma, KickerUart}, stm32_interface::{self, get_bootloader_uart_config, Stm32Interface},
+    drivers::kicker::Kicker, get_system_config, include_kicker_bin, pins::{KickerRxDma, KickerTxDma, KickerUart}, stm32_interface::{self, Stm32Interface},
 };
 use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
 use defmt::info;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
-    gpio::{Input, Level, Output, Pull, Speed}, interrupt, pac::Interrupt, usart::Uart
+    gpio::{Level, Output, Speed}, interrupt, pac::Interrupt, usart::Uart
 };
 use embassy_time::{Duration, Ticker, Timer};
 use panic_probe as _;
 
-include_kicker_bin! {KICKER_FW_IMG, "hwtest-blinky.bin"}
+include_kicker_bin! {KICKER_FW_IMG, "hwtest-coms.bin"}
 
 const MAX_TX_PACKET_SIZE: usize = 16;
 const TX_BUF_DEPTH: usize = 3;
@@ -55,12 +55,18 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     let mut kicker_pwr_pin = Output::new(p.PG8, Level::Low, Speed::Medium);
 
-    // defmt::info!("attempting to power on kicker.");
-    // Timer::after_millis(1000).await;
-    // kicker_pwr_pin.set_high();
-    // Timer::after_millis(200).await;
-    // kicker_pwr_pin.set_low();
-    // defmt::info!("power on attempt done");
+    kicker_pwr_pin.set_high();
+    defmt::info!("force power off kicker");
+    Timer::after_millis(2000).await;
+    kicker_pwr_pin.set_low();
+    defmt::info!("kicker force power off done");
+
+    defmt::info!("attempting to power on kicker.");
+    Timer::after_millis(1000).await;
+    kicker_pwr_pin.set_high();
+    Timer::after_millis(200).await;
+    kicker_pwr_pin.set_low();
+    defmt::info!("power on attempt done");
 
     // loop {
     //     Timer::after_millis(1000).await;
@@ -102,19 +108,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
         loop {}
     } else {
         info!("kicker flash complete");
-    }
-
-    Timer::after_millis(3000).await;
-
-    // defmt::info!("attempting to power off kicker.");
-    // Timer::after_millis(1000).await;
-    // kicker_pwr_pin.set_high();
-    // Timer::after_millis(2000).await;
-    // kicker_pwr_pin.set_low();
-    // defmt::info!("power off attempt done");
-
-    loop {
-        Timer::after_millis(1000).await;
     }
 
     kicker.set_telemetry_enabled(true);

@@ -1,7 +1,7 @@
 use ateam_lib_stm32::{audio::tone_player::TonePlayer, drivers::audio::buzzer::Buzzer};
 use embassy_executor::Spawner;
 use embassy_stm32::{gpio::OutputType, time::hz, timer::{simple_pwm::{PwmPin, SimplePwm}, Channel}};
-use embassy_time::Timer;
+use embassy_time::{Duration, Ticker};
 
 use crate::{pins::{BuzzerPin, BuzzerTimer}, robot_state::SharedRobotState, songs::TIPPED_WARNING_SONG};
 
@@ -19,6 +19,8 @@ async fn audio_task_entry(
     robot_state: &'static SharedRobotState,
     mut tone_player: TonePlayer<'static, Buzzer<'static, BuzzerTimer>>,
 ) {
+    let mut audio_ticker = Ticker::every(Duration::from_millis(100));
+
     loop {
         let cur_robot_state = robot_state.get_state();
 
@@ -28,7 +30,7 @@ async fn audio_task_entry(
             tone_player.play_song().await;
         }
 
-        Timer::after_millis(100).await;
+        audio_ticker.next().await;
     }
 }
 

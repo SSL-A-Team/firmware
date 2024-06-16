@@ -28,6 +28,8 @@ use crate::tasks::shutdown_task::HARD_SHUTDOWN_TIME_MS;
 #[link_section = ".sram4"]
 static mut DOTSTAR_SPI_BUFFER_CELL: [u8; 16] = [0; 16];
 
+
+
 #[macro_export]
 macro_rules! create_io_task {
     ($spawner:ident, $robot_state:ident, $p:ident) => {
@@ -54,34 +56,54 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
 ) {
     defmt::info!("user io task initialized");
 
-    let shutdown_anim = anim::Animation::Lerp(Lerp::new(WHITE, BLACK, Duration::from_millis(HARD_SHUTDOWN_TIME_MS), AnimRepeatMode::None));
-    let mut sd_anim_seq = [shutdown_anim];
-    let mut shutdown_anim = CompositeAnimation::new(&mut sd_anim_seq, AnimRepeatMode::None);
+    // let shutdown_anim = anim::Animation::Lerp(Lerp::new(WHITE, BLACK, Duration::from_millis(HARD_SHUTDOWN_TIME_MS), AnimRepeatMode::None));
+    // let mut sd_anim_seq = [shutdown_anim];
+    // let mut shutdown_anim = CompositeAnimation::new(&mut sd_anim_seq, AnimRepeatMode::None);
 
-    let anim0 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 255, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
-    let anim1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 0, g: 255, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
-    let anim2 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 0, g: 0, b: 255 }, RGB8 { r: 255, g: 0, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
+    let anim0 = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 255, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
+    let anim1 = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 255, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
+    let anim2 = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 0, b: 255 }, RGB8 { r: 255, g: 0, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
     let mut anim_seq = [anim0, anim1, anim2];
-    let mut composite_anim0 = CompositeAnimation::new(&mut anim_seq, AnimRepeatMode::Forever);
-    composite_anim0.start_animation();
+    const RGB_LERP_ID: usize = 1;
+    let composite_anim0 = CompositeAnimation::new(RGB_LERP_ID, &mut anim_seq, AnimRepeatMode::Forever);
+    // let mut composite_anim0 = CompositeAnimation::new(RGB_LERP_ID, &mut [anim0, anim1, anim2], AnimRepeatMode::Forever);
 
-    let anim0_1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 255, g: 255, b: 0 }, RGB8 { r: 0, g: 255, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
-    let anim1_1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 0, g: 255, b: 255 }, RGB8 { r: 255, g: 0, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
-    let anim2_1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 255, g: 0, b: 255 }, RGB8 { r: 255, g: 255, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
-    let mut anim_seq = [anim0_1, anim1_1, anim2_1];
-    let mut composite_anim1 = CompositeAnimation::new(&mut anim_seq, AnimRepeatMode::Forever);
-    composite_anim1.start_animation();
+    let mut led0_anim_playbook = [composite_anim0];
+
+    // composite_anim0.start_animation();
+
+    // let animation_playbooks: [Option<&mut [CompositeAnimation<u8, RGB8>]>; 2] = [
+    //     Some(&mut [
+    //         CompositeAnimation::new(RGB_LERP_ID, &mut [
+    //             anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 255, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None)),
+    //             anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 255, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None)),
+    //             anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 0, b: 255 }, RGB8 { r: 255, g: 0, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None)),     
+    //         ], AnimRepeatMode::Forever)
+    //     ]),
+    //     None,
+    // ];
+
+    let animation_playbooks: [Option<&mut [CompositeAnimation<u8, RGB8>]>; 2] = [
+        Some(&mut led0_anim_playbook),
+        None,
+    ];
+
+    // let anim0_1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 255, g: 255, b: 0 }, RGB8 { r: 0, g: 255, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
+    // let anim1_1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 0, g: 255, b: 255 }, RGB8 { r: 255, g: 0, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
+    // let anim2_1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 255, g: 0, b: 255 }, RGB8 { r: 255, g: 255, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
+    // let mut anim_seq = [anim0_1, anim1_1, anim2_1];
+    // let mut composite_anim1 = CompositeAnimation::new(&mut anim_seq, AnimRepeatMode::Forever);
+    // composite_anim1.start_animation();
 
     dotstars.set_drv_str_all(32);
-    let mut dotstars_anim = Apa102Anim::new(dotstars);
+    let mut dotstars_anim = Apa102Anim::new(dotstars, animation_playbooks);
+
+    dotstars_anim.enable_animation(0, RGB_LERP_ID);
+    dotstars_anim.enable_animation(1, RGB_LERP_ID);
 
     // let mut color_lerp = TimeLerp::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(10000));
     // color_lerp.start();
 
-
-
-    dotstars_anim.set_animation(&mut composite_anim0, 0);
-    dotstars_anim.set_animation(&mut composite_anim1, 1);
 
     // let mut anim1 = Lerp::new(RGB8 { r: 0, g: 0, b: 0}, RGB8 { r: 255, g: 255, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::Forever);
     // anim1.start_animation();

@@ -6,6 +6,7 @@ use crate::math::lerp::LerpNumeric;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum AnimState {
+    Disabled,
     Waiting,
     Running,
     Completed,
@@ -19,11 +20,17 @@ pub enum AnimRepeatMode {
 }
 
 pub trait AnimInterface<T>: Sized {
+    fn get_id(&self) -> usize;
+    fn enable(&mut self);
+    fn disable(&mut self);
+    fn enabled(&self) -> bool;
+
     fn start_animation(&mut self);
     fn reset_animation(&mut self);
     fn animation_running(&self) -> bool;
     fn animation_completed(&self) -> bool;
     fn update(&mut self);
+
     fn get_value(&self) -> T;
 }
 
@@ -45,6 +52,50 @@ where N: LerpNumeric,
 f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N> 
 {
+    fn get_id(&self) -> usize {
+        match self {
+            Animation::Blink(a) => {
+                a.get_id()
+            },
+            Animation::Lerp(a) => {
+                a.get_id()
+            },
+        }
+    }
+
+    fn enable(&mut self) {
+        match self {
+            Animation::Blink(a) => {
+                a.enable()
+            },
+            Animation::Lerp(a) => {
+                a.enable()
+            },
+        }
+    }
+
+    fn disable(&mut self) {
+        match self {
+            Animation::Blink(a) => {
+                a.disable()
+            },
+            Animation::Lerp(a) => {
+                a.disable()
+            },
+        }
+    }
+    
+    fn enabled(&self) -> bool {
+        match self {
+            Animation::Blink(a) => {
+                a.enabled()
+            },
+            Animation::Lerp(a) => {
+                a.enabled()
+            },
+        }
+    }
+
     fn start_animation(&mut self) {
         match self {
             Animation::Blink(a) => {
@@ -116,6 +167,8 @@ pub struct CompositeAnimation<'a, N, L>
 where N: LerpNumeric,
 f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N> {
+    id: usize,
+
     animations: &'a mut [Animation<N, L>],
     active_animation: usize,
 
@@ -131,13 +184,14 @@ where N: LerpNumeric,
 f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N>
 {
-    pub fn new(animations: &'a mut [Animation<N, L>], repeat_mode: AnimRepeatMode) -> Self {
+    pub fn new(id: usize, animations: &'a mut [Animation<N, L>], repeat_mode: AnimRepeatMode) -> Self {
         let first_val = animations[0].get_value();
         CompositeAnimation {
+            id,
             animations: animations,
             active_animation: 0,
             repeat_mode: repeat_mode,
-            anim_state: AnimState::Waiting,
+            anim_state: AnimState::Disabled,
             repeat_counter: 0,
             last_value: first_val,
         }
@@ -149,7 +203,27 @@ where N: LerpNumeric,
 f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N>
 {
+    fn get_id(&self) -> usize {
+        return self.id;
+    }
+
+    fn enable(&mut self) {
+        self.anim_state = AnimState::Waiting;
+    }
+
+    fn disable(&mut self) {
+        self.anim_state = AnimState::Disabled;
+    }
+
+    fn enabled(&self) -> bool {
+        self.anim_state != AnimState::Disabled
+    }
+
     fn start_animation(&mut self) {
+        if !self.enabled() {
+            return;
+        }
+
         self.active_animation = 0;
         self.anim_state = AnimState::Running;
         self.animations[self.active_animation].start_animation();
@@ -160,6 +234,10 @@ L: crate::math::lerp::Lerp<N>
     }
 
     fn reset_animation(&mut self) {
+        if !self.enabled() {
+            return;
+        }
+
         self.anim_state = AnimState::Waiting;
     }
 
@@ -172,6 +250,10 @@ L: crate::math::lerp::Lerp<N>
     }
 
     fn update(&mut self) {
+        if self.anim_state != AnimState::Running {
+            return;
+        }
+
         // update the current animation
         self.animations[self.active_animation].update();
         self.last_value = self.animations[self.active_animation].get_value();
@@ -219,6 +301,8 @@ L: crate::math::lerp::Lerp<N>
 
 #[derive(Clone, Copy, Debug)]
 pub struct Blink<T> {
+    id: usize,
+
     val_one: T,
     val_two: T,
     v1_time: u64,
@@ -232,8 +316,10 @@ pub struct Blink<T> {
 }
 
 impl<T: Clone + Copy + Sized> Blink<T> {
-    pub fn new(val_one: T, val_two: T, v1_time: Duration, v2_time: Duration, repeat_style: AnimRepeatMode) -> Self {
+    pub fn new(id: usize, val_one: T, val_two: T, v1_time: Duration, v2_time: Duration, repeat_style: AnimRepeatMode) -> Self {
         Blink { 
+            id,
+
             val_one,
             val_two,
             v1_time: v1_time.as_millis(),
@@ -249,7 +335,27 @@ impl<T: Clone + Copy + Sized> Blink<T> {
 }
 
 impl<T: Clone + Copy + Sized> AnimInterface<T> for Blink<T> {
+    fn get_id(&self) -> usize {
+        return self.id;
+    }
+
+    fn enable(&mut self) {
+        self.anim_state = AnimState::Disabled;
+    }
+
+    fn disable(&mut self) {
+        self.anim_state = AnimState::Waiting;
+    }
+
+    fn enabled(&self) -> bool {
+        self.anim_state != AnimState::Disabled
+    }
+
     fn start_animation(&mut self) {
+        if !self.enabled() {
+            return;
+        }
+
         self.start_time = Instant::now();
         self.anim_state = AnimState::Running;
 
@@ -259,6 +365,10 @@ impl<T: Clone + Copy + Sized> AnimInterface<T> for Blink<T> {
     }
 
     fn reset_animation(&mut self) {
+        if !self.enabled() {
+            return;
+        }
+
         self.anim_state = AnimState::Waiting;
     }
 
@@ -314,6 +424,8 @@ pub struct Lerp<N, L>
 where N: LerpNumeric,
 f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N> {
+    id: usize,
+
     val_one: L,
     val_two: L,
     lerp_duration_ms: u64,
@@ -332,8 +444,10 @@ where N: LerpNumeric,
 f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N> 
 {
-    pub fn new(val_one: L, val_two: L, lerp_duration_ms: Duration, repeat_style: AnimRepeatMode) -> Self {
+    pub fn new(id: usize, val_one: L, val_two: L, lerp_duration_ms: Duration, repeat_style: AnimRepeatMode) -> Self {
         Lerp { 
+            id,
+
             val_one,
             val_two,
             lerp_duration_ms: lerp_duration_ms.as_millis(),
@@ -354,7 +468,27 @@ where N: LerpNumeric,
 f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N> 
 {
+    fn get_id(&self) -> usize {
+        return self.id;
+    }
+
+    fn enable(&mut self) {
+        self.anim_state = AnimState::Waiting
+    }
+
+    fn disable(&mut self) {
+        self.anim_state = AnimState::Disabled
+    }
+
+    fn enabled(&self) -> bool {
+        self.anim_state != AnimState::Disabled
+    }
+
     fn start_animation(&mut self) {
+        if !self.enabled() {
+            return;
+        }
+
         self.start_time = Instant::now();
         self.anim_state = AnimState::Running;
 
@@ -364,6 +498,10 @@ L: crate::math::lerp::Lerp<N>
     }
 
     fn reset_animation(&mut self) {
+        if !self.enabled() {
+            return;
+        }
+
         self.anim_state = AnimState::Waiting;
     }
 

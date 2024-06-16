@@ -5,7 +5,7 @@ use defmt::*;
 
 use embassy_stm32::gpio::{Level, Output, Pin, Speed};
 use embassy_stm32::pac;
-use embassy_stm32::usart::{self, Parity, Config};
+use embassy_stm32::usart::{self, Config, Parity, StopBits};
 use embassy_time::{Duration, Timer};
 use embassy_time::with_timeout;
 
@@ -35,6 +35,7 @@ pub fn get_bootloader_uart_config() -> Config {
     let mut config = usart::Config::default();
     config.baudrate = 115_200; // max officially support baudrate
     config.parity = Parity::ParityEven;
+    config.stop_bits = StopBits::STOP1;
     config
 }
 
@@ -136,10 +137,19 @@ impl<
 
     pub async fn hard_reset(&mut self) {
         self.enter_reset().await;
+        // Timer::after_millis(1).await;
         self.leave_reset().await;
+        // Timer::after_millis(1).await;
     }
 
     pub async fn reset_into_bootloader(&mut self) -> Result<(), ()> {
+        // ensure UART is in the expected config for the bootloader
+        // this operation is unsafe because it takes the uart module offline
+        // when the executor may be relying on rx interrupts to unblock a thread
+        self.update_uart_config(STM32_BOOTLOADER_MAX_BAUD_RATE, Parity::ParityEven).await;
+        Timer::after_millis(100).await;
+
+
         // set the boot0 line high to enter the UART bootloader upon reset
         self.boot0_pin.set_high();
         Timer::after_millis(1).await;
@@ -151,21 +161,23 @@ impl<
         // this time isn't documented and can possibly be lowered.
         Timer::after(Duration::from_millis(10)).await;
 
-        // ensure UART is in the expected config for the bootloader
-        // this operation is unsafe because it takes the uart module offline
-        // when the executor may be relying on rx interrupts to unblock a thread
-        self.update_uart_config(STM32_BOOTLOADER_MAX_BAUD_RATE, Parity::ParityEven).await;
+
 
         defmt::debug!("sending the bootloader baud calibration command...");
-        self.writer
+        Timer::after_millis(1000).await;
+        if self.writer
         .write(|buf| {
             buf[0] = STM32_BOOTLOADER_CODE_SEQUENCE_BYTE;
             1
         })
-        .await?;
+        .await.is_err() {
+            defmt::debug!("failed to send bootloader start seq");
+            return Err(());
+        }
+        Timer::after_millis(10).await;
 
         let mut res = Err(());
-        let sync_res = with_timeout(Duration::from_millis(100), self.reader.read(|buf| {
+        let sync_res = with_timeout(Duration::from_millis(5000), self.reader.read(|buf| {
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
                     defmt::debug!("bootloader replied with ACK after calibration.");
@@ -510,10 +522,20 @@ impl<
             return Err(err);
         }
     
-        // let device_id = self.get_device_id().await;
         match self.get_device_id().await {
             Err(err) => return Err(err),
-            Ok(device_id) => if device_id != 68 { return Err(()) } 
+            Ok(device_id) => match device_id {
+                68 => {
+                    defmt::trace!("found stm32f1 device");
+                }
+                19 => {
+                    defmt::trace!("found stm32f40xxx device");
+                }
+                _ => {
+                    defmt::trace!("found unknown device id {}", device_id);
+                    return Err(());
+                }
+            }
         };
     
         // erase part
