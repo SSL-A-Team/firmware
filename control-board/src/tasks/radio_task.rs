@@ -1,5 +1,5 @@
 
-use ateam_common_packets::{bindings_radio::BasicTelemetry, radio::TelemetryPacket};
+use ateam_common_packets::{bindings_radio::{BasicControl, BasicTelemetry}, radio::{DataPacket, TelemetryPacket}};
 use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn, uart::queue::{UartReadQueue, UartWriteQueue}};
 use credentials::WifiCredential;
 use embassy_executor::{SendSpawner, Spawner};
@@ -251,7 +251,7 @@ impl<
                     }
                 },
                 RadioConnectionState::Connected => {
-                    let _ = self.process_packets2().await;
+                    let _ = self.process_packets().await;
                     // if we're stably connected, process packets at 100Hz
                 },
             }
@@ -331,14 +331,18 @@ impl<
         }
     }
 
-    async fn process_packets2(&mut self) -> Result<(), ()> {
+    async fn process_packets(&mut self) -> Result<(), ()> {
         // read any packets
-        if let Ok(pkt) = self.radio.read_packet_nonblocking() {
-            if let Some(c2_pkt) = pkt {
-                self.command_publisher.publish_immediate(c2_pkt);
-            } 
-        } else {
-            defmt::warn!("RadioTask - error reading data packet");
+        loop {
+            if let Ok(pkt) = self.radio.read_packet_nonblocking() {
+                if let Some(c2_pkt) = pkt {
+                    self.command_publisher.publish_immediate(c2_pkt);
+                } else {
+                    break;
+                }
+            } else {
+                defmt::warn!("RadioTask - error reading data packet");
+            }
         }
 
         if let Some(telemetry) = self.telemetry_subscriber.try_next_message_pure() {
@@ -365,59 +369,6 @@ impl<
         }
 
         return Ok(())
-    }
-
-    async fn process_packets(&mut self) -> Result<(), ()> {
-        match select(self.radio.read_packet(), self.telemetry_subscriber.next_message()).await {
-            Either::First(res) => {
-                if let Ok(c2_pkt) = res {
-                    self.command_publisher.publish_immediate(c2_pkt);
-                    Ok(())
-                } else {
-                    defmt::warn!("radio read packet returned an error");
-                    Err(())
-                }
-            }
-            Either::Second(telem_msg) => {
-                match telem_msg {
-                    WaitResult::Lagged(num_missed_pkts) => {
-                        defmt::warn!("radio task missed sending {} outbound packets. Should channel have higher capacity?", num_missed_pkts);
-                        Ok(())
-                    },
-                    WaitResult::Message(msg) => {
-                        match msg {
-                            TelemetryPacket::Basic(basic_telem_pkt) => {
-                                let res = self.radio.send_telemetry(basic_telem_pkt).await;
-                                if res.is_err() {
-                                    defmt::warn!("radio task failed to send basic telemetry packet. Is the backing queue too small?");
-                                    Err(())
-                                } else {
-                                    Ok(())
-                                }
-                            }
-                            TelemetryPacket::Control(control_telem_pkt) => {
-                                let res = self.radio.send_control_debug_telemetry(control_telem_pkt).await;
-                                if res.is_err() {
-                                    defmt::warn!("radio task failed to send control debug telemetry packet. Is the backing queue too small?");
-                                    Err(())
-                                } else {
-                                    Ok(())
-                                }
-                            }
-                            TelemetryPacket::ParameterCommandResponse(param_resp) => {
-                                let res = self.radio.send_parameter_response(param_resp).await;
-                                if res.is_err() {
-                                    defmt::warn!("radio task failed to send param resp packet. Is the backing queue too small?");
-                                    Err(())
-                                } else {
-                                    Ok(())
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 

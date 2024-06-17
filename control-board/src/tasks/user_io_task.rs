@@ -19,7 +19,7 @@ use ateam_lib_stm32::drivers::switches::rotary_encoder::RotaryEncoder;
 use crate::drivers::shell_indicator::ShellIndicator;
 use crate::robot_state::SharedRobotState;
 
-use crate::pins::*;
+use crate::{pins::*, stm32_interface};
 use crate::tasks::shutdown_task::HARD_SHUTDOWN_TIME_MS;
 
 // #[link_section = ".sram4"]
@@ -60,15 +60,22 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
     // let mut sd_anim_seq = [shutdown_anim];
     // let mut shutdown_anim = CompositeAnimation::new(&mut sd_anim_seq, AnimRepeatMode::None);
 
+    const SHUTDOWN_ANIM_ID: usize = 2;
+    let shutdown_dimmer = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 255, g: 255, b: 255}, RGB8 { r: 0, g: 0, b:0 }, Duration::from_millis(10000), AnimRepeatMode::None));
+    let mut shutdown_dimmer_arr = [shutdown_dimmer];
+    let shutdown_ca = CompositeAnimation::new(SHUTDOWN_ANIM_ID, &mut shutdown_dimmer_arr, AnimRepeatMode::None);
+
+    let mut led0_anim_playbook = [shutdown_ca];
+
+    const RGB_LERP_ID: usize = 1;
     let anim0 = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 255, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
     let anim1 = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 255, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
     let anim2 = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 0, b: 255 }, RGB8 { r: 255, g: 0, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
     let mut anim_seq = [anim0, anim1, anim2];
-    const RGB_LERP_ID: usize = 1;
     let composite_anim0 = CompositeAnimation::new(RGB_LERP_ID, &mut anim_seq, AnimRepeatMode::Forever);
     // let mut composite_anim0 = CompositeAnimation::new(RGB_LERP_ID, &mut [anim0, anim1, anim2], AnimRepeatMode::Forever);
 
-    let mut led0_anim_playbook = [composite_anim0];
+    let mut led1_anim_playbook = [composite_anim0];
 
     // composite_anim0.start_animation();
 
@@ -84,8 +91,8 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
     // ];
 
     let animation_playbooks: [Option<&mut [CompositeAnimation<u8, RGB8>]>; 2] = [
+        Some(&mut led1_anim_playbook),
         Some(&mut led0_anim_playbook),
-        None,
     ];
 
     // let anim0_1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 255, g: 255, b: 0 }, RGB8 { r: 0, g: 255, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
@@ -99,7 +106,7 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
     let mut dotstars_anim = Apa102Anim::new(dotstars, animation_playbooks);
 
     dotstars_anim.enable_animation(0, RGB_LERP_ID);
-    dotstars_anim.enable_animation(1, RGB_LERP_ID);
+    // dotstars_anim.enable_animation(1, RGB_LERP_ID);
 
     // let mut color_lerp = TimeLerp::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(10000));
     // color_lerp.start();
@@ -158,10 +165,10 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
             debug_led0.set_low();
         }
 
-        // if !prev_robot_state.shutdown_requested && cur_robot_state.shutdown_requested {
-        //     shutdown_anim.start_animation();
-        //     // dotstars_anim.set_animation(&shutdown_anim, 0);
-        // } 
+        if !prev_robot_state.shutdown_requested && cur_robot_state.shutdown_requested {
+            dotstars_anim.disable_animation(0, RGB_LERP_ID);
+            dotstars_anim.enable_animation(1, SHUTDOWN_ANIM_ID);
+        } 
 
         // let color = color_lerp.update();
         // dotstars.set_color(color, 0);
@@ -173,6 +180,8 @@ async fn user_io_task_entry(robot_state: &'static SharedRobotState,
             defmt::info!("loaded robot state: robot id: {}, team: {}", robot_id, robot_team_isblue);
             robot_state.set_hw_init_state_valid(true);
         }
+
+        prev_robot_state = cur_robot_state;
 
         Timer::after_millis(50).await;
     }

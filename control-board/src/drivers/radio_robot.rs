@@ -340,6 +340,7 @@ impl<
                         Ok(Some(ret))
                     },
                     Err(_) => {
+                        defmt::trace!("try read data failed after can read data reported data ready");
                         Err(())
                     },
                 }
@@ -347,6 +348,7 @@ impl<
                 Ok(None)
             }
         } else {
+            defmt::trace!("peer was none");
             Err(())
         }
     }
@@ -575,6 +577,7 @@ impl<
                             Err(_) => {
                                 // we got data that was a valid EDM DataPacket, but couldn't parse it
                                 // into any known A-Team packet format
+                                defmt::trace!("got EDM packet but wasn't A-Team");
                                 return Err(());
                             },
                         }
@@ -585,6 +588,7 @@ impl<
                 }
             },
             Err(_) => {
+                defmt::trace!("radio in invalid state");
                 // read_data_nonblocking failed because the radio was in an invalid state
                 return Err(())
             },

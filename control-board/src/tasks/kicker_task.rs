@@ -95,11 +95,12 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
 
             match self.kicker_task_state {
                 KickerTaskState::PoweredOff => {
-                    if cur_robot_state.hw_init_state_valid && cur_robot_state.shutdown_requested {
+                    if cur_robot_state.hw_init_state_valid && !cur_robot_state.shutdown_requested {
                         self.kicker_task_state = KickerTaskState::PowerOn;
                     }
                 },
                 KickerTaskState::PowerOn => {
+                    self.remote_power_btn_hold().await;
                     self.remote_power_btn_press().await;
                     // power should be coming on, attempt connection
                     self.kicker_task_state = KickerTaskState::ConnectUart;
@@ -146,7 +147,7 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
 
     async fn remote_power_btn_hold(&mut self) {
         self.remote_power_btn.set_high();
-        Timer::after_millis(1500).await;
+        Timer::after_millis(1000).await;
         self.remote_power_btn.set_low();
         Timer::after_millis(10).await;
     }

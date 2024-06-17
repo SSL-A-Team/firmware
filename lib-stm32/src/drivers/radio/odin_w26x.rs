@@ -467,10 +467,12 @@ impl<
                         if let EdmPacket::DataEvent { channel: _ , data } = pkt {
                             return Ok(fn_read(data))
                         } else {
+                            // defmt::trace!("got non data event");
                             return Err(());
                         }
                     },
                     Err(_) => {
+                        // defmt::trace!("got data that wasn't an edm packet: {}", buf.data());
                         return Err(());
                     },
                 }

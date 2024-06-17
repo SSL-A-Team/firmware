@@ -45,7 +45,7 @@ make_uart_queue_pair!(DRIB,
     MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
     #[link_section = ".axisram.buffers"]);
 
-const TICKS_WITHOUT_PACKET_STOP: usize = 10;
+const TICKS_WITHOUT_PACKET_STOP: usize = 20;
 const BATTERY_MIN_VOLTAGE: f32 = 18.0;
 
 const WHEEL_ANGLES_DEG: Vector4<f32> = Vector4::new(30.0, 150.0, 225.0, 315.0);
@@ -234,8 +234,6 @@ impl <
                                 latest_control.vel_z_angular,
                             );
 
-                            defmt::info!("ControlTask - got c2 packet ({}, {}, {})", new_cmd_vel.x, new_cmd_vel.y, new_cmd_vel.z);
-
                             cmd_vel = new_cmd_vel;
                             drib_vel = latest_control.dribbler_speed;
                             ticks_since_packet = 0;
@@ -251,9 +249,6 @@ impl <
                         // ticks_since_packet = 0;
                     }
                 }
-
-                defmt::info!("ControlTask - cmd_vel ({}, {}, {})", cmd_vel.x, cmd_vel.y, cmd_vel.z);
-
 
                 // now we have setpoint r(t) in self.cmd_vel
                 // let battery_v = battery_sub.next_message_pure().await as f32;
