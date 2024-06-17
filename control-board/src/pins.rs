@@ -14,6 +14,7 @@ const COMMANDS_PUBSUB_DEPTH: usize = 4;
 const TELEMETRY_PUBSUB_DEPTH: usize = 4;
 const GYRO_DATA_PUBSUB_DEPTH: usize = 1;
 const ACCEL_DATA_PUBSUB_DEPTH: usize = 1;
+const BATTERY_VOLT_PUBSUB_DEPTH: usize = 1;
 
 pub type CommandsPubSub = PubSubChannel<ThreadModeRawMutex, DataPacket, COMMANDS_PUBSUB_DEPTH, 1, 1>;
 pub type CommandsPublisher = Publisher<'static, ThreadModeRawMutex, DataPacket, COMMANDS_PUBSUB_DEPTH, 1, 1>;
@@ -29,6 +30,9 @@ pub type GyroDataSubscriber = Subscriber<'static, ThreadModeRawMutex, nalgebra::
 pub type AccelDataPubSub = PubSubChannel<ThreadModeRawMutex, nalgebra::Vector3<f32>, ACCEL_DATA_PUBSUB_DEPTH, 1, 1>;
 pub type AccelDataPublisher = Publisher<'static, ThreadModeRawMutex, nalgebra::Vector3<f32>, ACCEL_DATA_PUBSUB_DEPTH, 1, 1>;
 pub type AccelDataSubscriber = Subscriber<'static, ThreadModeRawMutex, nalgebra::Vector3<f32>, ACCEL_DATA_PUBSUB_DEPTH, 1, 1>;
+
+pub type BatteryVoltPubSub = PubSubChannel<ThreadModeRawMutex, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
+pub type BatteryVoltPublisher = Publisher<'static, ThreadModeRawMutex, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
 
 /////////////
 //  Radio  //
@@ -64,7 +68,8 @@ pub type ImuSpiInt2Pin = PB2;
 pub type ImuSpiInt1Exti = EXTI1;
 pub type ImuSpiInt2Exti = EXTI2;
 pub type ExtImuNDetPin = PF11;
-
+pub type BatteryAdcPin = PF14;
+pub type BatteryAdc = ADC2;
 
 //////////////
 //  Kicker  //

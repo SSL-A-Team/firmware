@@ -23,7 +23,7 @@ use crate::stm32_interface::Stm32Interface;
 
 pub struct WheelMotor<
     'a,
-    UART: usart::BasicInstance,
+    UART: usart::Instance,
     DmaRx: usart::RxDma<UART>,
     DmaTx: usart::TxDma<UART>,
     const LEN_RX: usize,
@@ -63,7 +63,7 @@ pub struct WheelMotor<
 
 impl<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         DmaRx: usart::RxDma<UART>,
         DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
@@ -326,7 +326,7 @@ impl<
 
 pub struct DribblerMotor<
     'a,
-    UART: usart::BasicInstance,
+    UART: usart::Instance,
     DmaRx: usart::RxDma<UART>,
     DmaTx: usart::TxDma<UART>,
     const LEN_RX: usize,
@@ -368,7 +368,7 @@ pub struct DribblerMotor<
 
 impl<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         DmaRx: usart::RxDma<UART>,
         DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,

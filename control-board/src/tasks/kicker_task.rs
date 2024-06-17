@@ -31,7 +31,7 @@ enum KickerTaskState {
 }
 
 pub struct KickerTask<'a,
-    UART: usart::BasicInstance,
+    UART: usart::Instance,
     DmaRx: usart::RxDma<UART>,
     DmaTx: usart::TxDma<UART>,
     const LEN_RX: usize,
@@ -46,7 +46,7 @@ pub struct KickerTask<'a,
 }
 
 impl<'a,
-UART: usart::BasicInstance,
+UART: usart::Instance,
 DmaRx: usart::RxDma<UART>,
 DmaTx: usart::TxDma<UART>,
 const LEN_RX: usize,

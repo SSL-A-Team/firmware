@@ -62,7 +62,7 @@ enum RadioConnectionState {
 }
 
 pub struct RadioTask<
-        UartPeripherial: usart::BasicInstance,
+        UartPeripherial: usart::Instance,
         UartRxDma: usart::RxDma<UartPeripherial>,
         UartTxDma: usart::TxDma<UartPeripherial>,
         const RADIO_MAX_TX_PACKET_SIZE: usize,
@@ -82,7 +82,7 @@ pub struct RadioTask<
 }
 
 impl<
-        UartPeripherial: usart::BasicInstance,
+        UartPeripherial: usart::Instance,
         UartRxDma: usart::RxDma<UartPeripherial>,
         UartTxDma: usart::TxDma<UartPeripherial>,
         const RADIO_MAX_TX_PACKET_SIZE: usize,
