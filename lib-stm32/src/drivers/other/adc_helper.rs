@@ -1,40 +1,51 @@
 
-use embassy_stm32::adc::{self, Adc, AdcChannel, Resolution, SampleTime, VrefInt, VREF_DEFAULT_MV};
+use embassy_stm32::adc::{self, Adc, AdcChannel, Resolution, SampleTime};
 use embassy_stm32::Peripheral;
 
-pub struct AdcHelper<'a, T: adc::Instance, Ch: AdcChannel<T>> where VrefInt: AdcChannel<T> {
+// The voltage which the internal ADC were calibrated at.
+// For the H743 and F407
+const V_CAL_MV: f32 = 3.3;
+
+pub struct AdcHelper<'a, T: adc::Instance, Ch: AdcChannel<T>> {
     inst: Adc<'a, T>,
-    channel_pin: Ch,
-    channel_vref: VrefInt
+    pin: Ch,
+    adc_bins: u32,
 }
 
-impl<'a, T: adc::Instance, Ch: AdcChannel<T>> AdcHelper<'a, T, Ch> 
-where VrefInt: AdcChannel<T> {
+impl<
+    'a, 
+    T: adc::Instance, 
+    Ch: AdcChannel<T>> 
+    AdcHelper<'a, T, Ch> {
+    
+    // NOTE: vref_int_peri is not checked by compiler and needs to 
+    // be the peripheral connected to Vref_int.
     pub fn new(
         peri: impl Peripheral<P = T> + 'a,
-        channel_pin: Ch,
+        pin: Ch,
         sample_time: SampleTime,
         resolution: Resolution
-    ) -> Self {
+        ) -> Self {
 
         let mut adc_inst = Adc::new(peri);
 
         adc_inst.set_sample_time(sample_time); 
         adc_inst.set_resolution(resolution);
 
-        let channel_vref = adc_inst.enable_vrefint();
-
+        // Use resolution to calculate the max ADC min quantity.
+        let adc_bins = u32::pow(2, resolution.to_bits() as u32) - 1;
         AdcHelper {
             inst: adc_inst,
-            channel_pin: channel_pin,
-            channel_vref: channel_vref
+            pin: pin,
+            adc_bins: adc_bins
         }
     }
 
-    pub fn read_f32(&mut self) -> f32 {
-        // Gets the Vref since it changes based on chip class.
-        let vref_cur_mv = self.inst.read(&mut self.channel_vref) as f32;
-        // Scale by Vref to convert to absolute voltage.
-        return ((VREF_DEFAULT_MV as f32) / vref_cur_mv) * (self.inst.read(&mut self.channel_pin) as f32);
+    // vref_int_mv has to be passed in because the ADC peripheral that
+    // it is connected to depends on the chip.
+    pub fn read_volt_raw_f32(&mut self, vref_int_read_mv: f32, vref_int_cal: f32) -> f32 {
+        // Based off of this: http://www.efton.sk/STM32/STM32_VREF.pdf
+        // vmeas = vcal * MEAS / MAX * CAL / REFINT (4)
+        return V_CAL_MV * (self.inst.read(&mut self.pin) as f32) / (self.adc_bins as f32) * vref_int_cal / vref_int_read_mv;
     }
 }
