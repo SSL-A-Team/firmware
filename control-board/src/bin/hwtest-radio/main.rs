@@ -11,7 +11,7 @@ use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{create_io_task, create_radio_task, get_system_config, pins::{CommandsPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
+use ateam_control_board::{create_io_task, create_radio_task, get_system_config, pins::{BatteryVoltPubSub, CommandsPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
 
 
 // load credentials from correct crate
@@ -29,6 +29,7 @@ static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(Sha
 
 static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
 static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
+static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
@@ -68,6 +69,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
     let radio_telemetry_subscriber = RADIO_TELEMETRY_CHANNEL.subscriber().unwrap();
 
+    let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
+
+
     ///////////////////
     //  start tasks  //
     ///////////////////
@@ -77,7 +81,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             radio_command_publisher, radio_telemetry_subscriber,
             wifi_credentials, p);
 
-    create_io_task!(main_spawner, robot_state, p);
+    create_io_task!(main_spawner, robot_state, battery_volt_publisher, p);
 
     loop {
         match select::select(control_command_subscriber.next_message(), Timer::after_millis(1000)).await {

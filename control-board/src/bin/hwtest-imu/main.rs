@@ -8,7 +8,7 @@ use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{create_audio_task, create_imu_task, create_io_task, create_shutdown_task, get_system_config, pins::{AccelDataPubSub, GyroDataPubSub}, robot_state::SharedRobotState};
+use ateam_control_board::{create_audio_task, create_imu_task, create_io_task, create_shutdown_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, GyroDataPubSub}, robot_state::SharedRobotState};
 
 use embassy_time::Timer;
 // provide embedded panic probe
@@ -19,6 +19,7 @@ static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(Sha
 
 static GYRO_DATA_CHANNEL: GyroDataPubSub = PubSubChannel::new();
 static ACCEL_DATA_CHANNEL: AccelDataPubSub = PubSubChannel::new();
+static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
@@ -51,11 +52,14 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let imu_accel_data_publisher = ACCEL_DATA_CHANNEL.publisher().unwrap();
     let mut imu_accel_data_subscriber = ACCEL_DATA_CHANNEL.subscriber().unwrap();
 
+    let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
+    
+
     ///////////////////
     //  start tasks  //
     ///////////////////
 
-    create_io_task!(main_spawner, robot_state, p);
+    create_io_task!(main_spawner, robot_state, battery_volt_publisher, p);
 
     create_shutdown_task!(main_spawner, robot_state, p);
 

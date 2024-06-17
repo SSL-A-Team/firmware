@@ -21,7 +21,7 @@ use embassy_stm32::adc::{Adc, SampleTime, Resolution};
 use crate::drivers::shell_indicator::ShellIndicator;
 use crate::robot_state::SharedRobotState;
 
-use crate::{pins::*, stm32_interface};
+use crate::{adc_v_to_battery_voltage, pins::*, stm32_interface};
 use crate::tasks::shutdown_task::HARD_SHUTDOWN_TIME_MS;
 
 // #[link_section = ".sram4"]
@@ -171,7 +171,9 @@ async fn user_io_task_entry(
             defmt::info!("updated robot network index {} -> {}", cur_robot_state.hw_wifi_network_index, robot_network_index);
         }
 
-        battery_volt_publisher.publish_immediate(battery_volt_adc.read_volt_raw_f32(vref_int_adc.read(&mut vref_int_ch) as f32, vref_int_cal));
+        let vref_int_read_mv = vref_int_adc.read(&mut vref_int_ch);
+        let batt_res_div_v = battery_volt_adc.read_volt_raw_f32(vref_int_read_mv as f32, vref_int_cal);
+        battery_volt_publisher.publish_immediate(adc_v_to_battery_voltage(batt_res_div_v));
 
         // TODO read messages
 
@@ -246,11 +248,11 @@ pub async fn start_io_task(spawner: &Spawner,
 
     let robot_id_indicator = ShellIndicator::new(robot_id_indicator_fr, robot_id_indicator_fl, robot_id_indicator_br, robot_id_indicator_bl, Some(robot_id_indicator_isblue));
 
-    let battery_volt_adc = AdcHelper::new(battery_adc_peri, battery_adc_pin, SampleTime::CYCLES810_5, Resolution::BITS8);
+    let battery_volt_adc = AdcHelper::new(battery_adc_peri, battery_adc_pin, SampleTime::CYCLES32_5, Resolution::BITS12);
     let mut vref_int_adc = Adc::new(vref_int_adc_peri);
     // Set the Vref_int ADC settings to the same as the battery.
-    vref_int_adc.set_resolution(Resolution::BITS8);
-    vref_int_adc.set_sample_time(SampleTime::CYCLES810_5);
+    vref_int_adc.set_resolution(Resolution::BITS12);
+    vref_int_adc.set_sample_time(SampleTime::CYCLES32_5);
 
     spawner.spawn(user_io_task_entry(robot_state, adv_usr_btn0, adv_usr_btn1, battery_volt_publisher, battery_volt_adc, vref_int_adc, dip_switch, robot_id_rotary, debug_led0, robot_id_indicator, dotstars)).unwrap();
 }

@@ -82,7 +82,7 @@ test = false
 harness = false
 
 [[bin]]
-name = "hwtest-enc"
+name = "hwtest-adc"
 test = false
 harness = false
 

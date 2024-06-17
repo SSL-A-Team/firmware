@@ -82,8 +82,8 @@ pub const fn adc_raw_to_v(adc_raw: f32) -> f32 {
     adc_raw / ADC_VREFINT_NOMINAL
 }
 
-pub const fn adc_v_to_battery_voltage(adc_mv: f32) -> f32 {
-    (adc_mv / 2.762) * BATTERY_MAX_VOLTAGE
+pub const fn adc_v_to_battery_voltage(adc_v: f32) -> f32 {
+    (adc_v / 1.966) * BATTERY_MAX_VOLTAGE
 }
 
 pub fn get_system_config() -> Config {
@@ -117,7 +117,7 @@ pub fn get_system_config() -> Config {
         source: PllSource::HSE,
         prediv: PllPreDiv::DIV1,
         mul: PllMul::MUL31,
-        divp: Some(PllDiv::DIV5), // 49.6 MHz
+        divp: Some(PllDiv::DIV7), // 35.8 MHz
         divq: Some(PllDiv::DIV2), // 124 MHz
         divr: Some(PllDiv::DIV1)  // 248 MHz
     });
@@ -149,7 +149,8 @@ pub fn get_system_config() -> Config {
     config.rcc.mux.usart16910sel = Usart16910sel::PCLK2; // 136 MHz
     config.rcc.mux.spi6sel = Spi6sel::PCLK4; // 136 MHz
     config.rcc.mux.sdmmcsel = Sdmmcsel::PLL2_R; // 248 MHz
-    config.rcc.mux.adcsel = Adcsel::PLL3_R; // 124 MHz
+    // config.rcc.mux.adcsel = Adcsel::PLL3_R; // 124 MHz
+    config.rcc.mux.adcsel = Adcsel::PLL2_P;
     config.rcc.mux.usbsel = Usbsel::PLL3_Q; // 124 MHz
 
     config.rcc.voltage_scale = VoltageScale::Scale0;
