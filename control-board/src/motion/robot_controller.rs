@@ -370,17 +370,17 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                         current_pid_gain.row_mut(0).copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
                         self.body_vel_controller.set_gain(current_pid_gain);
 
-                        let updated_pid_gain = self.body_vel_controller.get_gain();
-
+                        
                         // can't slice copy b/c backing storage is column-major
                         // so a row slice isn't contiguous in backing memory and
                         // therefore you can't do a slice copy
+                        let updated_pid_gain = self.body_vel_controller.get_gain();
                         unsafe {
-                            reply_cmd.data.pidii_f32[0] = current_pid_gain.row(0)[0];
-                            reply_cmd.data.pidii_f32[1] = current_pid_gain.row(0)[1];
-                            reply_cmd.data.pidii_f32[2] = current_pid_gain.row(0)[2];
-                            reply_cmd.data.pidii_f32[3] = current_pid_gain.row(0)[3];
-                            reply_cmd.data.pidii_f32[4] = current_pid_gain.row(0)[4];
+                            reply_cmd.data.pidii_f32[0] = updated_pid_gain.row(0)[0];
+                            reply_cmd.data.pidii_f32[1] = updated_pid_gain.row(0)[1];
+                            reply_cmd.data.pidii_f32[2] = updated_pid_gain.row(0)[2];
+                            reply_cmd.data.pidii_f32[3] = updated_pid_gain.row(0)[3];
+                            reply_cmd.data.pidii_f32[4] = updated_pid_gain.row(0)[4];
                         }
 
                         reply_cmd.command_code = PCC_ACK;
