@@ -1,56 +1,55 @@
 use nalgebra::{matrix, Matrix3, Matrix3x4, Matrix3x5, Matrix5, Matrix5x3};
 
-pub const KfNumStates: usize = 3;
-pub const KfNumControlInputs: usize = 4;
-pub const KfNumObservations: usize = 5;
+pub const KF_NUM_STATES: usize = 3;
+pub const KF_NUM_CONTROL_INPUTS: usize = 4;
+pub const KF_NUM_OBSERVATIONS: usize = 5;
 
-const ExpectedDt: f32 = 10000.0;  // 10mS = 10000uS
-const ExpectedDt2: f32 = ExpectedDt * ExpectedDt;
-const EncoderNoise: f32 = 0.11;  // noise in rad / sampling time 
-const GyroNoise: f32 = 0.002;  // BMI085 compensated for spectral noise at 100Hz sample rate
-const ProcessNoise: f32 = 0.05;
-const InitialCovariance: f32 = 0.11;
+const EXPECTED_DT: f32 = 10000.0;  // 10mS = 10000uS
+const EXPECTED_DT_2: f32 = EXPECTED_DT * EXPECTED_DT;
+const ENCODER_NOISE: f32 = 0.11;  // noise in rad / sampling time 
+const GYRO_NOISE: f32 = 0.002;  // BMI085 compensated for spectral noise at 100Hz sample rate
+const PROCESS_NOISE: f32 = 0.05;
+const INITIAL_COV: f32 = 0.11;
 
 
 // Assume constant velocity as a valid linearization of the transition system
-pub static F: Matrix3<f32> = 
+pub static STATE_TRANSITION: Matrix3<f32> = 
         matrix![1.0, 0.0, 0.0;
                 0.0, 1.0, 0.0;
                 0.0, 0.0, 1.0];
 
 // Assume no input for the moment
-pub static B: Matrix3x4<f32> = 
+pub static CONTROL_INPUT: Matrix3x4<f32> = 
         matrix![0.0, 0.0, 0.0, 0.0;
                 0.0, 0.0, 0.0, 0.0;
                 0.0, 0.0, 0.0, 0.0];
 
-
-pub static H: Matrix5x3<f32> = 
-        matrix![35.34797566, 20.40816327, 3.46938776;
-                -35.34797566, 20.40816327, 3.46938776;
-                -28.86150127, -28.86150127, 3.46938776;
-                28.86150127, -28.86150127, 3.46938776;
+pub static OBSERVATION_MODEL: Matrix5x3<f32> = 
+        matrix![-20.2429, 35.0618, 3.29555;
+                -28.6278, -28.6278, 3.29555; 
+                28.6278, -28.6278, 3.29555;
+                20.2429, 35.0618, 3.29555; 
                 0.0, 0.0, 1.0];
                 
-pub static Q: Matrix3<f32> =
-        matrix![KfNumStates as f32 * ProcessNoise / ExpectedDt2, 0.0,                                           0.0;
-                0.0,                                           KfNumStates as f32 * ProcessNoise / ExpectedDt2, 0.0;
-                0.0,                                           0.0,                                           KfNumStates as f32 * ProcessNoise / ExpectedDt2];
+pub static PROCESS_COV: Matrix3<f32> =
+        matrix![KF_NUM_STATES as f32 * PROCESS_NOISE / EXPECTED_DT_2, 0.0, 0.0;
+                0.0, KF_NUM_STATES as f32 * PROCESS_NOISE / EXPECTED_DT_2, 0.0;
+                0.0, 0.0, KF_NUM_STATES as f32 * PROCESS_NOISE / EXPECTED_DT_2];
 
-pub static R: Matrix5<f32> = 
-        matrix![EncoderNoise, 0.0,          0.0,          0.0,          0.0;
-                0.0,          EncoderNoise, 0.0,          0.0,          0.0;
-                0.0,          0.0,          EncoderNoise, 0.0,          0.0;
-                0.0,          0.0,          0.0,          EncoderNoise, 0.0;
-                0.0,          0.0,          0.0,          0.0,          GyroNoise];
+pub static OBSERVATION_COV: Matrix5<f32> = 
+        matrix![ENCODER_NOISE, 0.0,          0.0,          0.0,          0.0;
+                0.0,          ENCODER_NOISE, 0.0,          0.0,          0.0;
+                0.0,          0.0,          ENCODER_NOISE, 0.0,          0.0;
+                0.0,          0.0,          0.0,          ENCODER_NOISE, 0.0;
+                0.0,          0.0,          0.0,          0.0,          GYRO_NOISE];
 
-pub static P: Matrix3<f32> = 
-        matrix![InitialCovariance, 0.0,               0.0;
-                0.0,               InitialCovariance, 0.0;
-                0.0,               0.0,               InitialCovariance];
+pub static INIT_ESTIMATE_COV: Matrix3<f32> =
+        matrix![INITIAL_COV, 0.0,         0.0;
+                0.0,         INITIAL_COV, 0.0;
+                0.0,         0.0,         INITIAL_COV];
 
-pub static K: Matrix3x5<f32> = 
-        matrix![0.008483887, -0.008483887, -0.006927967, 0.006928444, 0.0;
-                0.009064674, 0.009062767, -0.01090765, -0.010907173, 0.012550354;
-                0.038414717, 0.038418293, 0.027166963, 0.027170658, 0.53518677];
+pub static KALMAN_GAIN: Matrix3x5<f32> = 
+        matrix![-0.00823069, -0.0116399, 0.0116399, 0.00823069, 0.0; 
+                0.00786165, -0.00783362, -0.00783362, 0.00786165, 0.0; 
+                0.06698, 0.0820302, 0.0820302, 0.06698, 0.00011093];
 

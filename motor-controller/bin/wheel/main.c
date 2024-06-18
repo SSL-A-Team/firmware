@@ -101,8 +101,10 @@ int main() {
     // setup the loop rate regulators
     SyncTimer_t vel_loop_timer;
     SyncTimer_t torque_loop_timer;
-    time_sync_init(&vel_loop_timer, 10);
-    time_sync_init(&torque_loop_timer, 1);
+    SyncTimer_t telemetry_timer;
+    time_sync_init(&vel_loop_timer, VELOCITY_LOOP_RATE_MS);
+    time_sync_init(&torque_loop_timer, TORQUE_LOOP_RATE_MS);
+    time_sync_init(&telemetry_timer, TELEMETRY_LOOP_RATE_MS);
 
     // setup the velocity filter
     IIRFilter_t encoder_filter;
@@ -136,6 +138,8 @@ int main() {
     df45_model.torque_to_current_linear_model_b = DF45_TORQUE_TO_CURRENT_LINEAR_B;
     df45_model.current_to_torque_linear_model_m = DF45_CURRENT_TO_TORQUE_LINEAR_M;
     df45_model.current_to_torque_linear_model_b = DF45_CURRENT_TO_TORQUE_LINEAR_B;
+    df45_model.rads_to_dc_linear_map_m = DF45_RADS_TO_DC_LINEAR_M;
+    df45_model.rads_to_dc_linear_map_b = DF45_RADS_TO_DC_LINEAR_B;
 
     // setup the velocity PID
     PidConstants_t vel_pid_constants;
@@ -144,10 +148,10 @@ int main() {
     pid_initialize(&vel_pid, &vel_pid_constants);
 
     vel_pid_constants.kP = 1.0f;
-    // vel_pid_constants.kI = 0.0001;
-    // vel_pid_constants.kD = 0.1;
-    // vel_pid_constants.kI_max = 550.0;
-    // vel_pid_constants.kI_min = -550.0;
+    vel_pid_constants.kI = 0.0001f;
+    // vel_pid_constants.kD = 0.1f;
+    vel_pid_constants.kI_max = 1.0;
+    vel_pid_constants.kI_min = -1.0;
 
     // setup the torque PID
     PidConstants_t torque_pid_constants;
@@ -199,6 +203,7 @@ int main() {
 
                 telemetry_enabled = motor_command_packet.data.motion.enable_telemetry;
                 r_motor_board = motor_command_packet.data.motion.setpoint;
+                motion_control_type = motor_command_packet.data.motion.motion_control_type;
             } else if (motor_command_packet.type == MCP_PARAMS) {
                 // a params update is issued (or the upstream just wants to readback current params)
 
@@ -263,6 +268,7 @@ int main() {
         // determine which loops need to be run
         bool run_torque_loop = time_sync_ready_rst(&torque_loop_timer);
         bool run_vel_loop = time_sync_ready_rst(&vel_loop_timer);
+        bool run_telemtry = time_sync_ready_rst(&telemetry_timer);
 
         // run the torque loop if applicable
         if (run_torque_loop) {
@@ -325,18 +331,18 @@ int main() {
             enc_rad_s_filt = iir_filter_update(&encoder_filter, enc_vel_rads);
         
             // compute the velcoity PID
-            float vel_setpoint_rads = pid_calculate(&vel_pid, r_motor_board, enc_rad_s_filt);
+            float vel_setpoint_rads = pid_calculate(&vel_pid, r_motor_board, enc_rad_s_filt, VELOCITY_LOOP_RATE_S);
             // back convert rads to duty cycle
             u_vel_loop = mm_rads_to_dc(&df45_model, vel_setpoint_rads);
             // u_vel_loop = vel_setpoint / DF45_MAX_MOTOR_RAD_PER_S;
 
             // velocity control data
-            response_packet.data.motion.vel_setpoint = vel_setpoint_rads;
+            response_packet.data.motion.vel_setpoint = r_motor_board;
             response_packet.data.motion.encoder_delta = enc_delta;
             response_packet.data.motion.vel_enc_estimate = enc_rad_s_filt;
             response_packet.data.motion.vel_hall_estimate = 0U;
             response_packet.data.motion.vel_computed_error = vel_pid.prev_err;
-            response_packet.data.motion.vel_computed_setpoint = vel_setpoint_rads;
+            response_packet.data.motion.vel_computed_setpoint = u_vel_loop;
         }
 
 
@@ -347,6 +353,8 @@ int main() {
             // set the motor duty cycle
             if (motion_control_type == OPEN_LOOP) {
                 float r_motor = mm_rads_to_dc(&df45_model, r_motor_board);
+                response_packet.data.motion.vel_setpoint = r_motor_board;
+                response_packet.data.motion.vel_computed_setpoint = r_motor;
                 pwm6step_set_duty_cycle_f(r_motor);
             } else if (motion_control_type == VELOCITY) {
                 pwm6step_set_duty_cycle_f(u_vel_loop);
@@ -407,9 +415,9 @@ int main() {
             // GPIOB->BSRR |= GPIO_BSRR_BS_8;
             uart_wait_for_transmission();
             // takes ~270uS, mostly hardware DMA
-            // if (telemetry_enabled) {
+            if (telemetry_enabled) {
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
-            // }
+            }
             // GPIOB->BSRR |= GPIO_BSRR_BR_8;
 #endif
 

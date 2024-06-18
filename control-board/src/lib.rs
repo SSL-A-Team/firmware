@@ -13,6 +13,7 @@
 #![feature(const_fn_floating_point_arithmetic)]
 #![feature(sync_unsafe_cell)]
 #![feature(inherent_associated_types)]
+#![feature(const_float_bits_conv)]
 
 use embassy_stm32::{
     bind_interrupts, peripherals, rcc::{
@@ -84,6 +85,10 @@ pub const fn adc_raw_to_v(adc_raw: f32) -> f32 {
 
 pub const fn adc_v_to_battery_voltage(adc_v: f32) -> f32 {
     (adc_v / 1.966) * BATTERY_MAX_VOLTAGE
+}
+
+pub const fn abs_f32(x: f32) -> f32 {
+    f32::from_bits(x.to_bits() & (i32::MAX as u32))
 }
 
 pub fn get_system_config() -> Config {

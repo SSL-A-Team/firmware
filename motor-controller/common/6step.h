@@ -51,7 +51,7 @@ typedef struct MotorErrors {
 
 #define PWM_TIM_PRESCALER 0
 
-// period 20000ns
+// period 20833ns
 // be conscious of dead time ratio
 #define PWM_FREQ_HZ 48000
 

@@ -9,8 +9,12 @@ use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{create_imu_task, create_io_task, create_radio_task, create_shutdown_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::control_task::start_control_task};
-
+use ateam_control_board::{
+    create_imu_task, create_io_task, create_radio_task, create_shutdown_task, 
+    get_system_config, 
+    pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, 
+    robot_state::SharedRobotState, 
+    tasks::control_task::start_control_task};
 
 // load credentials from correct crate
 #[cfg(not(feature = "no-private-credentials"))]
@@ -123,7 +127,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p.UART5, p.PB12, p.PB13, p.DMA2_CH3, p.DMA2_CH2, p.PD13, p.PD12).await;
 
     loop {
-        defmt::info!("{}", battery_volt_subscriber.next_message_pure().await);
         Timer::after_millis(10).await;
     }
 }
