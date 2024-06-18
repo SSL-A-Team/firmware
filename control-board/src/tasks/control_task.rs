@@ -5,13 +5,9 @@ use embassy_stm32::usart::Uart;
 use embassy_time::{Duration, Ticker, Timer};
 use nalgebra::{Vector3, Vector4};
 
-use crate::{include_external_cpp_bin, motion::{self, robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}},
-    motion::params::robot_physical_params::{
-        WHEEL_ANGLES_DEG,
-        WHEEL_RADIUS_M,
-        WHEEL_DISTANCE_TO_ROBOT_CENTER_M
-    }, 
-    pins::*, robot_state::SharedRobotState, stm32_interface, stspin_motor::{DribblerMotor, WheelMotor}, SystemIrqs};
+use crate::{include_external_cpp_bin, motion::{self, params::robot_physical_params::{
+        WHEEL_ANGLES_DEG, WHEEL_DISTANCE_TO_ROBOT_CENTER_M, WHEEL_RADIUS_M
+    }, robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, parameter_interface::ParameterInterface, pins::*, robot_state::SharedRobotState, stm32_interface, stspin_motor::{DribblerMotor, WheelMotor}, SystemIrqs};
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
@@ -240,8 +236,19 @@ impl <
                             drib_vel = latest_control.dribbler_speed;
                             ticks_since_packet = 0;
                         },
-                        ateam_common_packets::radio::DataPacket::ParameterCommand(_latest_param) => {
-                            defmt::warn!("param updates aren't supported yet");
+                        ateam_common_packets::radio::DataPacket::ParameterCommand(latest_param_cmd) => {
+                            // defmt::warn!("param updates aren't supported yet");
+                            let param_cmd_resp = robot_controller.apply_command(&latest_param_cmd);
+
+                            if let Ok(resp) = param_cmd_resp {
+                                defmt::info!("sending successful parameter update command response");
+                                let tp_resp = TelemetryPacket::ParameterCommandResponse(resp);
+                                self.telemetry_publisher.publish(tp_resp).await;
+                            } else if let Err(resp) = param_cmd_resp {
+                                defmt::warn!("sending failed parameter updated command response");
+                                let tp_resp = TelemetryPacket::ParameterCommandResponse(resp);
+                                self.telemetry_publisher.publish(tp_resp).await;
+                            }
                         },
                     }
                 } else {
