@@ -53,11 +53,11 @@ impl<
         // Based off of this: http://www.efton.sk/STM32/STM32_VREF.pdf
         // vmeas = vcal * MEAS / MAX * CAL / REFINT (4)
 
-        defmt::info!("V_CAL_MV: {}", V_CAL_V);
-        defmt::info!("inst.read(): {}", self.inst.read(&mut self.pin) as f32);
-        defmt::info!("adc_bins: {}", self.adc_bins as f32);
-        defmt::info!("vref_int_cal: {}", vref_int_cal);
-        defmt::info!("vref_int_read_mv: {}", vref_int_read_mv);
+        // defmt::info!("V_CAL_MV: {}", V_CAL_V);
+        // defmt::info!("inst.read(): {}", self.inst.read(&mut self.pin) as f32);
+        // defmt::info!("adc_bins: {}", self.adc_bins as f32);
+        // defmt::info!("vref_int_cal: {}", vref_int_cal);
+        // defmt::info!("vref_int_read_mv: {}", vref_int_read_mv);
 
         // FIXME, embassy API appears to not correctly load vref_int_read
         // override for now
