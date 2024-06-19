@@ -195,6 +195,8 @@ impl<'a> BodyVelocityController<'a> {
 
         // Add the commanded setpoint as a feedforward component.
         let body_vel_output = body_vel_control_pid + body_vel_setpoint;
+        // let body_vel_output = body_vel_setpoint;
+        
         self.debug_telemetry.body_velocity_u.copy_from_slice(body_vel_output.as_slice());
 
         // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.

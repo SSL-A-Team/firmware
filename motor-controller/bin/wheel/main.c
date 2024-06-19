@@ -147,11 +147,11 @@ int main() {
     Pid_t vel_pid;
     pid_initialize(&vel_pid, &vel_pid_constants);
 
-    vel_pid_constants.kP = 1.0f;
-    vel_pid_constants.kI = 0.0001f;
-    // vel_pid_constants.kD = 0.1f;
-    vel_pid_constants.kI_max = 1.0;
-    vel_pid_constants.kI_min = -1.0;
+    vel_pid_constants.kP = 2.0f;
+    vel_pid_constants.kI = 2.0f;
+    vel_pid_constants.kD = 0.0f;
+    vel_pid_constants.kI_max = 20.0;
+    vel_pid_constants.kI_min = -20.0;
 
     // setup the torque PID
     PidConstants_t torque_pid_constants;
@@ -198,7 +198,7 @@ int main() {
                 if (motor_command_packet.data.motion.reset) {
                     // TODO handle hardware reset
 
-                    while (true); // block, hardware reset flagged
+                    // while (true); // block, hardware reset flagged
                 }
 
                 telemetry_enabled = motor_command_packet.data.motion.enable_telemetry;
@@ -300,7 +300,7 @@ int main() {
             }
 
             // calculate PID on the torque in Nm
-            float torque_setpoint_Nm = pid_calculate(&torque_pid, r_Nm, measured_torque_Nm);
+            float torque_setpoint_Nm = pid_calculate(&torque_pid, r_Nm, measured_torque_Nm, TORQUE_LOOP_RATE_S);
 
             // convert desired torque to desired current
             float current_setpoint = mm_torque_to_current(&df45_model, fabs(torque_setpoint_Nm));
@@ -340,7 +340,7 @@ int main() {
             response_packet.data.motion.vel_setpoint = r_motor_board;
             response_packet.data.motion.encoder_delta = enc_delta;
             response_packet.data.motion.vel_enc_estimate = enc_rad_s_filt;
-            response_packet.data.motion.vel_hall_estimate = 0U;
+            response_packet.data.motion.vel_hall_estimate = vel_setpoint_rads;
             response_packet.data.motion.vel_computed_error = vel_pid.prev_err;
             response_packet.data.motion.vel_computed_setpoint = u_vel_loop;
         }
@@ -415,7 +415,7 @@ int main() {
             // GPIOB->BSRR |= GPIO_BSRR_BS_8;
             uart_wait_for_transmission();
             // takes ~270uS, mostly hardware DMA
-            if (telemetry_enabled) {
+            if (run_telemtry) {
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
             }
             // GPIOB->BSRR |= GPIO_BSRR_BR_8;

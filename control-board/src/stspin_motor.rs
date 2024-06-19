@@ -330,6 +330,10 @@ impl<
     pub fn read_vel_computed_setpoint(&self) -> f32 {
         return self.current_state.vel_computed_setpoint;
     }
+
+    pub fn read_hall_vel(&self) -> f32 {
+        return self.current_state.vel_hall_estimate;
+    }
 }
 
 pub struct DribblerMotor<

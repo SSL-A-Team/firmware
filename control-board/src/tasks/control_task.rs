@@ -1,4 +1,4 @@
-use ateam_common_packets::{bindings_radio::BasicTelemetry, radio::TelemetryPacket};
+use ateam_common_packets::{bindings_radio::BasicTelemetry, bindings_stspin::MotorCommand_MotionType, radio::TelemetryPacket};
 use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::Uart;
@@ -161,7 +161,13 @@ impl <
             });
             self.telemetry_publisher.publish_immediate(basic_telem);
 
-            let control_debug_telem = TelemetryPacket::Control(robot_controller.get_control_debug_telem());
+            let mut control_debug_telem = robot_controller.get_control_debug_telem();
+            control_debug_telem.motor_fl.wheel_torque = self.motor_fl.read_hall_vel();
+            control_debug_telem.motor_bl.wheel_torque = self.motor_bl.read_hall_vel();
+            control_debug_telem.motor_br.wheel_torque = self.motor_br.read_hall_vel();
+            control_debug_telem.motor_fr.wheel_torque = self.motor_fr.read_hall_vel();
+
+            let control_debug_telem = TelemetryPacket::Control(control_debug_telem);
             self.telemetry_publisher.publish_immediate(control_debug_telem);
         }
     
@@ -192,6 +198,12 @@ impl <
             self.motor_br.set_telemetry_enabled(true);
             self.motor_fr.set_telemetry_enabled(true);
             self.motor_drib.set_telemetry_enabled(true);
+
+            self.motor_fl.set_motion_type(MotorCommand_MotionType::VELOCITY);
+            self.motor_bl.set_motion_type(MotorCommand_MotionType::VELOCITY);
+            self.motor_br.set_motion_type(MotorCommand_MotionType::VELOCITY);
+            self.motor_fr.set_motion_type(MotorCommand_MotionType::VELOCITY);
+
 
             Timer::after_millis(10).await;
 
@@ -262,7 +274,7 @@ impl <
                 // now we have setpoint r(t) in self.cmd_vel
                 // let battery_v = battery_sub.next_message_pure().await as f32;
                 let battery_v = 25.0;
-                let controls_enabled = false;
+                let controls_enabled = true;
                 let gyro_rads = (self.gyro_subscriber.next_message_pure().await[2] as f32) * 2.0 * core::f32::consts::PI / 360.0;
                 let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
                     if controls_enabled 

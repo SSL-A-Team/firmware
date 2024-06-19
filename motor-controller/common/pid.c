@@ -28,13 +28,15 @@ float pid_calculate(Pid_t *pid, float r, float y, float dt) {
 
     float termP = err * pid->pid_constants->kP;
 
-    float termI = (pid->eI + (err * dt)) * pid->pid_constants->kI;
-    if (termI > pid->pid_constants->kI_max) {
-        termI = pid->pid_constants->kI_max;
-    } else if (termI < pid->pid_constants->kI_min) {
-        termI = pid->pid_constants->kI_min;
+    // float alpha = 0.37f;
+    // pid->eI = (pid->eI * alpha) + (err * dt * (1.0f - alpha));
+    pid->eI = pid->eI + (err * dt);
+    if (pid->eI > pid->pid_constants->kI_max) {
+        pid->eI = pid->pid_constants->kI_max;
+    } else if (pid->eI < pid->pid_constants->kI_min) {
+        pid->eI = pid->pid_constants->kI_min;
     }
-    pid->eI = termI;
+    float termI = pid->eI * pid->pid_constants->kI;
 
     float termD = (err - pid->prev_err) * pid->pid_constants->kD; // flip err and prev_err???
     pid->prev_err = err;
