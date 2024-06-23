@@ -275,7 +275,7 @@ impl <
                 // let battery_v = battery_sub.next_message_pure().await as f32;
                 let battery_v = 25.0;
                 let controls_enabled = true;
-                let gyro_rads = (self.gyro_subscriber.next_message_pure().await[2] as f32) * 2.0 * core::f32::consts::PI / 360.0;
+                let gyro_rads = self.gyro_subscriber.next_message_pure().await[2] as f32;
                 let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
                     if controls_enabled 
                     {

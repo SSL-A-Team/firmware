@@ -39,8 +39,8 @@ static mut IMU_BUFFER_CELL: [u8; bmi323::SPI_MIN_BUF_LEN] = [0; bmi323::SPI_MIN_
 #[embassy_executor::task]
 async fn imu_task_entry(
         robot_state: &'static SharedRobotState,
-        accel_pub: AccelDataPublisher,
         gyro_pub: GyroDataPublisher,
+        accel_pub: AccelDataPublisher,
         mut imu: Bmi323<'static, 'static>,
         mut _accel_int: ExtiInput<'static>,
         mut gyro_int: ExtiInput<'static>) {
@@ -61,8 +61,8 @@ async fn imu_task_entry(
         let gyro_config_res = imu.set_gyro_config(GyroMode::ContinuousHighPerformance,
             GyroRange::PlusMinus2000DegPerSec,
             Bandwidth3DbCutoffFreq::AccOdrOver2,
-            OutputDataRate::Odr6400p0,
-            DataAveragingWindow::Average64Samples).await;
+            OutputDataRate::Odr100p0,
+            DataAveragingWindow::Average2Samples).await;
         imu.set_gyro_interrupt_mode(InterruptMode::MappedToInt2).await;
 
         if gyro_config_res.is_err() {
@@ -73,8 +73,8 @@ async fn imu_task_entry(
         let acc_config_res = imu.set_accel_config(AccelMode::ContinuousHighPerformance,
             AccelRange::Range2g,
             Bandwidth3DbCutoffFreq::AccOdrOver2,
-            OutputDataRate::Odr6400p0,
-            DataAveragingWindow::Average64Samples).await;
+            OutputDataRate::Odr100p0,
+            DataAveragingWindow::Average2Samples).await;
         imu.set_accel_interrupt_mode(InterruptMode::MappedToInt1).await;
 
         if acc_config_res.is_err() {
@@ -153,6 +153,6 @@ pub fn start_imu_task(
     let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::None);
     let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::None);
 
-    imu_task_spawner.spawn(imu_task_entry(robot_state, accel_data_publisher, gyro_data_publisher, imu, accel_int, gyro_int)).unwrap();
+    imu_task_spawner.spawn(imu_task_entry(robot_state, gyro_data_publisher, accel_data_publisher, imu, accel_int, gyro_int)).unwrap();
 }
 
