@@ -118,7 +118,9 @@ int main() {
     
     // define the control points the loops use to interact
     float r_motor_board = 0.0f;
-    float u_vel_loop = 0.0f;
+    float control_setpoint_vel_duty = 0.0f;
+    float control_setpoint_vel_rads = 0.0f;
+    float control_setpoint_vel_rads_prev = 0.0f;
     float u_torque_loop = 0.0f;
     float cur_limit = 0.0f;
 
@@ -296,7 +298,7 @@ int main() {
             if (motion_control_type == TORQUE) {
                 r_Nm = r_motor_board;
             } else {
-                r_Nm = u_vel_loop;
+                r_Nm = control_setpoint_vel_duty;
             }
 
             // calculate PID on the torque in Nm
@@ -331,18 +333,28 @@ int main() {
             enc_rad_s_filt = iir_filter_update(&encoder_filter, enc_vel_rads);
         
             // compute the velcoity PID
-            float vel_setpoint_rads = pid_calculate(&vel_pid, r_motor_board, enc_rad_s_filt, VELOCITY_LOOP_RATE_S);
+            control_setpoint_vel_rads = pid_calculate(&vel_pid, r_motor_board, enc_rad_s_filt, VELOCITY_LOOP_RATE_S);
+            
+            // Clamp setpoint acceleration
+            float setpoint_accel_rads_2 = (control_setpoint_vel_rads - control_setpoint_vel_rads_prev)/VELOCITY_LOOP_RATE_S;
+            if (setpoint_accel_rads_2 > MOTOR_MAXIMUM_ACCEL) {
+                setpoint_accel_rads_2 = MOTOR_MAXIMUM_ACCEL;
+            } else if (setpoint_accel_rads_2 < -MOTOR_MAXIMUM_ACCEL) {
+                setpoint_accel_rads_2 = -MOTOR_MAXIMUM_ACCEL;
+            }
+
+            control_setpoint_vel_rads = control_setpoint_vel_rads_prev + (setpoint_accel_rads_2 * VELOCITY_LOOP_RATE_S);
+
             // back convert rads to duty cycle
-            u_vel_loop = mm_rads_to_dc(&df45_model, vel_setpoint_rads);
-            // u_vel_loop = vel_setpoint / DF45_MAX_MOTOR_RAD_PER_S;
+            control_setpoint_vel_duty = mm_rads_to_dc(&df45_model, control_setpoint_vel_rads);
 
             // velocity control data
             response_packet.data.motion.vel_setpoint = r_motor_board;
             response_packet.data.motion.encoder_delta = enc_delta;
             response_packet.data.motion.vel_enc_estimate = enc_rad_s_filt;
-            response_packet.data.motion.vel_hall_estimate = vel_setpoint_rads;
+            response_packet.data.motion.vel_hall_estimate = control_setpoint_vel_rads;
             response_packet.data.motion.vel_computed_error = vel_pid.prev_err;
-            response_packet.data.motion.vel_computed_setpoint = u_vel_loop;
+            response_packet.data.motion.vel_computed_setpoint = control_setpoint_vel_duty;
         }
 
 
@@ -357,7 +369,7 @@ int main() {
                 response_packet.data.motion.vel_computed_setpoint = r_motor;
                 pwm6step_set_duty_cycle_f(r_motor);
             } else if (motion_control_type == VELOCITY) {
-                pwm6step_set_duty_cycle_f(u_vel_loop);
+                pwm6step_set_duty_cycle_f(control_setpoint_vel_duty);
             } else {
                 pwm6step_set_duty_cycle_f(u_torque_loop);
             }
