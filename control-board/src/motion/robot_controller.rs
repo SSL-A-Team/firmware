@@ -179,9 +179,12 @@ impl<'a> BodyVelocityController<'a> {
 
         // If the encoder estimate is small enough, then replace IMU value with 
         // encoder value to reduce the jittery noise.
-        if abs_f32(enc_body_vel[2]) < 0.1 {
-            measurement[4] = enc_body_vel[2]
-        }
+        // TODO at least need to change the conditional here
+        // if abs_f32(enc_body_vel[2]) < 0.1 {
+        // if libm::fabsf(enc_body_vel[2]) < 0.1 as f32 {
+        //     defmt::warn!("remove gyro val");
+        //     measurement[4] = enc_body_vel[2]
+        // }
 
         // Update measurements process observation input into CGKF.
         self.body_vel_filter.update(&measurement);

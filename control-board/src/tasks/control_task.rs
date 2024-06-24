@@ -276,6 +276,7 @@ impl <
                 let battery_v = 25.0;
                 let controls_enabled = true;
                 let gyro_rads = self.gyro_subscriber.next_message_pure().await[2] as f32;
+                defmt::warn!("gyro rads: {}", gyro_rads);
                 let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
                     if controls_enabled 
                     {
