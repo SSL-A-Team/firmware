@@ -101,7 +101,8 @@ impl <
         fn do_control_update(&mut self, 
             robot_controller: &mut BodyVelocityController,
             cmd_vel: Vector3<f32>,
-            gyro_rads: f32
+            gyro_rads: f32,
+            controls_enabled: bool
         ) -> Vector4<f32>
         /*
             Provide the motion controller with the current wheel velocities
@@ -127,7 +128,7 @@ impl <
         
             // TODO read from channel or something
 
-            robot_controller.control_update(&cmd_vel, &wheel_vels, &wheel_torques, gyro_rads);
+            robot_controller.control_update(&cmd_vel, &wheel_vels, &wheel_torques, gyro_rads, controls_enabled);
             robot_controller.get_wheel_velocities()
         }
 
@@ -274,16 +275,11 @@ impl <
                 // now we have setpoint r(t) in self.cmd_vel
                 // let battery_v = battery_sub.next_message_pure().await as f32;
                 let battery_v = 25.0;
-                let controls_enabled = true;
+                let controls_enabled = false;
                 let gyro_rads = self.gyro_subscriber.next_message_pure().await[2] as f32;
                 let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
-                    if controls_enabled 
-                    {
-                        // TODO check order
-                        self.do_control_update(&mut robot_controller, cmd_vel, gyro_rads)
-                    } else {
-                        robot_model.robot_vel_to_wheel_vel(&cmd_vel)
-                    }
+                    // TODO check order
+                    self.do_control_update(&mut robot_controller, cmd_vel, gyro_rads, controls_enabled)
                 } else {
                     // Battery is too low, set velocity to zero
                     Vector4::new(
