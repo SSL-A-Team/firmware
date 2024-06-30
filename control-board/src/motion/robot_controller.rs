@@ -179,9 +179,17 @@ impl<'a> BodyVelocityController<'a> {
 
         // If the encoder estimate is small enough, then replace IMU value with 
         // encoder value to reduce the jittery noise.
-        if abs_f32(enc_body_vel[2]) < 0.1 {
+        
+        /*
+        if abs_f32(enc_body_vel[0]) < 0.1
+            && abs_f32(enc_body_vel[1]) < 0.1
+            && abs_f32(enc_body_vel[2]) < 0.1 {
+
             measurement[4] = enc_body_vel[2]
         }
+        */
+        
+        //defmt::debug!("{}", measurement[4]);
 
         // Update measurements process observation input into CGKF.
         self.body_vel_filter.update(&measurement);
@@ -224,13 +232,13 @@ impl<'a> BodyVelocityController<'a> {
         // and globally invalid. Investiage this later. If problems are suspected, disable this section
         // and lower the body acc limit (maybe something anatgonist based on 45/30 deg wheel angles?)
         // TODO cross check in the future against wheel angle plots and analysis
-        let wheel_acc_setpoint = (wheel_vel_output - self.cmd_wheel_velocities) / self.loop_dt_s;
-        let wheel_acc_setpoint_clamp = clamp_vector_keep_dir(&wheel_acc_setpoint, &WHEEL_ACC_LIM);
-        let wheel_vel_output_clamp = self.cmd_wheel_velocities + (wheel_acc_setpoint_clamp * self.loop_dt_s);
-        self.debug_telemetry.wheel_velocity_clamped_u.copy_from_slice(wheel_vel_output_clamp.as_slice());
+        //let wheel_acc_setpoint = (wheel_vel_output - self.cmd_wheel_velocities) / self.loop_dt_s;
+        //let wheel_acc_setpoint_clamp = clamp_vector_keep_dir(&wheel_acc_setpoint, &WHEEL_ACC_LIM);
+        //let wheel_vel_output_clamp = self.cmd_wheel_velocities + (wheel_acc_setpoint_clamp * self.loop_dt_s);
+        self.debug_telemetry.wheel_velocity_clamped_u.copy_from_slice(wheel_vel_output.as_slice());
 
         // Save command state.
-        self.cmd_wheel_velocities = wheel_vel_output_clamp;
+        self.cmd_wheel_velocities = wheel_vel_output;
     }
 
     pub fn get_wheel_velocities(&self) -> Vector4<f32> {

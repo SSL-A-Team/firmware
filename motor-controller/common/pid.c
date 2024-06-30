@@ -1,5 +1,6 @@
 
 #include <float.h>
+#include <math.h>
 
 #include "pid.h"
 
@@ -31,6 +32,11 @@ float pid_calculate(Pid_t *pid, float r, float y, float dt) {
     // float alpha = 0.37f;
     // pid->eI = (pid->eI * alpha) + (err * dt * (1.0f - alpha));
     pid->eI = pid->eI + (err * dt);
+
+    if (fabs(r) < 3.0) {
+        pid->eI = 0.0;
+    }
+
     if (pid->eI > pid->pid_constants->kI_max) {
         pid->eI = pid->pid_constants->kI_max;
     } else if (pid->eI < pid->pid_constants->kI_min) {
