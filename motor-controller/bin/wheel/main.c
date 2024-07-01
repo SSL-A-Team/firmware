@@ -344,6 +344,7 @@ int main() {
             }
 
             control_setpoint_vel_rads = control_setpoint_vel_rads_prev + (setpoint_accel_rads_2 * VELOCITY_LOOP_RATE_S);
+            control_setpoint_vel_rads_prev = control_setpoint_vel_rads;
 
             // back convert rads to duty cycle
             control_setpoint_vel_duty = mm_rads_to_dc(&df45_model, control_setpoint_vel_rads);

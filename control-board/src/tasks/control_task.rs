@@ -128,8 +128,8 @@ impl <
         
             // TODO read from channel or something
 
-            robot_controller.control_update(&cmd_vel, &wheel_vels, &wheel_torques, gyro_rads, controls_enabled);
-            robot_controller.get_wheel_velocities()
+            robot_controller.control_update(&cmd_vel, &wheel_vels, &wheel_torques, gyro_rads, controls_enabled); 
+            robot_controller.get_wheel_velocities()   
         }
 
         fn send_motor_commands_and_telemetry(&mut self,
@@ -275,7 +275,7 @@ impl <
                 // now we have setpoint r(t) in self.cmd_vel
                 // let battery_v = battery_sub.next_message_pure().await as f32;
                 let battery_v = 25.0;
-                let controls_enabled = false;
+                let controls_enabled = true;
                 let gyro_rads = self.gyro_subscriber.next_message_pure().await[2] as f32;
                 let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
                     // TODO check order
@@ -288,6 +288,8 @@ impl <
                         0.0,
                         0.0)
                 };
+
+                // Scale the wheel velocities to 
 
                 self.motor_fl.set_setpoint(wheel_vels[0]);
                 self.motor_bl.set_setpoint(wheel_vels[1]);

@@ -195,7 +195,19 @@ impl<'a> BodyVelocityController<'a> {
         self.body_vel_filter.update(&measurement);
 
         // Read the current body velocity state estimate from the CGKF.
-        let body_vel_estimate = self.body_vel_filter.get_state();
+        let mut body_vel_estimate = self.body_vel_filter.get_state();
+
+        // Deadzone the velocity estimate
+        if libm::fabsf(body_vel_estimate[0]) < 0.005 {
+            body_vel_estimate[0] = 0.0;
+        }
+        if libm::fabsf(body_vel_estimate[1]) < 0.005 {
+            body_vel_estimate[1] = 0.0;
+        }
+        if libm::fabsf(body_vel_estimate[2]) < 0.005 {
+            body_vel_estimate[2] = 0.0;
+        }
+
         self.debug_telemetry.cgkf_body_velocity_state_estimate.copy_from_slice(body_vel_estimate.as_slice());
 
         // Apply control policy.
@@ -242,6 +254,7 @@ impl<'a> BodyVelocityController<'a> {
             self.cmd_wheel_velocities = wheel_vel_output;
         } else {
             self.cmd_wheel_velocities = self.robot_model.robot_vel_to_wheel_vel(&body_vel_setpoint);
+            self.debug_telemetry.wheel_velocity_u.copy_from_slice(self.cmd_wheel_velocities.as_slice());
         }
     }
 
