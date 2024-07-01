@@ -79,7 +79,9 @@ int main() {
     bool params_return_packet_requested = false;
 
     SyncTimer_t torque_loop_timer;
-    time_sync_init(&torque_loop_timer, 1);
+    time_sync_init(&torque_loop_timer, TORQUE_LOOP_RATE_MS);
+    SyncTimer_t telemetry_timer;
+    time_sync_init(&telemetry_timer, TELEMETRY_LOOP_RATE_MS);
 
     IIRFilter_t torque_filter;
     iir_filter_init(&torque_filter, iir_filter_alpha_from_Tf(TORQUE_IIR_TF_MS, TORQUE_LOOP_RATE_MS));
@@ -174,6 +176,7 @@ int main() {
         }
 
         bool run_torque_loop = time_sync_ready_rst(&torque_loop_timer);
+        bool run_telemetry = time_sync_ready_rst(&telemetry_timer);
 
         if (run_torque_loop) {
             float cur_measurement = ((float) res.I_motor / (float) UINT16_MAX) * AVDD_V;
@@ -259,7 +262,10 @@ int main() {
             // GPIOB->BSRR |= GPIO_BSRR_BS_8;
             uart_wait_for_transmission();
             // takes ~270uS, mostly hardware DMA
-            uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
+            if (run_telemetry)
+            {
+                uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
+            }
             // GPIOB->BSRR |= GPIO_BSRR_BR_8;
 #endif
 

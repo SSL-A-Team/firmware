@@ -4,56 +4,45 @@ use nalgebra::{
 };
 
 pub struct PidController<const NUM_STATES: usize> {
-    K: SMatrix<f32, NUM_STATES, 5>,
-    u: SVector<f32, NUM_STATES>,
+    gain: SMatrix<f32, NUM_STATES, 5>,
     prev_error: SVector<f32, NUM_STATES>,
     integrated_error: SVector<f32, NUM_STATES>,
 }
 
 impl<'a, const NUM_STATES: usize> PidController<NUM_STATES> {
-    pub fn from_gains_matrix(K: &'a SMatrix<f32, NUM_STATES, 5>) -> PidController<NUM_STATES> {
+    pub fn from_gains_matrix(gain: &'a SMatrix<f32, NUM_STATES, 5>) -> PidController<NUM_STATES> {
         PidController {
-            K: K.clone(), 
-            u: SVector::<f32, NUM_STATES>::zeros(),
+            gain: gain.clone(), 
             prev_error: SVector::<f32, NUM_STATES>::zeros(),
             integrated_error: SVector::<f32, NUM_STATES>::zeros(),
         }
     }
 
-    pub fn calculate(&mut self, r: SVector<f32, NUM_STATES>, y: SVector<f32, NUM_STATES>, _dt: f32) {
-        let error = r - y;
+    pub fn calculate(&mut self, setpoint: &SVector<f32, NUM_STATES>, process_variable: &SVector<f32, NUM_STATES>, dt_s: f32) -> SVector<f32, NUM_STATES> {
+        let error = setpoint - process_variable;
 
-        // calculate integrated error
-        let ie = self.integrated_error + error;
+        // Calculate integrated error.
+        let cur_integrated_error = self.integrated_error + (error * dt_s);
         // clamp error
         // is there a better way to do this? 
-        self.integrated_error = ie.zip_zip_map(&self.K.column(3), &self.K.column(4), |err, min_err, max_err| clamp(err, min_err, max_err));
+        self.integrated_error = cur_integrated_error.zip_zip_map(&self.gain.column(3), &self.gain.column(4), |err, min_err, max_err| clamp(err, min_err, max_err));
 
         // calculate derivative error
-        let de_dt = error - self.prev_error;
+        let de_dt = (error - self.prev_error) / dt_s;
         self.prev_error = error;
 
-        let p = self.K.column(0).component_mul(&error);
-        let i = self.K.column(1).component_mul(&self.integrated_error);
-        let d = self.K.column(2).component_mul(&de_dt);
-        self.u = r + (p + i + d);
+        let p = self.gain.column(0).component_mul(&error);
+        let i = self.gain.column(1).component_mul(&self.integrated_error);
+        let d = self.gain.column(2).component_mul(&de_dt);
+        
+        p + i + d
     }
 
-    pub fn read_u(&self, u: &mut SVector<f32, NUM_STATES>) {
-        *u = self.u;
+    pub fn get_gain(&self) -> SMatrix<f32, NUM_STATES, 5> {
+        return self.gain;
     }
 
-    pub fn get_u(&self) -> SVector<f32, NUM_STATES> {
-        self.u
-    }
-
-    #[allow(non_snake_case)]
-    pub fn get_K(&self) -> SMatrix<f32, NUM_STATES, 5> {
-        return self.K;
-    }
-
-    #[allow(non_snake_case)]
-    pub fn set_K(&mut self, new_K: SMatrix<f32, NUM_STATES, 5>) {
-        self.K.copy_from(&new_K)
+    pub fn set_gain(&mut self, new_gain: SMatrix<f32, NUM_STATES, 5>) {
+        self.gain.copy_from(&new_gain)
     }
 }

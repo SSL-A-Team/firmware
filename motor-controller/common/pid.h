@@ -23,4 +23,4 @@ void pid_constants_initialize(PidConstants_t *pid_constants);
 
 void pid_initialize(Pid_t *pid, PidConstants_t *pid_constants);
 
-float pid_calculate(Pid_t *pid, float r, float y);
+float pid_calculate(Pid_t *pid, float r, float y, float dt);
