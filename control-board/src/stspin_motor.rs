@@ -219,7 +219,7 @@ impl<
                     // info!("vel enc {:?}", mrp.data.motion.vel_enc_estimate + 0.);
                     // // // info!("vel hall {:?}", mrp.data.motion.vel_hall_estimate + 0.);
                     if mrp.data.motion.master_error() != 0 {
-                        //error!("motor error: {:?}", &mrp.data.motion._bitfield_1.get(0, 32));
+                        error!("motor error: {:?}", &mrp.data.motion._bitfield_1.get(0, 32));
                     }
                     // info!("hall_power_error {:?}", mrp.data.motion.hall_power_error());
                     // info!("hall_disconnected_error {:?}", mrp.data.motion.hall_disconnected_error());

@@ -182,7 +182,6 @@ impl <
  
             self.flash_motor_firmware(
                 self.shared_robot_state.hw_in_debug_mode()).await;
-
              
             embassy_futures::join::join5(
                 self.motor_fl.leave_reset(),
@@ -190,8 +189,7 @@ impl <
                 self.motor_br.leave_reset(),
                 self.motor_fr.leave_reset(),
                 self.motor_drib.leave_reset(),
-            )
-            .await;
+            ).await;
 
 
             self.motor_fl.set_telemetry_enabled(true);
@@ -250,7 +248,6 @@ impl <
                             ticks_since_packet = 0;
                         },
                         ateam_common_packets::radio::DataPacket::ParameterCommand(latest_param_cmd) => {
-                            // defmt::warn!("param updates aren't supported yet");
                             let param_cmd_resp = robot_controller.apply_command(&latest_param_cmd);
 
                             if let Ok(resp) = param_cmd_resp {
@@ -282,14 +279,8 @@ impl <
                     self.do_control_update(&mut robot_controller, cmd_vel, gyro_rads, controls_enabled)
                 } else {
                     // Battery is too low, set velocity to zero
-                    Vector4::new(
-                        0.0,
-                        0.0,
-                        0.0,
-                        0.0)
+                    Vector4::new(0.0, 0.0, 0.0, 0.0)
                 };
-
-                // Scale the wheel velocities to 
 
                 self.motor_fl.set_setpoint(wheel_vels[0]);
                 self.motor_bl.set_setpoint(wheel_vels[1]);

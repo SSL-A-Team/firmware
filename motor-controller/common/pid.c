@@ -29,8 +29,6 @@ float pid_calculate(Pid_t *pid, float r, float y, float dt) {
 
     float termP = err * pid->pid_constants->kP;
 
-    // float alpha = 0.37f;
-    // pid->eI = (pid->eI * alpha) + (err * dt * (1.0f - alpha));
     pid->eI = pid->eI + (err * dt);
 
     if (fabs(r) < 3.0) {
@@ -48,6 +46,5 @@ float pid_calculate(Pid_t *pid, float r, float y, float dt) {
     pid->prev_err = err;
 
     float u = r + (termP + termI + termD);
-    //pid->prev_u = u;
     return u;
 }

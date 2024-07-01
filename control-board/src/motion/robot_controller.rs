@@ -172,24 +172,7 @@ impl<'a> BodyVelocityController<'a> {
         // these should probably be genericized/templated some how
 
         // Build measurement vector for CGKF.
-        let mut measurement: Vector5<f32> = Vector5::new(wheel_velocities[0], wheel_velocities[1], wheel_velocities[2], wheel_velocities[3], gyro_theta); 
-
-        // Convert encoder velocity to body velocity for comparison to IMU. 
-        let enc_body_vel = self.robot_model.wheel_vel_to_robot_vel(wheel_velocities);
-
-        // If the encoder estimate is small enough, then replace IMU value with 
-        // encoder value to reduce the jittery noise.
-        
-        /*
-        if abs_f32(enc_body_vel[0]) < 0.1
-            && abs_f32(enc_body_vel[1]) < 0.1
-            && abs_f32(enc_body_vel[2]) < 0.1 {
-
-            measurement[4] = enc_body_vel[2]
-        }
-        */
-        
-        //defmt::debug!("{}", measurement[4]);
+        let measurement: Vector5<f32> = Vector5::new(wheel_velocities[0], wheel_velocities[1], wheel_velocities[2], wheel_velocities[3], gyro_theta);
 
         // Update measurements process observation input into CGKF.
         self.body_vel_filter.update(&measurement);
@@ -201,9 +184,11 @@ impl<'a> BodyVelocityController<'a> {
         if libm::fabsf(body_vel_estimate[0]) < 0.005 {
             body_vel_estimate[0] = 0.0;
         }
+
         if libm::fabsf(body_vel_estimate[1]) < 0.005 {
             body_vel_estimate[1] = 0.0;
         }
+
         if libm::fabsf(body_vel_estimate[2]) < 0.005 {
             body_vel_estimate[2] = 0.0;
         }
