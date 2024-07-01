@@ -4,30 +4,24 @@
 #![feature(const_mut_refs)]
 #![feature(sync_unsafe_cell)]
 
-use core::cell::SyncUnsafeCell;
-use ateam_kicker_board::{drivers::breakbeam::Breakbeam, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin}, tasks::get_system_config};
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-use static_cell::StaticCell;
+use ateam_kicker_board::{drivers::breakbeam::Breakbeam, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin}, tasks::{get_system_config, ClkSource}};
 
 use defmt::*;
 use {defmt_rtt as _, panic_probe as _};
 
-use cortex_m_rt::entry;
-
 use libm::{fmaxf, fminf};
 
-use embassy_executor::{Executor, InterruptExecutor};
+use embassy_executor::{InterruptExecutor, Spawner};
 use embassy_stm32::{
     adc::{Adc, SampleTime},
     bind_interrupts,
     gpio::{Level, Output, Speed},
     interrupt,
     interrupt::InterruptExt,
-    pac::Interrupt,
-    peripherals,
-    usart::{self, Config, Parity, StopBits, Uart},
+    pac::Interrupt,peripherals,
+    usart::{self, Config, Parity, StopBits, Uart}
 };
-use embassy_time::{Duration, Instant, Ticker};
+use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use ateam_kicker_board::{
     adc_raw_to_v, adc_200v_to_rail_voltage,
@@ -38,18 +32,13 @@ use ateam_kicker_board::{
     },
 };
 
-use ateam_lib_stm32::queue::Buffer;
+use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
 use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
 
 use ateam_common_packets::bindings_kicker::{
     KickRequest::{self, KR_ARM, KR_DISABLE},
     KickerControl, KickerTelemetry,
 };
-
-const MAX_TX_PACKET_SIZE: usize = 16;
-const TX_BUF_DEPTH: usize = 3;
-const MAX_RX_PACKET_SIZE: usize = 16;
-const RX_BUF_DEPTH: usize = 3;
 
 const MAX_KICK_SPEED: f32 = 5.5;
 const SHUTDOWN_KICK_DUTY: f32 = 0.20;
@@ -59,22 +48,16 @@ pub const CHARGE_OVERVOLT_THRESH_VOLTAGE: f32 = 190.0;
 pub const CHARGED_THRESH_VOLTAGE: f32 = 170.0;
 pub const CHARGE_SAFE_VOLTAGE: f32 = 5.0;
 
-// control communications tx buffer
-const COMS_BUFFER_MUTEX: Mutex<CriticalSectionRawMutex, bool> = Mutex::new(false);
-const COMS_BUFFER_VAL_TX: SyncUnsafeCell<Buffer<MAX_TX_PACKET_SIZE>> = 
-    SyncUnsafeCell::new(Buffer::EMPTY);
-static COMS_BUFFERS_TX: [SyncUnsafeCell<Buffer<MAX_TX_PACKET_SIZE>>; TX_BUF_DEPTH] = 
-    [COMS_BUFFER_VAL_TX; TX_BUF_DEPTH];
-static COMS_QUEUE_TX: UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = 
-    UartWriteQueue::new(&COMS_BUFFERS_TX, COMS_BUFFER_MUTEX);
+const MAX_TX_PACKET_SIZE: usize = 16;
+const TX_BUF_DEPTH: usize = 3;
+const MAX_RX_PACKET_SIZE: usize = 16;
+const RX_BUF_DEPTH: usize = 3;
 
-// control communications rx buffer
-const COMS_BUFFER_VAL_RX: SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>> = 
-    SyncUnsafeCell::new(Buffer::EMPTY);
-static COMS_BUFFERS_RX: [SyncUnsafeCell<Buffer<MAX_RX_PACKET_SIZE>>; RX_BUF_DEPTH] = 
-    [COMS_BUFFER_VAL_RX; RX_BUF_DEPTH];
-static COMS_QUEUE_RX: UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> = 
-    UartReadQueue::new(&COMS_BUFFERS_RX, COMS_BUFFER_MUTEX);
+make_uart_queue_pair!(COMS,
+    ComsUartModule, ComsUartRxDma, ComsUartTxDma,
+    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
+    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
+    #[link_section = ".bss"]);
 
 fn get_empty_control_packet() -> KickerControl {
     KickerControl {
@@ -389,7 +372,6 @@ async fn high_pri_kick_task(
 }
 
 static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
-static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
 #[interrupt]
 unsafe fn TIM2() {
@@ -400,10 +382,11 @@ bind_interrupts!(struct Irqs {
     USART1 => usart::InterruptHandler<peripherals::USART1>;
 });
 
-#[entry]
-fn main() -> ! {
-    let sys_cfg = get_system_config(ateam_kicker_board::tasks::ClkSource::InternalOscillator);
-    let p = embassy_stm32::init(sys_cfg);
+
+#[embassy_executor::main]
+async fn main(spawner: Spawner) -> ! {
+    let stm32_config = get_system_config(ClkSource::InternalOscillator);
+    let p = embassy_stm32::init(stm32_config);
 
     info!("kicker startup!");
 
@@ -417,8 +400,9 @@ fn main() -> ! {
     // High-priority executor: I2C1, priority level 6
     // TODO CHECK THIS IS THE HIGHEST PRIORITY
     embassy_stm32::interrupt::TIM2.set_priority(embassy_stm32::interrupt::Priority::P6);
-    let spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
-    unwrap!(spawner.spawn(high_pri_kick_task(&COMS_QUEUE_RX, &COMS_QUEUE_TX, adc, p.PE4, p.PE5, p.PE6, p.PA1, p.PA0, p.PC0, p.PE1, p.PE2, p.PE3)));
+    let hp_spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
+
+    unwrap!(hp_spawner.spawn(high_pri_kick_task(&COMS_RX_UART_QUEUE, &COMS_TX_UART_QUEUE, adc, p.PE4, p.PE5, p.PE6, p.PA1, p.PA0, p.PC0, p.PE1, p.PE2, p.PE3)));
 
 
     //////////////////////////////////
@@ -441,12 +425,9 @@ fn main() -> ! {
     ).unwrap();
 
     let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
+    queue_pair_register_and_spawn!(spawner, COMS, coms_uart_rx, coms_uart_tx);
 
-    // low priority executor handles coms and user IO
-    // Low priority executor: runs in thread mode, using WFE/SEV
-    let lp_executor = EXECUTOR_LOW.init(Executor::new());
-    lp_executor.run(|spawner| {
-        unwrap!(spawner.spawn(COMS_QUEUE_TX.spawn_task(coms_uart_tx)));
-        unwrap!(spawner.spawn(COMS_QUEUE_RX.spawn_task(coms_uart_rx)));
-    });
+    loop {
+        Timer::after_millis(1000).await;
+    }
 }

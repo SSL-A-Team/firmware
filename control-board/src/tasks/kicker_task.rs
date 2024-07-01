@@ -125,6 +125,7 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
                 },
                 KickerTaskState::WaitShutdown => {
                     if self.kicker_driver.shutdown_completed() {
+                        defmt::info!("kicker finished shutdown");
                         self.kicker_task_state = KickerTaskState::PoweredOff;
                     }
                 },
