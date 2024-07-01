@@ -67,7 +67,7 @@ impl SharedRobotState {
             last_packet_receive_time_ticks_ms: 0,
             radio_connection_ok: false,
         
-            battery_pct: 0,
+            battery_pct: self.battery_pct(),
             battery_ok: false,
 
             robot_tipped: self.robot_tipped(),
@@ -132,6 +132,13 @@ impl SharedRobotState {
         self.shutdown_requested.store(true, Ordering::Relaxed);
     }
 
+    pub fn battery_pct(&self) -> u8 {
+        self.battery_pct.load(Ordering::Relaxed)
+    }
+
+    pub fn set_battery_pct(&self, battery_pct: u8) {
+        self.battery_pct.store(battery_pct, Ordering::Relaxed);
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]

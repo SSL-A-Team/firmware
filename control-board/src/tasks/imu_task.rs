@@ -61,8 +61,8 @@ async fn imu_task_entry(
         let gyro_config_res = imu.set_gyro_config(GyroMode::ContinuousHighPerformance,
             GyroRange::PlusMinus2000DegPerSec,
             Bandwidth3DbCutoffFreq::AccOdrOver2,
-            OutputDataRate::Odr6400p0,
-            DataAveragingWindow::Average64Samples).await;
+            OutputDataRate::Odr200p0,
+            DataAveragingWindow::Average2Samples).await;
         imu.set_gyro_interrupt_mode(InterruptMode::MappedToInt2).await;
 
         if gyro_config_res.is_err() {
@@ -73,8 +73,8 @@ async fn imu_task_entry(
         let acc_config_res = imu.set_accel_config(AccelMode::ContinuousHighPerformance,
             AccelRange::Range2g,
             Bandwidth3DbCutoffFreq::AccOdrOver2,
-            OutputDataRate::Odr6400p0,
-            DataAveragingWindow::Average64Samples).await;
+            OutputDataRate::Odr200p0,
+            DataAveragingWindow::Average2Samples).await;
         imu.set_accel_interrupt_mode(InterruptMode::MappedToInt1).await;
 
         if acc_config_res.is_err() {

@@ -123,7 +123,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p.UART5, p.PB12, p.PB13, p.DMA2_CH3, p.DMA2_CH2, p.PD13, p.PD12).await;
 
     loop {
-        defmt::info!("{}", battery_volt_subscriber.next_message_pure().await);
         Timer::after_millis(10).await;
     }
 }
