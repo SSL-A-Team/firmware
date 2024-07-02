@@ -263,6 +263,9 @@ impl<
                 },
             }
 
+            // set global radio connected flag
+            self.shared_robot_state.set_radio_connection_ok(self.connection_state == RadioConnectionState::Connected);
+
             radio_loop_rate_ticker.next().await;
         }
 

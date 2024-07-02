@@ -139,6 +139,14 @@ impl SharedRobotState {
     pub fn set_battery_pct(&self, battery_pct: u8) {
         self.battery_pct.store(battery_pct, Ordering::Relaxed);
     }
+
+    pub fn radio_connection_ok(&self) -> bool {
+        self.radio_connection_ok.load(Ordering::Relaxed)
+    }
+
+    pub fn set_radio_connection_ok(&self, conn_ok: bool) {
+        self.radio_connection_ok.store(conn_ok, Ordering::Relaxed);
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
