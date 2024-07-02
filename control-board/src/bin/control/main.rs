@@ -80,7 +80,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     // Battery Channel
     let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
-    let mut battery_volt_subscriber = BATTERY_VOLT_CHANNEL.subscriber().unwrap();
 
     // TODO imu channel
     let imu_gyro_data_publisher = GYRO_DATA_CHANNEL.publisher().unwrap();
