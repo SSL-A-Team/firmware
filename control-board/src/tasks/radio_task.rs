@@ -258,6 +258,7 @@ impl<
                     // if 1000ms have elapsed since we last got a packet, return to software connection state
                     if Instant::now() - self.last_software_packet > Duration::from_millis(1000) {
                         self.connection_state = RadioConnectionState::ConnectSoftware;
+                        self.radio.close_peer().await.unwrap();
                     }
                 },
             }
