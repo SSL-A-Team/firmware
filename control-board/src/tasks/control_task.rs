@@ -143,6 +143,17 @@ impl <
             self.motor_br.send_motion_command();
             self.motor_drib.send_motion_command();
 
+            let err_fr = self.motor_fr.read_is_error() as u32;
+            let err_fl = self.motor_fl.read_is_error() as u32;
+            let err_br = self.motor_br.read_is_error() as u32;
+            let err_bl = self.motor_bl.read_is_error() as u32;
+            let err_drib = self.motor_drib.read_is_error() as u32;
+
+            let hall_err_fr = self.motor_fr.check_hall_error() as u32;
+            let hall_err_fl = self.motor_fl.check_hall_error() as u32;
+            let hall_err_br = self.motor_br.check_hall_error() as u32;
+            let hall_err_bl = self.motor_bl.check_hall_error() as u32;
+            let hall_err_drib = self.motor_drib.check_hall_error() as u32;
 
             let basic_telem = TelemetryPacket::Basic(BasicTelemetry {
                 sequence_number: 0,
@@ -152,7 +163,7 @@ impl <
                 battery_temperature: 0.,
                 _bitfield_align_1: [],
                 _bitfield_1: BasicTelemetry::new_bitfield_1(
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, err_fr, hall_err_fr, err_fl, hall_err_fl, err_br, hall_err_br, err_bl, hall_err_bl, err_drib, hall_err_drib, 0, 0, 0,
                 ),
                 motor_0_temperature: 0.,
                 motor_1_temperature: 0.,
