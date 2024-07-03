@@ -3,7 +3,7 @@ use embassy_executor::Spawner;
 use embassy_stm32::{gpio::OutputType, time::hz, timer::{simple_pwm::{PwmPin, SimplePwm}, Channel}};
 use embassy_time::{Duration, Ticker};
 
-use crate::{pins::{BuzzerPin, BuzzerTimer}, robot_state::SharedRobotState, songs::TIPPED_WARNING_SONG};
+use crate::{pins::{BuzzerPin, BuzzerTimer}, robot_state::SharedRobotState, songs::{BATTERY_WARNING_SONG, TIPPED_WARNING_SONG}};
 
 #[macro_export]
 macro_rules! create_audio_task {
@@ -27,6 +27,13 @@ async fn audio_task_entry(
         if cur_robot_state.robot_tipped {
             defmt::warn!("robot tipped audio");
             let _ = tone_player.load_song(&TIPPED_WARNING_SONG);
+            tone_player.play_song().await;
+        }
+
+        defmt::info!("battery pct {}", cur_robot_state.battery_pct);
+        if cur_robot_state.battery_pct == 0 || cur_robot_state.battery_pct > 110 {
+            defmt::warn!("robot critical battery pct {}", cur_robot_state.battery_pct);
+            let _ = tone_player.load_song(&BATTERY_WARNING_SONG);
             tone_player.play_song().await;
         }
 
