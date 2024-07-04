@@ -2,7 +2,6 @@ use ateam_common_packets::bindings_radio::{ParameterCommandCode::*, ParameterNam
 use ateam_common_packets::bindings_radio::ParameterDataFormat::{PID_LIMITED_INTEGRAL_F32, VEC3_F32, VEC4_F32};
 use ateam_common_packets::bindings_radio::ParameterName::{VEL_PID_X, RC_BODY_VEL_LIMIT, RC_BODY_ACC_LIMIT, VEL_PID_Y, ANGULAR_VEL_PID_Z, VEL_CGKF_ENCODER_NOISE, VEL_CGKF_PROCESS_NOISE, VEL_CGKF_GYRO_NOISE, VEL_CGFK_INITIAL_COVARIANCE, VEL_CGKF_K_MATRIX, RC_WHEEL_ACC_LIMIT};
 use nalgebra::{SVector, Vector3, Vector4, Vector5};
-use crate::abs_f32;
 use crate::parameter_interface::ParameterInterface;
 
 use super::constant_gain_kalman_filter::CgKalmanFilter;
@@ -154,7 +153,7 @@ impl<'a> BodyVelocityController<'a> {
         }
     }
 
-    pub fn control_update(&mut self, body_vel_setpoint: &Vector3<f32>, wheel_velocities: &Vector4<f32>, wheel_torques: &Vector4<f32>, gyro_theta: f32) {
+    pub fn control_update(&mut self, body_vel_setpoint: &Vector3<f32>, wheel_velocities: &Vector4<f32>, wheel_torques: &Vector4<f32>, gyro_theta: f32, controls_enabled: bool) {
         // Assign telemetry data
         // TODO pass all of the gyro data up, not just theta
         self.debug_telemetry.imu_gyro[2] = gyro_theta;
@@ -168,29 +167,27 @@ impl<'a> BodyVelocityController<'a> {
         self.debug_telemetry.motor_fr.wheel_velocity = wheel_velocities[3];
         self.debug_telemetry.commanded_body_velocity.copy_from_slice(body_vel_setpoint.as_slice());
 
-        // TODO there are a few discrete time intergrals and derivatives in here
-        // these should probably be genericized/templated some how
-
-        // Build measurement vector for CGKF.
-        let mut measurement: Vector5<f32> = Vector5::new(wheel_velocities[0], wheel_velocities[1], wheel_velocities[2], wheel_velocities[3], gyro_theta); 
-
-        // Convert encoder velocity to body velocity for comparison to IMU. 
-        let enc_body_vel = self.robot_model.wheel_vel_to_robot_vel(wheel_velocities);
-
-        // If the encoder estimate is small enough, then replace IMU value with 
-        // encoder value to reduce the jittery noise.
-        // TODO at least need to change the conditional here
-        // if abs_f32(enc_body_vel[2]) < 0.1 {
-        // if libm::fabsf(enc_body_vel[2]) < 0.1 as f32 {
-        //     defmt::warn!("remove gyro val");
-        //     measurement[4] = enc_body_vel[2]
-        // }
+        let measurement: Vector5<f32> = Vector5::new(wheel_velocities[0], wheel_velocities[1], wheel_velocities[2], wheel_velocities[3], gyro_theta);
 
         // Update measurements process observation input into CGKF.
         self.body_vel_filter.update(&measurement);
 
         // Read the current body velocity state estimate from the CGKF.
-        let body_vel_estimate = self.body_vel_filter.get_state();
+        let mut body_vel_estimate = self.body_vel_filter.get_state();
+
+        // Deadzone the velocity estimate
+        if libm::fabsf(body_vel_estimate[0]) < 0.005 {
+            body_vel_estimate[0] = 0.0;
+        }
+
+        if libm::fabsf(body_vel_estimate[1]) < 0.005 {
+            body_vel_estimate[1] = 0.0;
+        }
+
+        if libm::fabsf(body_vel_estimate[2]) < 0.005 {
+            body_vel_estimate[2] = 0.0;
+        }
+
         self.debug_telemetry.cgkf_body_velocity_state_estimate.copy_from_slice(body_vel_estimate.as_slice());
 
         // Apply control policy.
@@ -227,13 +224,18 @@ impl<'a> BodyVelocityController<'a> {
         // and globally invalid. Investiage this later. If problems are suspected, disable this section
         // and lower the body acc limit (maybe something anatgonist based on 45/30 deg wheel angles?)
         // TODO cross check in the future against wheel angle plots and analysis
-        let wheel_acc_setpoint = (wheel_vel_output - self.cmd_wheel_velocities) / self.loop_dt_s;
-        let wheel_acc_setpoint_clamp = clamp_vector_keep_dir(&wheel_acc_setpoint, &WHEEL_ACC_LIM);
-        let wheel_vel_output_clamp = self.cmd_wheel_velocities + (wheel_acc_setpoint_clamp * self.loop_dt_s);
-        self.debug_telemetry.wheel_velocity_clamped_u.copy_from_slice(wheel_vel_output_clamp.as_slice());
+        //let wheel_acc_setpoint = (wheel_vel_output - self.cmd_wheel_velocities) / self.loop_dt_s;
+        //let wheel_acc_setpoint_clamp = clamp_vector_keep_dir(&wheel_acc_setpoint, &WHEEL_ACC_LIM);
+        //let wheel_vel_output_clamp = self.cmd_wheel_velocities + (wheel_acc_setpoint_clamp * self.loop_dt_s);
+        self.debug_telemetry.wheel_velocity_clamped_u.copy_from_slice(wheel_vel_output.as_slice());
 
         // Save command state.
-        self.cmd_wheel_velocities = wheel_vel_output_clamp;
+        if controls_enabled {
+            self.cmd_wheel_velocities = wheel_vel_output;
+        } else {
+            self.cmd_wheel_velocities = self.robot_model.robot_vel_to_wheel_vel(&body_vel_setpoint);
+            self.debug_telemetry.wheel_velocity_u.copy_from_slice(self.cmd_wheel_velocities.as_slice());
+        }
     }
 
     pub fn get_wheel_velocities(&self) -> Vector4<f32> {

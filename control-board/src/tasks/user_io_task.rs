@@ -173,7 +173,15 @@ async fn user_io_task_entry(
 
         let vref_int_read_mv = vref_int_adc.read(&mut vref_int_ch);
         let batt_res_div_v = battery_volt_adc.read_volt_raw_f32(vref_int_read_mv as f32, vref_int_cal);
-        battery_volt_publisher.publish_immediate(adc_v_to_battery_voltage(batt_res_div_v));
+        let battery_voltage = adc_v_to_battery_voltage(batt_res_div_v);
+        // publish votlage
+        battery_volt_publisher.publish_immediate(battery_voltage);
+        // set pct in state
+        const LIPO_MIN_VOLTAGE: f32 = 6.0 * 3.2;
+        const LIPO_MAX_VOLTAGE: f32 = 6.0 * 4.2;
+        const LIPO_VOTLAGE_RANGE: f32 = LIPO_MAX_VOLTAGE - LIPO_MIN_VOLTAGE;
+        let battery_pct = (((battery_voltage - LIPO_MIN_VOLTAGE) / LIPO_VOTLAGE_RANGE) * 100.0) as u8;
+        robot_state.set_battery_pct(battery_pct);
 
         // TODO read messages
 

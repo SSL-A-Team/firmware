@@ -1,5 +1,5 @@
 
-use ateam_common_packets::{bindings_radio::{BasicControl, BasicTelemetry}, radio::{DataPacket, TelemetryPacket}};
+use ateam_common_packets::{bindings_radio::BasicTelemetry, radio::TelemetryPacket};
 use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn, uart::queue::{UartReadQueue, UartWriteQueue}};
 use credentials::WifiCredential;
 use embassy_executor::{SendSpawner, Spawner};
@@ -8,8 +8,7 @@ use embassy_stm32::{
     gpio::{Input, Pin, Pull},
     usart::{self, DataBits, Parity, StopBits, Uart}
 };
-use embassy_sync::pubsub::WaitResult;
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{drivers::radio_robot::{RobotRadio, TeamColor}, pins::*, robot_state::SharedRobotState, SystemIrqs};
 
@@ -78,6 +77,7 @@ pub struct RadioTask<
     connection_state: RadioConnectionState,
     wifi_credentials: &'static [WifiCredential],
 
+    last_software_packet: Instant,
     last_basic_telemetry: BasicTelemetry,
 }
 
@@ -109,6 +109,7 @@ impl<
             radio_ndet_input: radio_ndet_input,
             connection_state: RadioConnectionState::Unconnected,
             wifi_credentials: wifi_credentials,
+            last_software_packet: Instant::now(),
             last_basic_telemetry: BasicTelemetry {
                 sequence_number: 0,
                 robot_revision_major: 0,
@@ -239,6 +240,7 @@ impl<
                     if let Ok(connected) = self.connect_software(cur_robot_state.hw_robot_id, cur_robot_state.hw_robot_team_is_blue).await {
                         if connected {
                             self.connection_state = RadioConnectionState::Connected;
+                            self.last_software_packet = Instant::now();
                         } else {
                             // software didn't respond to our hello, it may not be started yet
                             Timer::after_millis(1000).await;
@@ -253,8 +255,18 @@ impl<
                 RadioConnectionState::Connected => {
                     let _ = self.process_packets().await;
                     // if we're stably connected, process packets at 100Hz
+
+                    // if 1000ms have elapsed since we last got a packet, return to software connection state
+                    if Instant::now() - self.last_software_packet > Duration::from_millis(1000) {
+                        //self.connection_state = RadioConnectionState::ConnectSoftware;
+                        //self.radio.close_peer().await.unwrap();
+                        cortex_m::peripheral::SCB::sys_reset();
+                    }
                 },
             }
+
+            // set global radio connected flag
+            self.shared_robot_state.set_radio_connection_ok(self.connection_state == RadioConnectionState::Connected);
 
             radio_loop_rate_ticker.next().await;
         }
@@ -336,6 +348,8 @@ impl<
         loop {
             if let Ok(pkt) = self.radio.read_packet_nonblocking() {
                 if let Some(c2_pkt) = pkt {
+                    // update the last packet timestamp
+                    self.last_software_packet = Instant::now();
                     self.command_publisher.publish_immediate(c2_pkt);
                 } else {
                     break;

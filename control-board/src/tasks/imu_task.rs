@@ -62,6 +62,7 @@ async fn imu_task_entry(
             GyroRange::PlusMinus2000DegPerSec,
             Bandwidth3DbCutoffFreq::AccOdrOver2,
             OutputDataRate::Odr100p0,
+
             DataAveragingWindow::Average2Samples).await;
         imu.set_gyro_interrupt_mode(InterruptMode::MappedToInt2).await;
 

@@ -51,9 +51,7 @@ impl<'a, const NUM_STATES: usize, const NUM_CONTROL_INPUTS: usize, const NUM_OBS
         // Constant gain so don't need Innovation Covariance / Optimal Kalman gain calculation
 
         self.state_estimate = self.pred_state_estimate + self.kalman_gain * innovation_residual;
-
-        // self.estimate_cov = (SMatrix::<f32, NUM_STATES, NUM_STATES>::identity() -  self.kalman_gain * self.observation_model) * self.pred_estimate_cov;
-
+        
         self.measurement_residual = measurement - self.observation_model * self.state_estimate;
     }
 

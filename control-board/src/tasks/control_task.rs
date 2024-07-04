@@ -101,7 +101,8 @@ impl <
         fn do_control_update(&mut self, 
             robot_controller: &mut BodyVelocityController,
             cmd_vel: Vector3<f32>,
-            gyro_rads: f32
+            gyro_rads: f32,
+            controls_enabled: bool
         ) -> Vector4<f32>
         /*
             Provide the motion controller with the current wheel velocities
@@ -127,8 +128,8 @@ impl <
         
             // TODO read from channel or something
 
-            robot_controller.control_update(&cmd_vel, &wheel_vels, &wheel_torques, gyro_rads);
-            robot_controller.get_wheel_velocities()
+            robot_controller.control_update(&cmd_vel, &wheel_vels, &wheel_torques, gyro_rads, controls_enabled); 
+            robot_controller.get_wheel_velocities()   
         }
 
         fn send_motor_commands_and_telemetry(&mut self,
@@ -141,6 +142,17 @@ impl <
             self.motor_fr.send_motion_command();
             self.motor_drib.send_motion_command();
 
+            let err_fr = self.motor_fr.read_is_error() as u32;
+            let err_fl = self.motor_fl.read_is_error() as u32;
+            let err_br = self.motor_br.read_is_error() as u32;
+            let err_bl = self.motor_bl.read_is_error() as u32;
+            let err_drib = self.motor_drib.read_is_error() as u32;
+
+            let hall_err_fr = self.motor_fr.check_hall_error() as u32;
+            let hall_err_fl = self.motor_fl.check_hall_error() as u32;
+            let hall_err_br = self.motor_br.check_hall_error() as u32;
+            let hall_err_bl = self.motor_bl.check_hall_error() as u32;
+            let hall_err_drib = self.motor_drib.check_hall_error() as u32;
 
             let basic_telem = TelemetryPacket::Basic(BasicTelemetry {
                 sequence_number: 0,
@@ -150,7 +162,7 @@ impl <
                 battery_temperature: 0.,
                 _bitfield_align_1: [],
                 _bitfield_1: BasicTelemetry::new_bitfield_1(
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, err_fl, hall_err_fl, err_bl, hall_err_bl, err_br, hall_err_br, err_fr, hall_err_fr, err_drib, hall_err_drib, 0, 0, 0,
                 ),
                 motor_0_temperature: 0.,
                 motor_1_temperature: 0.,
@@ -181,7 +193,6 @@ impl <
  
             self.flash_motor_firmware(
                 self.shared_robot_state.hw_in_debug_mode()).await;
-
              
             embassy_futures::join::join5(
                 self.motor_fl.leave_reset(),
@@ -189,8 +200,7 @@ impl <
                 self.motor_br.leave_reset(),
                 self.motor_fr.leave_reset(),
                 self.motor_drib.leave_reset(),
-            )
-            .await;
+            ).await;
 
 
             self.motor_fl.set_telemetry_enabled(true);
@@ -249,7 +259,6 @@ impl <
                             ticks_since_packet = 0;
                         },
                         ateam_common_packets::radio::DataPacket::ParameterCommand(latest_param_cmd) => {
-                            // defmt::warn!("param updates aren't supported yet");
                             let param_cmd_resp = robot_controller.apply_command(&latest_param_cmd);
 
                             if let Ok(resp) = param_cmd_resp {
@@ -278,20 +287,11 @@ impl <
                 let gyro_rads = self.gyro_subscriber.next_message_pure().await[2] as f32;
                 defmt::warn!("gyro rads: {}", gyro_rads);
                 let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
-                    if controls_enabled 
-                    {
-                        // TODO check order
-                        self.do_control_update(&mut robot_controller, cmd_vel, gyro_rads)
-                    } else {
-                        robot_model.robot_vel_to_wheel_vel(&cmd_vel)
-                    }
+                    // TODO check order
+                    self.do_control_update(&mut robot_controller, cmd_vel, gyro_rads, controls_enabled)
                 } else {
                     // Battery is too low, set velocity to zero
-                    Vector4::new(
-                        0.0,
-                        0.0,
-                        0.0,
-                        0.0)
+                    Vector4::new(0.0, 0.0, 0.0, 0.0)
                 };
 
                 self.motor_fl.set_setpoint(wheel_vels[0]);

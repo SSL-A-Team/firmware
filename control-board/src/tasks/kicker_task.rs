@@ -7,7 +7,7 @@ use embassy_time::Timer;
 
 use crate::{drivers::kicker::Kicker, include_kicker_bin, pins::*, robot_state::SharedRobotState, stm32_interface, SystemIrqs};
 
-include_kicker_bin! {KICKER_FW_IMG, "hwtest-blinky.bin"}
+include_kicker_bin! {KICKER_FW_IMG, "kicker.bin"}
 
 const MAX_TX_PACKET_SIZE: usize = 16;
 const TX_BUF_DEPTH: usize = 3;

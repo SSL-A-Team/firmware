@@ -1,168 +1,100 @@
 #![no_std]
 #![no_main]
-#![feature(type_alias_impl_trait)]
-#![feature(const_mut_refs)]
 
-use apa102_spi::Apa102;
-use ateam_control_board::stm32_interface::get_bootloader_uart_config;
-use control::Control;
-use defmt::info;
+use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
-    dma::NoDma,
-    executor::InterruptExecutor,
-    exti::ExtiInput,
-    gpio::{Input, Level, Output, Pull, Speed},
-    interrupt::{self, InterruptExt},
-    spi,
-    time::{hz, mhz},
-    usart::Uart,
+    interrupt, pac::Interrupt
 };
-use embassy_time::{Duration, Ticker, Timer};
-use futures_util::StreamExt;
+use embassy_sync::pubsub::PubSubChannel;
+
+use defmt_rtt as _; 
+
+use ateam_control_board::{create_io_task, create_shutdown_task, get_system_config, pins::{BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::control_task::start_control_task};
+
+use embassy_time::Timer;
+// provide embedded panic probe
 use panic_probe as _;
-use pins::{
-    PowerStateExti, PowerStatePin,
-    ShutdownCompletePin,
-};
-use smart_leds::{SmartLedsWrite, RGB8};
-use static_cell::StaticCell;
+use static_cell::ConstStaticCell;
 
-mod control;
-mod pins;
+static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
 
-static EXECUTOR_UART_QUEUE: StaticCell<InterruptExecutor<interrupt::CEC>> = StaticCell::new();
+static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
+static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
+static GYRO_DATA_CHANNEL: GyroDataPubSub = PubSubChannel::new();
+static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
 
-#[embassy_executor::main]
-async fn main(_spawner: embassy_executor::Spawner) {
-    let mut stm32_config: embassy_stm32::Config = Default::default();
-    stm32_config.rcc.hse = Some(mhz(8));
-    stm32_config.rcc.sys_ck = Some(mhz(400));
-    stm32_config.rcc.hclk = Some(mhz(200));
-    stm32_config.rcc.pclk1 = Some(mhz(100));
-    let p = embassy_stm32::init(stm32_config);
+static RADIO_UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
+static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
-    info!("system core initialized");
-
-    // Delay so dotstar can turn on
-    Timer::after(Duration::from_millis(50)).await;
-
-    let irq = interrupt::take!(CEC);
-    irq.set_priority(interrupt::Priority::P6);
-    let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
-    let spawner = executor.start();
-
-    let imu_spi = spi::Spi::new_txonly(
-        p.SPI3,
-        p.PB3,
-        p.PB5,
-        NoDma,
-        NoDma,
-        hz(1_000_000),
-        spi::Config::default(),
-    );
-
-    let mut dotstar = Apa102::new(imu_spi);
-    let _ = dotstar.write([RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
-
-    let front_right_int = interrupt::take!(USART1);
-    let front_left_int = interrupt::take!(UART4);
-    let back_left_int = interrupt::take!(UART7);
-    let back_right_int = interrupt::take!(UART8);
-    let drib_int = interrupt::take!(UART5);
-
-    let front_right_usart = Uart::new(
-        p.USART1,
-        p.PB15,
-        p.PB14,
-        front_right_int,
-        p.DMA1_CH0,
-        p.DMA1_CH1,
-        get_bootloader_uart_config(),
-    );
-    let front_left_usart = Uart::new(
-        p.UART4,
-        p.PA1,
-        p.PA0,
-        front_left_int,
-        p.DMA1_CH2,
-        p.DMA1_CH3,
-        get_bootloader_uart_config(),
-    );
-    let back_left_usart = Uart::new(
-        p.UART7,
-        p.PF6,
-        p.PF7,
-        back_left_int,
-        p.DMA1_CH4,
-        p.DMA1_CH5,
-        get_bootloader_uart_config(),
-    );
-    let back_right_usart = Uart::new(
-        p.UART8,
-        p.PE0,
-        p.PE1,
-        back_right_int,
-        p.DMA1_CH6,
-        p.DMA1_CH7,
-        get_bootloader_uart_config(),
-    );
-    let drib_usart = Uart::new(
-        p.UART5,
-        p.PB12,
-        p.PB13,
-        drib_int,
-        p.DMA2_CH2,
-        p.DMA2_CH3,
-        get_bootloader_uart_config(),
-    );
-
-    let ball_detected_thresh = 1.0;
-    let mut control = Control::new(
-        &spawner,
-        front_right_usart,
-        front_left_usart,
-        back_left_usart,
-        back_right_usart,
-        drib_usart,
-        p.PD8,
-        p.PC1,
-        p.PF8,
-        p.PB9,
-        p.PD13,
-        p.PD9,
-        p.PC0,
-        p.PF9,
-        p.PB8,
-        p.PD12,
-        ball_detected_thresh,
-    );
-
-    control.load_firmware().await;
-
-    let _ = dotstar.write([RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
-
-    let _ = dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 0, b: 10 }].iter().cloned());
-
-    let _ = dotstar.write([RGB8 { r: 0, g: 10, b: 0 }, RGB8 { r: 0, g: 10, b: 0 }].iter().cloned());
-
-    let mut main_loop_rate_ticker = Ticker::every(Duration::from_millis(10));
-
-    loop {
-
-        main_loop_rate_ticker.next().await;
-    }
+#[interrupt]
+unsafe fn CEC() {
+    UART_QUEUE_EXECUTOR.on_interrupt();
 }
 
-#[embassy_executor::task]
-async fn power_off_task(
-    power_state_pin: PowerStatePin,
-    exti: PowerStateExti,
-    shutdown_pin: ShutdownCompletePin,
-) {
-    let power_state = Input::new(power_state_pin, Pull::None);
-    let mut shutdown = Output::new(shutdown_pin, Level::Low, Speed::Low);
-    let mut power_state = ExtiInput::new(power_state, exti);
-    power_state.wait_for_falling_edge().await;
-    shutdown.set_high();
-    loop {}
+#[interrupt]
+unsafe fn CORDIC() {
+    RADIO_UART_QUEUE_EXECUTOR.on_interrupt();
+}
+
+#[embassy_executor::main]
+async fn main(main_spawner: embassy_executor::Spawner) {
+    // init system
+    let sys_config = get_system_config();
+    let p = embassy_stm32::init(sys_config);
+
+    defmt::info!("embassy HAL configured.");
+
+    let robot_state = ROBOT_STATE.take();
+
+    ////////////////////////
+    //  setup task pools  //
+    ////////////////////////
+
+    // uart queue executor should be highest priority
+    // NOTE: maybe this should be all DMA tasks? No computation tasks here
+    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CEC, embassy_stm32::interrupt::Priority::P7);
+    let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(Interrupt::CEC);
+
+    //////////////////////////////////////
+    //  setup inter-task coms channels  //
+    //////////////////////////////////////
+
+    // commands channel
+    let control_command_subscriber = RADIO_C2_CHANNEL.subscriber().unwrap();
+
+    // telemetry channel
+    let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
+
+    // Battery Channel
+    let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
+
+    // TODO imu channel
+    let control_gyro_data_subscriber = GYRO_DATA_CHANNEL.subscriber().unwrap();
+
+    ///////////////////
+    //  start tasks  //
+    ///////////////////
+
+    create_io_task!(main_spawner,
+        robot_state,
+        battery_volt_publisher,
+        p);
+
+    create_shutdown_task!(main_spawner,
+        robot_state,
+        p);
+
+    start_control_task(
+        uart_queue_spawner, main_spawner, 
+        robot_state, 
+        control_command_subscriber, control_telemetry_publisher, control_gyro_data_subscriber,
+        p.UART4, p.PA1, p.PA0, p.DMA1_CH3, p.DMA1_CH2, p.PC1, p.PC0,
+        p.UART7, p.PF6, p.PF7, p.DMA1_CH5, p.DMA1_CH4, p.PF8, p.PF9,
+        p.UART8, p.PE0, p.PE1, p.DMA1_CH7, p.DMA1_CH6, p.PB9, p.PB8,
+        p.USART1, p.PB15, p.PB14, p.DMA1_CH1, p.DMA1_CH0, p.PD8, p.PD9,
+        p.UART5, p.PB12, p.PB13, p.DMA2_CH3, p.DMA2_CH2, p.PD13, p.PD12).await;
+
+    loop {
+       Timer::after_millis(10).await;
+    }
 }
