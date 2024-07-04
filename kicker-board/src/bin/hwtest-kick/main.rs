@@ -67,6 +67,7 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
         }
     }
 
+    defmt::info!("wait for btn press to charge and kick");
     'outer: while usr_btn.is_low() {
         while usr_btn.is_high() {
             defmt::info!("btn pressed! - initiating kick cycle");
@@ -77,7 +78,7 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
     Timer::after(Duration::from_millis(1000)).await;
 
     reg_charge.set_high();
-    Timer::after(Duration::from_millis(450)).await;
+    Timer::after(Duration::from_millis(400)).await;
     reg_charge.set_low();
 
     let mut vrefint = adc.enable_vrefint();

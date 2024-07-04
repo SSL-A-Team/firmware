@@ -68,9 +68,10 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
     }
 
     // in us
-    let durations = [500, 1000, 2000, 4000];
+    let durations = [1000, 1500, 2000, 2500, 3000, 3500, 4000, 5000, 6000];
 
     for d in durations {
+        defmt::info!("wait for btn press to kick at {}us!", d);
         'outer: while usr_btn.is_low() {
             while usr_btn.is_high() {
                 defmt::info!("btn pressed! - initiating kick for {} us", d);
