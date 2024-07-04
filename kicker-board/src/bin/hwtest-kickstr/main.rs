@@ -1,3 +1,11 @@
+// Test script for different kicker charge times
+// Change the values in the `durations` array to the
+// number of microseconds you'd like to charge for each
+// trial.
+// Push the button to charge and then kick. Afterwards,
+// the bot will wait for the next button press for the
+// current duration.
+
 #![no_std]
 #![no_main]
 #![feature(type_alias_impl_trait)]
@@ -70,6 +78,7 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
     // in us
     let durations = [500, 1000, 2000, 4000];
 
+    // For each duration, wait for button, charge, then kick
     for d in durations {
         'outer: while usr_btn.is_low() {
             while usr_btn.is_high() {
@@ -80,8 +89,8 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
 
         Timer::after(Duration::from_millis(1000)).await;
 
-        // Can't charge and kick at the same time
-        // Fully charges within ~400 ms
+        // We can't charge and kick at the same time...
+        // The kicker fully charges within ~400 ms
         reg_charge.set_high();
         Timer::after(Duration::from_millis(450)).await;
         reg_charge.set_low();
@@ -98,6 +107,7 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
         // High = discharge into the solenoid
         kick.set_high();
         Timer::after(Duration::from_micros(d)).await;
+        // Low = don't discharge into solenoid
         kick.set_low();
 
         Timer::after(Duration::from_millis(1000)).await;
