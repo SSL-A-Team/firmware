@@ -162,7 +162,7 @@ impl <
                 battery_temperature: 0.,
                 _bitfield_align_1: [],
                 _bitfield_1: BasicTelemetry::new_bitfield_1(
-                    0, 0, 0, 0, 0, 0, 0, 0, err_fl, hall_err_fl, err_bl, hall_err_bl, err_br, hall_err_br, err_fr, hall_err_fr, err_drib, hall_err_drib, 0, 0, 0,
+                    0, 0, 0, self.shared_robot_state.ball_detected() as u32, 0, 0, 0, 0, err_fl, hall_err_fl, err_bl, hall_err_bl, err_br, hall_err_br, err_fr, hall_err_fr, err_drib, hall_err_drib, 0, 0, 0,
                 ),
                 motor_0_temperature: 0.,
                 motor_1_temperature: 0.,
@@ -285,8 +285,8 @@ impl <
                 let battery_v = 25.0;
                 let controls_enabled = true;
                 let gyro_rads = self.gyro_subscriber.next_message_pure().await[2] as f32;
-                defmt::warn!("gyro rads: {}", gyro_rads);
-                let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
+                // defmt::warn!("gyro rads: {}", gyro_rads);
+                let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE && !self.shared_robot_state.shutdown_requested() {
                     // TODO check order
                     self.do_control_update(&mut robot_controller, cmd_vel, gyro_rads, controls_enabled)
                 } else {

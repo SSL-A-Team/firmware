@@ -3,7 +3,7 @@ use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn, uart:
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::{gpio::{Level, Output, Pin, Speed}, usart::{self, Uart}};
 use embassy_sync::pubsub::WaitResult;
-use embassy_time::Timer;
+use embassy_time::{Duration, Ticker, Timer};
 
 use crate::{drivers::kicker::Kicker, include_kicker_bin, pins::*, robot_state::SharedRobotState, stm32_interface, SystemIrqs};
 
@@ -19,6 +19,22 @@ make_uart_queue_pair!(KICKER,
     MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
     MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
     #[link_section = ".axisram.buffers"]);
+
+#[macro_export]
+macro_rules! create_kicker_task {
+    ($main_spawner:ident, $uart_queue_spawner:ident, $robot_state:ident,
+        $radio_command_publisher:ident, $radio_telemetry_subscriber:ident,
+        $wifi_credentials:ident, $p:ident) => {
+        ateam_control_board::tasks::radio_task::start_radio_task(
+            $main_spawner, $uart_queue_spawner,
+            $robot_state,
+            $radio_command_publisher, $radio_telemetry_subscriber,
+            &$wifi_credentials,
+            $p.USART10, $p.PE2, $p.PE3, $p.PG13, $p.PG14,
+            $p.DMA2_CH1, $p.DMA2_CH0,
+            $p.PC13, $p.PE4).await; 
+    };
+}
 
 #[derive(PartialEq, PartialOrd, Debug)]
 enum KickerTaskState {
@@ -82,6 +98,8 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
     }
 
     pub async fn kicker_task_entry(&mut self) {
+        let mut main_loop_ticker = Ticker::every(Duration::from_hz(100));
+
         loop {
             let cur_robot_state = self.robot_state.get_state();
 
@@ -100,6 +118,7 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
                     }
                 },
                 KickerTaskState::PowerOn => {
+                    defmt::debug!("power cycling kicker");
                     self.remote_power_btn_hold().await;
                     self.remote_power_btn_press().await;
                     // power should be coming on, attempt connection
@@ -111,8 +130,12 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
                         // if the kicker is missing or bugged we'll stay in a power on -> attempt
                         // uart loop forever
                         self.kicker_task_state = KickerTaskState::PowerOn;
+
+                        defmt::error!("kicker firmware load failed, try power cycle");
                     } else {
                         self.kicker_task_state = KickerTaskState::Connected;
+
+                        defmt::info!("kicker flashed!");
                     }
                 },
                 KickerTaskState::Connected => {
@@ -121,12 +144,18 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
                 },
                 KickerTaskState::InitiateShutdown => {
                     self.kicker_driver.request_shutdown();
-                    self.kicker_task_state = KickerTaskState::WaitShutdown;
+
+                    // wait for kicker to ack shutdown
+                    if self.kicker_driver.shutdown_acknowledge() {
+                        defmt::info!("kicker acknowledged shutdown request");
+                        self.kicker_task_state = KickerTaskState::WaitShutdown;
+                    }
                 },
                 KickerTaskState::WaitShutdown => {
                     if self.kicker_driver.shutdown_completed() {
                         defmt::info!("kicker finished shutdown");
                         self.kicker_task_state = KickerTaskState::PoweredOff;
+                        self.robot_state.set_kicker_shutdown_complete(true);
                     }
                 },
             }
@@ -135,7 +164,16 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
             // commands to the kicker
             if self.kicker_task_state >= KickerTaskState::Connected {
                 self.kicker_driver.send_command();
+
+                let ball_detected = self.kicker_driver.ball_detected();
+                if ball_detected {
+                    defmt::info!("ball detected!");
+                }
+
+                self.robot_state.set_ball_detected(ball_detected);
             }
+
+            main_loop_ticker.next().await;
         }
     }
 
@@ -143,7 +181,7 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
         self.remote_power_btn.set_high();
         Timer::after_millis(200).await;
         self.remote_power_btn.set_low();
-        Timer::after_millis(10).await;
+        Timer::after_millis(200).await;
     }
 
     async fn remote_power_btn_hold(&mut self) {
@@ -154,6 +192,8 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
     }
 
     async fn connected_poll_loop(&mut self) {
+        self.kicker_driver.set_telemetry_enabled(true);
+
         if let Some(pkt) = self.commands_subscriber.try_next_message() {
             match pkt {
                 WaitResult::Lagged(amnt) => {

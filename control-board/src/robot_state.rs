@@ -26,6 +26,9 @@ pub struct SharedRobotState {
     robot_tipped: AtomicBool,
 
     shutdown_requested: AtomicBool,
+
+    ball_detected: AtomicBool,
+    kicker_shutdown_complete: AtomicBool,
 }
 
 impl SharedRobotState {
@@ -47,6 +50,8 @@ impl SharedRobotState {
             battery_ok: AtomicBool::new(false),
             robot_tipped: AtomicBool::new(false),
             shutdown_requested: AtomicBool::new(false),
+            ball_detected: AtomicBool::new(false),
+            kicker_shutdown_complete: AtomicBool::new(false),
         }
     }
 
@@ -73,6 +78,8 @@ impl SharedRobotState {
             robot_tipped: self.robot_tipped(),
 
             shutdown_requested: self.shutdown_requested(),
+            ball_detected: self.ball_detected(),
+            kicker_shutdown_complete: self.kicker_shutdown_complete(),
         }
     }
 
@@ -147,6 +154,22 @@ impl SharedRobotState {
     pub fn set_radio_connection_ok(&self, conn_ok: bool) {
         self.radio_connection_ok.store(conn_ok, Ordering::Relaxed);
     }
+
+    pub fn ball_detected(&self) -> bool {
+        self.ball_detected.load(Ordering::Relaxed)
+    }
+
+    pub fn set_ball_detected(&self, ball_detected: bool) {
+        self.ball_detected.store(ball_detected, Ordering::Relaxed);
+    }
+
+    pub fn kicker_shutdown_complete(&self) -> bool {
+        self.kicker_shutdown_complete.load(Ordering::Relaxed)
+    }
+
+    pub fn set_kicker_shutdown_complete(&self, shutdown_complete: bool) {
+        self.kicker_shutdown_complete.store(shutdown_complete, Ordering::Relaxed);
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -173,4 +196,6 @@ pub struct RobotState {
     pub robot_tipped: bool,
 
     pub shutdown_requested: bool,
+    pub ball_detected: bool,
+    pub kicker_shutdown_complete: bool,
 }

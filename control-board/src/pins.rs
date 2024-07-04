@@ -16,9 +16,9 @@ const GYRO_DATA_PUBSUB_DEPTH: usize = 1;
 const ACCEL_DATA_PUBSUB_DEPTH: usize = 1;
 const BATTERY_VOLT_PUBSUB_DEPTH: usize = 1;
 
-pub type CommandsPubSub = PubSubChannel<ThreadModeRawMutex, DataPacket, COMMANDS_PUBSUB_DEPTH, 1, 1>;
-pub type CommandsPublisher = Publisher<'static, ThreadModeRawMutex, DataPacket, COMMANDS_PUBSUB_DEPTH, 1, 1>;
-pub type CommandsSubscriber = Subscriber<'static, ThreadModeRawMutex, DataPacket, COMMANDS_PUBSUB_DEPTH, 1, 1>;
+pub type CommandsPubSub = PubSubChannel<ThreadModeRawMutex, DataPacket, COMMANDS_PUBSUB_DEPTH, 2, 1>;
+pub type CommandsPublisher = Publisher<'static, ThreadModeRawMutex, DataPacket, COMMANDS_PUBSUB_DEPTH, 2, 1>;
+pub type CommandsSubscriber = Subscriber<'static, ThreadModeRawMutex, DataPacket, COMMANDS_PUBSUB_DEPTH, 2, 1>;
 
 pub type TelemetryPubSub = PubSubChannel<ThreadModeRawMutex, TelemetryPacket, TELEMETRY_PUBSUB_DEPTH, 1, 1>;
 pub type TelemetryPublisher = Publisher<'static, ThreadModeRawMutex, TelemetryPacket, COMMANDS_PUBSUB_DEPTH, 1, 1>;

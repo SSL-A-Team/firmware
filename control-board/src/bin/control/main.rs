@@ -14,7 +14,7 @@ use ateam_control_board::{
     get_system_config, 
     pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, 
     robot_state::SharedRobotState, 
-    tasks::control_task::start_control_task};
+    tasks::{control_task::start_control_task, kicker_task::start_kicker_task}};
 
 // load credentials from correct crate
 #[cfg(not(feature = "no-private-credentials"))]
@@ -77,6 +77,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     // commands channel
     let radio_command_publisher = RADIO_C2_CHANNEL.publisher().unwrap();
     let control_command_subscriber = RADIO_C2_CHANNEL.subscriber().unwrap();
+    let kicker_command_subscriber = RADIO_C2_CHANNEL.subscriber().unwrap();
 
     // telemetry channel
     let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
@@ -124,6 +125,14 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p.UART8, p.PE0, p.PE1, p.DMA1_CH7, p.DMA1_CH6, p.PB9, p.PB8,
         p.USART1, p.PB15, p.PB14, p.DMA1_CH1, p.DMA1_CH0, p.PD8, p.PD9,
         p.UART5, p.PB12, p.PB13, p.DMA2_CH3, p.DMA2_CH2, p.PD13, p.PD12).await;
+
+    start_kicker_task(
+        main_spawner, uart_queue_spawner,
+        robot_state,
+        kicker_command_subscriber,
+        p.USART6,
+        p.PC7, p.PC6, p.DMA2_CH5, p.DMA2_CH4, p.PA8, p.PA9, p.PG8,
+    ).await;
 
     loop {
         Timer::after_millis(10).await;

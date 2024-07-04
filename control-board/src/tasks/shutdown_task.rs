@@ -4,7 +4,7 @@ use embassy_futures::select;
 use embassy_stm32::gpio::{Level, Output, OutputOpenDrain, Pull, Speed};
 use embassy_time::Timer;
 
-use crate::{pins::{PowerBtnPressedIntExti, PowerBtnPressedIntPin, PowerKillPin, ShutdownInitiatedLedPin}, robot_state::SharedRobotState};
+use crate::{pins::{PowerBtnPressedIntExti, PowerBtnPressedIntPin, PowerKillPin, ShutdownInitiatedLedPin}, robot_state::{self, SharedRobotState}};
 
 pub const HARD_SHUTDOWN_TIME_MS: u64 = 10000;
 
@@ -35,10 +35,11 @@ async fn shutdown_task_entry(robot_state: &'static SharedRobotState,
     // wait for tasks to flag shutdown complete, or hard temrinate after 10s
     select::select(async move {
         loop {
+            Timer::after_millis(100).await;
 
-
-            // TODO wait for other tasks
-            Timer::after_millis(1000).await;
+            if robot_state.kicker_shutdown_complete() {
+                break;
+            }
         }
     }, Timer::after_millis(HARD_SHUTDOWN_TIME_MS)).await;
 
