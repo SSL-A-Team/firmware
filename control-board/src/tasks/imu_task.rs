@@ -74,11 +74,7 @@ async fn imu_task_entry(
         let acc_config_res = imu.set_accel_config(AccelMode::ContinuousHighPerformance,
             AccelRange::Range2g,
             Bandwidth3DbCutoffFreq::AccOdrOver2,
-<<<<<<< HEAD
             OutputDataRate::Odr100p0,
-=======
-            OutputDataRate::Odr200p0,
->>>>>>> origin/support/generation2
             DataAveragingWindow::Average2Samples).await;
         imu.set_accel_interrupt_mode(InterruptMode::MappedToInt1).await;
 

@@ -7,7 +7,7 @@ pub static PID_GAIN: Matrix3x5<f32> =
                 2.0, 0.5, 0.0, -2.0, 2.0];
 
 // x, y, theta (m/s, m/s, rad/s)
-pub static BODY_VEL_LIM: Vector3<f32> = vector![3.0, 3.0, 22.0];  // 8, 8, 34.9 maxes out motors/IMU measurement rate
+pub static BODY_VEL_LIM: Vector3<f32> = vector![5.0, 3.0, 22.0];  // 8, 8, 34.9 maxes out motors/IMU measurement rate
 pub static BODY_ACC_LIM: Vector3<f32> = vector![5.0, 3.0, 36.0];  // TODO calibrate/ignore
 
 // FL, BL, BR, FR (rad/s^2)
