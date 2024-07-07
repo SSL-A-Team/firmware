@@ -9,6 +9,7 @@ dependencies = [
  "critical-section 1.1.2",
  "defmt",
  "defmt-rtt",
+ "defmt-test",
  "embassy-executor",
  "embassy-futures",
  "embassy-stm32",
@@ -116,6 +117,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortex-m-semihosting"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c23234600452033cc77e4b761e740e02d2c4168e11dbf36ab14a0f58973592b0"
+dependencies = [
+ "cortex-m",
+]
+
+[[package]]
 name = "critical-section"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -206,6 +216,29 @@ checksum = "1d2cbbbd58847d508d97629b32cd9730a2d28532f71e219714614406029f18b1"
 dependencies = [
  "critical-section 0.2.8",
  "defmt",
+]
+
+[[package]]
+name = "defmt-test"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "290966e8c38f94b11884877242de876280d0eab934900e9642d58868e77c5df1"
+dependencies = [
+ "cortex-m-rt",
+ "cortex-m-semihosting",
+ "defmt",
+ "defmt-test-macros",
+]
+
+[[package]]
+name = "defmt-test-macros"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "984bc6eca246389726ac2826acc2488ca0fe5fcd6b8d9b48797021951d76a125"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.66",
 ]
 
 [[package]]

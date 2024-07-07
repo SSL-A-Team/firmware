@@ -30,9 +30,9 @@ fn generate_pitch_set(ref_freq: u16, octaves_below: i8, octaves_above: i8) -> Ve
 }
 
 fn write_pitches_to_file(pitch_set: Vec<(String, u16)>){
-    /// Write each pitch name as a constant
-    /// in the format PITCH_NAME_OCTAVE, ex. 
-    /// pub const A4: u16 = 440
+    // Write each pitch name as a constant
+    // in the format PITCH_NAME_OCTAVE, ex. 
+    // pub const A4: u16 = 440
     let f = fs::File::create("./src/audio/pitches.rs").expect("Unable to create pitches.rs");
     let mut f = BufWriter::new(f);
     for pitch in pitch_set {
