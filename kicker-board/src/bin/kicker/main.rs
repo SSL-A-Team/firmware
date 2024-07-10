@@ -212,12 +212,12 @@ async fn high_pri_kick_task(
 
         // scale kick strength from m/s to duty for the critical section
         // if shutdown is requested and not complete, set kick discharge kick strength to 5%
-        let kick_strength = if shutdown_completed {
+        let kick_speed = if shutdown_completed {
             0.0
         } else if shutdown_requested {
             SHUTDOWN_KICK_DUTY
         } else {
-            fmaxf(0.0, fminf(MAX_KICK_SPEED, kicker_control_packet.kick_speed)) / MAX_KICK_SPEED
+            fmaxf(0.0, fminf(MAX_KICK_SPEED, kicker_control_packet.kick_speed))
         };
 
         // if control requests only an ARM or DISABLE, clear the active command
@@ -304,7 +304,7 @@ async fn high_pri_kick_task(
                     rail_voltage,
                     charge_hv_rail,
                     kick_command,
-                    kick_strength,
+                    kick_speed
                 )
                 .await
         };
