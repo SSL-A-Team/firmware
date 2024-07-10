@@ -18,18 +18,19 @@ async fn main(_spawner: Spawner) {
     let sys_cfg = get_system_config(ateam_kicker_board::tasks::ClkSource::InternalOscillator);
     let p = embassy_stm32::init(sys_cfg);
 
-    let _charge_pin = Output::new(p.PB3, Level::Low, Speed::Medium);
-    let _kick_pin = Output::new(p.PB0, Level::Low, Speed::Medium);
-    let _chip_pin = Output::new(p.PB1, Level::Low, Speed::Medium);
+    let _charge_pin = Output::new(p.PE4, Level::Low, Speed::Medium);
+    let _kick_pin = Output::new(p.PE5, Level::Low, Speed::Medium);
+    let _chip_pin = Output::new(p.PE6, Level::Low, Speed::Medium);
 
     info!("breakbeam startup!");
     
-    let mut status_led_green = Output::new(p.PA11, Level::Low, Speed::Medium);
-    let mut status_led_blue = Output::new(p.PA8, Level::Low, Speed::Medium);
+    let mut status_led_green = Output::new(p.PE0, Level::Low, Speed::Medium);
+    let mut ball_detected_led1 = Output::new(p.PE2, Level::Low, Speed::Low);
+    let mut ball_detected_led2 = Output::new(p.PE3, Level::Low, Speed::Low);
 
     // Breakbeam 
     // nets on schematic are inverted to silkscreen, sorry :/ -Will
-    let mut breakbeam = Breakbeam::new(p.PA3, p.PA2);
+    let mut breakbeam = Breakbeam::new(p.PA1, p.PA0);
 
     status_led_green.set_high();
     Timer::after(Duration::from_millis(250)).await;
@@ -47,11 +48,13 @@ async fn main(_spawner: Spawner) {
         // Timer::after(Duration::from_millis(100)).await;
         if breakbeam.read()
         {
-            status_led_blue.set_high();
+            ball_detected_led1.set_high();
+            ball_detected_led2.set_high();
         } 
         else
         {
-            status_led_blue.set_low();
+            ball_detected_led1.set_low();
+            ball_detected_led2.set_low();
         }
         // Timer::after(Duration::from_millis(1000)).await;
 

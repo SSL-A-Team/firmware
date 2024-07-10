@@ -285,12 +285,13 @@ impl <
                 let battery_v = 25.0;
                 let controls_enabled = true;
                 let gyro_rads = self.gyro_subscriber.next_message_pure().await[2] as f32;
-                // defmt::warn!("gyro rads: {}", gyro_rads);
+                defmt::warn!("gyro rads: {}", gyro_rads);
                 let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE && !self.shared_robot_state.shutdown_requested() {
                     // TODO check order
                     self.do_control_update(&mut robot_controller, cmd_vel, gyro_rads, controls_enabled)
                 } else {
                     // Battery is too low, set velocity to zero
+                    drib_vel = 0.0;
                     Vector4::new(0.0, 0.0, 0.0, 0.0)
                 };
 
@@ -312,34 +313,46 @@ impl <
         async fn flash_motor_firmware(&mut self, debug: bool) {
             defmt::info!("flashing firmware");
             if debug {
+                let mut had_motor_error = false;
                 if self.motor_fl.load_default_firmware_image().await.is_err() {
                     defmt::error!("failed to flash FL");
+                    had_motor_error = true;
                 } else {
                     defmt::info!("FL flashed");
                 }
 
                 if self.motor_bl.load_default_firmware_image().await.is_err() {
                     defmt::error!("failed to flash BL");
+                    had_motor_error = true;
                 } else {
                     defmt::info!("BL flashed");
                 }
 
                 if self.motor_br.load_default_firmware_image().await.is_err() {
                     defmt::error!("failed to flash BR");
+                    had_motor_error = true;
                 } else {
                     defmt::info!("BR flashed");
                 }
 
                 if self.motor_fr.load_default_firmware_image().await.is_err() {
                     defmt::error!("failed to flash FR");
+                    had_motor_error = true;
                 } else {
                     defmt::info!("FR flashed");
                 }
 
                 if self.motor_drib.load_default_firmware_image().await.is_err() {
                     defmt::error!("failed to flash DRIB");
+                    had_motor_error = true;
                 } else {
                     defmt::info!("DRIB flashed");
+                }
+
+                if had_motor_error {
+                    defmt::error!("one or more motors failed to flash.")
+                } else {
+                    defmt::debug!("all motors flashed");
                 }
             } else {
                 let _res = embassy_futures::join::join5(
