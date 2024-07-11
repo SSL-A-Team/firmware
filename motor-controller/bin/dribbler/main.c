@@ -189,7 +189,7 @@ int main() {
 
             float r = r_motor_board;
 
-            float torque_setpoint = pid_calculate(&torque_pid, r, cur_measurement);
+            float torque_setpoint = pid_calculate(&torque_pid, r, cur_measurement, TORQUE_LOOP_RATE_S);
             // TODO: transform desired torque to current
             u_torque_loop = torque_setpoint;
 
