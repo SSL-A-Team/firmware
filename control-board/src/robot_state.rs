@@ -20,8 +20,8 @@ pub struct SharedRobotState {
     last_packet_receive_time_ticks_ms: AtomicU32,
     radio_connection_ok: AtomicBool,
 
-    battery_pct: AtomicU8,
-    battery_ok: AtomicBool,
+    battery_low: AtomicBool,
+    battery_crit: AtomicBool,
 
     robot_tipped: AtomicBool,
 
@@ -46,8 +46,8 @@ impl SharedRobotState {
             dribbler_inop: AtomicBool::new(true),
             last_packet_receive_time_ticks_ms: AtomicU32::new(0),
             radio_connection_ok: AtomicBool::new(false), 
-            battery_pct: AtomicU8::new(0),
-            battery_ok: AtomicBool::new(false),
+            battery_low: AtomicBool::new(false),
+            battery_crit: AtomicBool::new(false),
             robot_tipped: AtomicBool::new(false),
             shutdown_requested: AtomicBool::new(false),
             ball_detected: AtomicBool::new(false),
@@ -64,7 +64,7 @@ impl SharedRobotState {
             hw_debug_mode: self.hw_in_debug_mode(),
 
             radio_inop: true,
-            imu_inop: true,
+            imu_inop: self.get_imu_inop(),
             kicker_inop: true,
             wheels_inop: 0xFF,
             dribbler_inop: true,
@@ -72,8 +72,8 @@ impl SharedRobotState {
             last_packet_receive_time_ticks_ms: 0,
             radio_connection_ok: false,
         
-            battery_pct: self.battery_pct(),
-            battery_ok: false,
+            battery_low: self.get_battery_low(),
+            battery_crit: self.get_battery_crit(),
 
             robot_tipped: self.robot_tipped(),
 
@@ -131,6 +131,14 @@ impl SharedRobotState {
         self.robot_tipped.store(tipped, Ordering::Relaxed);
     }
 
+    pub fn get_imu_inop(&self) -> bool {
+        self.imu_inop.load(Ordering::Relaxed)
+    }
+
+    pub fn set_imu_inop(&self, imu_inop: bool) {
+        self.imu_inop.store(imu_inop, Ordering::Relaxed);
+    }
+
     pub fn shutdown_requested(&self) -> bool {
         self.shutdown_requested.load(Ordering::Relaxed)
     }
@@ -139,12 +147,20 @@ impl SharedRobotState {
         self.shutdown_requested.store(true, Ordering::Relaxed);
     }
 
-    pub fn battery_pct(&self) -> u8 {
-        self.battery_pct.load(Ordering::Relaxed)
+    pub fn get_battery_low(&self) -> bool {
+        self.battery_low.load(Ordering::Relaxed)
     }
 
-    pub fn set_battery_pct(&self, battery_pct: u8) {
-        self.battery_pct.store(battery_pct, Ordering::Relaxed);
+    pub fn set_battery_low(&self, battery_low: bool) {
+        self.battery_low.store(battery_low, Ordering::Relaxed);
+    }
+
+    pub fn get_battery_crit(&self) -> bool {
+        self.battery_crit.load(Ordering::Relaxed)
+    }
+
+    pub fn set_battery_crit(&self, battery_crit: bool) {
+        self.battery_crit.store(battery_crit, Ordering::Relaxed);
     }
 
     pub fn radio_connection_ok(&self) -> bool {
@@ -190,8 +206,8 @@ pub struct RobotState {
     pub last_packet_receive_time_ticks_ms: u32,
     pub radio_connection_ok: bool,
 
-    pub battery_pct: u8,
-    pub battery_ok: bool,
+    pub battery_low: bool,
+    pub battery_crit: bool,
 
     pub robot_tipped: bool,
 

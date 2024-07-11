@@ -21,7 +21,7 @@ use embassy_stm32::adc::{Adc, SampleTime, Resolution};
 use crate::drivers::shell_indicator::ShellIndicator;
 use crate::robot_state::SharedRobotState;
 
-use crate::{adc_v_to_battery_voltage, pins::*, stm32_interface};
+use crate::{adc_v_to_battery_voltage, pins::*, stm32_interface, BATTERY_MIN_CRIT_VOLTAGE, BATTERY_MIN_SAFE_VOLTAGE, BATTERY_MAX_VOLTAGE, BATTERY_BUFFER_SIZE};
 use crate::tasks::shutdown_task::HARD_SHUTDOWN_TIME_MS;
 
 // #[link_section = ".sram4"]
@@ -137,6 +137,11 @@ async fn user_io_task_entry(
     // blink_anim.start_animation();
     // dotstars.set_animation(blink_anim, 1);
 
+    let mut battery_voltage_buffer: [f32; BATTERY_BUFFER_SIZE] =
+        [BATTERY_MAX_VOLTAGE; BATTERY_BUFFER_SIZE];
+    
+    let mut battery_voltage_filt_indx = 0;
+
     let mut prev_robot_state = robot_state.get_state();
     loop {
         let cur_robot_state = robot_state.get_state();
@@ -170,18 +175,34 @@ async fn user_io_task_entry(
             robot_state.set_hw_network_index(robot_network_index);
             defmt::info!("updated robot network index {} -> {}", cur_robot_state.hw_wifi_network_index, robot_network_index);
         }
+    
+        ///////////////////////
+        //  Battery reading  //
+        ///////////////////////
 
-        let vref_int_read_mv = vref_int_adc.read(&mut vref_int_ch);
+        // FIXME: Vref_int is not returning valid value. Embassy issue. 
+        // let vref_int_read_mv = vref_int_adc.read(&mut vref_int_ch);
+        let vref_int_read_mv = 1509.0;
         let batt_res_div_v = battery_volt_adc.read_volt_raw_f32(vref_int_read_mv as f32, vref_int_cal);
-        let battery_voltage = adc_v_to_battery_voltage(batt_res_div_v);
-        // publish votlage
-        battery_volt_publisher.publish_immediate(battery_voltage);
-        // set pct in state
-        const LIPO_MIN_VOLTAGE: f32 = 6.0 * 3.2;
-        const LIPO_MAX_VOLTAGE: f32 = 6.0 * 4.2;
-        const LIPO_VOTLAGE_RANGE: f32 = LIPO_MAX_VOLTAGE - LIPO_MIN_VOLTAGE;
-        let battery_pct = (((battery_voltage - LIPO_MIN_VOLTAGE) / LIPO_VOTLAGE_RANGE) * 100.0) as u8;
-        robot_state.set_battery_pct(battery_pct);
+        let battery_voltage_cur = adc_v_to_battery_voltage(batt_res_div_v);
+        
+        // Add new battery read to cyclical buffer.
+        battery_voltage_buffer[battery_voltage_filt_indx] = battery_voltage_cur;
+
+        // Shift index for next run.
+        if battery_voltage_filt_indx == (BATTERY_BUFFER_SIZE - 1) {
+            battery_voltage_filt_indx = 0;
+        } else {
+            battery_voltage_filt_indx += 1;
+        }
+        
+        let battery_voltage_sum: f32 = battery_voltage_buffer.iter().sum();
+        // Calculate battery average
+        let battery_voltage_ave = battery_voltage_sum / (BATTERY_BUFFER_SIZE as f32);
+        
+        battery_volt_publisher.publish_immediate(battery_voltage_ave);
+        robot_state.set_battery_low(battery_voltage_ave < BATTERY_MIN_SAFE_VOLTAGE);
+        robot_state.set_battery_crit(battery_voltage_ave < BATTERY_MIN_CRIT_VOLTAGE || battery_voltage_ave > BATTERY_MAX_VOLTAGE);
 
         // TODO read messages
 
