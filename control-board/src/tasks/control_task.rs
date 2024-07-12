@@ -57,6 +57,7 @@ pub struct ControlTask<
     const TX_BUF_DEPTH: usize> {
     shared_robot_state: &'static SharedRobotState,
     command_subscriber: CommandsSubscriber,
+    battery_subscriber: BatteryVoltSubscriber,
     gyro_subscriber: GyroDataSubscriber,
     telemetry_publisher: TelemetryPublisher,
     
@@ -78,6 +79,7 @@ impl <
         pub fn new(robot_state: &'static SharedRobotState,
                 command_subscriber: CommandsSubscriber,
                 telemetry_publisher: TelemetryPublisher,
+                battery_subscriber: BatteryVoltSubscriber,
                 gyro_subscriber: GyroDataSubscriber,
                 motor_fl: WheelMotor<'static, MotorFLUart, MotorFLDmaRx, MotorFLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
                 motor_bl: WheelMotor<'static, MotorBLUart, MotorBLDmaRx, MotorBLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
@@ -89,6 +91,7 @@ impl <
                 shared_robot_state: robot_state,
                 command_subscriber: command_subscriber,
                 telemetry_publisher: telemetry_publisher,
+                battery_subscriber: battery_subscriber,
                 gyro_subscriber: gyro_subscriber,
                 motor_fl: motor_fl, 
                 motor_bl: motor_bl,
@@ -281,11 +284,9 @@ impl <
                 }
 
                 // now we have setpoint r(t) in self.cmd_vel
-                // let battery_v = battery_sub.next_message_pure().await as f32;
-                let battery_v = 25.0;
+                let battery_v = self.battery_subscriber.next_message_pure().await as f32;
                 let controls_enabled = true;
                 let gyro_rads = self.gyro_subscriber.next_message_pure().await[2] as f32;
-                defmt::warn!("gyro rads: {}", gyro_rads);
                 let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE && !self.shared_robot_state.shutdown_requested() {
                     // TODO check order
                     self.do_control_update(&mut robot_controller, cmd_vel, gyro_rads, controls_enabled)
@@ -410,6 +411,7 @@ pub async fn start_control_task(
     robot_state: &'static SharedRobotState,
     command_subscriber: CommandsSubscriber,
     telemetry_publisher: TelemetryPublisher,
+    battery_subscriber: BatteryVoltSubscriber,
     gyro_subscriber: GyroDataSubscriber,
     motor_fl_uart: MotorFLUart, motor_fl_rx_pin: MotorFLUartRxPin, motor_fl_tx_pin: MotorFLUartTxPin, motor_fl_rx_dma: MotorFLDmaRx, motor_fl_tx_dma: MotorFLDmaTx, motor_fl_boot0_pin: MotorFLBootPin, motor_fl_nrst_pin: MotorFLResetPin,
     motor_bl_uart: MotorBLUart, motor_bl_rx_pin: MotorBLUartRxPin, motor_bl_tx_pin: MotorBLUartTxPin, motor_bl_rx_dma: MotorBLDmaRx, motor_bl_tx_dma: MotorBLDmaTx, motor_bl_boot0_pin: MotorBLBootPin, motor_bl_nrst_pin: MotorBLResetPin,
@@ -457,7 +459,7 @@ pub async fn start_control_task(
     let motor_drib = DribblerMotor::new_from_pins(&DRIB_RX_UART_QUEUE,   &DRIB_TX_UART_QUEUE,        motor_d_boot0_pin,  motor_d_nrst_pin,  DRIB_FW_IMG, 1.0);
 
     let control_task = ControlTask::new(
-        robot_state, command_subscriber, telemetry_publisher,
+        robot_state, command_subscriber, telemetry_publisher, battery_subscriber,
         gyro_subscriber, motor_fl, motor_bl, motor_br, motor_fr, motor_drib);
 
     control_task_spawner.spawn(control_task_entry(control_task)).unwrap();

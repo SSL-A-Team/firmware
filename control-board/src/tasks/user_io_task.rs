@@ -182,7 +182,7 @@ async fn user_io_task_entry(
 
         // FIXME: Vref_int is not returning valid value. Embassy issue. 
         // let vref_int_read_mv = vref_int_adc.read(&mut vref_int_ch);
-        let vref_int_read_mv = 1509.0;
+        let vref_int_read_mv = 1216.0;
         let batt_res_div_v = battery_volt_adc.read_volt_raw_f32(vref_int_read_mv as f32, vref_int_cal);
         let battery_voltage_cur = adc_v_to_battery_voltage(batt_res_div_v);
         
@@ -199,7 +199,7 @@ async fn user_io_task_entry(
         let battery_voltage_sum: f32 = battery_voltage_buffer.iter().sum();
         // Calculate battery average
         let battery_voltage_ave = battery_voltage_sum / (BATTERY_BUFFER_SIZE as f32);
-        
+                
         battery_volt_publisher.publish_immediate(battery_voltage_ave);
         robot_state.set_battery_low(battery_voltage_ave < BATTERY_MIN_SAFE_VOLTAGE);
         robot_state.set_battery_crit(battery_voltage_ave < BATTERY_MIN_CRIT_VOLTAGE || battery_voltage_ave > BATTERY_MAX_VOLTAGE);
