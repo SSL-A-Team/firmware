@@ -275,7 +275,7 @@ pub async fn start_io_task(spawner: &Spawner,
 
     let debug_led0 = Output::new(usr_led0_pin, Level::Low, Speed::Low);
 
-    let robot_id_indicator = ShellIndicator::new(robot_id_indicator_fr, robot_id_indicator_fl, robot_id_indicator_br, robot_id_indicator_bl, Some(robot_id_indicator_isblue));
+    let robot_id_indicator = ShellIndicator::new(robot_id_indicator_fr, robot_id_indicator_fl, robot_id_indicator_bl, robot_id_indicator_br, Some(robot_id_indicator_isblue));
 
     let battery_volt_adc = AdcHelper::new(battery_adc_peri, battery_adc_pin, SampleTime::CYCLES32_5, Resolution::BITS12);
     let mut vref_int_adc = Adc::new(vref_int_adc_peri);

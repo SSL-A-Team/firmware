@@ -58,7 +58,9 @@ pub struct ControlTask<
     shared_robot_state: &'static SharedRobotState,
     command_subscriber: CommandsSubscriber,
     battery_subscriber: BatteryVoltSubscriber,
+    last_battery_v: f32,
     gyro_subscriber: GyroDataSubscriber,
+    last_gyro_rads: f32,
     telemetry_publisher: TelemetryPublisher,
     
     motor_fl: WheelMotor<'static, MotorFLUart, MotorFLDmaRx, MotorFLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
@@ -92,7 +94,9 @@ impl <
                 command_subscriber: command_subscriber,
                 telemetry_publisher: telemetry_publisher,
                 battery_subscriber: battery_subscriber,
+                last_battery_v: 0.0,
                 gyro_subscriber: gyro_subscriber,
+                last_gyro_rads: 0.0,
                 motor_fl: motor_fl, 
                 motor_bl: motor_bl,
                 motor_br: motor_br,
@@ -137,7 +141,7 @@ impl <
 
         fn send_motor_commands_and_telemetry(&mut self,
                                             robot_controller: &mut BodyVelocityController,
-                                            battery_voltage: &f32) 
+                                            battery_voltage: f32) 
         {
             self.motor_fl.send_motion_command();
             self.motor_bl.send_motion_command();
@@ -161,7 +165,7 @@ impl <
                 sequence_number: 0,
                 robot_revision_major: 0,
                 robot_revision_minor: 0,
-                battery_level: *battery_voltage,
+                battery_level: battery_voltage,
                 battery_temperature: 0.,
                 _bitfield_align_1: [],
                 _bitfield_1: BasicTelemetry::new_bitfield_1(
@@ -284,12 +288,20 @@ impl <
                 }
 
                 // now we have setpoint r(t) in self.cmd_vel
-                let battery_v = self.battery_subscriber.next_message_pure().await as f32;
+                // let battery_v = self.battery_subscriber.next_message_pure().await as f32;
+                if let Some(battery_v) = self.battery_subscriber.try_next_message_pure() {
+                    self.last_battery_v = battery_v;
+                }
                 let controls_enabled = true;
-                let gyro_rads = self.gyro_subscriber.next_message_pure().await[2] as f32;
-                let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE && !self.shared_robot_state.shutdown_requested() {
+                // let gyro_rads = self.gyro_subscriber.next_message_pure().await[2] as f32;
+                if let Some(gyro_rads) = self.gyro_subscriber.try_next_message_pure() {
+                    self.last_gyro_rads = gyro_rads[2];
+                }
+
+
+                let wheel_vels = if self.last_battery_v > BATTERY_MIN_VOLTAGE && !self.shared_robot_state.shutdown_requested() {
                     // TODO check order
-                    self.do_control_update(&mut robot_controller, cmd_vel, gyro_rads, controls_enabled)
+                    self.do_control_update(&mut robot_controller, cmd_vel, self.last_gyro_rads, controls_enabled)
                 } else {
                     // Battery is too low, set velocity to zero
                     drib_vel = 0.0;
@@ -305,7 +317,7 @@ impl <
                 self.motor_drib.set_setpoint(drib_dc);
 
                 self.send_motor_commands_and_telemetry(
-                    &mut robot_controller, &battery_v);
+                    &mut robot_controller, self.last_battery_v);
 
                 loop_rate_ticker.next().await;
             }
