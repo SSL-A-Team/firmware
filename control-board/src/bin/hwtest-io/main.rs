@@ -46,6 +46,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     
     let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
 
+    let mut battery_volt_subscriber = BATTERY_VOLT_CHANNEL.subscriber().unwrap();
 
     ///////////////////
     //  start tasks  //
@@ -58,6 +59,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     create_audio_task!(main_spawner, robot_state, p);
 
     loop {
+        defmt::info!("Battery Voltage: {}", battery_volt_subscriber.next_message_pure().await);
         Timer::after_millis(1000).await;
     }
 }

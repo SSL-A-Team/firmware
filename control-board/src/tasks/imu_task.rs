@@ -5,7 +5,7 @@ use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Pull;
 use embassy_stm32::spi::{SckPin, MisoPin, MosiPin};
 
-use embassy_time::Timer;
+use embassy_time::{Duration, Instant, Timer};
 use nalgebra::Vector3;
 
 use static_cell::ConstStaticCell;
@@ -14,6 +14,8 @@ use ateam_lib_stm32::drivers::imu::bmi323::{self, *};
 
 use crate::pins::*;
 use crate::robot_state::SharedRobotState;
+
+const TIPPED_MIN_DURATION_MS: u64 = 1000;
 
 #[macro_export]
 macro_rules! create_imu_task {
@@ -39,16 +41,20 @@ static mut IMU_BUFFER_CELL: [u8; bmi323::SPI_MIN_BUF_LEN] = [0; bmi323::SPI_MIN_
 #[embassy_executor::task]
 async fn imu_task_entry(
         robot_state: &'static SharedRobotState,
-        accel_pub: AccelDataPublisher,
         gyro_pub: GyroDataPublisher,
+        accel_pub: AccelDataPublisher,
         mut imu: Bmi323<'static, 'static>,
         mut _accel_int: ExtiInput<'static>,
         mut gyro_int: ExtiInput<'static>) {
 
     defmt::info!("imu start startup.");
+    let mut first_tipped_check_time = Instant::now(); 
+    let mut first_tipped_seen = false;
 
     'imu_configuration_loop:
     loop {
+        // At the beginning, assume IMU is not working yet.
+        robot_state.set_imu_inop(true);
         imu.init().await;
         let self_test_res = imu.self_test().await;
         if self_test_res.is_err() {
@@ -61,7 +67,7 @@ async fn imu_task_entry(
         let gyro_config_res = imu.set_gyro_config(GyroMode::ContinuousHighPerformance,
             GyroRange::PlusMinus2000DegPerSec,
             Bandwidth3DbCutoffFreq::AccOdrOver2,
-            OutputDataRate::Odr200p0,
+            OutputDataRate::Odr100p0,
             DataAveragingWindow::Average2Samples).await;
         imu.set_gyro_interrupt_mode(InterruptMode::MappedToInt2).await;
 
@@ -73,7 +79,7 @@ async fn imu_task_entry(
         let acc_config_res = imu.set_accel_config(AccelMode::ContinuousHighPerformance,
             AccelRange::Range2g,
             Bandwidth3DbCutoffFreq::AccOdrOver2,
-            OutputDataRate::Odr200p0,
+            OutputDataRate::Odr100p0,
             DataAveragingWindow::Average2Samples).await;
         imu.set_accel_interrupt_mode(InterruptMode::MappedToInt1).await;
 
@@ -93,6 +99,9 @@ async fn imu_task_entry(
             // block on gyro interrupt, active low
             match select(gyro_int.wait_for_falling_edge(), Timer::after_millis(1000)).await {
                 Either::First(_) => {
+                    // Got an interrupt, so IMU should be working.
+                    robot_state.set_imu_inop(false);
+
                     // read gyro data
                     let imu_data = imu.gyro_get_data_rads().await;
                     gyro_pub.publish_immediate(Vector3::new(imu_data[0], imu_data[1], imu_data[2]));
@@ -104,8 +113,22 @@ async fn imu_task_entry(
 
                     // TODO: magic number, fix after raw data conversion
                     if accel_data[2] < 8000 {
-                        robot_state.set_robot_tipped(true);
+                        if !first_tipped_seen {
+                            // If it's the first time a tipping occured, start tracking.
+                            first_tipped_seen = true;
+                            first_tipped_check_time = Instant::now();
+                        } else {
+                            // After the first tipped is seen, then wait if it has been tipped for long enough.
+                            if (Instant::now() - first_tipped_check_time) > Duration::from_millis(TIPPED_MIN_DURATION_MS) {
+                                robot_state.set_robot_tipped(true);
+                            } else {
+                                // If it hasn't been long enough, clear the robot tipped.
+                                robot_state.set_robot_tipped(false);
+                            }
+                        }
                     } else {
+                        // Not tipped so clear everything. 
+                        first_tipped_seen = false;
                         robot_state.set_robot_tipped(false);
                     }
                 }
@@ -153,6 +176,6 @@ pub fn start_imu_task(
     let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::None);
     let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::None);
 
-    imu_task_spawner.spawn(imu_task_entry(robot_state, accel_data_publisher, gyro_data_publisher, imu, accel_int, gyro_int)).unwrap();
+    imu_task_spawner.spawn(imu_task_entry(robot_state, gyro_data_publisher, accel_data_publisher, imu, accel_int, gyro_int)).unwrap();
 }
 

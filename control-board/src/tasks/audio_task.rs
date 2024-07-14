@@ -30,9 +30,7 @@ async fn audio_task_entry(
             tone_player.play_song().await;
         }
 
-        defmt::info!("battery pct {}", cur_robot_state.battery_pct);
-        if cur_robot_state.battery_pct == 0 || cur_robot_state.battery_pct > 110 {
-            defmt::warn!("robot critical battery pct {}", cur_robot_state.battery_pct);
+        if cur_robot_state.battery_low {
             let _ = tone_player.load_song(&BATTERY_WARNING_SONG);
             tone_player.play_song().await;
         }

@@ -240,6 +240,7 @@ impl<
                     if let Ok(connected) = self.connect_software(cur_robot_state.hw_robot_id, cur_robot_state.hw_robot_team_is_blue).await {
                         if connected {
                             self.connection_state = RadioConnectionState::Connected;
+                            self.last_software_packet = Instant::now();
                         } else {
                             // software didn't respond to our hello, it may not be started yet
                             Timer::after_millis(1000).await;
@@ -257,8 +258,9 @@ impl<
 
                     // if 1000ms have elapsed since we last got a packet, return to software connection state
                     if Instant::now() - self.last_software_packet > Duration::from_millis(1000) {
-                        self.connection_state = RadioConnectionState::ConnectSoftware;
-                        self.radio.close_peer().await.unwrap();
+                        //self.connection_state = RadioConnectionState::ConnectSoftware;
+                        //self.radio.close_peer().await.unwrap();
+                        cortex_m::peripheral::SCB::sys_reset();
                     }
                 },
             }
@@ -357,21 +359,25 @@ impl<
             }
         }
 
-        if let Some(telemetry) = self.telemetry_subscriber.try_next_message_pure() {
-            match telemetry {
-                TelemetryPacket::Basic(basic) => {
-                    self.last_basic_telemetry = basic;
-                },
-                TelemetryPacket::Control(control) => {
-                    if self.radio.send_control_debug_telemetry(control).await.is_err() {
-                        defmt::warn!("RadioTask - failed to send control debug telemetry packet");
-                    }
-                },
-                TelemetryPacket::ParameterCommandResponse(pc_resp) => {
-                    if self.radio.send_parameter_response(pc_resp).await.is_err() {
-                        defmt::warn!("RadioTask - failed to send control parameter response packet");
-                    }
-                },
+        loop {
+            if let Some(telemetry) = self.telemetry_subscriber.try_next_message_pure() {
+                match telemetry {
+                    TelemetryPacket::Basic(basic) => {
+                        self.last_basic_telemetry = basic;
+                    },
+                    TelemetryPacket::Control(control) => {
+                        if self.radio.send_control_debug_telemetry(control).await.is_err() {
+                            defmt::warn!("RadioTask - failed to send control debug telemetry packet");
+                        }
+                    },
+                    TelemetryPacket::ParameterCommandResponse(pc_resp) => {
+                        if self.radio.send_parameter_response(pc_resp).await.is_err() {
+                            defmt::warn!("RadioTask - failed to send control parameter response packet");
+                        }
+                    },
+                }
+            } else {
+                break;
             }
         }
 

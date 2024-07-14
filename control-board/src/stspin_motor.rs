@@ -326,6 +326,18 @@ impl<
     pub fn read_rpm(&self) -> f32 {
         return self.current_state.vel_enc_estimate * 60.0 / (2.0 * PI);
     }
+
+    pub fn read_vel_setpoint(&self) -> f32 {
+        return self.current_state.vel_setpoint;
+    }
+
+    pub fn read_vel_computed_setpoint(&self) -> f32 {
+        return self.current_state.vel_computed_setpoint;
+    }
+
+    pub fn read_hall_vel(&self) -> f32 {
+        return self.current_state.vel_hall_estimate;
+    }
 }
 
 pub struct DribblerMotor<

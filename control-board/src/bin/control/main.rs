@@ -9,8 +9,8 @@ use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{create_imu_task, create_io_task, create_radio_task, create_shutdown_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::control_task::start_control_task};
-
+use ateam_control_board::{
+    create_audio_task, create_imu_task, create_io_task, create_radio_task, create_shutdown_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::{control_task::start_control_task, kicker_task::start_kicker_task}};
 
 // load credentials from correct crate
 #[cfg(not(feature = "no-private-credentials"))]
@@ -73,6 +73,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     // commands channel
     let radio_command_publisher = RADIO_C2_CHANNEL.publisher().unwrap();
     let control_command_subscriber = RADIO_C2_CHANNEL.subscriber().unwrap();
+    let kicker_command_subscriber = RADIO_C2_CHANNEL.subscriber().unwrap();
 
     // telemetry channel
     let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
@@ -80,6 +81,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     // Battery Channel
     let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
+    let battery_volt_subscriber = BATTERY_VOLT_CHANNEL.subscriber().unwrap();
 
     // TODO imu channel
     let imu_gyro_data_publisher = GYRO_DATA_CHANNEL.publisher().unwrap();
@@ -100,6 +102,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         robot_state,
         p);
 
+    create_audio_task!(main_spawner,
+        robot_state,
+        p);
+
     create_radio_task!(main_spawner, radio_uart_queue_spawner,
         robot_state,
         radio_command_publisher, radio_telemetry_subscriber,
@@ -114,12 +120,20 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     start_control_task(
         uart_queue_spawner, main_spawner, 
         robot_state, 
-        control_command_subscriber, control_telemetry_publisher, control_gyro_data_subscriber,
+        control_command_subscriber, control_telemetry_publisher, battery_volt_subscriber, control_gyro_data_subscriber,
         p.UART4, p.PA1, p.PA0, p.DMA1_CH3, p.DMA1_CH2, p.PC1, p.PC0,
         p.UART7, p.PF6, p.PF7, p.DMA1_CH5, p.DMA1_CH4, p.PF8, p.PF9,
         p.UART8, p.PE0, p.PE1, p.DMA1_CH7, p.DMA1_CH6, p.PB9, p.PB8,
         p.USART1, p.PB15, p.PB14, p.DMA1_CH1, p.DMA1_CH0, p.PD8, p.PD9,
         p.UART5, p.PB12, p.PB13, p.DMA2_CH3, p.DMA2_CH2, p.PD13, p.PD12).await;
+
+    start_kicker_task(
+        main_spawner, uart_queue_spawner,
+        robot_state,
+        kicker_command_subscriber,
+        p.USART6,
+        p.PC7, p.PC6, p.DMA2_CH5, p.DMA2_CH4, p.PA8, p.PA9, p.PG8,
+    ).await;
 
     loop {
         Timer::after_millis(10).await;
