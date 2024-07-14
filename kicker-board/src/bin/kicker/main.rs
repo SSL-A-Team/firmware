@@ -44,7 +44,7 @@ const MAX_KICK_SPEED: f32 = 5.5;
 const SHUTDOWN_KICK_DUTY: f32 = 0.20;
 
 pub const CHARGE_TARGET_VOLTAGE: f32 = 182.0;
-pub const CHARGE_OVERVOLT_THRESH_VOLTAGE: f32 = 190.0;
+pub const CHARGE_OVERVOLT_THRESH_VOLTAGE: f32 = 195.0;
 pub const CHARGED_THRESH_VOLTAGE: f32 = 170.0;
 pub const CHARGE_SAFE_VOLTAGE: f32 = 5.0;
 
@@ -52,6 +52,8 @@ const MAX_TX_PACKET_SIZE: usize = 16;
 const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 3;
+
+const RAIL_BUFFER_SIZE: usize = 10;
 
 make_uart_queue_pair!(COMS,
     ComsUartModule, ComsUartRxDma, ComsUartTxDma,
@@ -132,6 +134,10 @@ async fn high_pri_kick_task(
     let mut shutdown_requested: bool = false;
     let mut shutdown_completed: bool = false;
 
+    let mut rail_voltage_buffer: [f32; RAIL_BUFFER_SIZE] =
+        [0.0; RAIL_BUFFER_SIZE];
+    let mut rail_voltage_filt_indx: usize = 0;
+
     // loop rate control
     let mut ticker = Ticker::every(Duration::from_millis(1));
     let mut last_packet_sent_time = Instant::now();
@@ -141,7 +147,22 @@ async fn high_pri_kick_task(
         let mut vrefint = adc.enable_vrefint();
         let vrefint_sample = adc.read(&mut vrefint);
 
-        let rail_voltage = adc_200v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32, vrefint_sample as f32));
+        let rail_voltage_cur = adc_200v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32, vrefint_sample as f32));
+        
+        // Add new battery read to cyclical buffer.
+        rail_voltage_buffer[rail_voltage_filt_indx] = rail_voltage_cur;
+
+        // Shift index for next run.
+        if rail_voltage_filt_indx == (RAIL_BUFFER_SIZE - 1) {
+            rail_voltage_filt_indx = 0;
+        } else {
+            rail_voltage_filt_indx += 1;
+        }
+
+        let rail_voltage_sum: f32 = rail_voltage_buffer.iter().sum();
+        // Calculate battery average
+        let rail_voltage_ave = rail_voltage_sum / (RAIL_BUFFER_SIZE as f32);
+        
         // let battery_voltage =
         //     adc_v_to_battery_voltage(adc_raw_to_v(adc.read(&mut battery_voltage_pin) as f32, vrefint_sample as f32));
         // optionally pre-flag errors?
@@ -185,11 +206,11 @@ async fn high_pri_kick_task(
         }
 
         // check if we've met the criteria for completed shutdown
-        if shutdown_requested && rail_voltage < CHARGE_SAFE_VOLTAGE {
+        if shutdown_requested && rail_voltage_ave < CHARGE_SAFE_VOLTAGE {
             shutdown_completed = true;
         }
 
-        if rail_voltage > CHARGE_OVERVOLT_THRESH_VOLTAGE {
+        if rail_voltage_ave > CHARGE_OVERVOLT_THRESH_VOLTAGE {
             error_latched = true;
         }
 
@@ -252,7 +273,7 @@ async fn high_pri_kick_task(
                     }
                 }
                 KickRequest::KR_KICK_CAPTURED => {
-                    if ball_detected && rail_voltage > CHARGED_THRESH_VOLTAGE {
+                    if ball_detected && rail_voltage_ave > CHARGED_THRESH_VOLTAGE {
                         KickType::Kick
                     } else {
                         KickType::None
@@ -267,7 +288,7 @@ async fn high_pri_kick_task(
                     }
                 }
                 KickRequest::KR_CHIP_CAPTURED => {
-                    if ball_detected && rail_voltage > CHARGED_THRESH_VOLTAGE {
+                    if ball_detected && rail_voltage_ave > CHARGED_THRESH_VOLTAGE {
                         KickType::Chip
                     } else {
                         KickType::None
@@ -289,7 +310,7 @@ async fn high_pri_kick_task(
         // if telemetry isn't enabled, the control board doesn't want to talk to us, don't permit any actions
         let res = if !telemetry_enabled || error_latched {
             kick_manager
-                .command(battery_voltage, rail_voltage, false, KickType::None, 0.0)
+                .command(battery_voltage, rail_voltage_ave, false, KickType::None, 0.0)
                 .await
         } else {
             if kick_command == KickType::Kick || kick_command == KickType::Chip {
@@ -298,10 +319,11 @@ async fn high_pri_kick_task(
                     false => KickRequest::KR_DISABLE,
                 }
             }
+            
             kick_manager
                 .command(
                     battery_voltage,
-                    rail_voltage,
+                    rail_voltage_ave,
                     charge_hv_rail,
                     kick_command,
                     kick_speed
@@ -312,9 +334,9 @@ async fn high_pri_kick_task(
         // this will permanently latch an error if the rail voltages are low
         // which we probably don't want on boot up?
         // maybe this error should be clearable and the HV rail OV should not be
-        // if res.is_err() {
-        //     error_latched = true;
-        // }
+        if res.is_err() {
+            error_latched = true;
+        }
 
         // send telemetry packet
         if telemetry_enabled {
@@ -330,7 +352,7 @@ async fn high_pri_kick_task(
                     ball_detected as u32,
                     res.is_err() as u32,
                 );
-                kicker_telemetry_packet.rail_voltage = rail_voltage;
+                kicker_telemetry_packet.rail_voltage = rail_voltage_ave;
                 kicker_telemetry_packet.battery_voltage = battery_voltage;
 
                 // raw interpretaion of a struct for wire transmission is unsafe
