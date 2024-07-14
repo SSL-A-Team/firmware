@@ -28,6 +28,11 @@ pub const BATTERY_WARNING_SONG: [Beat; 4] = [
     Beat::Rest(250_000),
 ];
 
+pub const BATTERY_CRITICAL_SONG: [Beat; 2] = [
+    Beat::Note { tone: 440, duration: 250_000 },
+    Beat::Note { tone: 466, duration: 250_000 },
+];
+
 pub const TEST_SONG: [Beat; 17] = [
     Beat::Note { tone: 392, duration: 250_000 },
     Beat::Note { tone: 392, duration: 250_000 },

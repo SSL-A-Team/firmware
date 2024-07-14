@@ -3,7 +3,7 @@ use embassy_executor::Spawner;
 use embassy_stm32::{gpio::OutputType, time::hz, timer::{simple_pwm::{PwmPin, SimplePwm}, Channel}};
 use embassy_time::{Duration, Ticker};
 
-use crate::{pins::{BuzzerPin, BuzzerTimer}, robot_state::SharedRobotState, songs::{BATTERY_WARNING_SONG, TIPPED_WARNING_SONG}};
+use crate::{pins::{BuzzerPin, BuzzerTimer}, robot_state::SharedRobotState, songs::{BATTERY_CRITICAL_SONG, BATTERY_WARNING_SONG, TIPPED_WARNING_SONG}};
 
 #[macro_export]
 macro_rules! create_audio_task {
@@ -24,14 +24,16 @@ async fn audio_task_entry(
     loop {
         let cur_robot_state = robot_state.get_state();
 
-        if cur_robot_state.robot_tipped {
+        // Structure so only one song can play per 
+        if cur_robot_state.battery_crit {
+            let _ = tone_player.load_song(&BATTERY_CRITICAL_SONG);
+            tone_player.play_song().await;
+        } else if cur_robot_state.battery_low {
+            let _ = tone_player.load_song(&BATTERY_WARNING_SONG);
+            tone_player.play_song().await;
+        } else if cur_robot_state.robot_tipped {
             defmt::warn!("robot tipped audio");
             let _ = tone_player.load_song(&TIPPED_WARNING_SONG);
-            tone_player.play_song().await;
-        }
-
-        if cur_robot_state.battery_low {
-            let _ = tone_player.load_song(&BATTERY_WARNING_SONG);
             tone_player.play_song().await;
         }
 
