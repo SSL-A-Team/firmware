@@ -288,18 +288,17 @@ impl <
                 }
 
                 // now we have setpoint r(t) in self.cmd_vel
-                // let battery_v = self.battery_subscriber.next_message_pure().await as f32;
                 if let Some(battery_v) = self.battery_subscriber.try_next_message_pure() {
                     self.last_battery_v = battery_v;
                 }
-                let controls_enabled = true;
-                // let gyro_rads = self.gyro_subscriber.next_message_pure().await[2] as f32;
+
                 if let Some(gyro_rads) = self.gyro_subscriber.try_next_message_pure() {
                     self.last_gyro_rads = gyro_rads[2];
                 }
+                
+                let controls_enabled = true;
 
-
-                let wheel_vels = if self.last_battery_v > BATTERY_MIN_VOLTAGE && !self.shared_robot_state.shutdown_requested() {
+                let wheel_vels = if !(self.shared_robot_state.get_battery_low() || self.shared_robot_state.get_battery_crit()) && !self.shared_robot_state.shutdown_requested() {
                     // TODO check order
                     self.do_control_update(&mut robot_controller, cmd_vel, self.last_gyro_rads, controls_enabled)
                 } else {
