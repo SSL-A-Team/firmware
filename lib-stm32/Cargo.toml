@@ -33,3 +33,15 @@ embassy-sync = { git = "https://github.com/embassy-rs/embassy"}
 embassy-time = { git = "https://github.com/embassy-rs/embassy"}
 embassy-stm32 = { git = "https://github.com/embassy-rs/embassy"}
 embassy-futures = { git = "https://github.com/embassy-rs/embassy"}
+
+[dev-dependencies]
+defmt-test = "0.3.0"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+
+[lib]
+test = false
+harness = false
+
+[[test]]
+name = "linear-map"
+harness = false

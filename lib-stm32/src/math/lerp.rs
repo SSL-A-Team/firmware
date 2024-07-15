@@ -100,8 +100,3 @@ L: Lerp<N>
         L::lerp_f(self.a, self.b, pct_complete)
     }
 }
-
-#[test]
-fn test_lerp() {
-    print("hi")
-}
