@@ -56,11 +56,11 @@ macro_rules! create_io_task {
 #[embassy_executor::task]
 async fn user_io_task_entry(
     robot_state: &'static SharedRobotState,
-    mut usr_btn0: AdvExtiButton,
-    mut usr_btn1: AdvExtiButton,
+    mut _usr_btn0: AdvExtiButton,
+    mut _usr_btn1: AdvExtiButton,
     battery_volt_publisher: BatteryVoltPublisher,
     mut battery_volt_adc: AdcHelper<'static, BatteryAdc, BatteryAdcPin>,
-    mut vref_int_adc: Adc<'static, VrefIntAdc>,
+    vref_int_adc: Adc<'static, VrefIntAdc>,
     dip_switch: DipSwitch<'static, 7>,
     robot_id_rotary: RotaryEncoder<'static, 4>,
     mut debug_led0: Output<'static>,

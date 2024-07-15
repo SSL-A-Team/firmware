@@ -4,7 +4,7 @@
 #![feature(const_mut_refs)]
 #![feature(sync_unsafe_cell)]
 
-use ateam_kicker_board::{drivers::breakbeam::Breakbeam, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin}, tasks::{get_system_config, ClkSource}};
+use ateam_kicker_board::{drivers::breakbeam::Breakbeam, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin, GreenStatusLedPin}, tasks::{get_system_config, ClkSource}};
 
 use defmt::*;
 use {defmt_rtt as _, panic_probe as _};
@@ -100,6 +100,7 @@ async fn high_pri_kick_task(
     breakbeam_tx: BreakbeamLeftAgpioPin,
     breakbeam_rx: BreakbeamRightAgpioPin,
     mut rail_pin: PowerRail200vReadPin,
+    grn_led_pin: GreenStatusLedPin,
     err_led_pin: RedStatusLedPin,
     ball_detected_led1_pin: BlueStatusLed1Pin,
     ball_detected_led2_pin: BlueStatusLed2Pin,
@@ -111,6 +112,7 @@ async fn high_pri_kick_task(
     let mut kick_manager = KickManager::new(charge_pin, kick_pin, chip_pin);
 
     // debug LEDs
+    let mut status_led = Output::new(grn_led_pin, Level::Low, Speed::Low);
     let mut err_led = Output::new(err_led_pin, Level::Low, Speed::Low);
     let mut ball_detected_led1 = Output::new(ball_detected_led1_pin, Level::Low, Speed::Low);
     let mut ball_detected_led2 = Output::new(ball_detected_led2_pin, Level::Low, Speed::Low);
@@ -199,6 +201,11 @@ async fn high_pri_kick_task(
 
         // update telemetry requests
         telemetry_enabled = kicker_control_packet.telemetry_enabled() != 0;
+        if telemetry_enabled {
+            status_led.set_high();
+        } else {
+            status_led.set_low();
+        }
 
         // for now shutdown requests will be latched and a reboot is required to re-power
         if kicker_control_packet.request_power_down() != 0 {
@@ -412,8 +419,6 @@ async fn main(spawner: Spawner) -> ! {
 
     info!("kicker startup!");
 
-    let _status_led = Output::new(p.PA11, Level::High, Speed::Low);
-
     let mut adc = Adc::new(p.ADC1);
     adc.set_resolution(embassy_stm32::adc::Resolution::BITS12);
     adc.set_sample_time(SampleTime::CYCLES480);
@@ -424,7 +429,7 @@ async fn main(spawner: Spawner) -> ! {
     embassy_stm32::interrupt::TIM2.set_priority(embassy_stm32::interrupt::Priority::P6);
     let hp_spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
 
-    unwrap!(hp_spawner.spawn(high_pri_kick_task(&COMS_RX_UART_QUEUE, &COMS_TX_UART_QUEUE, adc, p.PE4, p.PE5, p.PE6, p.PA1, p.PA0, p.PC0, p.PE1, p.PE2, p.PE3)));
+    unwrap!(hp_spawner.spawn(high_pri_kick_task(&COMS_RX_UART_QUEUE, &COMS_TX_UART_QUEUE, adc, p.PE4, p.PE5, p.PE6, p.PA1, p.PA0, p.PC0, p.PE0, p.PE1, p.PE2, p.PE3)));
 
 
     //////////////////////////////////
