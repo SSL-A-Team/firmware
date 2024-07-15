@@ -41,7 +41,7 @@ async fn main(_spawner: Spawner) -> ! {
     let tx_buf = FLASH_TX_BUF.init([0; 256]);
 
 
-    let mut flash: AT25DF041B<'static, embassy_stm32::peripherals::SPI2, true> = AT25DF041B::new(spi, p.PB12, rx_buf, tx_buf);
+    let mut flash: AT25DF041B<'static, true> = AT25DF041B::new(spi, p.PB12, rx_buf, tx_buf);
     let res = flash.verify_chip_id().await;
     if res.is_err() {
         defmt::error!("failed to verify flash chip ID");

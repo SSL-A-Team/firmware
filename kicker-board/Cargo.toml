@@ -95,11 +95,6 @@ name = "kicker"
 test = false
 harness = false
 
-[[bin]]
-name = "kicker-no-uart"
-test = false
-harness = false
-
 [patch.crates-io]
 embassy-executor = { git = "https://github.com/embassy-rs/embassy"}
 embassy-sync = { git = "https://github.com/embassy-rs/embassy"}
