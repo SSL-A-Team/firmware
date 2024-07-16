@@ -367,7 +367,7 @@ impl <
                     defmt::debug!("all motors flashed");
                 }
             } else {
-                let _res = embassy_futures::join::join5(
+                let res = embassy_futures::join::join5(
                     self.motor_fl.load_default_firmware_image(),
                     self.motor_bl.load_default_firmware_image(),
                     self.motor_br.load_default_firmware_image(),
@@ -375,8 +375,12 @@ impl <
                     self.motor_drib.load_default_firmware_image(),
                 )
                 .await;
-
-                defmt::debug!("motor firmware flashed");
+                
+                if res.0.is_err() || res.1.is_err() || res.2.is_err() || res.3.is_err() {
+                    defmt::error!("failed to flash drive motor: {}", res);
+                } else {
+                    defmt::debug!("motor firmware flashed");
+                }
             }
         }
 

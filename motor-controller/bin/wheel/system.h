@@ -45,7 +45,6 @@
 #define TORQUE_LOOP_RATE_S ((float) TORQUE_LOOP_RATE_MS / (float) MS_PER_S)
 #define TELEMETRY_LOOP_RATE_MS 5
 
-#define MOTOR_MAXIMUM_ACCEL 5500 // rad/s^2
-
+#define MOTOR_MAXIMUM_ACCEL 6000 // rad/s^2
 
 // #define MOTOR_MAXIMUM_RAD_S 550.825911929f

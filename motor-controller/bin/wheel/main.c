@@ -150,7 +150,7 @@ int main() {
     pid_initialize(&vel_pid, &vel_pid_constants);
 
     vel_pid_constants.kP = 2.0f;
-    vel_pid_constants.kI = 2.0f;
+    vel_pid_constants.kI = 0.0f;
     vel_pid_constants.kD = 0.0f;
     vel_pid_constants.kI_max = 20.0;
     vel_pid_constants.kI_min = -20.0;
@@ -173,9 +173,6 @@ int main() {
 
         //GPIOB->BSRR |= GPIO_BSRR_BR_8;
         //GPIOB->BSRR |= GPIO_BSRR_BR_9;
-
-        // watchdog on receiving a command packet
-        ticks_since_last_command_packet++;
 
         GPIOB->BSRR |= GPIO_BSRR_BS_9;
 #ifdef UART_ENABLED
@@ -260,12 +257,23 @@ int main() {
         // if upstream isn't listening or its been too long since we got a command packet, turn off the motor
         if (!telemetry_enabled || ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
             r_motor_board = 0.0f;
+            // Warning pin enable.
+            GPIOB->BSRR |= GPIO_BSRR_BS_8;
+        } else {
+            // Warning pin clear.
+            GPIOB->BSRR |= GPIO_BSRR_BR_8;
         }
 
         // if any critical error is latched, coast the motor
         if (response_packet.data.motion.master_error) {
             r_motor_board = 0.0f;
-        }
+            // Error pin enable.
+            GPIOB->BSRR |= GPIO_BSRR_BS_6;
+        } 
+        // else {
+        //     // Error pin clear.
+        //     GPIOB->BSRR |= GPIO_BSRR_BR_6;
+        // }
 
         // determine which loops need to be run
         bool run_torque_loop = time_sync_ready_rst(&torque_loop_timer);
@@ -368,6 +376,7 @@ int main() {
                 float r_motor = mm_rads_to_dc(&df45_model, r_motor_board);
                 response_packet.data.motion.vel_setpoint = r_motor_board;
                 response_packet.data.motion.vel_computed_setpoint = r_motor;
+                response_packet.data.motion.vel_hall_estimate = r_motor_board;
                 pwm6step_set_duty_cycle_f(r_motor);
             } else if (motion_control_type == VELOCITY) {
                 pwm6step_set_duty_cycle_f(control_setpoint_vel_duty);
@@ -463,6 +472,11 @@ int main() {
         // limit loop rate to smallest time step
         if (sync_systick()) {
             slipped_control_frame_count++;
+        }
+
+        if (slipped_control_frame_count > 10) {
+            // Error pin enable.
+            GPIOB->BSRR |= GPIO_BSRR_BS_6;
         }
     }
 }
