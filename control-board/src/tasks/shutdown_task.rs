@@ -6,7 +6,7 @@ use embassy_time::Timer;
 
 use crate::{pins::{PowerBtnPressedIntExti, PowerBtnPressedIntPin, PowerKillPin, ShutdownInitiatedLedPin}, robot_state::{self, SharedRobotState}};
 
-pub const HARD_SHUTDOWN_TIME_MS: u64 = 10000;
+pub const HARD_SHUTDOWN_TIME_MS: u64 = 20000;
 
 #[macro_export]
 macro_rules! create_shutdown_task {

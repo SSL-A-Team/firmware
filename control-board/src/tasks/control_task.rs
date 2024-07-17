@@ -216,10 +216,10 @@ impl <
             self.motor_fr.set_telemetry_enabled(true);
             self.motor_drib.set_telemetry_enabled(true);
 
-            self.motor_fl.set_motion_type(MotorCommand_MotionType::VELOCITY);
-            self.motor_bl.set_motion_type(MotorCommand_MotionType::VELOCITY);
-            self.motor_br.set_motion_type(MotorCommand_MotionType::VELOCITY);
-            self.motor_fr.set_motion_type(MotorCommand_MotionType::VELOCITY);
+            self.motor_fl.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+            self.motor_bl.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+            self.motor_br.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+            self.motor_fr.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
 
 
             Timer::after_millis(10).await;
@@ -288,18 +288,17 @@ impl <
                 }
 
                 // now we have setpoint r(t) in self.cmd_vel
-                // let battery_v = self.battery_subscriber.next_message_pure().await as f32;
                 if let Some(battery_v) = self.battery_subscriber.try_next_message_pure() {
                     self.last_battery_v = battery_v;
                 }
-                let controls_enabled = true;
-                // let gyro_rads = self.gyro_subscriber.next_message_pure().await[2] as f32;
+
                 if let Some(gyro_rads) = self.gyro_subscriber.try_next_message_pure() {
                     self.last_gyro_rads = gyro_rads[2];
                 }
+                
+                let controls_enabled = true;
 
-
-                let wheel_vels = if self.last_battery_v > BATTERY_MIN_VOLTAGE && !self.shared_robot_state.shutdown_requested() {
+                let wheel_vels = if !(self.shared_robot_state.get_battery_low() || self.shared_robot_state.get_battery_crit()) && !self.shared_robot_state.shutdown_requested() {
                     // TODO check order
                     self.do_control_update(&mut robot_controller, cmd_vel, self.last_gyro_rads, controls_enabled)
                 } else {
@@ -368,7 +367,7 @@ impl <
                     defmt::debug!("all motors flashed");
                 }
             } else {
-                let _res = embassy_futures::join::join5(
+                let res = embassy_futures::join::join5(
                     self.motor_fl.load_default_firmware_image(),
                     self.motor_bl.load_default_firmware_image(),
                     self.motor_br.load_default_firmware_image(),
@@ -376,8 +375,12 @@ impl <
                     self.motor_drib.load_default_firmware_image(),
                 )
                 .await;
-
-                defmt::debug!("motor firmware flashed");
+                
+                if res.0.is_err() || res.1.is_err() || res.2.is_err() || res.3.is_err() {
+                    defmt::error!("failed to flash drive motor: {}", res);
+                } else {
+                    defmt::debug!("motor firmware flashed");
+                }
             }
         }
 

@@ -15,7 +15,7 @@ use super::params::body_vel_filter_params::{
 
 use super::params::body_vel_pid_params::{
     PID_GAIN,
-    BODY_VEL_LIM, BODY_ACC_LIM, WHEEL_ACC_LIM
+    BODY_VEL_LIM, BODY_ACC_LIM, BODY_DEACC_LIM, WHEEL_ACC_LIM
 };
 
 use ateam_common_packets::bindings_radio::{
@@ -39,6 +39,7 @@ pub struct BodyVelocityController<'a> {
     body_vel_controller: PidController<3>,
     body_velocity_limit: Vector3<f32>,
     body_acceleration_limit: Vector3<f32>,
+    body_deceleration_limit: Vector3<f32>,
     wheel_acceleration_limits: Vector4<f32>,
     prev_output: Vector3<f32>,
     cmd_wheel_velocities: Vector4<f32>,
@@ -60,6 +61,7 @@ impl<'a> BodyVelocityController<'a> {
             body_vel_controller: body_vel_controller,
             body_velocity_limit: Vector3::zeros(),
             body_acceleration_limit: Vector3::zeros(),
+            body_deceleration_limit: Vector3::zeros(),
             wheel_acceleration_limits: Vector4::zeros(),
             prev_output: Vector3::zeros(),
             cmd_wheel_velocities: Vector4::zeros(),
@@ -97,6 +99,7 @@ impl<'a> BodyVelocityController<'a> {
 
         bvc.body_velocity_limit.copy_from(&BODY_VEL_LIM);
         bvc.body_acceleration_limit.copy_from(&BODY_ACC_LIM);
+        bvc.body_deceleration_limit.copy_from(&BODY_DEACC_LIM);
         bvc.wheel_acceleration_limits.copy_from(&WHEEL_ACC_LIM);
 
         bvc
@@ -108,6 +111,7 @@ impl<'a> BodyVelocityController<'a> {
             pid_controller: PidController<3>,
             bv_limit: Vector3<f32>,
             ba_limit: Vector3<f32>,
+            bda_limit: Vector3<f32>,
             wa_limit: Vector4<f32>
     ) -> BodyVelocityController<'a> {
         BodyVelocityController {
@@ -117,6 +121,7 @@ impl<'a> BodyVelocityController<'a> {
             body_vel_controller: pid_controller,
             body_velocity_limit: bv_limit,
             body_acceleration_limit: ba_limit,
+            body_deceleration_limit: bda_limit,
             wheel_acceleration_limits: wa_limit,
             prev_output: Vector3::zeros(),
             cmd_wheel_velocities: Vector4::zeros(),
@@ -176,15 +181,15 @@ impl<'a> BodyVelocityController<'a> {
         let mut body_vel_estimate = self.body_vel_filter.get_state();
 
         // Deadzone the velocity estimate
-        if libm::fabsf(body_vel_estimate[0]) < 0.005 {
+        if libm::fabsf(body_vel_estimate[0]) < 0.05 {
             body_vel_estimate[0] = 0.0;
         }
 
-        if libm::fabsf(body_vel_estimate[1]) < 0.005 {
+        if libm::fabsf(body_vel_estimate[1]) < 0.05 {
             body_vel_estimate[1] = 0.0;
         }
 
-        if libm::fabsf(body_vel_estimate[2]) < 0.005 {
+        if libm::fabsf(body_vel_estimate[2]) < 0.05 {
             body_vel_estimate[2] = 0.0;
         }
 
@@ -202,14 +207,30 @@ impl<'a> BodyVelocityController<'a> {
         // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
         // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
         let body_acc_output = (body_vel_output - self.prev_output) / self.loop_dt_s;
-        let body_acc_output_clamp = clamp_vector_keep_dir(&body_acc_output, &self.body_acceleration_limit);
+        // Make a copy of acceleration to swap out with decel parts.
+        let mut temp_accel_decel_holder: Vector3<f32> = Vector3::zeros();
+        temp_accel_decel_holder.copy_from_slice(self.body_acceleration_limit.as_slice());
+        // Check if each part is decel (sign of acceleration != est velocity)
+        if (body_acc_output[0] > 0.0) != (body_vel_estimate[0] > 0.0) {
+            temp_accel_decel_holder[0] = self.body_deceleration_limit[0];
+        }
+
+        if (body_acc_output[1] > 0.0) != (body_vel_estimate[1] > 0.0) {
+            temp_accel_decel_holder[1] = self.body_deceleration_limit[1];
+        }
+
+        if (body_acc_output[2] > 0.0) != (body_vel_estimate[2] > 0.0) {
+            temp_accel_decel_holder[2] = self.body_deceleration_limit[2];
+        }
+
+        let body_acc_output_clamp = clamp_vector_keep_dir(&body_acc_output, &temp_accel_decel_holder);
 
         // Convert back to body velocity
         let body_vel_output_acc_clamp = self.prev_output + (body_acc_output_clamp * self.loop_dt_s);
 
         // Clamp and maintain direction of control body velocity.
         let body_vel_output_full_clamp = clamp_vector_keep_dir(&body_vel_output_acc_clamp, &self.body_velocity_limit);
-        self.prev_output = body_vel_output_full_clamp;
+        self.prev_output.copy_from_slice(body_vel_output_full_clamp.as_slice());
         self.debug_telemetry.clamped_commanded_body_velocity.copy_from_slice(body_vel_output_full_clamp.as_slice());
 
         // Transform body velocity commands into the wheel velocity domain.
@@ -227,14 +248,14 @@ impl<'a> BodyVelocityController<'a> {
         //let wheel_acc_setpoint = (wheel_vel_output - self.cmd_wheel_velocities) / self.loop_dt_s;
         //let wheel_acc_setpoint_clamp = clamp_vector_keep_dir(&wheel_acc_setpoint, &WHEEL_ACC_LIM);
         //let wheel_vel_output_clamp = self.cmd_wheel_velocities + (wheel_acc_setpoint_clamp * self.loop_dt_s);
-        self.debug_telemetry.wheel_velocity_clamped_u.copy_from_slice(wheel_vel_output.as_slice());
+        //self.debug_telemetry.wheel_velocity_clamped_u.copy_from_slice(wheel_vel_output_clamp.as_slice());
 
         // Save command state.
         if controls_enabled {
             self.cmd_wheel_velocities = wheel_vel_output;
         } else {
             self.cmd_wheel_velocities = self.robot_model.robot_vel_to_wheel_vel(&body_vel_setpoint);
-            self.debug_telemetry.wheel_velocity_u.copy_from_slice(self.cmd_wheel_velocities.as_slice());
+            self.debug_telemetry.wheel_velocity_u.copy_from_slice(wheel_vel_output.as_slice());
         }
     }
 

@@ -3,6 +3,8 @@
 
 #include "motor_model.h"
 
+#define MOTOR_MINIMUM_VEL 4.0f // rad/s
+
 void mm_initialize(MotorModel_t *mm) {
     mm->max_vel_rads = 0.0f;
     mm->enc_ticks_per_rev = 0.0f;
@@ -20,15 +22,15 @@ void mm_initialize(MotorModel_t *mm) {
 float mm_rads_to_dc(MotorModel_t *mm, float avel_rads) {
     // Need to exceed coefficient to prevent b from inverting the directions.
     // So just return 0.0 at small values
-    if (avel_rads > -(mm->rads_to_dc_linear_map_b/mm->rads_to_dc_linear_map_m) && 
-        avel_rads < (mm->rads_to_dc_linear_map_b/mm->rads_to_dc_linear_map_m)) {
+    if (avel_rads > -MOTOR_MINIMUM_VEL && avel_rads < MOTOR_MINIMUM_VEL) {
         return 0.0f;
     }
 
     // Linear mapping from 'motor_model.py' in hw-analysis
-    float map_value = (avel_rads * mm->rads_to_dc_linear_map_m) +
-        ((avel_rads < 0) ? mm->rads_to_dc_linear_map_b : -mm->rads_to_dc_linear_map_b);
+    //float map_value = (avel_rads * mm->rads_to_dc_linear_map_m) +
+    //    ((avel_rads < 0) ? mm->rads_to_dc_linear_map_b : -mm->rads_to_dc_linear_map_b);
 
+    float map_value = avel_rads / mm->max_vel_rads;
     // bound DC [-1, 1]
     return fmax(fmin(map_value, 1.0f), -1.0f);
 }

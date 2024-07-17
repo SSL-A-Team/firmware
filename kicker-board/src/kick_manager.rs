@@ -31,7 +31,7 @@ const MAX_KICK_DURATION_US: f32 = 4500.0;  // 10ms (10k us) max power kick
 const MAX_CHIP_DURATION_US: f32 = 10000.0;  // 10ms (10k us) max power kick
 
 const CHARGE_COOLDOWN: Duration = Duration::from_micros(50);  // 50 micros (5 switching cycles) to confirm switching regulator is off
-const KICK_COOLDOWN: Duration = Duration::from_millis(500);  // TODO: get estiamted mechanical return time from Matt and pad it
+const KICK_COOLDOWN: Duration = Duration::from_millis(300);  // TODO: get estiamted mechanical return time from Matt and pad it
 const CHIP_COOLDOWN: Duration = Duration::from_millis(500);  // TODO: get estiamted mechanical return time from Matt and pad it
 
 const MAX_SAFE_RAIL_VOLTAGE: f32 = 190.0;  // rail is rated for 200V, and should stop charging around 180V

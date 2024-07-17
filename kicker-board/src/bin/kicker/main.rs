@@ -41,7 +41,7 @@ use ateam_common_packets::bindings_kicker::{
 };
 
 const MAX_KICK_SPEED: f32 = 5.5;
-const SHUTDOWN_KICK_DUTY: f32 = 0.20;
+const SHUTDOWN_KICK_SPEED: f32 = 0.15;
 
 pub const CHARGE_TARGET_VOLTAGE: f32 = 182.0;
 pub const CHARGE_OVERVOLT_THRESH_VOLTAGE: f32 = 195.0;
@@ -243,7 +243,7 @@ async fn high_pri_kick_task(
         let kick_speed = if shutdown_completed {
             0.0
         } else if shutdown_requested {
-            SHUTDOWN_KICK_DUTY
+            SHUTDOWN_KICK_SPEED
         } else {
             fmaxf(0.0, fminf(MAX_KICK_SPEED, kicker_control_packet.kick_speed))
         };
@@ -266,7 +266,14 @@ async fn high_pri_kick_task(
         let kick_command = if shutdown_completed {
             KickType::None
         } else if shutdown_requested {
-            KickType::Kick
+            if ball_detected {
+                // If shutdown requested, person could be picking up the robot.
+                // Don't want to kick if ball detected since it might 
+                // be someone's finger.
+                KickType::None
+            } else {
+                KickType::Kick
+            }
         } else {
             match latched_command {
                 KickRequest::KR_DISABLE => KickType::None,

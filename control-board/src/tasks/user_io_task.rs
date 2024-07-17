@@ -74,7 +74,7 @@ async fn user_io_task_entry(
     // let mut shutdown_anim = CompositeAnimation::new(&mut sd_anim_seq, AnimRepeatMode::None);
 
     const SHUTDOWN_ANIM_ID: usize = 2;
-    let shutdown_dimmer = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 255, g: 255, b: 255}, RGB8 { r: 0, g: 0, b:0 }, Duration::from_millis(10000), AnimRepeatMode::None));
+    let shutdown_dimmer = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 255, g: 255, b: 255}, RGB8 { r: 0, g: 0, b:0 }, Duration::from_millis(20100), AnimRepeatMode::None));
     let mut shutdown_dimmer_arr = [shutdown_dimmer];
     let shutdown_ca = CompositeAnimation::new(SHUTDOWN_ANIM_ID, &mut shutdown_dimmer_arr, AnimRepeatMode::None);
 
