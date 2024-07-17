@@ -46,7 +46,7 @@ const SHUTDOWN_KICK_SPEED: f32 = 0.15;
 pub const CHARGE_TARGET_VOLTAGE: f32 = 182.0;
 pub const CHARGE_OVERVOLT_THRESH_VOLTAGE: f32 = 195.0;
 pub const CHARGED_THRESH_VOLTAGE: f32 = 170.0;
-pub const CHARGE_SAFE_VOLTAGE: f32 = 5.0;
+pub const CHARGE_SAFE_VOLTAGE: f32 = 10.0;
 
 const MAX_TX_PACKET_SIZE: usize = 16;
 const TX_BUF_DEPTH: usize = 3;

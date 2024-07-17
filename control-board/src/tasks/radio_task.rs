@@ -1,6 +1,6 @@
 
 use ateam_common_packets::{bindings_radio::BasicTelemetry, radio::TelemetryPacket};
-use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn, uart::queue::{UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_signals, queue_pair_rx_task, queue_pair_tx_task, uart::queue::{UartReadQueue, UartWriteQueue}};
 use credentials::WifiCredential;
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_futures::select::{select, Either};
@@ -14,11 +14,11 @@ use crate::{drivers::radio_robot::{RobotRadio, TeamColor}, pins::*, robot_state:
 
 #[macro_export]
 macro_rules! create_radio_task {
-    ($main_spawner:ident, $uart_queue_spawner:ident, $robot_state:ident,
+    ($main_spawner:ident, $rx_uart_queue_spawner:ident, $tx_uart_queue_spawner:ident, $robot_state:ident,
         $radio_command_publisher:ident, $radio_telemetry_subscriber:ident,
         $wifi_credentials:ident, $p:ident) => {
         ateam_control_board::tasks::radio_task::start_radio_task(
-            $main_spawner, $uart_queue_spawner,
+            $main_spawner, $rx_uart_queue_spawner, $tx_uart_queue_spawner, 
             $robot_state,
             $radio_command_publisher, $radio_telemetry_subscriber,
             &$wifi_credentials,
@@ -261,6 +261,8 @@ impl<
                         //self.connection_state = RadioConnectionState::ConnectSoftware;
                         //self.radio.close_peer().await.unwrap();
                         cortex_m::peripheral::SCB::sys_reset();
+
+                        // self.connection_state = RadioConnectionState::ConnectPhys;
                     }
                 },
             }
@@ -409,7 +411,8 @@ async fn radio_task_entry(mut radio_task: RadioTask<RadioUART, RadioRxDMA, Radio
 }
 
 pub async fn start_radio_task(radio_task_spawner: Spawner,
-        queue_spawner: SendSpawner,
+        rx_queue_spawner: SendSpawner,
+        tx_queue_spawner: SendSpawner,
         robot_state: &'static SharedRobotState,
         command_publisher: CommandsPublisher,
         telemetry_subscriber: TelemetrySubcriber,
@@ -430,7 +433,10 @@ pub async fn start_radio_task(radio_task_spawner: Spawner,
     // let radio_uart = Uart::new_with_rtscts(radio_uart, radio_uart_rx_pin, radio_uart_tx_pin, SystemIrqs, _radio_uart_rts_pin, _radio_uart_cts_pin, radio_uart_tx_dma, radio_uart_rx_dma, radio_uart_config).unwrap();
     let (radio_uart_tx, radio_uart_rx) = Uart::split(radio_uart);
 
-    queue_pair_register_and_spawn!(queue_spawner, RADIO, radio_uart_rx, radio_uart_tx);
+    // queue_pair_register_and_spawn!(queue_spawner, RADIO, radio_uart_rx, radio_uart_tx);
+    queue_pair_register_signals!(RADIO);
+    rx_queue_spawner.spawn(queue_pair_rx_task!(RADIO, radio_uart_rx)).unwrap();
+    tx_queue_spawner.spawn(queue_pair_tx_task!(RADIO, radio_uart_tx)).unwrap();
 
     let radio_task = RadioTask::new_from_pins(robot_state, command_publisher, telemetry_subscriber, &RADIO_RX_UART_QUEUE, &RADIO_TX_UART_QUEUE, radio_reset_pin, radio_ndet_pin, wifi_credentials);
 

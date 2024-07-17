@@ -231,8 +231,7 @@ impl <
 
             let mut cmd_vel = Vector3::new(0.0, 0.0, 0.0);
             let mut drib_vel = 0.0;
-            let mut ticks_since_packet = 0;
-
+            let mut ticks_since_control_packet = 0;
 
             loop {
                 self.motor_fl.process_packets();
@@ -251,7 +250,8 @@ impl <
                     defmt::info!("ball detected");
                 }
 
-                if let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
+                ticks_since_control_packet += 1;
+                while let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
                     match latest_packet {
                         ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
 
@@ -263,7 +263,7 @@ impl <
 
                             cmd_vel = new_cmd_vel;
                             drib_vel = latest_control.dribbler_speed;
-                            ticks_since_packet = 0;
+                            ticks_since_control_packet = 0;
                         },
                         ateam_common_packets::radio::DataPacket::ParameterCommand(latest_param_cmd) => {
                             let param_cmd_resp = robot_controller.apply_command(&latest_param_cmd);
@@ -279,20 +279,20 @@ impl <
                             }
                         },
                     }
-                } else {
-                    ticks_since_packet += 1;
-                    if ticks_since_packet >= TICKS_WITHOUT_PACKET_STOP {
-                        cmd_vel = Vector3::new(0., 0., 0.);
-                        // ticks_since_packet = 0;
-                    }
+                }
+                
+                if ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
+                    cmd_vel = Vector3::new(0., 0., 0.);
+                    drib_vel = 0.0;
+                    defmt::warn!("ticks since packet lockout");
                 }
 
                 // now we have setpoint r(t) in self.cmd_vel
-                if let Some(battery_v) = self.battery_subscriber.try_next_message_pure() {
+                while let Some(battery_v) = self.battery_subscriber.try_next_message_pure() {
                     self.last_battery_v = battery_v;
                 }
 
-                if let Some(gyro_rads) = self.gyro_subscriber.try_next_message_pure() {
+                while let Some(gyro_rads) = self.gyro_subscriber.try_next_message_pure() {
                     self.last_gyro_rads = gyro_rads[2];
                 }
                 
@@ -304,6 +304,7 @@ impl <
                 } else {
                     // Battery is too low, set velocity to zero
                     drib_vel = 0.0;
+                    defmt::warn!("CT - low batter command lockout");
                     Vector4::new(0.0, 0.0, 0.0, 0.0)
                 };
 

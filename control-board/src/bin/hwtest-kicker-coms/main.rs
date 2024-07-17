@@ -101,7 +101,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     let kicker_firmware_image = KICKER_FW_IMG;
     let mut kicker = Kicker::new(kicker_stm32_interface, kicker_firmware_image);
-    let res = kicker.load_default_firmware_image().await;
+    let res = kicker.init_default_firmware_image(true).await;
 
     if res.is_err() {
         defmt::warn!("kicker flashing failed.");

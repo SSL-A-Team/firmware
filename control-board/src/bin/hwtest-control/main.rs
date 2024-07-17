@@ -21,8 +21,16 @@ use credentials::public_credentials::wifi::wifi_credentials;
 
 use embassy_time::Timer;
 // provide embedded panic probe
-use panic_probe as _;
+// use panic_probe as _;
 use static_cell::ConstStaticCell;
+
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    defmt::error!("{}", defmt::Display2Format(info));
+    // Delay to give it a change to print
+    cortex_m::asm::delay(10_000_000);
+    cortex_m::peripheral::SCB::sys_reset();
+}
 
 static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
 
@@ -109,7 +117,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         robot_state,
         p);
 
-    create_radio_task!(main_spawner, radio_uart_queue_spawner,
+    create_radio_task!(main_spawner, radio_uart_queue_spawner, uart_queue_spawner,
+    // create_radio_task!(main_spawner, uart_queue_spawner,
         robot_state,
         radio_dummy_command_publisher, radio_telemetry_subscriber,
         wifi_credentials,
@@ -139,15 +148,17 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     ).await;
 
     loop {
-        Timer::after_millis(100).await;
+        Timer::after_millis(10).await;
 
-        radio_command_publisher.publish(DataPacket::BasicControl(BasicControl {
+        defmt::info!("main loop");
+
+        radio_command_publisher.publish_immediate(DataPacket::BasicControl(BasicControl {
             vel_x_linear: 2.0,
             vel_y_linear: 0.0,
             vel_z_angular: 0.0,
             kick_vel: 0.0,
             dribbler_speed: -0.1, 
             kick_request: KickRequest::KR_ARM, 
-        })).await;
+        }));
     }
 }

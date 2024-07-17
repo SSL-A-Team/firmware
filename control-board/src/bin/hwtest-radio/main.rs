@@ -76,10 +76,11 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  start tasks  //
     ///////////////////
 
-    create_radio_task!(main_spawner, uart_queue_spawner,
-            robot_state,
-            radio_command_publisher, radio_telemetry_subscriber,
-            wifi_credentials, p);
+    create_radio_task!(main_spawner, uart_queue_spawner, uart_queue_spawner,
+        robot_state,
+        radio_command_publisher, radio_telemetry_subscriber,
+        wifi_credentials,
+        p);
 
     create_io_task!(main_spawner, robot_state, battery_volt_publisher, p);
 

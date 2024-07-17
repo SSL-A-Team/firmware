@@ -40,9 +40,12 @@ int main() {
     // turn off LEDs
     GPIOB->BSRR |= GPIO_BSRR_BR_6;
     GPIOB->BSRR |= GPIO_BSRR_BR_7;
+    GPIOB->BSRR |= GPIO_BSRR_BR_8;
 
-    // turn on Red LED
+    // turn on Red/Yl LED
     GPIOB->BSRR |= GPIO_BSRR_BS_6;
+    GPIOB->BSRR |= GPIO_BSRR_BS_8;
+
 
     // Setups clocks
     setup();
@@ -54,11 +57,6 @@ int main() {
     IWDG->RLR = 5; // count to 10 ticks, 16ms then trigger a system reset
     while (IWDG->SR) {} // wait for value to take
     IWDG->KR = 0x0000AAAA; // feed the watchdog
-
-    GPIOB->BSRR |= GPIO_BSRR_BR_6;
-    GPIOB->BSRR |= GPIO_BSRR_BR_7;
-
-    GPIOB->BSRR |= GPIO_BSRR_BS_8;
 
     uint32_t ticks_since_last_command_packet = 0;
     bool telemetry_enabled = false;
@@ -163,18 +161,14 @@ int main() {
 
     torque_pid_constants.kP = 1.0f;
 
-    // turn off Red turn on Green
+    // turn off Red/Yl
     GPIOB->BSRR |= GPIO_BSRR_BR_6;
-    GPIOB->BSRR |= GPIO_BSRR_BS_7;
+    GPIOB->BSRR |= GPIO_BSRR_BR_8;
 
     // toggle J1-1
     while (true) {
         IWDG->KR = 0x0000AAAA; // feed the watchdog
 
-        //GPIOB->BSRR |= GPIO_BSRR_BR_8;
-        //GPIOB->BSRR |= GPIO_BSRR_BR_9;
-
-        GPIOB->BSRR |= GPIO_BSRR_BS_9;
 #ifdef UART_ENABLED
         // increment the soft watchdog
         ticks_since_last_command_packet++;
@@ -257,14 +251,19 @@ int main() {
         // if upstream isn't listening or its been too long since we got a command packet, turn off the motor
         if (!telemetry_enabled) {
             r_motor_board = 0.0f;
+            GPIOB->BSRR |= GPIO_BSRR_BR_7;
+        } else {
+            GPIOB->BSRR |= GPIO_BSRR_BS_7;
         }
         
         if (ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
             r_motor_board = 0.0f;
             // Error pin enable.
-            GPIOB->BSRR |= GPIO_BSRR_BS_7;
+            GPIOB->BSRR |= GPIO_BSRR_BS_8;
             // HACK Will force the watchdog to trigger. 
-            while(true);
+            // while(true);
+        } else {
+            GPIOB->BSRR |= GPIO_BSRR_BR_8;
         }
 
         // if any critical error is latched, coast the motor

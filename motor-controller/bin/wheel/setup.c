@@ -161,6 +161,8 @@ inline void setup_io() {
 
     GPIOB->MODER |= GPIO_MODER_MODER6_0;  // set output, Red LED, Err
     GPIOB->MODER |= GPIO_MODER_MODER7_0;  // set output, Green LED, Fw Ready
+    GPIOB->MODER |= GPIO_MODER_MODER8_0;  // set output, Yellow LED, Warn
+
 }
 
 /**

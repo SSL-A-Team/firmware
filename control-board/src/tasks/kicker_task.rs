@@ -118,14 +118,19 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
                     }
                 },
                 KickerTaskState::PowerOn => {
-                    defmt::debug!("power cycling kicker");
-                    self.remote_power_btn_hold().await;
+                    // lets power settle on kicker
+                    Timer::after_millis(100).await;
+                    defmt::debug!("turn on kicker");
                     self.remote_power_btn_press().await;
+                    Timer::after_millis(50).await;
+                    self.kicker_driver.enter_reset().await;
+                    self.kicker_driver.leave_reset().await;
                     // power should be coming on, attempt connection
                     self.kicker_task_state = KickerTaskState::ConnectUart;
                 },
                 KickerTaskState::ConnectUart => {
-                    if self.kicker_driver.load_default_firmware_image().await.is_err() {
+                    let flash_firmware = cur_robot_state.hw_debug_mode;
+                    if self.kicker_driver.init_default_firmware_image(flash_firmware).await.is_err() {
                         // attempt to power on the board again
                         // if the kicker is missing or bugged we'll stay in a power on -> attempt
                         // uart loop forever
@@ -179,9 +184,9 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
 
     async fn remote_power_btn_press(&mut self) {
         self.remote_power_btn.set_high();
-        Timer::after_millis(200).await;
+        Timer::after_millis(250).await;
         self.remote_power_btn.set_low();
-        Timer::after_millis(200).await;
+        Timer::after_millis(50).await;
     }
 
     async fn remote_power_btn_hold(&mut self) {
