@@ -255,25 +255,24 @@ int main() {
 #endif
 
         // if upstream isn't listening or its been too long since we got a command packet, turn off the motor
-        if (!telemetry_enabled || ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
+        if (!telemetry_enabled) {
             r_motor_board = 0.0f;
-            // Warning pin enable.
-            GPIOB->BSRR |= GPIO_BSRR_BS_8;
-        } else {
-            // Warning pin clear.
-            GPIOB->BSRR |= GPIO_BSRR_BR_8;
+        }
+        
+        if (ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
+            r_motor_board = 0.0f;
+            // Error pin enable.
+            GPIOB->BSRR |= GPIO_BSRR_BS_7;
+            // HACK Will force the watchdog to trigger. 
+            while(true);
         }
 
         // if any critical error is latched, coast the motor
         if (response_packet.data.motion.master_error) {
             r_motor_board = 0.0f;
             // Error pin enable.
-            GPIOB->BSRR |= GPIO_BSRR_BS_6;
+            GPIOB->BSRR |= GPIO_BSRR_BS_7;
         } 
-        // else {
-        //     // Error pin clear.
-        //     GPIOB->BSRR |= GPIO_BSRR_BR_6;
-        // }
 
         // determine which loops need to be run
         bool run_torque_loop = time_sync_ready_rst(&torque_loop_timer);

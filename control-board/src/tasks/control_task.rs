@@ -216,10 +216,10 @@ impl <
             self.motor_fr.set_telemetry_enabled(true);
             self.motor_drib.set_telemetry_enabled(true);
 
-            self.motor_fl.set_motion_type(MotorCommand_MotionType::VELOCITY);
-            self.motor_bl.set_motion_type(MotorCommand_MotionType::VELOCITY);
-            self.motor_br.set_motion_type(MotorCommand_MotionType::VELOCITY);
-            self.motor_fr.set_motion_type(MotorCommand_MotionType::VELOCITY);
+            self.motor_fl.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+            self.motor_bl.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+            self.motor_br.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+            self.motor_fr.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
 
 
             Timer::after_millis(10).await;

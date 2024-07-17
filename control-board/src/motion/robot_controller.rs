@@ -245,17 +245,17 @@ impl<'a> BodyVelocityController<'a> {
         // and globally invalid. Investiage this later. If problems are suspected, disable this section
         // and lower the body acc limit (maybe something anatgonist based on 45/30 deg wheel angles?)
         // TODO cross check in the future against wheel angle plots and analysis
-        let wheel_acc_setpoint = (wheel_vel_output - self.cmd_wheel_velocities) / self.loop_dt_s;
-        let wheel_acc_setpoint_clamp = clamp_vector_keep_dir(&wheel_acc_setpoint, &WHEEL_ACC_LIM);
-        let wheel_vel_output_clamp = self.cmd_wheel_velocities + (wheel_acc_setpoint_clamp * self.loop_dt_s);
-        self.debug_telemetry.wheel_velocity_clamped_u.copy_from_slice(wheel_vel_output_clamp.as_slice());
+        //let wheel_acc_setpoint = (wheel_vel_output - self.cmd_wheel_velocities) / self.loop_dt_s;
+        //let wheel_acc_setpoint_clamp = clamp_vector_keep_dir(&wheel_acc_setpoint, &WHEEL_ACC_LIM);
+        //let wheel_vel_output_clamp = self.cmd_wheel_velocities + (wheel_acc_setpoint_clamp * self.loop_dt_s);
+        //self.debug_telemetry.wheel_velocity_clamped_u.copy_from_slice(wheel_vel_output_clamp.as_slice());
 
         // Save command state.
         if controls_enabled {
             self.cmd_wheel_velocities = wheel_vel_output;
         } else {
             self.cmd_wheel_velocities = self.robot_model.robot_vel_to_wheel_vel(&body_vel_setpoint);
-            self.debug_telemetry.wheel_velocity_u.copy_from_slice(wheel_vel_output_clamp.as_slice());
+            self.debug_telemetry.wheel_velocity_u.copy_from_slice(wheel_vel_output.as_slice());
         }
     }
 
