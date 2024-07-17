@@ -13,7 +13,7 @@ use ateam_control_board::{
     queue::Buffer,
     stm32_interface::{get_bootloader_uart_config, Stm32Interface},
     uart_queue::{UartReadQueue, UartWriteQueue},
-    BATTERY_BUFFER_SIZE, BATTERY_MAX_VOLTAGE, BATTERY_MIN_VOLTAGE, include_kicker_bin, parameter_interface::ParameterInterface,
+    BATTERY_BUFFER_SIZE, BATTERY_MAX_VOLTAGE, BATTERY_MIN_VOLTAGE, include_kicker_bin, parameter_interface::ParameterInterface, tasks,
 };
 use control::Control;
 use defmt::info;
@@ -79,10 +79,6 @@ static RADIO_TEST: RadioTest<
     RadioTxDMA,
     RadioReset,
 > = RadioTest::new(unsafe { &mut BUFFERS_TX }, unsafe { &mut BUFFERS_RX });
-
-// pub sub channel for the gyro vals
-// CAP queue size, n_subs, n_pubs
-static GYRO_CHANNEL: PubSubChannel<ThreadModeRawMutex, f32, 2, 2, 2> = PubSubChannel::new();
 
 // pub sub channel for the battery raw adc vals
 // CAP queue size, n_subs, n_pubs
@@ -202,41 +198,12 @@ async fn main(_spawner: embassy_executor::Spawner) {
         [BATTERY_MAX_VOLTAGE; BATTERY_BUFFER_SIZE];
     let battery_pub = BATTERY_CHANNEL.publisher().unwrap();
 
-    let mut imu_spi = spi::Spi::new(
-        p.SPI6,
-        p.PA5,
-        p.PA7,
-        p.PA6,
-        p.BDMA_CH0,
-        p.BDMA_CH1,
-        hz(1_000_000),
-        spi::Config::default(),
-    );
+    tasks::imu::start_imu_task(_spawner, p.SPI6, p.PA5, p.PA7, p.PA6, p.BDMA_CH0, p.BDMA_CH1, p.PC4, p.PC5, p.PB1, p.PB2, p.EXTI1, p.EXTI2).expect("unable to start IMU task");
+    let accel_sub = tasks::imu::get_accel_sub().expect("accel data channel had no subscribers left");
+    let gyro_sub = tasks::imu::get_gyro_sub().expect("gyro data channel had no subscribers left");
 
-    // acceleromter
-    let mut imu_cs1 = Output::new(p.PC4, Level::High, Speed::VeryHigh);
-    // gyro
-    let mut imu_cs2 = Output::new(p.PC5, Level::High, Speed::VeryHigh);
-
+    // TODO remove?
     Timer::after(Duration::from_millis(1)).await;
-
-    let gyro_pub = GYRO_CHANNEL.publisher().unwrap();
-    unsafe {
-        SPI6_BUF[0] = 0x80;
-        // info!("xfer {=[u8]:x}", SPI6_BUF[0..1]);
-        imu_cs1.set_low();
-        let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
-        imu_cs1.set_high();
-        let accel_id = SPI6_BUF[1];
-        info!("accelerometer id: 0x{:x}", accel_id);
-
-        SPI6_BUF[0] = 0x80;
-        imu_cs2.set_low();
-        let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
-        imu_cs2.set_high();
-        let gyro_id = SPI6_BUF[1];
-        info!("gyro id: 0x{:x}", gyro_id);
-    }
 
     let front_right_int = interrupt::take!(USART1);
     let front_left_int = interrupt::take!(UART4);
@@ -290,7 +257,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
         get_bootloader_uart_config(),
     );
 
-    let gyro_sub = GYRO_CHANNEL.subscriber().unwrap();
     let battery_sub = BATTERY_CHANNEL.subscriber().unwrap();
 
     if kicker_det.is_low() {
@@ -336,6 +302,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.PD12,
         ball_detected_thresh,
         gyro_sub,
+        accel_sub,
         battery_sub,
     );
 
@@ -405,19 +372,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     loop {
         unsafe { wdg.pet() };
-
-        unsafe {
-            SPI6_BUF[0] = 0x86;
-            imu_cs2.set_low();
-            let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..3]).await;
-            imu_cs2.set_high();
-            let rate_z = (SPI6_BUF[2] as u16 * 256 + SPI6_BUF[1] as u16) as i16;
-            // info!("z rate: {}", rate_z);
-            let gyro_conversion = 2000.0 / 32767.0;
-            gyro_pub.publish_immediate((rate_z as f32) * gyro_conversion);
-        }
-
-        // could just feed gyro in here but the comment in control said to use a channel
 
         ///////////////////////
         //  Battery reading  //

@@ -15,7 +15,7 @@ use ateam_control_board::{
         robot_model::{RobotConstants, RobotModel},
         robot_controller::BodyVelocityController
     },
-    BATTERY_MIN_VOLTAGE, parameter_interface::ParameterInterface
+    BATTERY_MIN_VOLTAGE, parameter_interface::ParameterInterface, tasks::imu::{GyroSub, AccelSub}
 };
 use nalgebra::{Vector3, Vector4};
 
@@ -176,7 +176,10 @@ pub struct Control<'a> {
         MotorDResetPin,
     >,
     ticks_since_packet: u16,
-    gyro_sub: Subscriber<'static, ThreadModeRawMutex, f32, 2, 2, 2>,
+    gyro_sub: GyroSub<'a>,
+    accel_sub: AccelSub<'a>,
+    last_gyro_vals: Vector3<f32>,
+    last_accel_vals: Vector3<f32>,
     battery_sub: Subscriber<'static, ThreadModeRawMutex, f32, 2, 2, 2>
 }
 
@@ -201,7 +204,8 @@ impl<'a> Control<'a> {
         back_right_reset_pin: MotorBRResetPin,
         drib_reset_pin: MotorDResetPin,
         ball_detected_thresh: f32,
-        gyro_sub: Subscriber<'static, ThreadModeRawMutex, f32, 2, 2, 2>,
+        gyro_sub: GyroSub<'a>,
+        accel_sub: AccelSub<'a>,
         battery_sub: Subscriber<'static, ThreadModeRawMutex, f32, 2, 2, 2>
     ) -> Control<'a> {
         let wheel_firmware_image = WHEEL_FW_IMG;
@@ -382,6 +386,9 @@ impl<'a> Control<'a> {
             drib_motor,
             ticks_since_packet: 0,
             gyro_sub,
+            accel_sub,
+            last_gyro_vals: Vector3::new(0., 0., 0.),
+            last_accel_vals: Vector3::new(0., 0., 0.),
             battery_sub
         }
     }
@@ -478,10 +485,20 @@ impl<'a> Control<'a> {
             }
         }
 
+        // update with any new gyro vals
+        if let Some(gyro_vals) = self.gyro_sub.try_next_message_pure() {
+            self.last_gyro_vals = gyro_vals;
+        }
+
+        // update with any new accel vals
+        if let Some(accel_vals) = self.accel_sub.try_next_message_pure() {
+            self.last_accel_vals = accel_vals;
+        }
+
         // now we have setpoint r(t) in self.cmd_vel
         let battery_v = self.battery_sub.next_message_pure().await as f32;
         let controls_enabled = true;
-        let gyro_rads = (self.gyro_sub.next_message_pure().await as f32) * 2.0 * core::f32::consts::PI / 360.0;
+
         let wheel_vels = if battery_v > BATTERY_MIN_VOLTAGE {
             if controls_enabled 
             {
@@ -504,7 +521,7 @@ impl<'a> Control<'a> {
             
                 // TODO read from channel or something
 
-                self.robot_controller.control_update(&self.cmd_vel, &wheel_vels, &wheel_torques, gyro_rads);
+                self.robot_controller.control_update(&self.cmd_vel, &wheel_vels, &wheel_torques, self.last_gyro_vals[2]);
             
                 self.robot_controller.get_wheel_velocities()
             } 
