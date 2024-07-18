@@ -7,7 +7,11 @@ pub static PID_GAIN: Matrix3x5<f32> =
                 4.0, 0.0, 0.0, -2.0, 2.0];
 
 // x, y, theta (m/s, m/s, rad/s)
-pub static BODY_VEL_LIM: Vector3<f32> = vector![5.0, 5.0, 30.0];  // 8, 8, 34.9 maxes out motors/IMU measurement rate
+// NOTE: Because of (bad) motor model, need to give way
+// higher constraints to allow controller to overcome
+// static friction / loading. 
+// 8, 8, 34.9 maxes out motors/IMU measurement rate
+pub static BODY_VEL_LIM: Vector3<f32> = vector![8.0, 8.0, 40.0];  
 pub static BODY_ACC_LIM: Vector3<f32> = vector![7.0, 5.0, 36.0];  // TODO calibrate/ignore
 pub static BODY_DEACC_LIM: Vector3<f32> = vector![7.0, 5.0, 36.0];  // TODO calibrate/ignore
 
