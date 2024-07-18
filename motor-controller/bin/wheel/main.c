@@ -1,12 +1,12 @@
 /**
  * @file main.c
  * @author your name (you@domain.com)
- * @brief 
+ * @brief
  * @version 0.1
  * @date 2022-04-10
- * 
+ *
  * @copyright Copyright (c) 2022
- * 
+ *
  */
 
 #include <stm32f031x6.h>
@@ -113,7 +113,7 @@ int main() {
 
     // set the default command mode to open loop (no PID)
     MotorCommand_MotionType motion_control_type = OPEN_LOOP;
-    
+
     // define the control points the loops use to interact
     float r_motor_board = 0.0f;
     float control_setpoint_vel_duty = 0.0f;
@@ -171,7 +171,7 @@ int main() {
 
 #ifdef UART_ENABLED
         // increment the soft watchdog
-        ticks_since_last_command_packet++;
+        //ticks_since_last_command_packet++;
 
         // process all available packets
         while (uart_can_read()) {
@@ -255,12 +255,12 @@ int main() {
         } else {
             GPIOB->BSRR |= GPIO_BSRR_BS_7;
         }
-        
+
         if (ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
             r_motor_board = 0.0f;
             // Error pin enable.
             GPIOB->BSRR |= GPIO_BSRR_BS_8;
-            // HACK Will force the watchdog to trigger. 
+            // HACK Will force the watchdog to trigger.
             while(true);
         } else {
             GPIOB->BSRR |= GPIO_BSRR_BR_8;
@@ -271,7 +271,7 @@ int main() {
             r_motor_board = 0.0f;
             // Error pin enable.
             GPIOB->BSRR |= GPIO_BSRR_BS_7;
-        } 
+        }
 
         // determine which loops need to be run
         bool run_torque_loop = time_sync_ready_rst(&torque_loop_timer);
@@ -290,7 +290,7 @@ int main() {
             // filter torque
             measured_torque_Nm = iir_filter_update(&torque_filter, measured_torque_Nm);
 
-            // TODO: add filter? 
+            // TODO: add filter?
 
             // correct torque sign from recovered velocity
             // TODO: this should probably be acceleration based not velocity
@@ -337,10 +337,10 @@ int main() {
 
             // filter the recovered velocity
             enc_rad_s_filt = iir_filter_update(&encoder_filter, enc_vel_rads);
-        
+
             // compute the velcoity PID
             control_setpoint_vel_rads = pid_calculate(&vel_pid, r_motor_board, enc_rad_s_filt, VELOCITY_LOOP_RATE_S);
-            
+
             // Clamp setpoint acceleration
             float setpoint_accel_rads_2 = (control_setpoint_vel_rads - control_setpoint_vel_rads_prev)/VELOCITY_LOOP_RATE_S;
             if (setpoint_accel_rads_2 > MOTOR_MAXIMUM_ACCEL) {
@@ -435,7 +435,7 @@ int main() {
             // GPIOB->BSRR |= GPIO_BSRR_BS_8;
             uart_wait_for_transmission();
             // takes ~270uS, mostly hardware DMA
-            if (run_telemtry) {            
+            if (run_telemtry) {
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
             }
             // GPIOB->BSRR |= GPIO_BSRR_BR_8;
