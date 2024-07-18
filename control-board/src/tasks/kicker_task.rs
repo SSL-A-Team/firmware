@@ -140,7 +140,7 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
                     } else {
                         self.kicker_task_state = KickerTaskState::Connected;
 
-                        defmt::info!("kicker flashed!");
+                        defmt::info!("kicker booted!");
                     }
                 },
                 KickerTaskState::Connected => {
