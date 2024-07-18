@@ -171,7 +171,7 @@ int main() {
 
 #ifdef UART_ENABLED
         // increment the soft watchdog
-        //ticks_since_last_command_packet++;
+        ticks_since_last_command_packet++;
 
         // process all available packets
         while (uart_can_read()) {

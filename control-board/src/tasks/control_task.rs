@@ -325,7 +325,7 @@ impl <
 
         async fn flash_motor_firmware(&mut self, debug: bool) {
             defmt::info!("flashing firmware");
-            if true {
+            if debug {
                 let mut had_motor_error = false;
                 if self.motor_fl.load_default_firmware_image().await.is_err() {
                     defmt::error!("failed to flash FL");

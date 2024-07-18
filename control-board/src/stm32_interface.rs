@@ -46,7 +46,7 @@ pub struct Stm32Interface<
         DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
         const LEN_TX: usize,
-        const DEPTH_RX: usize, 
+        const DEPTH_RX: usize,
         const DEPTH_TX: usize,
 > {
     reader: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
@@ -66,17 +66,17 @@ impl<
         DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
         const LEN_TX: usize,
-        const DEPTH_RX: usize, 
+        const DEPTH_RX: usize,
         const DEPTH_TX: usize,
     > Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
 {
-    pub fn new(        
+    pub fn new(
         read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
         write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
         boot0_pin: Output<'a>,
         reset_pin: OutputOpenDrain<'a>,
         reset_polarity_high: bool,
-    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {        
+    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         Stm32Interface {
             reader: read_queue,
             writer: write_queue,
@@ -87,16 +87,16 @@ impl<
         }
     }
 
-    pub fn new_from_pins(        
+    pub fn new_from_pins(
         read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
         write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
         reset_pin_pull: Pull,
         reset_polarity_high: bool,
-    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {        
-        let boot0_output = Output::new(boot0_pin, Level::Low, Speed::Medium);        
-        
+    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
+        let boot0_output = Output::new(boot0_pin, Level::Low, Speed::Medium);
+
         let initial_reset_level = if reset_polarity_high {
             Level::Low
         } else {
@@ -347,7 +347,7 @@ impl<
             return Err(());
         }
 
-        // stm bl can only support 256 byte data payloads, right now we don't automatically handle 
+        // stm bl can only support 256 byte data payloads, right now we don't automatically handle
         // larger chunks than the tx buffer
         if data.len() > 256 || data.len() + 1 > LEN_TX {
             return Err(());
@@ -520,11 +520,11 @@ impl<
                 return Err(err);
             }
         }
-        
+
         if let Err(err) = self.verify_bootloader().await {
             return Err(err);
         }
-    
+
         match self.get_device_id().await {
             Err(err) => return Err(err),
             Ok(device_id) => match device_id {
@@ -540,7 +540,7 @@ impl<
                 }
             }
         };
-    
+
         // erase part
         if let Err(err) = self.erase_flash_memory().await {
             return Err(err);
@@ -552,7 +552,7 @@ impl<
         }
 
         self.reset_into_program(false).await;
-        
+
         Ok(())
     }
 
