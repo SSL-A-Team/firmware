@@ -119,7 +119,7 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
                 },
                 KickerTaskState::PowerOn => {
                     // lets power settle on kicker
-                    Timer::after_millis(100).await;
+                    Timer::after_millis(2000).await;
                     defmt::debug!("turn on kicker");
                     self.remote_power_btn_press().await;
                     Timer::after_millis(50).await;
@@ -186,9 +186,9 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
 
     async fn remote_power_btn_press(&mut self) {
         self.remote_power_btn.set_high();
-        Timer::after_millis(250).await;
+        Timer::after_millis(500).await;
         self.remote_power_btn.set_low();
-        Timer::after_millis(50).await;
+        Timer::after_millis(250).await;
     }
 
     async fn remote_power_btn_hold(&mut self) {
