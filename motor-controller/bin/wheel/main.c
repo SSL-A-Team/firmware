@@ -99,10 +99,10 @@ int main() {
     // setup the loop rate regulators
     SyncTimer_t vel_loop_timer;
     SyncTimer_t torque_loop_timer;
-    SyncTimer_t telemetry_timer;
+    //SyncTimer_t telemetry_timer;
     time_sync_init(&vel_loop_timer, VELOCITY_LOOP_RATE_MS);
     time_sync_init(&torque_loop_timer, TORQUE_LOOP_RATE_MS);
-    time_sync_init(&telemetry_timer, TELEMETRY_LOOP_RATE_MS);
+    //time_sync_init(&telemetry_timer, TELEMETRY_LOOP_RATE_MS);
 
     // setup the velocity filter
     IIRFilter_t encoder_filter;
@@ -276,7 +276,7 @@ int main() {
         // determine which loops need to be run
         bool run_torque_loop = time_sync_ready_rst(&torque_loop_timer);
         bool run_vel_loop = time_sync_ready_rst(&vel_loop_timer);
-        bool run_telemtry = time_sync_ready_rst(&telemetry_timer);
+        //bool run_telemtry = time_sync_ready_rst(&telemetry_timer);
 
         // run the torque loop if applicable
         if (run_torque_loop) {
@@ -435,9 +435,9 @@ int main() {
             // GPIOB->BSRR |= GPIO_BSRR_BS_8;
             uart_wait_for_transmission();
             // takes ~270uS, mostly hardware DMA
-            if (run_telemtry) {
+            //if (run_telemtry) {            
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
-            }
+            //}
             // GPIOB->BSRR |= GPIO_BSRR_BR_8;
 #endif
 

@@ -6,17 +6,23 @@ use smart_leds::RGB8;
 
 use crate::anim::{AnimInterface, CompositeAnimation};
 
+const START_FRAME_SIZE: usize = 4;
+const COLOR_FRAME_SIZE: usize = 4;
+const END_FRAME_SIZE: usize = 4;
+const HEADER_FRAME_SIZE: usize = START_FRAME_SIZE + END_FRAME_SIZE;
+
+
 pub struct Apa102<'a, 'buf, const NUM_LEDS: usize>
-where [(); (NUM_LEDS * 4) + 8]: {
+where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
     spi: spi::Spi<'a, Async>,
-    spi_buf: &'buf mut [u8; (NUM_LEDS * 4) + 8],
+    spi_buf: &'buf mut [u8; (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE],
 }
 
 impl<'a, 'buf, const NUM_LEDS: usize> Apa102<'a, 'buf, NUM_LEDS> 
-where [(); (NUM_LEDS * 4) + 8]: {
+where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
     pub fn new(
         spi: spi::Spi<'a, Async>, 
-        spi_buf: &'buf mut [u8; (NUM_LEDS * 4) + 8],
+        spi_buf: &'buf mut [u8; (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE],
     ) -> Self {
         // set start frame
         spi_buf[0] = 0x00;
@@ -25,10 +31,10 @@ where [(); (NUM_LEDS * 4) + 8]: {
         spi_buf[3] = 0x00;
 
         // set end frame
-        spi_buf[8 + (NUM_LEDS * 4) - 4] = 0xFF;
-        spi_buf[8 + (NUM_LEDS * 4) - 3] = 0xFF;
-        spi_buf[8 + (NUM_LEDS * 4) - 2] = 0xFF;
-        spi_buf[8 + (NUM_LEDS * 4) - 1] = 0xFF;
+        spi_buf[HEADER_FRAME_SIZE + (NUM_LEDS * COLOR_FRAME_SIZE) - 4] = 0xFF;
+        spi_buf[HEADER_FRAME_SIZE + (NUM_LEDS * COLOR_FRAME_SIZE) - 3] = 0xFF;
+        spi_buf[HEADER_FRAME_SIZE + (NUM_LEDS * COLOR_FRAME_SIZE) - 2] = 0xFF;
+        spi_buf[HEADER_FRAME_SIZE + (NUM_LEDS * COLOR_FRAME_SIZE) - 1] = 0xFF;
 
         Apa102 { 
             spi: spi,
@@ -41,7 +47,7 @@ where [(); (NUM_LEDS * 4) + 8]: {
         sck_pin: impl Peripheral<P = impl SckPin<SpiPeri>> + 'a,
         mosi_pin: impl Peripheral<P = impl MosiPin<SpiPeri>> + 'a,
         tx_dma: impl Peripheral<P = impl spi::TxDma<SpiPeri>> + 'a,
-        spi_buf: &'buf mut [u8; (NUM_LEDS * 4) + 8],
+        spi_buf: &'buf mut [u8; (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE],
     ) -> Self {
         let mut dotstar_spi_config = Config::default();
         dotstar_spi_config.frequency = mhz(1);
@@ -58,26 +64,30 @@ where [(); (NUM_LEDS * 4) + 8]: {
     }
 
     const fn l2d(led_index: usize) -> usize {
-        4 + (led_index * 4) + 0
+        START_FRAME_SIZE + (led_index * COLOR_FRAME_SIZE) + 0
     }
 
+    // Calculates the frame index for red based on LED index.
     const fn l2r(led_index: usize) -> usize {
-        4 + (led_index * 4) + 3
+        START_FRAME_SIZE + (led_index * COLOR_FRAME_SIZE) + 3
     }
 
+    // Calculates the frame index for green based on LED index.
     const fn l2g(led_index: usize) -> usize {
-        4 + (led_index * 4) + 2
+        START_FRAME_SIZE + (led_index * COLOR_FRAME_SIZE) + 2
     }
 
+    // Calculates the frame index for blue based on LED index.
     const fn l2b(led_index: usize) -> usize {
-        4 + (led_index * 4) + 1
+        START_FRAME_SIZE + (led_index * COLOR_FRAME_SIZE) + 1
     }
 
-    pub fn set_drv_str(&mut self, str: u8, led_index: usize) {
+    pub fn set_drv_str(&mut self, strength: u8, led_index: usize) {
         assert!(led_index < NUM_LEDS);
-
-        let str = ((str >> 3) & 0x1F) | 0xE0;
-        self.spi_buf[Self::l2d(led_index)] = str;
+        // The top 3 bits always high (0xE0)
+        // Bottom 5 bits are the intensity.
+        let strength_shift = ((strength >> 3) & 0x1F) | 0xE0;
+        self.spi_buf[Self::l2d(led_index)] = strength_shift;
     }
 
     pub fn set_drv_str_range(&mut self, str: u8, led_index_range: Range<usize>) {
@@ -114,7 +124,7 @@ where [(); (NUM_LEDS * 4) + 8]: {
 }
 
 pub struct Apa102Anim<'a, 'buf, 'ca, const NUM_LEDS: usize> 
-where [(); (NUM_LEDS * 4) + 8]: {
+where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
     apa102_driver: Apa102<'a, 'buf, NUM_LEDS>,
     active_animation: [usize; NUM_LEDS],
     animation_playbook_buf: [Option<&'ca mut [CompositeAnimation<'ca, u8, RGB8>]>; NUM_LEDS],
@@ -123,7 +133,7 @@ where [(); (NUM_LEDS * 4) + 8]: {
 }
 
 impl<'a, 'buf, 'ca, const NUM_LEDS: usize> Apa102Anim<'a, 'buf, 'ca, NUM_LEDS> 
-where [(); (NUM_LEDS * 4) + 8]: {
+where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
     pub fn new(apa102: Apa102<'a, 'buf, NUM_LEDS>, anim_playbook_buf: [Option<&'ca mut [CompositeAnimation<'ca, u8, RGB8>]>; NUM_LEDS]) -> Self {
         Apa102Anim {
             apa102_driver: apa102,
@@ -210,11 +220,11 @@ where [(); (NUM_LEDS * 4) + 8]: {
 
         if let Some(animation_playbook) = self.animation_playbook_buf[led_index].as_deref_mut() {
             for composite_animation in animation_playbook.iter_mut() {
-                defmt::info!("evaluating animation {}", composite_animation.get_id());
+                //defmt::info!("evaluating animation {}", composite_animation.get_id());
 
                 if composite_animation.get_id() == anim_id {
                     if enable {
-                        defmt::info!("enabling animation");
+                        //defmt::info!("enabling animation");
                         composite_animation.enable();
                         composite_animation.start_animation();
                     } else {

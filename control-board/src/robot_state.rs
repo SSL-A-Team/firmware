@@ -18,7 +18,9 @@ pub struct SharedRobotState {
     // 32bit Cortex M has no AtomicU64, so we'll sync on milliseconds
     // overflow occurs in ~49.7 days
     last_packet_receive_time_ticks_ms: AtomicU32,
-    radio_connection_ok: AtomicBool,
+    radio_network_ok: AtomicBool,
+    radio_bridge_ok: AtomicBool,
+
 
     battery_low: AtomicBool,
     battery_crit: AtomicBool,
@@ -45,7 +47,8 @@ impl SharedRobotState {
             wheels_inop: AtomicU8::new(0x0F), 
             dribbler_inop: AtomicBool::new(true),
             last_packet_receive_time_ticks_ms: AtomicU32::new(0),
-            radio_connection_ok: AtomicBool::new(false), 
+            radio_network_ok: AtomicBool::new(false), 
+            radio_bridge_ok: AtomicBool::new(false), 
             battery_low: AtomicBool::new(false),
             battery_crit: AtomicBool::new(false),
             robot_tipped: AtomicBool::new(false),
@@ -63,15 +66,16 @@ impl SharedRobotState {
             hw_wifi_network_index: self.hw_wifi_network_index(),
             hw_debug_mode: self.hw_in_debug_mode(),
 
-            radio_inop: true,
+            radio_inop: self.get_radio_inop(),
             imu_inop: self.get_imu_inop(),
             kicker_inop: true,
             wheels_inop: 0xFF,
             dribbler_inop: true,
         
             last_packet_receive_time_ticks_ms: 0,
-            radio_connection_ok: false,
-        
+            radio_network_ok: self.get_radio_network_ok(),
+            radio_bridge_ok: self.get_radio_bridge_ok(),
+
             battery_low: self.get_battery_low(),
             battery_crit: self.get_battery_crit(),
 
@@ -131,6 +135,14 @@ impl SharedRobotState {
         self.robot_tipped.store(tipped, Ordering::Relaxed);
     }
 
+    pub fn get_radio_inop(&self) -> bool {
+        self.radio_inop.load(Ordering::Relaxed)
+    }
+
+    pub fn set_radio_inop(&self, radio_inop: bool) {
+        self.radio_inop.store(radio_inop, Ordering::Relaxed);
+    }
+
     pub fn get_imu_inop(&self) -> bool {
         self.imu_inop.load(Ordering::Relaxed)
     }
@@ -163,12 +175,20 @@ impl SharedRobotState {
         self.battery_crit.store(battery_crit, Ordering::Relaxed);
     }
 
-    pub fn radio_connection_ok(&self) -> bool {
-        self.radio_connection_ok.load(Ordering::Relaxed)
+    pub fn get_radio_network_ok(&self) -> bool {
+        self.radio_network_ok.load(Ordering::Relaxed)
     }
 
-    pub fn set_radio_connection_ok(&self, conn_ok: bool) {
-        self.radio_connection_ok.store(conn_ok, Ordering::Relaxed);
+    pub fn set_radio_network_ok(&self, network_ok: bool) {
+        self.radio_network_ok.store(network_ok, Ordering::Relaxed);
+    }
+
+    pub fn get_radio_bridge_ok(&self) -> bool {
+        self.radio_bridge_ok.load(Ordering::Relaxed)
+    }
+
+    pub fn set_radio_bridge_ok(&self, bridge_ok: bool) {
+        self.radio_bridge_ok.store(bridge_ok, Ordering::Relaxed);
     }
 
     pub fn ball_detected(&self) -> bool {
@@ -204,7 +224,8 @@ pub struct RobotState {
     pub dribbler_inop: bool,
 
     pub last_packet_receive_time_ticks_ms: u32,
-    pub radio_connection_ok: bool,
+    pub radio_network_ok: bool,
+    pub radio_bridge_ok: bool,
 
     pub battery_low: bool,
     pub battery_crit: bool,

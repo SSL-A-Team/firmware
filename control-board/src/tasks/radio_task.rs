@@ -53,11 +53,10 @@ make_uart_queue_pair!(RADIO,
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
 enum RadioConnectionState {
     Unconnected,
-    ConnectPhys,
-    ConnectUart,
-    ConnectNetwork,
-    ConnectSoftware,
-    Connected,
+    ConnectedPhys,
+    ConnectedUart,
+    ConnectedNetwork,
+    Connected
 }
 
 pub struct RadioTask<
@@ -93,6 +92,7 @@ impl<
     pub type TaskRobotRadio = RobotRadio<'static, UartPeripherial, UartRxDma, UartTxDma, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH>;
 
     const RETRY_DELAY_MS: u64 = 1000;
+    const RESPONSE_FROM_PC_TIMEOUT_MS: u64 = 1000;
     const UART_CONNECT_TIMEOUT_MS: u64 = 5000;
 
     pub fn new(robot_state: &'static SharedRobotState,
@@ -158,23 +158,25 @@ impl<
         #[allow(unused_assignments)]
         // let mut next_connection_state = self.connection_state;
         loop {
-
+            // Keep a local flag of radio issues.
+            let mut radio_inop_flag_local = false;
+            let mut radio_network_fail_local = false;
             // check for hardware config changes that affect radio connection
 
             let cur_robot_state = self.shared_robot_state.get_state();
             if cur_robot_state != last_robot_state {
                 // we are connected to software and robot id or team was changed on hardware
                 if self.connection_state == RadioConnectionState::Connected &&
-                        (cur_robot_state.hw_robot_id != last_robot_state.hw_robot_id 
-                        || cur_robot_state.hw_robot_team_is_blue != last_robot_state.hw_robot_team_is_blue) {
-                    // enter software connect state (disconnecting)
-                    self.connection_state = RadioConnectionState::ConnectSoftware;
+                        (cur_robot_state.hw_robot_id != last_robot_state.hw_robot_id || 
+                        cur_robot_state.hw_robot_team_is_blue != last_robot_state.hw_robot_team_is_blue) {
+                    // Enter connected network state (disconnecting)
+                    self.connection_state = RadioConnectionState::ConnectedNetwork;
                     defmt::info!("shell state change triggering software reconnect");
                 }
 
-                // we ar at least connected to Wifi and the wifi network id changed
-                if self.connection_state >= RadioConnectionState::ConnectNetwork 
-                && cur_robot_state.hw_wifi_network_index != last_robot_state.hw_wifi_network_index {
+                // We are at least connected on UART and the wifi network id changed
+                if self.connection_state >= RadioConnectionState::ConnectedUart && 
+                    cur_robot_state.hw_wifi_network_index != last_robot_state.hw_wifi_network_index {
                     defmt::info!("dip state change triggering wifi network change");
 
                     if self.radio.disconnect_network().await.is_err() {
@@ -184,42 +186,42 @@ impl<
                         defmt::error!("failed to cleanly disconnect - consider radio reboot");
                     }
 
-                    self.connection_state = RadioConnectionState::ConnectNetwork;
+                    // Go back to reset the full network flow.
+                    self.connection_state = RadioConnectionState::ConnectedUart;
                 }
             }
-            last_robot_state = cur_robot_state;
 
-            // check for missing radio
-
+            // Check for missing radio. Highest priority clear of state.
             if self.radio_ndet_input.is_high() {
                 defmt::error!("radio appears unplugged.");
-                self.connection_state = RadioConnectionState::ConnectPhys;
+                radio_inop_flag_local = true;
+                self.connection_state = RadioConnectionState::Unconnected;
             }
 
             // execute on the connection state
 
             match self.connection_state {
                 RadioConnectionState::Unconnected => {
-                    self.connection_state = RadioConnectionState::ConnectPhys;
-                },
-                RadioConnectionState::ConnectPhys => {
-                    if self.radio_ndet_input.is_high() {
-                        Timer::after_millis(Self::RETRY_DELAY_MS).await;
-                        self.connection_state = RadioConnectionState::ConnectPhys;
+                    // Radio detect pin says unplugged from above.
+                    if radio_inop_flag_local {
+                        self.connection_state = RadioConnectionState::Unconnected;
                     } else {
-                        self.connection_state = RadioConnectionState::ConnectUart;
+                        // Pin is detected, so connected physically.
+                        self.connection_state = RadioConnectionState::ConnectedPhys;
                     }
                 },
-                RadioConnectionState::ConnectUart => {
+                RadioConnectionState::ConnectedPhys => {
                     if self.connect_uart().await.is_err() {
-                        Timer::after_millis(Self::RETRY_DELAY_MS).await;
-                        // failed to connect, go back to physical connection check
-                        self.connection_state = RadioConnectionState::ConnectPhys;
+                        radio_inop_flag_local = true;
+                        // If the pin is unconnected, will be overridden out of the state. 
+                        // So just check UART again.
+                        self.connection_state = RadioConnectionState::ConnectedPhys;
                     } else {
-                        self.connection_state = RadioConnectionState::ConnectNetwork;
+                        // UART is not in error, so good to go.
+                        self.connection_state = RadioConnectionState::ConnectedUart;
                     }
                 },
-                RadioConnectionState::ConnectNetwork => {
+                RadioConnectionState::ConnectedUart => {
                     let wifi_network_ind = cur_robot_state.hw_wifi_network_index as usize;
                     let wifi_credential = if wifi_network_ind >= self.wifi_credentials.len() {
                         self.wifi_credentials[self.wifi_credentials.len() - 1]
@@ -229,46 +231,57 @@ impl<
 
                     defmt::debug!("connecting to network ({}): ssid: {}, password: {}", wifi_network_ind, wifi_credential.get_ssid(), wifi_credential.get_password());
                     if self.connect_network(wifi_credential, cur_robot_state.hw_robot_id).await.is_err() {
-                        Timer::after_millis(Self::RETRY_DELAY_MS).await;
-                        // TODO make error handling smarter, e.g. if we get a timeout or low level errors
-                        // we should fall back to ConnectPhys or ConnectUart, not keep retrying forever
+                        // If network connection failed, go back up to verify UART.
+                        radio_network_fail_local = true;
+                        self.connection_state = RadioConnectionState::ConnectedPhys;
                     } else {
-                        self.connection_state = RadioConnectionState::ConnectSoftware;
+                        self.connection_state = RadioConnectionState::ConnectedNetwork;
                     }
                 },
-                RadioConnectionState::ConnectSoftware => {
+                RadioConnectionState::ConnectedNetwork => {
                     if let Ok(connected) = self.connect_software(cur_robot_state.hw_robot_id, cur_robot_state.hw_robot_team_is_blue).await {
                         if connected {
-                            self.connection_state = RadioConnectionState::Connected;
+                            // Refresh last software packet on first connect.
                             self.last_software_packet = Instant::now();
+                            self.connection_state = RadioConnectionState::Connected;
                         } else {
-                            // software didn't respond to our hello, it may not be started yet
-                            Timer::after_millis(1000).await;
+                            // Software didn't respond to our hello, it may not be started yet.
+                            radio_network_fail_local = true;
+                            self.connection_state = RadioConnectionState::ConnectedNetwork;
                         }
                     } else {
-                        // a hard error occurred
-                        Timer::after_millis(Self::RETRY_DELAY_MS).await;
-
-                        // TODO where should we retry?
+                        radio_network_fail_local = true;
+                        // If network connection failed, go back up to verify UART.
+                        self.connection_state = RadioConnectionState::ConnectedPhys;
                     }
                 },
                 RadioConnectionState::Connected => {
                     let _ = self.process_packets().await;
                     // if we're stably connected, process packets at 100Hz
 
-                    // if 1000ms have elapsed since we last got a packet, return to software connection state
-                    if Instant::now() - self.last_software_packet > Duration::from_millis(1000) {
-                        //self.connection_state = RadioConnectionState::ConnectSoftware;
-                        //self.radio.close_peer().await.unwrap();
+                    // If timeout have elapsed since we last got a packet, 
+                    // reboot the robot (unless we had a shutdown request).
+                    if !cur_robot_state.shutdown_requested && Instant::now() - self.last_software_packet > Duration::from_millis(Self::RESPONSE_FROM_PC_TIMEOUT_MS) {                        
                         cortex_m::peripheral::SCB::sys_reset();
-
-                        // self.connection_state = RadioConnectionState::ConnectPhys;
                     }
                 },
             }
 
-            // set global radio connected flag
-            self.shared_robot_state.set_radio_connection_ok(self.connection_state == RadioConnectionState::Connected);
+            // set global radio connected flag           
+            self.shared_robot_state.set_radio_network_ok(self.connection_state >= RadioConnectionState::ConnectedNetwork);
+            self.shared_robot_state.set_radio_bridge_ok(self.connection_state == RadioConnectionState::Connected);
+            self.shared_robot_state.set_radio_inop(radio_inop_flag_local);
+
+            if radio_inop_flag_local {
+                // If hardware problems is present, adds a delay.
+                Timer::after_millis(Self::RETRY_DELAY_MS).await;
+            }
+            else if radio_network_fail_local {
+                // If network problems is present, adds a delay.
+                Timer::after_millis(Self::RESPONSE_FROM_PC_TIMEOUT_MS).await;
+            }
+
+            last_robot_state = cur_robot_state;
 
             radio_loop_rate_ticker.next().await;
         }
@@ -281,15 +294,15 @@ impl<
             Either::First(res) => {
                 if res.is_err() {
                     defmt::error!("failed to establish radio UART connection.");
-                    return Err(())
+                    return Err(());
                 } else {
                     defmt::debug!("established radio uart coms");
-                    return Ok(())
+                    return Ok(());
                 }
             }
             Either::Second(_) => {
                 defmt::error!("initial radio uart connection timed out");
-                return Err(())
+                return Err(());
             }
         }
     }
@@ -304,11 +317,11 @@ impl<
         let res = self.radio.open_multicast().await;
         if res.is_err() {
             defmt::error!("failed to establish multicast socket to network.");
-            return Err(())
+            return Err(());
         }
         defmt::info!("multicast open");
 
-        return Ok(())
+        return Ok(());
     }
 
     async fn connect_software(&mut self, robot_id: u8, is_blue: bool) -> Result<bool, ()> {
@@ -321,10 +334,11 @@ impl<
         };
 
         if self.radio.send_hello(robot_id, team_color).await.is_err() {
-            return Err(())
+            defmt::error!("send hello failed.");
+            return Err(());
         }
         
-        let hello = self.radio.wait_hello(Duration::from_millis(1000)).await;
+        let hello = self.radio.wait_hello(Duration::from_millis(Self::RESPONSE_FROM_PC_TIMEOUT_MS)).await;
         match hello {
             Ok(hello) => {
                 defmt::info!(
@@ -337,10 +351,10 @@ impl<
                 self.radio.open_unicast(hello.ipv4, hello.port).await.unwrap();
                 defmt::info!("unicast open");
 
-                Ok(true)
+                return Ok(true);
             }
             Err(_) => {
-                Ok(false)
+                return Ok(false);
             }
         }
     }

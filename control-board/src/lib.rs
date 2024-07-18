@@ -75,7 +75,7 @@ macro_rules! include_kicker_bin {
 
 pub const BATTERY_MIN_SAFE_VOLTAGE: f32 = 21.0;
 pub const BATTERY_MIN_CRIT_VOLTAGE: f32 = 19.5;
-pub const BATTERY_MAX_VOLTAGE: f32 = 25.2;
+pub const BATTERY_MAX_VOLTAGE: f32 = 26.0;
 pub const BATTERY_BUFFER_SIZE: usize = 20;
 pub const ADC_TO_BATTERY_DIVIDER: f32 = (130_000.0 + 11_000.0) / 11_000.0; 
 

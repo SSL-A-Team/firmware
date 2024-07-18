@@ -73,22 +73,36 @@ async fn user_io_task_entry(
     // let mut sd_anim_seq = [shutdown_anim];
     // let mut shutdown_anim = CompositeAnimation::new(&mut sd_anim_seq, AnimRepeatMode::None);
 
-    const SHUTDOWN_ANIM_ID: usize = 2;
+    const SHUTDOWN_ANIM_ID: usize = 0;
     let shutdown_dimmer = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 255, g: 255, b: 255}, RGB8 { r: 0, g: 0, b:0 }, Duration::from_millis(20100), AnimRepeatMode::None));
-    let mut shutdown_dimmer_arr = [shutdown_dimmer];
-    let shutdown_ca = CompositeAnimation::new(SHUTDOWN_ANIM_ID, &mut shutdown_dimmer_arr, AnimRepeatMode::None);
+    let mut shutdown_anim_seq = [shutdown_dimmer];
+    let shutdown_comp_anim = CompositeAnimation::new(SHUTDOWN_ANIM_ID, &mut shutdown_anim_seq, AnimRepeatMode::None);
 
-    let mut led0_anim_playbook = [shutdown_ca];
+    const ERROR_ANIM_ID: usize = 1;
+    let error_blink = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 255, g: 0, b: 0}, RGB8 { r: 0, g: 0, b:0 }, Duration::from_millis(500), AnimRepeatMode::Forever));
+    let mut error_blink_seq = [error_blink];
+    let error_blink_comp_anim = CompositeAnimation::new(ERROR_ANIM_ID, &mut error_blink_seq, AnimRepeatMode::Forever);
 
-    const RGB_LERP_ID: usize = 1;
-    let anim0 = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 255, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
-    let anim1 = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 255, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
-    let anim2 = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 0, b: 255 }, RGB8 { r: 255, g: 0, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
-    let mut anim_seq = [anim0, anim1, anim2];
-    let composite_anim0 = CompositeAnimation::new(RGB_LERP_ID, &mut anim_seq, AnimRepeatMode::Forever);
-    // let mut composite_anim0 = CompositeAnimation::new(RGB_LERP_ID, &mut [anim0, anim1, anim2], AnimRepeatMode::Forever);
+    const NETWORK_OK_ANIM_ID: usize = 2;
+    let network_ok_blink = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 0, b: 255}, RGB8 { r: 0, g: 0, b:0 }, Duration::from_millis(500), AnimRepeatMode::Forever));
+    let mut network_blink_seq = [network_ok_blink];
+    let network_ok_blink_comp_anim = CompositeAnimation::new(NETWORK_OK_ANIM_ID, &mut network_blink_seq, AnimRepeatMode::Forever);
 
-    let mut led1_anim_playbook = [composite_anim0];
+    const BRIDGE_OK_ANIM_ID: usize = 3;
+    let bridge_ok_blink = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 255, b: 0}, RGB8 { r: 0, g: 0, b:0 }, Duration::from_millis(500), AnimRepeatMode::Forever));
+    let mut bridge_ok_blink_seq = [bridge_ok_blink];
+    let bridge_ok_blink_comp_anim = CompositeAnimation::new(BRIDGE_OK_ANIM_ID, &mut bridge_ok_blink_seq, AnimRepeatMode::Forever);
+
+    let mut led0_anim_playbook = [shutdown_comp_anim, error_blink_comp_anim, network_ok_blink_comp_anim, bridge_ok_blink_comp_anim];
+
+    const RGB_LERP_ID: usize = 0;
+    let red_to_green_anim = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 255, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
+    let green_to_blue_anim = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 255, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
+    let blue_to_red_anim = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 0, b: 255 }, RGB8 { r: 255, g: 0, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
+    let mut rgb_blend_seq = [red_to_green_anim, green_to_blue_anim, blue_to_red_anim];
+    let rgb_blend_anim = CompositeAnimation::new(RGB_LERP_ID, &mut rgb_blend_seq, AnimRepeatMode::Forever);
+
+    let mut led1_anim_playbook = [rgb_blend_anim];
 
     // composite_anim0.start_animation();
 
@@ -124,10 +138,19 @@ async fn user_io_task_entry(
     // let mut color_lerp = TimeLerp::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(10000));
     // color_lerp.start();
 
-    // Battery ADC Setup
+    ///////////////////////
+    // Battery ADC Setup //
+    ///////////////////////
+    
     // Get the Vref_int calibration values.
     let vref_int_cal = get_vref_int_cal() as f32;
     let mut vref_int_ch = vref_int_adc.enable_vrefint();
+
+    // Create the running buffers for averaging
+    let mut battery_voltage_buffer: [f32; BATTERY_BUFFER_SIZE] =
+        [BATTERY_MAX_VOLTAGE; BATTERY_BUFFER_SIZE];
+    
+    let mut battery_voltage_filt_indx = 0;
 
     // let mut anim1 = Lerp::new(RGB8 { r: 0, g: 0, b: 0}, RGB8 { r: 255, g: 255, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::Forever);
     // anim1.start_animation();
@@ -136,11 +159,6 @@ async fn user_io_task_entry(
     // let mut blink_anim = Blink::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(800), Duration::from_millis(200), AnimRepeatMode::Forever);
     // blink_anim.start_animation();
     // dotstars.set_animation(blink_anim, 1);
-
-    let mut battery_voltage_buffer: [f32; BATTERY_BUFFER_SIZE] =
-        [BATTERY_MAX_VOLTAGE; BATTERY_BUFFER_SIZE];
-    
-    let mut battery_voltage_filt_indx = 0;
 
     let mut prev_robot_state = robot_state.get_state();
     loop {
@@ -215,15 +233,26 @@ async fn user_io_task_entry(
             debug_led0.set_low();
         }
 
+        // LED states cascade down.
         if !prev_robot_state.shutdown_requested && cur_robot_state.shutdown_requested {
-            dotstars_anim.disable_animation(0, RGB_LERP_ID);
-            dotstars_anim.enable_animation(1, SHUTDOWN_ANIM_ID);
+            let _ = dotstars_anim.disable_animation(0, RGB_LERP_ID);
+            let _ = dotstars_anim.enable_animation(1, SHUTDOWN_ANIM_ID);
         } 
+        // TODO THESE DON'T WORK BUT LED BAD (for now)
+        else if cur_robot_state.radio_inop {
+            let _ = dotstars_anim.enable_animation(1, ERROR_ANIM_ID);
+        } else if cur_robot_state.radio_bridge_ok {
+            let _ = dotstars_anim.enable_animation(1, BRIDGE_OK_ANIM_ID);
+        } else if cur_robot_state.radio_network_ok {
+            let _ = dotstars_anim.enable_animation(1, NETWORK_OK_ANIM_ID);
+        }
 
         // let color = color_lerp.update();
         // dotstars.set_color(color, 0);
         // dotstars.set_color(RGB8 { r: 0, g: 0, b: 0 }, 1);
-        dotstars_anim.update().await;
+        // TODO THIS BRICKS EVERYTHING SOMETHING SOMETHING SPI
+        // SOMETHING SOMETHING UART 
+        //dotstars_anim.update().await;
 
 
         if !robot_state.hw_init_state_valid() {
