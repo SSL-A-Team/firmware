@@ -7,7 +7,7 @@ use embassy_stm32::spi::{Config, Spi};
 use embassy_stm32::time::mhz;
 use embassy_time::{Duration, Timer};
 
-use smart_leds::colors::{BLACK, WHITE};
+use smart_leds::colors::{BLACK, GREEN, ORANGE, RED, WHITE, YELLOW};
 use smart_leds::RGB8;
 use static_cell::ConstStaticCell;
 
@@ -69,74 +69,7 @@ async fn user_io_task_entry(
 ) {
     defmt::info!("user io task initialized");
 
-    // let shutdown_anim = anim::Animation::Lerp(Lerp::new(WHITE, BLACK, Duration::from_millis(HARD_SHUTDOWN_TIME_MS), AnimRepeatMode::None));
-    // let mut sd_anim_seq = [shutdown_anim];
-    // let mut shutdown_anim = CompositeAnimation::new(&mut sd_anim_seq, AnimRepeatMode::None);
-
-    const SHUTDOWN_ANIM_ID: usize = 0;
-    let shutdown_dimmer = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 255, g: 255, b: 255}, RGB8 { r: 0, g: 0, b:0 }, Duration::from_millis(20100), AnimRepeatMode::None));
-    let mut shutdown_anim_seq = [shutdown_dimmer];
-    let shutdown_comp_anim = CompositeAnimation::new(SHUTDOWN_ANIM_ID, &mut shutdown_anim_seq, AnimRepeatMode::None);
-
-    const ERROR_ANIM_ID: usize = 1;
-    let error_blink = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 255, g: 0, b: 0}, RGB8 { r: 0, g: 0, b:0 }, Duration::from_millis(500), AnimRepeatMode::Forever));
-    let mut error_blink_seq = [error_blink];
-    let error_blink_comp_anim = CompositeAnimation::new(ERROR_ANIM_ID, &mut error_blink_seq, AnimRepeatMode::Forever);
-
-    const NETWORK_OK_ANIM_ID: usize = 2;
-    let network_ok_blink = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 0, b: 255}, RGB8 { r: 0, g: 0, b:0 }, Duration::from_millis(500), AnimRepeatMode::Forever));
-    let mut network_blink_seq = [network_ok_blink];
-    let network_ok_blink_comp_anim = CompositeAnimation::new(NETWORK_OK_ANIM_ID, &mut network_blink_seq, AnimRepeatMode::Forever);
-
-    const BRIDGE_OK_ANIM_ID: usize = 3;
-    let bridge_ok_blink = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 255, b: 0}, RGB8 { r: 0, g: 0, b:0 }, Duration::from_millis(500), AnimRepeatMode::Forever));
-    let mut bridge_ok_blink_seq = [bridge_ok_blink];
-    let bridge_ok_blink_comp_anim = CompositeAnimation::new(BRIDGE_OK_ANIM_ID, &mut bridge_ok_blink_seq, AnimRepeatMode::Forever);
-
-    let mut led0_anim_playbook = [shutdown_comp_anim, error_blink_comp_anim, network_ok_blink_comp_anim, bridge_ok_blink_comp_anim];
-
-    const RGB_LERP_ID: usize = 0;
-    let red_to_green_anim = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 255, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
-    let green_to_blue_anim = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 255, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
-    let blue_to_red_anim = anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 0, b: 255 }, RGB8 { r: 255, g: 0, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
-    let mut rgb_blend_seq = [red_to_green_anim, green_to_blue_anim, blue_to_red_anim];
-    let rgb_blend_anim = CompositeAnimation::new(RGB_LERP_ID, &mut rgb_blend_seq, AnimRepeatMode::Forever);
-
-    let mut led1_anim_playbook = [rgb_blend_anim];
-
-    // composite_anim0.start_animation();
-
-    // let animation_playbooks: [Option<&mut [CompositeAnimation<u8, RGB8>]>; 2] = [
-    //     Some(&mut [
-    //         CompositeAnimation::new(RGB_LERP_ID, &mut [
-    //             anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 255, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None)),
-    //             anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 255, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None)),
-    //             anim::Animation::Lerp(Lerp::new(0, RGB8 { r: 0, g: 0, b: 255 }, RGB8 { r: 255, g: 0, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None)),     
-    //         ], AnimRepeatMode::Forever)
-    //     ]),
-    //     None,
-    // ];
-
-    let animation_playbooks: [Option<&mut [CompositeAnimation<u8, RGB8>]>; 2] = [
-        Some(&mut led1_anim_playbook),
-        Some(&mut led0_anim_playbook),
-    ];
-
-    // let anim0_1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 255, g: 255, b: 0 }, RGB8 { r: 0, g: 255, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
-    // let anim1_1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 0, g: 255, b: 255 }, RGB8 { r: 255, g: 0, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::None));
-    // let anim2_1 = anim::Animation::Lerp(Lerp::new(RGB8 { r: 255, g: 0, b: 255 }, RGB8 { r: 255, g: 255, b: 0 }, Duration::from_millis(1000), AnimRepeatMode::None));
-    // let mut anim_seq = [anim0_1, anim1_1, anim2_1];
-    // let mut composite_anim1 = CompositeAnimation::new(&mut anim_seq, AnimRepeatMode::Forever);
-    // composite_anim1.start_animation();
-
     dotstars.set_drv_str_all(32);
-    let mut dotstars_anim = Apa102Anim::new(dotstars, animation_playbooks);
-
-    dotstars_anim.enable_animation(0, RGB_LERP_ID);
-    // dotstars_anim.enable_animation(1, RGB_LERP_ID);
-
-    // let mut color_lerp = TimeLerp::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(10000));
-    // color_lerp.start();
 
     ///////////////////////
     // Battery ADC Setup //
@@ -151,14 +84,6 @@ async fn user_io_task_entry(
         [BATTERY_MAX_VOLTAGE; BATTERY_BUFFER_SIZE];
     
     let mut battery_voltage_filt_indx = 0;
-
-    // let mut anim1 = Lerp::new(RGB8 { r: 0, g: 0, b: 0}, RGB8 { r: 255, g: 255, b: 255 }, Duration::from_millis(1000), AnimRepeatMode::Forever);
-    // anim1.start_animation();
-    // dotstars_anim.set_animation(anim1, 1);
-
-    // let mut blink_anim = Blink::new(RGB8 { r: 255, g: 0, b: 0 }, RGB8 { r: 0, g: 0, b: 255 }, Duration::from_millis(800), Duration::from_millis(200), AnimRepeatMode::Forever);
-    // blink_anim.start_animation();
-    // dotstars.set_animation(blink_anim, 1);
 
     let mut prev_robot_state = robot_state.get_state();
     loop {
@@ -233,27 +158,33 @@ async fn user_io_task_entry(
             debug_led0.set_low();
         }
 
-        // LED states cascade down.
-        if !prev_robot_state.shutdown_requested && cur_robot_state.shutdown_requested {
-            let _ = dotstars_anim.disable_animation(0, RGB_LERP_ID);
-            let _ = dotstars_anim.enable_animation(1, SHUTDOWN_ANIM_ID);
-        } 
-        // TODO THESE DON'T WORK BUT LED BAD (for now)
-        else if cur_robot_state.radio_inop {
-            let _ = dotstars_anim.enable_animation(1, ERROR_ANIM_ID);
+        // LED 0 states cascade down.
+        if cur_robot_state.shutdown_requested {
+            let _ = dotstars.set_color(WHITE, 0);
+        } else if cur_robot_state.radio_inop {
+            let _ = dotstars.set_color(RED, 0);
         } else if cur_robot_state.radio_bridge_ok {
-            let _ = dotstars_anim.enable_animation(1, BRIDGE_OK_ANIM_ID);
+            let _ = dotstars.set_color(GREEN, 0);
         } else if cur_robot_state.radio_network_ok {
-            let _ = dotstars_anim.enable_animation(1, NETWORK_OK_ANIM_ID);
+            let _ = dotstars.set_color(ORANGE, 0);
+        } else {
+            let _ = dotstars.set_color(BLACK, 0);
         }
 
-        // let color = color_lerp.update();
-        // dotstars.set_color(color, 0);
-        // dotstars.set_color(RGB8 { r: 0, g: 0, b: 0 }, 1);
-        // TODO THIS BRICKS EVERYTHING SOMETHING SOMETHING SPI
-        // SOMETHING SOMETHING UART 
-        //dotstars_anim.update().await;
+        // LED 1 states cascade down.
+        if cur_robot_state.shutdown_requested {
+            let _ = dotstars.set_color(WHITE, 1);
+        } else if cur_robot_state.wheels_inop != 0 {
+            let _ = dotstars.set_color(RED, 1);
+        } else if cur_robot_state.imu_inop {
+            let _ = dotstars.set_color(ORANGE, 1);
+        } else if cur_robot_state.kicker_inop {
+            let _ = dotstars.set_color(YELLOW, 1);
+        } else {
+            let _ = dotstars.set_color(BLACK, 1);
+        }
 
+        //dotstars.update().await;
 
         if !robot_state.hw_init_state_valid() {
             defmt::info!("loaded robot state: robot id: {}, team: {}", robot_id, robot_team_isblue);

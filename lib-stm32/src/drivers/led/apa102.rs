@@ -16,6 +16,7 @@ pub struct Apa102<'a, 'buf, const NUM_LEDS: usize>
 where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
     spi: spi::Spi<'a, Async>,
     spi_buf: &'buf mut [u8; (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE],
+    needs_update: bool,
 }
 
 impl<'a, 'buf, const NUM_LEDS: usize> Apa102<'a, 'buf, NUM_LEDS> 
@@ -39,6 +40,7 @@ where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
         Apa102 { 
             spi: spi,
             spi_buf: spi_buf,
+            needs_update: false,
         }
     }
 
@@ -103,6 +105,12 @@ where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
     pub fn set_color(&mut self, color: RGB8, led_index: usize) {
         assert!(led_index < NUM_LEDS);
 
+        if self.spi_buf[Self::l2r(led_index)] != color.r 
+                || self.spi_buf[Self::l2g(led_index)] != color.g
+                || self.spi_buf[Self::l2b(led_index)] != color.b {
+            self.needs_update = true;
+        }
+
         self.spi_buf[Self::l2r(led_index)] = color.r;
         self.spi_buf[Self::l2g(led_index)] = color.g;
         self.spi_buf[Self::l2b(led_index)] = color.b;
@@ -119,7 +127,10 @@ where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
     }
 
     pub async fn update(&mut self) {
-        let _ = self.spi.write(self.spi_buf).await;
+        if self.needs_update {
+            let _ = self.spi.write(self.spi_buf).await;
+            self.needs_update = false;
+        }
     }
 }
 
@@ -150,7 +161,7 @@ where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
         let mut cur_index = search_start_ind;
         loop {
             // inc and loop the index
-            cur_index = cur_index + 1 % anim_playbook.len();
+            cur_index = (cur_index + 1) % anim_playbook.len();
 
             // we incremented and found an enabled animation
             // return the index

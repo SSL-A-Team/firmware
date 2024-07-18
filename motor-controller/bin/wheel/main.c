@@ -171,7 +171,7 @@ int main() {
 
 #ifdef UART_ENABLED
         // increment the soft watchdog
-        ticks_since_last_command_packet++;
+        //ticks_since_last_command_packet++;
 
         // process all available packets
         while (uart_can_read()) {
@@ -261,7 +261,10 @@ int main() {
             // Error pin enable.
             GPIOB->BSRR |= GPIO_BSRR_BS_8;
             // HACK Will force the watchdog to trigger. 
-            // while(true);
+            //while(true) {
+            //    NVIC_SystemReset();
+            //    while(true);
+            //}
         } else {
             GPIOB->BSRR |= GPIO_BSRR_BR_8;
         }

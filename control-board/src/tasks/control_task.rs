@@ -304,7 +304,7 @@ impl <
                 } else {
                     // Battery is too low, set velocity to zero
                     drib_vel = 0.0;
-                    defmt::warn!("CT - low batter command lockout");
+                    defmt::warn!("CT - low battery / shutting down command lockout");
                     Vector4::new(0.0, 0.0, 0.0, 0.0)
                 };
 
@@ -325,7 +325,7 @@ impl <
 
         async fn flash_motor_firmware(&mut self, debug: bool) {
             defmt::info!("flashing firmware");
-            if debug {
+            if true {
                 let mut had_motor_error = false;
                 if self.motor_fl.load_default_firmware_image().await.is_err() {
                     defmt::error!("failed to flash FL");
@@ -377,8 +377,16 @@ impl <
                 )
                 .await;
                 
-                if res.0.is_err() || res.1.is_err() || res.2.is_err() || res.3.is_err() {
-                    defmt::error!("failed to flash drive motor: {}", res);
+                let error_mask = res.0.is_err() as u8 
+                        | ((res.1.is_err() as u8) & 0x01) << 1 
+                        | ((res.2.is_err() as u8) & 0x01) << 2
+                        | ((res.3.is_err() as u8) & 0x01) << 3;
+
+                self.shared_robot_state.set_wheels_inop(error_mask);
+                self.shared_robot_state.set_dribbler_inop(res.4.is_err());
+
+                if error_mask != 0 {
+                    defmt::error!("failed to flash drive motor (FL, BL, BR, FR, DRIB): {}", res);
                 } else {
                     defmt::debug!("motor firmware flashed");
                 }

@@ -99,10 +99,10 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
 
     pub async fn kicker_task_entry(&mut self) {
         let mut main_loop_ticker = Ticker::every(Duration::from_hz(100));
-
+    
         loop {
             let cur_robot_state = self.robot_state.get_state();
-
+            // Assume not working, clear if connected.
             self.kicker_driver.process_telemetry();
 
             // TODO global state overrides of kicker state
@@ -177,6 +177,8 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
 
                 self.robot_state.set_ball_detected(ball_detected);
             }
+
+            self.robot_state.set_kicker_inop(self.kicker_task_state < KickerTaskState::Connected);
 
             main_loop_ticker.next().await;
         }
