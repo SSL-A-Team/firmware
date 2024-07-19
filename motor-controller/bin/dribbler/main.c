@@ -108,10 +108,10 @@ int main() {
         // GPIOB->BSRR |= GPIO_BSRR_BR_8;
         // GPIOB->BSRR |= GPIO_BSRR_BR_9;
 
+#ifdef UART_ENABLED
         // watchdog on receiving a command packet
         ticks_since_last_command_packet++;
 
-#ifdef UART_ENABLED
         while (uart_can_read()) {
             MotorCommandPacket motor_command_packet;
             uint8_t bytes_moved = uart_read(&motor_command_packet, sizeof(MotorCommandPacket));
@@ -170,9 +170,22 @@ int main() {
         }
 #endif
 
-        // if upstream isn't listening or its been too long since we got a packet, turn off the motor
-        if (!telemetry_enabled || ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
+        // if upstream isn't listening or its been too long since we got a command packet, turn off the motor
+        if (!telemetry_enabled) {
             r_motor_board = 0.0f;
+            GPIOB->BSRR |= GPIO_BSRR_BR_7;
+        } else {
+            GPIOB->BSRR |= GPIO_BSRR_BS_7;
+        }
+        
+        if (ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
+            r_motor_board = 0.0f;
+            // Error pin enable.
+            GPIOB->BSRR |= GPIO_BSRR_BS_8;
+            // HACK Will force the watchdog to trigger. 
+            while(true);
+        } else {
+            GPIOB->BSRR |= GPIO_BSRR_BR_8;
         }
 
         bool run_torque_loop = time_sync_ready_rst(&torque_loop_timer);
@@ -293,6 +306,11 @@ int main() {
         // limit loop rate to smallest time step
         if (sync_systick()) {
             slipped_control_frame_count++;
+        }
+
+        if (slipped_control_frame_count > 10) {
+            // Error pin enable.
+            GPIOB->BSRR |= GPIO_BSRR_BS_6;
         }
     }
 }

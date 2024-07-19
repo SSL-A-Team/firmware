@@ -3,7 +3,7 @@ use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn, uart:
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::{gpio::{Level, Output, Pin, Speed}, usart::{self, Uart}};
 use embassy_sync::pubsub::WaitResult;
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Duration, Ticker, Timer, Instant};
 
 use crate::{drivers::kicker::Kicker, include_kicker_bin, pins::*, robot_state::SharedRobotState, stm32_interface, SystemIrqs};
 
@@ -13,6 +13,7 @@ const MAX_TX_PACKET_SIZE: usize = 16;
 const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 20;
+const TELEMETRY_TIMEOUT_MS: u64 = 2000;
 
 make_uart_queue_pair!(KICKER,
     KickerUart, KickerRxDma, KickerTxDma,
@@ -99,11 +100,24 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
 
     pub async fn kicker_task_entry(&mut self) {
         let mut main_loop_ticker = Ticker::every(Duration::from_hz(100));
-    
+        let mut last_packet_sent_time = Instant::now();
         loop {
             let cur_robot_state = self.robot_state.get_state();
-            // Assume not working, clear if connected.
-            self.kicker_driver.process_telemetry();
+
+            if self.kicker_driver.process_telemetry() {
+                last_packet_sent_time = Instant::now();
+            }
+
+            let cur_time = Instant::now();
+            if self.kicker_task_state == KickerTaskState::Connected && Instant::checked_duration_since(&cur_time, last_packet_sent_time).unwrap().as_millis() > TELEMETRY_TIMEOUT_MS {
+                defmt::error!("Kicker telemetry timed out! Will reset.");
+                self.kicker_driver.reset().await;
+                // Have a small delay for bring up to prevent boot looping. 
+                Timer::after_millis(1000).await;
+                // Capture packet time to just in case UART is getting set up.
+                // TODO Remove this and actually get timing on bring up tuned in.
+                last_packet_sent_time = Instant::now();
+            } 
 
             // TODO global state overrides of kicker state
             // e.g. external shutdown requsts, battery votlage, etc
@@ -121,6 +135,12 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
                     // lets power settle on kicker
                     Timer::after_millis(2000).await;
                     defmt::debug!("turn on kicker");
+                    // TODO Don't spam the power button.
+                    // Spam power button press on to make sure it is on.
+                    self.remote_power_btn_press().await;
+                    Timer::after_millis(500).await;
+                    self.remote_power_btn_press().await;
+                    Timer::after_millis(500).await;
                     self.remote_power_btn_press().await;
                     Timer::after_millis(50).await;
                     self.kicker_driver.enter_reset().await;
@@ -186,7 +206,7 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
 
     async fn remote_power_btn_press(&mut self) {
         self.remote_power_btn.set_high();
-        Timer::after_millis(500).await;
+        Timer::after_millis(300).await;
         self.remote_power_btn.set_low();
         Timer::after_millis(250).await;
     }

@@ -284,7 +284,7 @@ impl <
                 if ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
                     cmd_vel = Vector3::new(0., 0., 0.);
                     drib_vel = 0.0;
-                    defmt::warn!("ticks since packet lockout");
+                    //defmt::warn!("ticks since packet lockout");
                 }
 
                 // now we have setpoint r(t) in self.cmd_vel

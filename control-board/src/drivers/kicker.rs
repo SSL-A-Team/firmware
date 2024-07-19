@@ -80,7 +80,8 @@ impl<
         Self::new(stm32_interface, firmware_image)
     }
 
-    pub fn process_telemetry(&mut self) {
+    pub fn process_telemetry(&mut self) -> bool {
+        let mut received_packet = false;
         while let Ok(res) = self.stm32_uart_interface.try_read_data() {
             let buf = res.data();
 
@@ -88,6 +89,8 @@ impl<
                 defmt::warn!("kicker interface - invalid packet of len {:?} data: {:?}", buf.len(), buf);
                 continue;
             }
+
+            received_packet = true;
 
             // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
             unsafe {
@@ -98,6 +101,8 @@ impl<
                 }
             }
         }
+
+        return received_packet; 
     }
 
     pub fn send_command(&mut self) {
