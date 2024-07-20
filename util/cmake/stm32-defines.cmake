@@ -17,7 +17,7 @@ set(NUCLEO_F429ZI_OPENOCD_CFG "board/stm32f429discovery.cfg")
 #################
 
 set(STSPIN32F0x_MACHINE_OPTIONS -mthumb -mcpu=cortex-m0 -mfloat-abi=soft CACHE STRING "")
-set(STSPIN32F0x_C_OPTIONS ${STSPIN32F0x_MACHINE_OPTIONS})
+set(STSPIN32F0x_C_OPTIONS ${STSPIN32F0x_MACHINE_OPTIONS} -Wall)
 set(STSPIN32F0x_CXX_OPTIONS ${STSPIN32F0x_MACHINE_OPTIONS} -Wno-register -fno-exceptions -fno-rtti -ffunction-sections -fdata-sections CACHE STRING "")
 set(STSPIN32F0x_LINKER_OPTIONS ${STSPIN32F0x_MACHINE_OPTIONS} -Wl,--gc-sections,--no-warn-rwx-segments --specs=nosys.specs --specs=nano.specs CACHE STRING "")
 set(STSPIN32F0x_DEFINITIONS -DSTM32F031xx)
