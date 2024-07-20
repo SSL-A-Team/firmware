@@ -17,7 +17,6 @@
 
 void uart_initialize();
 
-bool uart_can_transmit();
 bool uart_transmit_dma_pending();
 bool uart_wait_for_transmission();
 bool uart_transmit(uint8_t *data_buf, uint16_t len);
