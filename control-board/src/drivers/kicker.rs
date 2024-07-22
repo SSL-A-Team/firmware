@@ -1,5 +1,5 @@
 use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
-use embassy_stm32::{gpio::Pin, usart::{self, Parity}};
+use embassy_stm32::{gpio::{Pin, Pull}, usart::{self, Parity}};
 use embassy_time::{Duration, Timer};
 
 use crate::stm32_interface::Stm32Interface;
@@ -75,7 +75,7 @@ impl<
         reset_pin: impl Pin,
         firmware_image: &'a [u8]) -> Self {
 
-        let stm32_interface = Stm32Interface::new_from_pins(read_queue, write_queue, boot0_pin, reset_pin, true);
+        let stm32_interface = Stm32Interface::new_from_pins(read_queue, write_queue, boot0_pin, reset_pin, Pull::Up, true);
 
         Self::new(stm32_interface, firmware_image)
     }

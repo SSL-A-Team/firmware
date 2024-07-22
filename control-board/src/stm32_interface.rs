@@ -3,7 +3,7 @@ use core::cmp::min;
 use defmt_rtt as _;
 use defmt::*;
 
-use embassy_stm32::gpio::{Level, Output, OutputOpenDrain, Pin, Speed};
+use embassy_stm32::gpio::{Level, Output, OutputOpenDrain, Pin, Speed, Pull};
 use embassy_stm32::pac;
 use embassy_stm32::usart::{self, Config, Parity, StopBits};
 use embassy_time::{Duration, Timer};
@@ -92,6 +92,7 @@ impl<
         write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
+        reset_pin_pull: Pull,
         reset_polarity_high: bool,
     ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {        
         let boot0_output = Output::new(boot0_pin, Level::Low, Speed::Medium);        
@@ -101,7 +102,7 @@ impl<
         } else {
             Level::High
         };
-        let reset_output = OutputOpenDrain::new(reset_pin, initial_reset_level, Speed::Medium, embassy_stm32::gpio::Pull::None);
+        let reset_output = OutputOpenDrain::new(reset_pin, initial_reset_level, Speed::Medium, reset_pin_pull);
 
         Stm32Interface {
             reader: read_queue,
