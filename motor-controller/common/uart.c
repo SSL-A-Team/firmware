@@ -96,8 +96,6 @@ void _uart_start_transmit_dma() {
 
     // enable DMA
     DMA1_Channel2->CCR |= DMA_CCR_EN;
-
-    return true;
 }
 
 //////////
@@ -119,10 +117,7 @@ bool uart_read(void *dest, uint16_t len, uint16_t* num_bytes_read) {
 void _uart_start_receive_dma() {
     // get the next data to read and send down the line
     IoBuf_t *rx_buf;
-    if (!ioq_peek_write(&uart_rx_queue, &rx_buf)) {
-        // Queue is full so don't set up to receive. 
-        return;
-    }
+    ioq_peek_write(&uart_rx_queue, &rx_buf);
 
     DMA1_Channel3->CMAR = (uint32_t) rx_buf->buf;
     DMA1_Channel3->CNDTR = IOQ_BUF_LENGTH;
@@ -139,18 +134,20 @@ void _uart_receive_dma() {
     IoBuf_t *rx_buf;
     ioq_peek_write(&uart_rx_queue, &rx_buf);
 
-    // check if were filling the last slot
-    if (ioq_cur_size(&uart_rx_queue) < (IOQ_BUF_DEPTH - 1)) {
-        uint8_t transmitted_bytes = (IOQ_BUF_LENGTH - DMA1_Channel3->CNDTR);
-        rx_buf->len = transmitted_bytes;
+    // Peak write discards the last entry if we are full, 
+    // so we will always be good on transfers. 
 
-        // data and len now correct, finalize write
-        ioq_finalize_peek_write(&uart_rx_queue, NULL);
+    // CNDTR is number of bytes left so max 
+    // tranfer size - size left is transfer size.
+    uint16_t transmitted_bytes = (IOQ_BUF_LENGTH - DMA1_Channel3->CNDTR);
+    rx_buf->len = transmitted_bytes;
 
-        // re-peek after potential finalization
-        ioq_peek_write(&uart_rx_queue, &rx_buf);
-    }
+    // data and len now correct, finalize write
+    // TODO JOE Need a hardware failure/indicator if this returns false.
+    // Implies RX happens twice without handling
+    ioq_finalize_peek_write(&uart_rx_queue);
 
+    // Assigns the place and length for the write.
     DMA1_Channel3->CMAR = (uint32_t) rx_buf->buf;
     DMA1_Channel3->CNDTR = IOQ_BUF_LENGTH;
 }
