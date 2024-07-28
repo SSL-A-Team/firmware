@@ -18,6 +18,10 @@ void _increment_read_ind(IoQueue_t *q) {
     q->read_ind = (q->read_ind + 1) % IOQ_BUF_DEPTH;
 }
 
+void _decrement_write_ind(IoQueue_t *q) {
+    q->write_ind = (q->write_ind - 1) % IOQ_BUF_DEPTH;
+}
+
 void _decrement_read_ind(IoQueue_t *q) {
     q->read_ind = (q->read_ind - 1) % IOQ_BUF_DEPTH;
 }
@@ -74,24 +78,22 @@ bool ioq_write(IoQueue_t *q, uint8_t *buf, uint16_t len) {
     return true;
 }
 
-bool ioq_peek_write(IoQueue_t *q, IoBuf_t **buf) {
+void ioq_peek_write(IoQueue_t *q, IoBuf_t **buf) {
     if (ioq_full(q)) {
         // If the queue is full, discard the back to maintain 
         // order and minimize data loss.
-        ioq_discard_back(q);
-        // TODO JOE FINISH
-        return false;
+        ioq_discard_write_back(q);
     }
 
     // Gets the pointer for the next buffer to write to.
     *buf = &q->backing_sto[q->write_ind];
-
-    return true;
 }
 
-bool ioq_finalize_peek_write(IoQueue_t *q, IoBuf_t *buf) {
+bool ioq_finalize_peek_write(IoQueue_t *q) {
     // Can't add to a full queue.
     if (ioq_full(q)) {
+        // Tried to clear with the peek write, so if still
+        // full probably filling too fast.
         return false;
     }
 
@@ -160,10 +162,11 @@ bool ioq_finalize_peek_read(IoQueue_t *q, IoBuf_t *dest) {
     return true;
 }
 
-void ioq_discard_back(IoQueue_t *q) {
-    // Critical. Should be quick but we don't want to infinite loop 
+void ioq_discard_write_back(IoQueue_t *q) {
+    // Critical. Should be quick but we don't want to infinite loop with
+    // additions and decrements.
     __disable_irq();
-    _decrement_read_ind(q);
+    _decrement_write_ind(q);
     q->size--;
     __enable_irq();
 }

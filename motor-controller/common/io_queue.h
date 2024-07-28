@@ -38,8 +38,8 @@ bool ioq_full(IoQueue_t *q);
 uint8_t ioq_cur_size(IoQueue_t *q);
 
 bool ioq_write(IoQueue_t *q, uint8_t *buf, uint16_t len);
-bool ioq_peek_write(IoQueue_t *q, IoBuf_t **buf);
-bool ioq_finalize_peek_write(IoQueue_t *q, IoBuf_t *buf);
+void ioq_peek_write(IoQueue_t *q, IoBuf_t **buf);
+bool ioq_finalize_peek_write(IoQueue_t *q);
 
 bool ioq_read(IoQueue_t *q, void *dest, uint16_t len, uint16_t *num_bytes_read);
 bool ioq_peek_read(IoQueue_t *q, IoBuf_t **dest);
