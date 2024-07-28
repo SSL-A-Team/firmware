@@ -68,9 +68,9 @@ impl SharedRobotState {
 
             radio_inop: self.get_radio_inop(),
             imu_inop: self.get_imu_inop(),
-            kicker_inop: true,
-            wheels_inop: 0xFF,
-            dribbler_inop: true,
+            kicker_inop: self.get_kicker_inop(),
+            wheels_inop: self.get_wheels_inop(),
+            dribbler_inop: self.get_dribbler_inop(),
         
             last_packet_receive_time_ticks_ms: 0,
             radio_network_ok: self.get_radio_network_ok(),
@@ -149,6 +149,30 @@ impl SharedRobotState {
 
     pub fn set_imu_inop(&self, imu_inop: bool) {
         self.imu_inop.store(imu_inop, Ordering::Relaxed);
+    }
+
+    pub fn get_wheels_inop(&self) -> u8 {
+        self.wheels_inop.load(Ordering::Relaxed)
+    }
+
+    pub fn set_wheels_inop(&self, wheels_inop: u8) {
+        self.wheels_inop.store(wheels_inop, Ordering::Relaxed);
+    }
+
+    pub fn get_dribbler_inop(&self) -> bool {
+        self.dribbler_inop.load(Ordering::Relaxed)
+    }
+
+    pub fn set_dribbler_inop(&self, drib_inop: bool) {
+        self.dribbler_inop.store(drib_inop, Ordering::Relaxed);
+    }
+
+    pub fn get_kicker_inop(&self) -> bool {
+        self.kicker_inop.load(Ordering::Relaxed)
+    }
+
+    pub fn set_kicker_inop(&self, kicker_inop: bool) {
+        self.kicker_inop.store(kicker_inop, Ordering::Relaxed);
     }
 
     pub fn shutdown_requested(&self) -> bool {

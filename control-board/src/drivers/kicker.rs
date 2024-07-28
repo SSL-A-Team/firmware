@@ -1,5 +1,5 @@
 use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
-use embassy_stm32::{gpio::Pin, usart::{self, Parity}};
+use embassy_stm32::{gpio::{Pin, Pull}, usart::{self, Parity}};
 use embassy_time::{Duration, Timer};
 
 use crate::stm32_interface::Stm32Interface;
@@ -75,12 +75,13 @@ impl<
         reset_pin: impl Pin,
         firmware_image: &'a [u8]) -> Self {
 
-        let stm32_interface = Stm32Interface::new_from_pins(read_queue, write_queue, boot0_pin, reset_pin, true);
+        let stm32_interface = Stm32Interface::new_from_pins(read_queue, write_queue, boot0_pin, reset_pin, Pull::Up, true);
 
         Self::new(stm32_interface, firmware_image)
     }
 
-    pub fn process_telemetry(&mut self) {
+    pub fn process_telemetry(&mut self) -> bool {
+        let mut received_packet = false;
         while let Ok(res) = self.stm32_uart_interface.try_read_data() {
             let buf = res.data();
 
@@ -88,6 +89,8 @@ impl<
                 defmt::warn!("kicker interface - invalid packet of len {:?} data: {:?}", buf.len(), buf);
                 continue;
             }
+
+            received_packet = true;
 
             // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
             unsafe {
@@ -98,6 +101,8 @@ impl<
                 }
             }
         }
+
+        return received_packet; 
     }
 
     pub fn send_command(&mut self) {

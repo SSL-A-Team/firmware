@@ -3,7 +3,7 @@ use core::cmp::min;
 use defmt_rtt as _;
 use defmt::*;
 
-use embassy_stm32::gpio::{Level, Output, Pin, Speed};
+use embassy_stm32::gpio::{Level, Output, OutputOpenDrain, Pin, Speed, Pull};
 use embassy_stm32::pac;
 use embassy_stm32::usart::{self, Config, Parity, StopBits};
 use embassy_time::{Duration, Timer};
@@ -52,7 +52,7 @@ pub struct Stm32Interface<
     reader: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
     writer: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
     boot0_pin: Output<'a>,
-    reset_pin: Output<'a>,
+    reset_pin: OutputOpenDrain<'a>,
 
     reset_pin_noninverted: bool,
 
@@ -74,7 +74,7 @@ impl<
         read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
         write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
         boot0_pin: Output<'a>,
-        reset_pin: Output<'a>,
+        reset_pin: OutputOpenDrain<'a>,
         reset_polarity_high: bool,
     ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {        
         Stm32Interface {
@@ -92,6 +92,7 @@ impl<
         write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
+        reset_pin_pull: Pull,
         reset_polarity_high: bool,
     ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {        
         let boot0_output = Output::new(boot0_pin, Level::Low, Speed::Medium);        
@@ -101,7 +102,7 @@ impl<
         } else {
             Level::High
         };
-        let reset_output = Output::new(reset_pin, initial_reset_level, Speed::Medium);
+        let reset_output = OutputOpenDrain::new(reset_pin, initial_reset_level, Speed::Medium, reset_pin_pull);
 
         Stm32Interface {
             reader: read_queue,
@@ -123,7 +124,7 @@ impl<
         } else {
             self.reset_pin.set_low();
         }
-        Timer::after(Duration::from_micros(100)).await;
+        Timer::after(Duration::from_millis(50)).await;
     }
 
     pub async fn leave_reset(&mut self) {
@@ -132,7 +133,7 @@ impl<
         } else {
             self.reset_pin.set_high();
         }
-        Timer::after(Duration::from_micros(100)).await;
+        Timer::after(Duration::from_millis(50)).await;
     }
 
     pub async fn hard_reset(&mut self) {

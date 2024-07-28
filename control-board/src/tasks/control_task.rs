@@ -284,7 +284,7 @@ impl <
                 if ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
                     cmd_vel = Vector3::new(0., 0., 0.);
                     drib_vel = 0.0;
-                    defmt::warn!("ticks since packet lockout");
+                    //defmt::warn!("ticks since packet lockout");
                 }
 
                 // now we have setpoint r(t) in self.cmd_vel
@@ -304,7 +304,7 @@ impl <
                 } else {
                     // Battery is too low, set velocity to zero
                     drib_vel = 0.0;
-                    defmt::warn!("CT - low batter command lockout");
+                    defmt::warn!("CT - low battery / shutting down command lockout");
                     Vector4::new(0.0, 0.0, 0.0, 0.0)
                 };
 
@@ -377,8 +377,16 @@ impl <
                 )
                 .await;
                 
-                if res.0.is_err() || res.1.is_err() || res.2.is_err() || res.3.is_err() {
-                    defmt::error!("failed to flash drive motor: {}", res);
+                let error_mask = res.0.is_err() as u8 
+                        | ((res.1.is_err() as u8) & 0x01) << 1 
+                        | ((res.2.is_err() as u8) & 0x01) << 2
+                        | ((res.3.is_err() as u8) & 0x01) << 3;
+
+                self.shared_robot_state.set_wheels_inop(error_mask);
+                self.shared_robot_state.set_dribbler_inop(res.4.is_err());
+
+                if error_mask != 0 {
+                    defmt::error!("failed to flash drive motor (FL, BL, BR, FR, DRIB): {}", res);
                 } else {
                     defmt::debug!("motor firmware flashed");
                 }

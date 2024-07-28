@@ -3,7 +3,7 @@ use core::{mem::MaybeUninit, f32::consts::PI};
 use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
 use defmt::*;
 use embassy_stm32::{
-    gpio::Pin,
+    gpio::{Pin, Pull},
     usart::{self, Parity},
 };
 use embassy_time::{Duration, Timer};
@@ -122,7 +122,8 @@ impl<
         firmware_image: &'a [u8],
     ) -> WheelMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
     {
-        let stm32_interface = Stm32Interface::new_from_pins(read_queue, write_queue, boot0_pin, reset_pin, false);
+        // Need a Pull None to allow for STSPIN watchdog usage.
+        let stm32_interface = Stm32Interface::new_from_pins(read_queue, write_queue, boot0_pin, reset_pin, Pull::None, false);
 
         let start_state: MotorResponse_Motion_Packet =
             { unsafe { MaybeUninit::zeroed().assume_init() } };
@@ -447,7 +448,8 @@ impl<
         ball_detected_thresh: f32,
     ) -> DribblerMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
     {
-        let stm32_interface = Stm32Interface::new_from_pins(read_queue, write_queue, boot0_pin, reset_pin, false);
+        // Need a Pull None to allow for STSPIN watchdog usage.
+        let stm32_interface = Stm32Interface::new_from_pins(read_queue, write_queue, boot0_pin, reset_pin, Pull::None, false);
 
         let start_state: MotorResponse_Motion_Packet =
             { unsafe { MaybeUninit::zeroed().assume_init() } };

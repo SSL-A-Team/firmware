@@ -115,7 +115,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             vel_y_linear: 0.0,
             vel_z_angular: 0.0,
             kick_vel: 0.0,
-            dribbler_speed: -0.1, 
+            dribbler_speed: 10.0, 
             kick_request: KickRequest::KR_DISABLE, 
         })).await;
     }

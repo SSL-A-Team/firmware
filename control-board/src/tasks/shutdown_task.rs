@@ -6,7 +6,7 @@ use embassy_time::Timer;
 
 use crate::{pins::{PowerBtnPressedIntExti, PowerBtnPressedIntPin, PowerKillPin, ShutdownInitiatedLedPin}, robot_state::{self, SharedRobotState}};
 
-pub const HARD_SHUTDOWN_TIME_MS: u64 = 20000;
+pub const HARD_SHUTDOWN_TIME_MS: u64 = 15000;
 
 #[macro_export]
 macro_rules! create_shutdown_task {
@@ -32,12 +32,12 @@ async fn shutdown_task_entry(robot_state: &'static SharedRobotState,
 
     defmt::warn!("shutdown initiated via user btn! syncing...");
 
-    // wait for tasks to flag shutdown complete, or hard temrinate after 10s
+    // wait for tasks to flag shutdown complete, or hard temrinate after hard shutdown time
     select::select(async move {
         loop {
             Timer::after_millis(100).await;
 
-            if robot_state.kicker_shutdown_complete() {
+            if robot_state.kicker_shutdown_complete() || robot_state.get_kicker_inop() {
                 break;
             }
         }

@@ -119,7 +119,8 @@ async fn imu_task_entry(
                             first_tipped_check_time = Instant::now();
                         } else {
                             // After the first tipped is seen, then wait if it has been tipped for long enough.
-                            if (Instant::now() - first_tipped_check_time) > Duration::from_millis(TIPPED_MIN_DURATION_MS) {
+                            let cur_time = Instant::now();
+                            if Instant::checked_duration_since(&cur_time, first_tipped_check_time).unwrap().as_millis() > TIPPED_MIN_DURATION_MS {
                                 robot_state.set_robot_tipped(true);
                             } else {
                                 // If it hasn't been long enough, clear the robot tipped.

@@ -261,7 +261,9 @@ impl<
 
                     // If timeout have elapsed since we last got a packet, 
                     // reboot the robot (unless we had a shutdown request).
-                    if !cur_robot_state.shutdown_requested && Instant::now() - self.last_software_packet > Duration::from_millis(Self::RESPONSE_FROM_PC_TIMEOUT_MS) {                        
+                    let cur_time = Instant::now();
+                    if !cur_robot_state.shutdown_requested && 
+                        Instant::checked_duration_since(&cur_time, self.last_software_packet).unwrap().as_millis() > Self::RESPONSE_FROM_PC_TIMEOUT_MS {                        
                         cortex_m::peripheral::SCB::sys_reset();
                     }
                 },

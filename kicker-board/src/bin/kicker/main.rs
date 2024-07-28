@@ -145,6 +145,7 @@ async fn high_pri_kick_task(
     let mut last_packet_sent_time = Instant::now();
 
     breakbeam.enable_tx();
+
     loop {
         let mut vrefint = adc.enable_vrefint();
         let vrefint_sample = adc.read(&mut vrefint);
@@ -423,6 +424,9 @@ bind_interrupts!(struct Irqs {
 async fn main(spawner: Spawner) -> ! {
     let stm32_config = get_system_config(ClkSource::InternalOscillator);
     let p = embassy_stm32::init(stm32_config);
+
+    // Drives power on high in case of floating.
+    let _power_on = Output::new(p.PD6, Level::High, Speed::Low);
 
     info!("kicker startup!");
 
