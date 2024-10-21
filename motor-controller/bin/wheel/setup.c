@@ -4,15 +4,15 @@
  * @brief setup function for the STSPIN32
  * @version 0.1
  * @date 2022-04-10
- * 
+ *
  * @copyright Copyright (c) 2022
- * 
+ *
  * Relevant Documents:
  * stm32f031x4/stm32f031x6 reference "stspin reference"
  *      ARM-Based 32-bit MCU with up to 32 Kbyte Flash, 9 timers, ADC and communication interfaces, 2.0 - 3.6V, 106 pages
  * stm32f0x1/stm32f0x2/stm32f0x8 reference "m0 reference"
- *      1004 pages 
- * 
+ *      1004 pages
+ *
  */
 
 #include <stm32f031x6.h>
@@ -30,10 +30,10 @@ void HardFault_Handler() {
 
 /**
  * @brief Setup the clock tree
- * 
+ *
  * Clock tree diagram: pg 14 / 106 of the "stspin reference"
  * Register info: pg 108+ / 1004 of the "m0 reference"
- * 
+ *
  */
 __attribute__((optimize("O0")))
 __attribute__((always_inline))
@@ -102,17 +102,17 @@ inline void setup_clocks() {
     RCC->BDCR |= RCC_BDCR_RTCSEL_LSI;
 
     // HSI14 enable (for ADC)
-    // on by default?? 
+    // on by default??
 
-    // Setup TIM14 sysclk source 
+    // Setup TIM14 sysclk source
     RCC->CFGR |= RCC_CFGR_MCO_SYSCLK;
     // MCOPRE -> 1
     RCC->CFGR |= RCC_CFGR_MCOPRE_DIV1;
 
     // https://developer.arm.com/documentation/dui0552/a/cortex-m3-peripherals/system-timer--systick/systick-reload-value-register
-    // set source to sysclk (48MHz) 
+    // set source to sysclk (48MHz)
     SysTick->CTRL |= SysTick_CTRL_CLKSOURCE_Msk;
-    // timer counts down to fire approximately every 1ms 
+    // timer counts down to fire approximately every 1ms
     SysTick->LOAD = (F_SYS_CLK_HZ / 1000UL);
     // current value set to 0, e.g. no trigger event
     SysTick->VAL = (F_SYS_CLK_HZ / 1000UL) - 1;
@@ -124,7 +124,7 @@ inline void setup_clocks() {
 
 /**
  * @brief sets up base IO
- * 
+ *
  */
 __attribute__((optimize("O0")))
 inline void setup_io() {
@@ -167,7 +167,7 @@ inline void setup_io() {
 
 /**
  * @brief setups UART IO, UART, and UART DMA
- * 
+ *
  * TODO move to uart.c
  */
 __attribute__((optimize("O0")))
@@ -189,7 +189,7 @@ void setup_uart() {
     // configure PA14 and PA15 AF mode
     GPIOA->MODER |= (GPIO_MODER_MODER14_1 | GPIO_MODER_MODER15_1);
     // configure PA14 and PA15 pin speed to 10Mhz
-    GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR14_0 | GPIO_OSPEEDR_OSPEEDR15_0); 
+    GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR14_0 | GPIO_OSPEEDR_OSPEEDR15_0);
     // configure PA14 and PA15 pin pullup to UP
     GPIOA->PUPDR |= (GPIO_PUPDR_PUPDR14_0 | GPIO_PUPDR_PUPDR15_0);
     // configure PA14 and PA15 alternate function
@@ -203,12 +203,12 @@ void setup_uart() {
     //  UART Peripheral Setup  //
     /////////////////////////////
 
-    // make sure USART1 is disabled
+    // make sure USART1 is disabled while configuring.
     USART1->CR1 &= ~(USART_CR1_UE);
     // 9-bits with parity (PCE) insert parity bit at the 9th bit
     // defaults to even parity
 	USART1->CR1 |= (USART_CR1_M | USART_CR1_PCE);
-    // enable transmision
+    // Enable transmit and receive functionality.
     USART1->CR1 |= (USART_CR1_TE | USART_CR1_RE);
     // we don't need anything here
 	USART1->CR2 = 0;
@@ -217,42 +217,50 @@ void setup_uart() {
     // set baud rate
 	USART1->BRR = 0x18; // => 2 Mbaud/s
 
-    // enable the module
+    // Enable the module now that configuration is finished.
 	USART1->CR1 |= USART_CR1_UE;
 
-    // Enable idle line interrupt
+    // Clear idle line interrupt
     USART1->ICR |= USART_ICR_IDLECF;
+    // FUTURE: We can probably enable the idle line interrupt here
+    // and leave it enabled after we add pullups to the bus.
     // USART1->CR1 |= USART_CR1_IDLEIE;
 
     //////////////////////////////////////
     //  Transmission DMA Channel Setup  //
     //////////////////////////////////////
 
-	// medium priority, memory increment, memory to peripheral
-	DMA1_Channel2->CCR = DMA_CCR_PL_0 | DMA_CCR_MINC | DMA_CCR_DIR;
+	// Memory increment, memory to peripheral
+	DMA1_Channel2->CCR = DMA_CCR_MINC | DMA_CCR_DIR;
+    // DMA set to Medium Priority
+    DMA1_Channel2->CCR |= DMA_CCR_PL_0;
     // clear buffer base addr
 	DMA1_Channel2->CMAR = 0; // transmit buffer base addr, set at transmission time
     // clear transmission length
     DMA1_Channel2->CNDTR = 0; // transmit length, set at transmission time
     // set destination address as UART periperal transmission shift register
 	DMA1_Channel2->CPAR = (uint32_t) &USART1->TDR; // USART1 data transmit register address
-    // enable the transfer complete (TCIE) and transfer error (TEIE) interrupts
+    // Enable the transfer complete (TCIE) and transfer error (TEIE) interrupts
     DMA1_Channel2->CCR |= (DMA_CCR_TEIE | DMA_CCR_TCIE);
-    // clear channel 2, global IF, transfer error IF, half-transfer IF, and transfer complete IF
+    // Clear the Global Ch2 interrupt flag.
     DMA1->IFCR |= DMA_IFCR_CGIF2;
 
     /////////////////////////////////
     //  Receive DMA Channel Setup  //
     /////////////////////////////////
 
-	// USART1_RX, low priority, memory increment, peripheral to memory
-	// DMA1_Channel3->CCR = DMA_CCR_MINC | DMA_CCR_CIRC;
-	DMA1_Channel3->CCR = DMA_CCR_MINC;
-    DMA1_Channel3->CCR |= (0x3U << DMA_CCR_PL_Pos);
+	// USART1_RX memory increment, peripheral to memory
+	// Sets memory increment mode.
+    DMA1_Channel3->CCR = DMA_CCR_MINC;
+    // DMA set to High Priority
+    DMA1_Channel3->CCR |= DMA_CCR_PL_1;
+    // clear buffer base addr
 	DMA1_Channel3->CMAR = (uint32_t) 0 ;
+    // Set destination address as UART periperal receive register
 	DMA1_Channel3->CPAR = (uint32_t) &USART1->RDR;
+    // clear transmission length
 	DMA1_Channel3->CNDTR = 0;
-    // DMA1_Channel3->CCR |= (DMA_CCR_TEIE | DMA_CCR_TCIE);
+    // Clear the Global Ch3 interrupt flag.
     DMA1->IFCR |= DMA_IFCR_CGIF3;
 
     /////////////////
@@ -268,7 +276,7 @@ void setup_uart() {
 
 /**
  * @brief performs startup system configuration
- * 
+ *
  */
 __attribute__((optimize("O0")))
 //__attribute__((always_inline))

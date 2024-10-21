@@ -1,12 +1,12 @@
 /**
  * @file uart.c
  * @author your name (you@domain.com)
- * @brief 
+ * @brief
  * @version 0.1
  * @date 2022-04-30
- * 
+ *
  * @copyright Copyright (c) 2022
- * 
+ *
  */
 
 #include <stdbool.h>
@@ -40,8 +40,14 @@ void _uart_receive_dma();
 ////////////////////////
 
 void uart_initialize() {
+
     ioq_initialize(&uart_tx_queue);
     ioq_initialize(&uart_rx_queue);
+
+    // Make sure SYSCFG bit(s) are cleared for USART TX and RX
+    // to be on DMA Ch2 and Ch3, respectively.
+    SYSCFG->CFGR1 &= ~(SYSCFG_CFGR1_USART1TX_DMA_RMP);
+    SYSCFG->CFGR1 &= ~(SYSCFG_CFGR1_USART1RX_DMA_RMP);
 
     _uart_start_receive_dma();
 }
@@ -123,7 +129,7 @@ void _uart_start_receive_dma() {
     DMA1_Channel3->CNDTR = IOQ_BUF_LENGTH;
 
     // enable DMA
-    DMA1_Channel3->CCR |= DMA_CCR_EN; 
+    DMA1_Channel3->CCR |= DMA_CCR_EN;
 
     USART1->ICR |= USART_ICR_IDLECF;
     USART1->CR1 |= USART_CR1_IDLEIE;
@@ -134,11 +140,11 @@ void _uart_receive_dma() {
     IoBuf_t *rx_buf;
     ioq_peek_write(&uart_rx_queue, &rx_buf);
 
-    // Peak write discards the last entry if we are full, 
-    // so we will always be good on transfers. 
+    // Peak write discards the last entry if we are full,
+    // so we will always be good on transfers.
 
-    // CNDTR is number of bytes left so max 
-    // tranfer size - size left is transfer size.
+    // CNDTR is number of bytes left so
+    // (max tranfer size - size left) is transfer size.
     uint16_t transmitted_bytes = (IOQ_BUF_LENGTH - DMA1_Channel3->CNDTR);
     rx_buf->len = transmitted_bytes;
 
@@ -157,64 +163,91 @@ void _uart_receive_dma() {
 //////////////////////////
 
 /**
- * @brief callback handler for DMA RX
- * 
+ * @brief callback handler for USART DMA1 Ch2 (TX) and Ch3 (RX)
+ *
  */
 void DMA1_Channel2_3_IRQHandler() {
-    // check if DMA1 CH2 has any interrupt, this is for transmit
+    // Check if DMA1 Ch2 (TX) has any interrupts.
     if (DMA1->ISR & DMA_ISR_GIF2) {
-        // transmit had a DMA error
+        // Transmit had a DMA error. Occurs when the USART is
+        // reading / writing at a reserved address.
         if (DMA1->ISR & DMA_ISR_TEIF2) {
-            // TODO log error
+            uart_logging_status = UART_LOGGING_DMA_TX_ERROR;
+            // In COMP_MODE, try to just clear the error and then
+            // continue with transfers.
+            #ifdef COMP_MODE
+            // If TEIF2 is set, the CCR is disabled automatically.
+            // First need to clear Transfer Error Flag.
+            DMA1->IFCR |= DMA_IFCR_CTEIF2;
+            // Then reset the DMA channel control (CCR).
+            DMA1_Channel2->CCR |= DMA_CCR_EN;
+            #endif
         }
 
         // DMA finished transfer to USART
         if (DMA1->ISR & DMA_ISR_TCIF2) {
-            // expect the USART1 TC interrupt to fire once last byte is out of the FIFO/TR
-            // make sure tx complete inerrupts are on
+            // Expect the USART1 Transfer Complete interrupt to
+            // fire once last byte is out of
+            // the FIFO/Transmit Register.
+            // Since USART1 handler disables the Transfer Complete
+            // interrupt, we need to re-enable it here.
             USART1->CR1 |= USART_CR1_TCIE;
         }
 
+        // Clears the interrupt flags for Ch2.
         DMA1->IFCR |= DMA_IFCR_CGIF2;
     }
 
-    // check if DMA1 CH3 has any interrupt, this is for receive
+    // Check if DMA1 Ch3 (RX) has any interrupt.
     if (DMA1->ISR & DMA_ISR_GIF3) {
-        // receive had a dma error
+        // Receive had a DMA error
         if (DMA1->ISR & DMA_ISR_TEIF3) {
-            // TODO: log error
+            uart_logging_status = UART_LOGGING_DMA_RX_ERROR;
+            // In COMP_MODE, try to just clear the error and then
+            // continue with transfers.
+            #ifdef COMP_MODE
+            // If TEIF3 is set, the CCR is disabled automatically.
+            // First need to clear Transfer Error Flag.
+            DMA1->IFCR |= DMA_IFCR_CTEIF3;
+            // Then reset the DMA channel control (CCR).
+            DMA1_Channel3->CCR |= DMA_CCR_EN;
+            #endif
         }
 
         // receive, got a full buffer
+        // TODO JOE look into this.
         // this is sort of unexpected, we generally expect a packet less than
-        // max buffer length, which fires USART line idle. We probably got 
+        // max buffer length, which fires USART line idle. We probably got
         // two packets back to back and need to sort that out
         if (DMA1->ISR & DMA_ISR_TCIF3) {
             // _uart_receive_dma();
         }
 
+        // Clears the interrupt flags for Ch3.
         DMA1->IFCR |= DMA_IFCR_CGIF3;
     }
 }
 
 /**
  * @brief callback handler for uart
- * 
+ *
  */
 __attribute((__optimize__("O0")))
 void USART1_IRQHandler() {
-    uint32_t uart_status_register = USART1->ISR;
+    const uint32_t uart_status_register = USART1->ISR;
 
     ////////////////////
     //  Transmission  //
     ////////////////////
 
+    // If it's a USART transmit complete interrupt:
     if (uart_status_register & USART_ISR_TC) {
-        // disable DMA channel
+        // Disable TX DMA channel until we
+        // know we have a payload to send.
         DMA1_Channel2->CCR &= ~(DMA_CCR_EN);
-        // disable transfer complete interrupts 
+        // Disable transfer complete interrupts.
         USART1->CR1 &= ~(USART_CR1_TCIE);
-
+        // Clear transmission complete flag.
         USART1->ICR |= USART_ICR_TCCF;
 
         // finalize tx queue read
@@ -232,7 +265,8 @@ void USART1_IRQHandler() {
     ////////////////////
     //   Reception    //
     ////////////////////
-
+    // TODO Check parity?
+    // TODO Finish looking over this.
     // detected idle line before full buf
     if (uart_status_register & USART_ISR_IDLE) {
         // disable DMA
