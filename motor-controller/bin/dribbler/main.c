@@ -75,7 +75,7 @@ int main() {
     response_packet.data.motion.reset_low_power = rcc_csr & RCC_CSR_LPWRRSTF != 0;
     response_packet.data.motion.reset_software = rcc_csr & RCC_CSR_SFTRSTF != 0;
     response_packet.data.motion.reset_pin = rcc_csr & RCC_CSR_PINRSTF != 0;
-    
+
     bool params_return_packet_requested = false;
 
     SyncTimer_t torque_loop_timer;
@@ -87,7 +87,7 @@ int main() {
     iir_filter_init(&torque_filter, iir_filter_alpha_from_Tf(TORQUE_IIR_TF_MS, TORQUE_LOOP_RATE_MS));
 
     MotorCommand_MotionType motion_control_type = OPEN_LOOP;
-    
+
     float r_motor_board = 0.0f;
     float u_torque_loop;
     float cur_limit = 0.0f;
@@ -114,13 +114,21 @@ int main() {
 
         while (uart_can_read()) {
             MotorCommandPacket motor_command_packet;
-            uint8_t bytes_moved = uart_read(&motor_command_packet, sizeof(MotorCommandPacket));
-            if (bytes_moved != sizeof(MotorCommandPacket)) {
+            uint16_t uart_bytes_read = 0;
+            bool uart_read_success = uart_read(&motor_command_packet, sizeof(MotorCommandPacket), &uart_bytes_read);
+            if (!uart_read_success || uart_bytes_read != sizeof(MotorCommandPacket)) {
                 // something went wrong, just purge all of the data
                 uart_discard();
 
                 continue;
             }
+
+            // If something goes wrong with the UART, we need to flag it.
+            if (uart_logging_status != UART_LOGGING_OK) {
+                // Error pin enable.
+                GPIOB->BSRR |= GPIO_BSRR_BS_8;
+            }
+
 
             if (motor_command_packet.type == MCP_MOTION) {
                 // GPIOB->BSRR |= GPIO_BSRR_BS_8;
@@ -177,12 +185,12 @@ int main() {
         } else {
             GPIOB->BSRR |= GPIO_BSRR_BS_7;
         }
-        
+
         if (ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
             r_motor_board = 0.0f;
             // Error pin enable.
             GPIOB->BSRR |= GPIO_BSRR_BS_8;
-            // HACK Will force the watchdog to trigger. 
+            // HACK Will force the watchdog to trigger.
             while(true);
         } else {
             GPIOB->BSRR |= GPIO_BSRR_BR_8;

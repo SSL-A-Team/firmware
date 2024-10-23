@@ -25,7 +25,6 @@ IoQueue_t uart_tx_queue;
 volatile bool uart_dma_rx_active = false;
 volatile int uart_dma_rx_num_bytes = 0;
 IoQueue_t uart_rx_queue;
-volatile IoBuf_t backing_sto[2];
 
 /////////////////////////
 //  PRIVATE FUNCTIONS  //
@@ -33,7 +32,7 @@ volatile IoBuf_t backing_sto[2];
 
 void _uart_start_transmit_dma();
 void _uart_start_receive_dma();
-void _uart_receive_dma();
+void _uart_receive_dma(bool parity_error);
 
 ////////////////////////
 //  PUBLIC FUNCTIONS  //
@@ -60,8 +59,8 @@ bool uart_is_transmit_dma_pending() {
     return uart_dma_tx_active;
 }
 
-bool uart_wait_for_transmission() {
-    while (uart_transmit_dma_pending());
+void uart_wait_for_transmission() {
+    while (uart_is_transmit_dma_pending());
 }
 
 bool uart_transmit(uint8_t *data_buf, uint16_t len) {
@@ -109,11 +108,11 @@ void _uart_start_transmit_dma() {
 //////////
 
 bool uart_can_read() {
-    return (!ioq_empty(&uart_rx_queue));
+    return (!ioq_is_empty(&uart_rx_queue));
 }
 
 void uart_discard() {
-    ioq_discard(&uart_rx_queue);
+    ioq_discard_write_back(&uart_rx_queue);
 }
 
 bool uart_read(void *dest, uint16_t len, uint16_t* num_bytes_read) {
@@ -135,27 +134,40 @@ void _uart_start_receive_dma() {
     USART1->CR1 |= USART_CR1_IDLEIE;
 }
 
-void _uart_receive_dma() {
-    // get the next data to read and send down the line
-    IoBuf_t *rx_buf;
-    ioq_peek_write(&uart_rx_queue, &rx_buf);
+void _uart_receive_dma(bool parity_error) {
+    // If we have a parity error, we can just overwrite the queue
+    // with the next packet.
+    if (!parity_error) {
+        // Get the buffer location that was written into with
+        // last DMA contents.
+        IoBuf_t *rx_buf;
+        ioq_peek_write(&uart_rx_queue, &rx_buf);
 
-    // Peak write discards the last entry if we are full,
-    // so we will always be good on transfers.
+        // Peek write discards the last entry if we are full,
+        // so we will always be good on transfers.
 
-    // CNDTR is number of bytes left so
-    // (max tranfer size - size left) is transfer size.
-    uint16_t transmitted_bytes = (IOQ_BUF_LENGTH - DMA1_Channel3->CNDTR);
-    rx_buf->len = transmitted_bytes;
+        // CNDTR is number of bytes left in the DMA buffer so
+        // (max transfer size - size left) is packet transfer size.
+        uint16_t transmitted_bytes = (IOQ_BUF_LENGTH - DMA1_Channel3->CNDTR);
+        rx_buf->len = transmitted_bytes;
 
-    // data and len now correct, finalize write
-    // TODO JOE Need a hardware failure/indicator if this returns false.
-    // Implies RX happens twice without handling
-    ioq_finalize_peek_write(&uart_rx_queue);
+        // data and len now correct, finalize write
+        // If this returns false, implies RX happens twice without handling.
+        if (!ioq_finalize_peek_write(&uart_rx_queue)) {
+            uart_logging_status = UART_LOGGING_UART_RX_BUFFER_FULL;
+        }
+    }
 
-    // Assigns the place and length for the write.
-    DMA1_Channel3->CMAR = (uint32_t) rx_buf->buf;
+    // Get the NEXT buffer for the DMA to write into.
+    IoBuf_t* rx_buf_next;
+    ioq_peek_write(&uart_rx_queue, &rx_buf_next);
+
+    // Assigns the location and length for the NEXT DMA write.
+    DMA1_Channel3->CMAR = (uint32_t) rx_buf_next->buf;
     DMA1_Channel3->CNDTR = IOQ_BUF_LENGTH;
+
+    // DMA is now ready to receive the next payload, so enable DMA.
+    DMA1_Channel3->CCR |= DMA_CCR_EN;
 }
 
 //////////////////////////
@@ -214,13 +226,12 @@ void DMA1_Channel2_3_IRQHandler() {
             #endif
         }
 
-        // receive, got a full buffer
-        // TODO JOE look into this.
-        // this is sort of unexpected, we generally expect a packet less than
+        // Receive, got a full buffer
+        // This is sort of unexpected, we generally expect less than
         // max buffer length, which fires USART line idle. We probably got
-        // two packets back to back and need to sort that out
+        // two packets back to back and need to sort that out.
         if (DMA1->ISR & DMA_ISR_TCIF3) {
-            // _uart_receive_dma();
+            uart_logging_status = UART_LOGGING_DMA_RX_BUFFER_FULL;
         }
 
         // Clears the interrupt flags for Ch3.
@@ -254,7 +265,7 @@ void USART1_IRQHandler() {
         // check if queue is empty
         // conditionally recall transmit
         ioq_finalize_peek_read(&uart_tx_queue, NULL);
-        if (!ioq_empty(&uart_tx_queue)) {
+        if (!ioq_is_empty(&uart_tx_queue)) {
             _uart_start_transmit_dma();
         } else {
             // restore the ready flag
@@ -265,24 +276,26 @@ void USART1_IRQHandler() {
     ////////////////////
     //   Reception    //
     ////////////////////
-    // TODO Check parity?
-    // TODO Finish looking over this.
     // detected idle line before full buf
     if (uart_status_register & USART_ISR_IDLE) {
         // disable DMA
         DMA1_Channel3->CCR &= ~(DMA_CCR_EN);
-        // disable idle interrupts
+        // FUTURE: Need to fix pull-ups to disable idle interrupts
         // USART1->CR1 &= ~(USART_CR1_IDLEIE);
 
         // clear idle line int flag
         USART1->ICR |= USART_ICR_IDLECF;
 
-        _uart_receive_dma();
+        // Moves the received DMA data to the queue
+        // and prepares the next DMA transfer.
+        bool parity_error = (uart_status_register & USART_ISR_PE);
+        _uart_receive_dma(parity_error);
 
+        // Clear the parity error flag for the next transfer.
+        USART1->ICR |= USART_ICR_PECF;
+
+        // FUTURE: Need to fix pull-ups to enable idle interrupts
         // enable idle interrupts
         // USART1->CR1 |= USART_CR1_IDLEIE;
-
-        // enable DMA
-        DMA1_Channel3->CCR |= DMA_CCR_EN;
     }
 }

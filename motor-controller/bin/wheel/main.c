@@ -175,12 +175,19 @@ int main() {
 
         // process all available packets
         while (uart_can_read()) {
-            uint8_t bytes_moved = uart_read(&motor_command_packet, sizeof(MotorCommandPacket));
-            if (bytes_moved != sizeof(MotorCommandPacket)) {
+            uint16_t uart_bytes_read = 0;
+            bool uart_read_success = uart_read(&motor_command_packet, sizeof(MotorCommandPacket), &uart_bytes_read);
+            if (!uart_read_success || uart_bytes_read != sizeof(MotorCommandPacket)) {
                 // something went wrong, just purge all of the data
                 uart_discard();
 
                 continue;
+            }
+
+            // If something goes wrong with the UART, we need to flag it.
+            if (uart_logging_status != UART_LOGGING_OK) {
+                // Error pin enable.
+                GPIOB->BSRR |= GPIO_BSRR_BS_8;
             }
 
             if (motor_command_packet.type == MCP_MOTION) {

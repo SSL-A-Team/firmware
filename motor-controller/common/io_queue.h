@@ -33,9 +33,9 @@ typedef struct IoQueue {
 
 void ioq_initialize(IoQueue_t *q);
 
-bool ioq_empty(IoQueue_t *q);
-bool ioq_full(IoQueue_t *q);
-uint8_t ioq_cur_size(IoQueue_t *q);
+bool ioq_is_empty(IoQueue_t *q);
+bool ioq_is_full(IoQueue_t *q);
+uint8_t ioq_get_cur_size(IoQueue_t *q);
 
 bool ioq_write(IoQueue_t *q, uint8_t *buf, uint16_t len);
 void ioq_peek_write(IoQueue_t *q, IoBuf_t **buf);
@@ -44,4 +44,4 @@ bool ioq_finalize_peek_write(IoQueue_t *q);
 bool ioq_read(IoQueue_t *q, void *dest, uint16_t len, uint16_t *num_bytes_read);
 bool ioq_peek_read(IoQueue_t *q, IoBuf_t **dest);
 bool ioq_finalize_peek_read(IoQueue_t *q, IoBuf_t *dest);
-void ioq_discard(IoQueue_t *q);
+void ioq_discard_write_back(IoQueue_t *q);
