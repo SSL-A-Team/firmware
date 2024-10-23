@@ -1,4 +1,4 @@
-
+#include <stm32f031x6.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -54,7 +54,7 @@ uint8_t ioq_get_cur_size(IoQueue_t *q) {
 
 bool ioq_write(IoQueue_t *q, uint8_t *buf, uint16_t len) {
     // Can't add to a full queue.
-    if (ioq_full(q)) {
+    if (ioq_is_full(q)) {
         return false;
     }
 
@@ -63,7 +63,7 @@ bool ioq_write(IoQueue_t *q, uint8_t *buf, uint16_t len) {
         return false;
     }
 
-    // Do copy first and then set the length to confirm data 
+    // Do copy first and then set the length to confirm data
     // is valid in the buffer.
     memcpy(q->backing_sto[q->write_ind].buf, buf, len);
     q->backing_sto[q->write_ind].len = len;
@@ -79,8 +79,8 @@ bool ioq_write(IoQueue_t *q, uint8_t *buf, uint16_t len) {
 }
 
 void ioq_peek_write(IoQueue_t *q, IoBuf_t **buf) {
-    if (ioq_full(q)) {
-        // If the queue is full, discard the back to maintain 
+    if (ioq_is_full(q)) {
+        // If the queue is full, discard the back to maintain
         // order and minimize data loss.
         ioq_discard_write_back(q);
     }
@@ -91,7 +91,7 @@ void ioq_peek_write(IoQueue_t *q, IoBuf_t **buf) {
 
 bool ioq_finalize_peek_write(IoQueue_t *q) {
     // Can't add to a full queue.
-    if (ioq_full(q)) {
+    if (ioq_is_full(q)) {
         // Tried to clear with the peek write, so if still
         // full probably filling too fast.
         return false;
@@ -112,12 +112,12 @@ bool ioq_finalize_peek_write(IoQueue_t *q) {
 
 bool ioq_read(IoQueue_t *q, void *dest, uint16_t len, uint16_t* num_bytes_read) {
     // Can't read an empty queue.
-    if (ioq_empty(q)) {
+    if (ioq_is_empty(q)) {
         return false;
     }
 
     uint16_t cpy_num_bytes = q->backing_sto[q->read_ind].len;
-    // Intended read size is smaller than intended. 
+    // Intended read size is smaller than intended.
     if (len < cpy_num_bytes) {
         return false;
     }
@@ -136,7 +136,7 @@ bool ioq_read(IoQueue_t *q, void *dest, uint16_t len, uint16_t* num_bytes_read) 
 
 bool ioq_peek_read(IoQueue_t *q, IoBuf_t **dest) {
     // Can't read an empty queue.
-    if (ioq_empty(q)) {
+    if (ioq_is_empty(q)) {
         return false;
     }
 
@@ -148,12 +148,12 @@ bool ioq_peek_read(IoQueue_t *q, IoBuf_t **dest) {
 
 bool ioq_finalize_peek_read(IoQueue_t *q, IoBuf_t *dest) {
     // Can't read an empty queue.
-    if (ioq_empty(q)) {
+    if (ioq_is_empty(q)) {
         return false;
     }
 
     _increment_read_ind(q);
-    // This is probably fine without disable since called from interrupt with high enough 
+    // This is probably fine without disable since called from interrupt with high enough
     // priority, but just to be safe.
     __disable_irq();
     q->size--;
