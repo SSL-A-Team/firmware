@@ -42,9 +42,9 @@ inline void setup_clocks() {
     RCC->CR |= RCC_CR_HSION;
     RCC->CFGR = 0x00000000;
     RCC->CR &= ~(RCC_CR_PLLON | RCC_CR_CSSON | RCC_CR_HSEBYP | RCC_CR_HSEON);
-	RCC->CFGR2 = 0;
-	RCC->CFGR3 = 0;
-	RCC->CIR = 0;
+    RCC->CFGR2 = 0;
+    RCC->CFGR3 = 0;
+    RCC->CIR = 0;
 
     // wait for HSI to be stable
     while ((RCC->CR & RCC_CR_HSIRDY) == 0) {
@@ -207,18 +207,18 @@ void setup_uart() {
     USART1->CR1 &= ~(USART_CR1_UE);
     // 9-bits with parity (PCE) insert parity bit at the 9th bit
     // defaults to even parity
-	USART1->CR1 |= (USART_CR1_M | USART_CR1_PCE);
+    USART1->CR1 |= (USART_CR1_M | USART_CR1_PCE);
     // Enable transmit and receive functionality.
     USART1->CR1 |= (USART_CR1_TE | USART_CR1_RE);
     // we don't need anything here
-	USART1->CR2 = 0;
+    USART1->CR2 = 0;
     // enable DMA for transmission and receive
-	USART1->CR3 = USART_CR3_DMAT | USART_CR3_DMAR;
+    USART1->CR3 = USART_CR3_DMAT | USART_CR3_DMAR;
     // set baud rate
-	USART1->BRR = 0x18; // => 2 Mbaud/s
+    USART1->BRR = 0x18; // => 2 Mbaud/s
 
     // Enable the module now that configuration is finished.
-	USART1->CR1 |= USART_CR1_UE;
+    USART1->CR1 |= USART_CR1_UE;
 
     // Clear idle line interrupt
     USART1->ICR |= USART_ICR_IDLECF;
@@ -230,16 +230,16 @@ void setup_uart() {
     //  Transmission DMA Channel Setup  //
     //////////////////////////////////////
 
-	// Memory increment, memory to peripheral
-	DMA1_Channel2->CCR = DMA_CCR_MINC | DMA_CCR_DIR;
+    // Memory increment, memory to peripheral
+    DMA1_Channel2->CCR = DMA_CCR_MINC | DMA_CCR_DIR;
     // DMA set to Medium Priority
     DMA1_Channel2->CCR |= DMA_CCR_PL_0;
     // clear buffer base addr
-	DMA1_Channel2->CMAR = 0; // transmit buffer base addr, set at transmission time
+    DMA1_Channel2->CMAR = 0; // transmit buffer base addr, set at transmission time
     // clear transmission length
     DMA1_Channel2->CNDTR = 0; // transmit length, set at transmission time
     // set destination address as UART periperal transmission shift register
-	DMA1_Channel2->CPAR = (uint32_t) &USART1->TDR; // USART1 data transmit register address
+    DMA1_Channel2->CPAR = (uint32_t) &USART1->TDR; // USART1 data transmit register address
     // Enable the transfer complete (TCIE) and transfer error (TEIE) interrupts
     DMA1_Channel2->CCR |= (DMA_CCR_TEIE | DMA_CCR_TCIE);
     // Clear the Global Ch2 interrupt flag.
@@ -249,17 +249,17 @@ void setup_uart() {
     //  Receive DMA Channel Setup  //
     /////////////////////////////////
 
-	// USART1_RX memory increment, peripheral to memory
-	// Sets memory increment mode.
+    // USART1_RX memory increment, peripheral to memory
+    // Sets memory increment mode.
     DMA1_Channel3->CCR = DMA_CCR_MINC;
     // DMA set to High Priority
     DMA1_Channel3->CCR |= DMA_CCR_PL_1;
     // clear buffer base addr
-	DMA1_Channel3->CMAR = (uint32_t) 0 ;
+    DMA1_Channel3->CMAR = (uint32_t) 0 ;
     // Set destination address as UART periperal receive register
-	DMA1_Channel3->CPAR = (uint32_t) &USART1->RDR;
+    DMA1_Channel3->CPAR = (uint32_t) &USART1->RDR;
     // clear transmission length
-	DMA1_Channel3->CNDTR = 0;
+    DMA1_Channel3->CNDTR = 0;
     // Clear the Global Ch3 interrupt flag.
     DMA1->IFCR |= DMA_IFCR_CGIF3;
 
