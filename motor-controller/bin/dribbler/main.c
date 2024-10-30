@@ -129,7 +129,6 @@ int main() {
                 GPIOB->BSRR |= GPIO_BSRR_BS_8;
             }
 
-
             if (motor_command_packet.type == MCP_MOTION) {
                 // GPIOB->BSRR |= GPIO_BSRR_BS_8;
 
