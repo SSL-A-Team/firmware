@@ -70,11 +70,11 @@ int main() {
     MotorResponsePacket response_packet;
     memset(&response_packet, 0, sizeof(MotorResponsePacket));
 
-    response_packet.data.motion.reset_watchdog_independent = rcc_csr & RCC_CSR_IWDGRSTF != 0;
-    response_packet.data.motion.reset_watchdog_window = rcc_csr & RCC_CSR_WWDGRSTF != 0;
-    response_packet.data.motion.reset_low_power = rcc_csr & RCC_CSR_LPWRRSTF != 0;
-    response_packet.data.motion.reset_software = rcc_csr & RCC_CSR_SFTRSTF != 0;
-    response_packet.data.motion.reset_pin = rcc_csr & RCC_CSR_PINRSTF != 0;
+    response_packet.data.motion.reset_watchdog_independent = (rcc_csr & RCC_CSR_IWDGRSTF) != 0;
+    response_packet.data.motion.reset_watchdog_window = (rcc_csr & RCC_CSR_WWDGRSTF) != 0;
+    response_packet.data.motion.reset_low_power = (rcc_csr & RCC_CSR_LPWRRSTF) != 0;
+    response_packet.data.motion.reset_software = (rcc_csr & RCC_CSR_SFTRSTF) != 0;
+    response_packet.data.motion.reset_pin = (rcc_csr & RCC_CSR_PINRSTF) != 0;
 
     bool params_return_packet_requested = false;
 

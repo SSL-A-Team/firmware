@@ -112,7 +112,17 @@ bool uart_can_read() {
 }
 
 void uart_discard() {
-    ioq_discard_write_back(&uart_rx_queue);
+    uint8_t discard_runs = 0;
+    // Try to empty the current queue. If it's empty, we're done.
+    while (!ioq_is_empty(&uart_rx_queue)) {
+        ioq_discard_write_back(&uart_rx_queue);
+
+        // Don't want to get caught in an infinite loop,
+        // so just clear at least the buffer depth.
+        if (discard_runs++ > IOQ_BUF_DEPTH) {
+            break;
+        }
+    }
 }
 
 bool uart_read(void *dest, uint16_t len, uint16_t* num_bytes_read) {
