@@ -12,7 +12,7 @@ use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
 use defmt::info;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
-    gpio::{Level, Output, Speed}, interrupt, pac::Interrupt, usart::Uart
+    gpio::{Level, Output, Speed, Pull}, interrupt, pac::Interrupt, usart::Uart
 };
 use embassy_time::{Duration, Ticker, Timer};
 use panic_probe as _;
@@ -94,6 +94,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         &KICKER_TX_UART_QUEUE,
         p.PA8,
         p.PA9,
+        Pull::Up,
         true
     );
 
