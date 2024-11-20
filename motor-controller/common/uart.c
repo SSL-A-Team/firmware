@@ -63,10 +63,14 @@ void uart_wait_for_transmission() {
     while (uart_is_transmit_dma_pending());
 }
 
-bool uart_transmit(uint8_t *data_buf, uint16_t len) {
+void uart_transmit(uint8_t *data_buf, uint16_t len) {
     if (!ioq_write(&uart_tx_queue, data_buf, len)) {
-        // Queue is either full or the data length is invalid.
-        return false;
+        // Queue is either full or the length is too long.
+        uart_logging_status = UART_LOGGING_UART_TX_BUFFER_FULL;
+        if (len > IOQ_BUF_LENGTH) {
+            uart_logging_status = UART_LOGGING_UART_TX_SIZE_MISMATCH;
+        }
+        return;
     }
 
     // dma transmission isn't in progress to keep scheduling dma writes
@@ -74,8 +78,6 @@ bool uart_transmit(uint8_t *data_buf, uint16_t len) {
     if (!uart_is_transmit_dma_pending()) {
         _uart_start_transmit_dma();
     }
-
-    return true;
 }
 
 void _uart_start_transmit_dma() {
@@ -125,8 +127,21 @@ void uart_discard() {
     }
 }
 
-bool uart_read(void *dest, uint16_t len, uint16_t* num_bytes_read) {
-    return ioq_read(&uart_rx_queue, dest, len, num_bytes_read);
+void uart_clear_logging_status() {
+    uart_logging_status = UART_LOGGING_OK;
+}
+
+void uart_read(void *dest, uint16_t len) {
+    uint16_t num_bytes_to_read = 0;
+    if (!ioq_read(&uart_rx_queue, dest, len, &num_bytes_to_read)) {
+        // Can fail from empty queue or size mismatch.
+        uart_logging_status = UART_LOGGING_UART_RX_BUFFER_EMPTY;
+        // If the size number of bytes to read is not zero and
+        // not matching, then we have a size mismatch.
+        if (num_bytes_to_read != 0 && len != num_bytes_to_read) {
+            uart_logging_status = UART_LOGGING_UART_RX_SIZE_MISMATCH;
+        }
+    }
 }
 
 void _uart_start_receive_dma() {
@@ -166,6 +181,10 @@ void _uart_receive_dma(bool parity_error) {
         if (!ioq_finalize_peek_write(&uart_rx_queue)) {
             uart_logging_status = UART_LOGGING_UART_RX_BUFFER_FULL;
         }
+    } else {
+        // If we have a parity error, we can just overwrite the queue
+        // with the next packet.
+        uart_logging_status = UART_LOGGING_UART_RX_PARITY_ERROR;
     }
 
     // Get the NEXT buffer for the DMA to write into.

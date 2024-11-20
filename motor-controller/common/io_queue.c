@@ -110,14 +110,18 @@ bool ioq_finalize_peek_write(IoQueue_t *q) {
 //  READING  //
 ///////////////
 
-bool ioq_read(IoQueue_t *q, void *dest, uint16_t len, uint16_t* num_bytes_read) {
+bool ioq_read(IoQueue_t *q, void *dest, uint16_t len, uint16_t* num_bytes_to_read) {
     // Can't read an empty queue.
     if (ioq_is_empty(q)) {
         return false;
     }
 
     uint16_t cpy_num_bytes = q->backing_sto[q->read_ind].len;
-    // Intended read size is smaller than intended.
+    // Updates the number of bytes to read so we can tell
+    // that we didn't have length to read the full packet.
+    *num_bytes_to_read = cpy_num_bytes;
+
+    // Intended read size is smaller than storage contents.
     if (len < cpy_num_bytes) {
         return false;
     }
@@ -130,7 +134,6 @@ bool ioq_read(IoQueue_t *q, void *dest, uint16_t len, uint16_t* num_bytes_read) 
     q->size--;
     __enable_irq();
 
-    *num_bytes_read = cpy_num_bytes;
     return true;
 }
 
