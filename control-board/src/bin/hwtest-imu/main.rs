@@ -89,7 +89,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                         defmt::warn!("publishing accel data lagged by {}", amnt);
                     }
                     WaitResult::Message(msg) => {
-                        defmt::info!("got accel data (x: {}, y: {}, z: {})", msg[1], msg[1], msg[2]);
+                        defmt::info!("got accel data (x: {}, y: {}, z: {})", msg[0], msg[1], msg[2]);
 
                     }
                 }

@@ -60,7 +60,10 @@ pub struct ControlTask<
     battery_subscriber: BatteryVoltSubscriber,
     last_battery_v: f32,
     gyro_subscriber: GyroDataSubscriber,
+    accel_subscriber: AccelDataSubscriber,
     last_gyro_rads: f32,
+    last_accel_x_ms: f32,
+    last_accel_y_ms: f32,
     telemetry_publisher: TelemetryPublisher,
     
     motor_fl: WheelMotor<'static, MotorFLUart, MotorFLDmaRx, MotorFLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
@@ -83,6 +86,7 @@ impl <
                 telemetry_publisher: TelemetryPublisher,
                 battery_subscriber: BatteryVoltSubscriber,
                 gyro_subscriber: GyroDataSubscriber,
+                accel_subscriber: AccelDataSubscriber,
                 motor_fl: WheelMotor<'static, MotorFLUart, MotorFLDmaRx, MotorFLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
                 motor_bl: WheelMotor<'static, MotorBLUart, MotorBLDmaRx, MotorBLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
                 motor_br: WheelMotor<'static, MotorBRUart, MotorBRDmaRx, MotorBRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
@@ -96,7 +100,10 @@ impl <
                 battery_subscriber: battery_subscriber,
                 last_battery_v: 0.0,
                 gyro_subscriber: gyro_subscriber,
+                accel_subscriber: accel_subscriber,
                 last_gyro_rads: 0.0,
+                last_accel_x_ms: 0.0,
+                last_accel_y_ms: 0.0,
                 motor_fl: motor_fl, 
                 motor_bl: motor_bl,
                 motor_br: motor_br,
@@ -185,6 +192,8 @@ impl <
             control_debug_telem.motor_bl.wheel_torque = self.motor_bl.read_hall_vel();
             control_debug_telem.motor_br.wheel_torque = self.motor_br.read_hall_vel();
             control_debug_telem.motor_fr.wheel_torque = self.motor_fr.read_hall_vel();
+            control_debug_telem.imu_accel[0] = self.last_accel_x_ms;
+            control_debug_telem.imu_accel[1] = self.last_accel_y_ms;
 
             let control_debug_telem = TelemetryPacket::Control(control_debug_telem);
             self.telemetry_publisher.publish_immediate(control_debug_telem);
@@ -294,6 +303,11 @@ impl <
 
                 while let Some(gyro_rads) = self.gyro_subscriber.try_next_message_pure() {
                     self.last_gyro_rads = gyro_rads[2];
+                }
+
+                while let Some(accel_ms) = self.accel_subscriber.try_next_message_pure() {
+                    self.last_accel_x_ms = accel_ms[0];
+                    self.last_accel_y_ms = accel_ms[1];
                 }
                 
                 let controls_enabled = true;
@@ -437,6 +451,7 @@ pub async fn start_control_task(
     telemetry_publisher: TelemetryPublisher,
     battery_subscriber: BatteryVoltSubscriber,
     gyro_subscriber: GyroDataSubscriber,
+    accel_subscriber: AccelDataSubscriber,
     motor_fl_uart: MotorFLUart, motor_fl_rx_pin: MotorFLUartRxPin, motor_fl_tx_pin: MotorFLUartTxPin, motor_fl_rx_dma: MotorFLDmaRx, motor_fl_tx_dma: MotorFLDmaTx, motor_fl_boot0_pin: MotorFLBootPin, motor_fl_nrst_pin: MotorFLResetPin,
     motor_bl_uart: MotorBLUart, motor_bl_rx_pin: MotorBLUartRxPin, motor_bl_tx_pin: MotorBLUartTxPin, motor_bl_rx_dma: MotorBLDmaRx, motor_bl_tx_dma: MotorBLDmaTx, motor_bl_boot0_pin: MotorBLBootPin, motor_bl_nrst_pin: MotorBLResetPin,
     motor_br_uart: MotorBRUart, motor_br_rx_pin: MotorBRUartRxPin, motor_br_tx_pin: MotorBRUartTxPin, motor_br_rx_dma: MotorBRDmaRx, motor_br_tx_dma: MotorBRDmaTx, motor_br_boot0_pin: MotorBRBootPin, motor_br_nrst_pin: MotorBRResetPin,
@@ -484,7 +499,7 @@ pub async fn start_control_task(
 
     let control_task = ControlTask::new(
         robot_state, command_subscriber, telemetry_publisher, battery_subscriber,
-        gyro_subscriber, motor_fl, motor_bl, motor_br, motor_fr, motor_drib);
+        gyro_subscriber, accel_subscriber, motor_fl, motor_bl, motor_br, motor_fr, motor_drib);
 
     control_task_spawner.spawn(control_task_entry(control_task)).unwrap();
 }

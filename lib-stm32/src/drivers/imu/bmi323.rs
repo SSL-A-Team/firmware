@@ -423,31 +423,29 @@ impl<'a, 'buf>
         [buf[0] as i16, buf[1] as i16, buf[2] as i16]
     }
 
-    pub fn accel_range_mg(&self) -> f32 {
+    pub fn accel_range_scale(&self) -> f32 {
         match self.accel_range {
-            AccelRange::Range2g => 2000.0,
-            AccelRange::Range4g => 4000.0,
-            AccelRange::Range8g => 8000.0,
-            AccelRange::Range16g => 16000.0,
+            AccelRange::Range2g => 2.0,
+            AccelRange::Range4g => 4.0,
+            AccelRange::Range8g => 8.0,
+            AccelRange::Range16g => 16.0,
         }
     }
 
-    pub fn convert_accel_raw_sample_mg(&self, raw_sample: i16) -> f32 {
-        let conversion_num = self.accel_range_mg();
-
-        raw_sample as f32 * (conversion_num / i16::MAX as f32)
+    pub fn convert_accel_raw_sample_g(&self, raw_sample: i16) -> f32 {
+        (raw_sample as f32 / i16::MAX as f32) * self.accel_range_scale()
     }
 
     pub fn convert_accel_raw_sample_mps(&self, raw_sample: i16) -> f32 {
-        self.convert_accel_raw_sample_mg(raw_sample) / 1000.0 * 9.80665
+        self.convert_accel_raw_sample_g(raw_sample) * 9.80665
     }
 
-    pub async fn accel_get_data_mg(&mut self) -> [f32; 3] {
+    pub async fn accel_get_data_g(&mut self) -> [f32; 3] {
         let raw_data = self.accel_get_raw_data().await;
 
-        return [self.convert_accel_raw_sample_mg(raw_data[0]),
-            self.convert_accel_raw_sample_mg(raw_data[1]),
-            self.convert_accel_raw_sample_mg(raw_data[2])]
+        return [self.convert_accel_raw_sample_g(raw_data[0]),
+            self.convert_accel_raw_sample_g(raw_data[1]),
+            self.convert_accel_raw_sample_g(raw_data[2])]
     }
 
     pub async fn accel_get_data_mps(&mut self) -> [f32; 3] {
