@@ -1,6 +1,9 @@
-use ateam_common_packets::bindings_radio::{ParameterCommandCode::*, ParameterName};
-use ateam_common_packets::bindings_radio::ParameterDataFormat::{PID_LIMITED_INTEGRAL_F32, VEC3_F32, VEC4_F32};
-use ateam_common_packets::bindings_radio::ParameterName::{VEL_PID_X, RC_BODY_VEL_LIMIT, RC_BODY_ACC_LIMIT, VEL_PID_Y, ANGULAR_VEL_PID_Z, VEL_CGKF_ENCODER_NOISE, VEL_CGKF_PROCESS_NOISE, VEL_CGKF_GYRO_NOISE, VEL_CGFK_INITIAL_COVARIANCE, VEL_CGKF_K_MATRIX, RC_WHEEL_ACC_LIMIT};
+use ateam_common_packets::bindings::{
+    ParameterCommandCode::*,
+    ParameterName,
+    ParameterDataFormat::{PID_LIMITED_INTEGRAL_F32, VEC3_F32, VEC4_F32},
+    ParameterName::{VEL_PID_X, RC_BODY_VEL_LIMIT, RC_BODY_ACC_LIMIT, VEL_PID_Y, ANGULAR_VEL_PID_Z, VEL_CGKF_ENCODER_NOISE, VEL_CGKF_PROCESS_NOISE, VEL_CGKF_GYRO_NOISE, VEL_CGFK_INITIAL_COVARIANCE, VEL_CGKF_K_MATRIX, RC_WHEEL_ACC_LIMIT}};
+use ateam_common_packets::radio::get_motor_response_motion_packet;
 use nalgebra::{SVector, Vector3, Vector4, Vector5};
 use crate::parameter_interface::ParameterInterface;
 
@@ -18,9 +21,9 @@ use super::params::body_vel_pid_params::{
     BODY_VEL_LIM, BODY_ACC_LIM, BODY_DEACC_LIM, WHEEL_ACC_LIM
 };
 
-use ateam_common_packets::bindings_radio::{
+use ateam_common_packets::bindings::{
     ControlDebugTelemetry,
-    MotorDebugTelemetry, ParameterCommand
+    ParameterCommand
 };
 
 // TODO find some general numeric type trait(s) for D
@@ -66,26 +69,10 @@ impl<'a> BodyVelocityController<'a> {
             prev_output: Vector3::zeros(),
             cmd_wheel_velocities: Vector4::zeros(),
             debug_telemetry: ControlDebugTelemetry { 
-                motor_fl: MotorDebugTelemetry { 
-                    wheel_setpoint: 0.0,
-                    wheel_velocity: 0.0,
-                    wheel_torque: 0.0
-                },
-                motor_bl: MotorDebugTelemetry { 
-                    wheel_setpoint: 0.0,
-                    wheel_velocity: 0.0,
-                    wheel_torque: 0.0
-                },
-                motor_br: MotorDebugTelemetry { 
-                    wheel_setpoint: 0.0,
-                    wheel_velocity: 0.0,
-                    wheel_torque: 0.0
-                },
-                motor_fr: MotorDebugTelemetry { 
-                    wheel_setpoint: 0.0,
-                    wheel_velocity: 0.0,
-                    wheel_torque: 0.0
-                },
+                motor_fl: get_motor_response_motion_packet(),
+                motor_bl: get_motor_response_motion_packet(),
+                motor_br: get_motor_response_motion_packet(),
+                motor_fr: get_motor_response_motion_packet(),
                 imu_gyro: [0.0, 0.0, 0.0],
                 imu_accel: [0.0, 0.0, 0.0],
                 commanded_body_velocity: [0.0, 0.0, 0.0],
@@ -126,26 +113,10 @@ impl<'a> BodyVelocityController<'a> {
             prev_output: Vector3::zeros(),
             cmd_wheel_velocities: Vector4::zeros(),
             debug_telemetry: ControlDebugTelemetry { 
-                motor_fl: MotorDebugTelemetry { 
-                    wheel_setpoint: 0.0,
-                    wheel_velocity: 0.0,
-                    wheel_torque: 0.0
-                },
-                motor_bl: MotorDebugTelemetry { 
-                    wheel_setpoint: 0.0,
-                    wheel_velocity: 0.0,
-                    wheel_torque: 0.0
-                },
-                motor_br: MotorDebugTelemetry { 
-                    wheel_setpoint: 0.0,
-                    wheel_velocity: 0.0,
-                    wheel_torque: 0.0
-                },
-                motor_fr: MotorDebugTelemetry { 
-                    wheel_setpoint: 0.0,
-                    wheel_velocity: 0.0,
-                    wheel_torque: 0.0
-                },
+                motor_fl: get_motor_response_motion_packet(),
+                motor_bl: get_motor_response_motion_packet(),
+                motor_br: get_motor_response_motion_packet(),
+                motor_fr: get_motor_response_motion_packet(),
                 imu_gyro: [0.0, 0.0, 0.0],
                 imu_accel: [0.0, 0.0, 0.0],
                 commanded_body_velocity: [0.0, 0.0, 0.0],
@@ -162,14 +133,7 @@ impl<'a> BodyVelocityController<'a> {
         // Assign telemetry data
         // TODO pass all of the gyro data up, not just theta
         self.debug_telemetry.imu_gyro[2] = gyro_theta;
-        self.debug_telemetry.motor_fl.wheel_torque = wheel_torques[0];
-        self.debug_telemetry.motor_bl.wheel_torque = wheel_torques[1];
-        self.debug_telemetry.motor_br.wheel_torque = wheel_torques[2];
-        self.debug_telemetry.motor_fr.wheel_torque = wheel_torques[3];
-        self.debug_telemetry.motor_fl.wheel_velocity = wheel_velocities[0];
-        self.debug_telemetry.motor_bl.wheel_velocity = wheel_velocities[1];
-        self.debug_telemetry.motor_br.wheel_velocity = wheel_velocities[2];
-        self.debug_telemetry.motor_fr.wheel_velocity = wheel_velocities[3];
+        
         self.debug_telemetry.commanded_body_velocity.copy_from_slice(body_vel_setpoint.as_slice());
 
         let measurement: Vector5<f32> = Vector5::new(wheel_velocities[0], wheel_velocities[1], wheel_velocities[2], wheel_velocities[3], gyro_theta);

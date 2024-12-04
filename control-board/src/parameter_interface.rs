@@ -1,5 +1,5 @@
-use ateam_common_packets::bindings_radio::ParameterCommand;
-use ateam_common_packets::bindings_radio::ParameterName;
+use ateam_common_packets::bindings::ParameterCommand;
+use ateam_common_packets::bindings::ParameterName;
 
 pub trait ParameterInterface {
     fn processes_cmd(&self, param_cmd: &ParameterCommand) -> bool;

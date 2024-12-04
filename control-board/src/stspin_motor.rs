@@ -9,7 +9,7 @@ use embassy_stm32::{
 use embassy_time::{Duration, Timer};
 use nalgebra::Vector3;
 
-use ateam_common_packets::bindings_stspin::{
+use ateam_common_packets::bindings::{
     MotorCommandPacket,
     MotorCommandPacketType::MCP_MOTION,
     MotorCommand_MotionType,
@@ -288,6 +288,10 @@ impl<
         self.reset_flagged = false;
     }
 
+    pub fn get_latest_state(&self) -> MotorResponse_Motion_Packet {
+        self.current_state
+    }
+
     pub fn set_motion_type(&mut self, motion_type: MotorCommand_MotionType::Type) {
         self.motion_type = motion_type;
     }
@@ -334,10 +338,6 @@ impl<
 
     pub fn read_vel_computed_setpoint(&self) -> f32 {
         return self.current_state.vel_computed_setpoint;
-    }
-
-    pub fn read_hall_vel(&self) -> f32 {
-        return self.current_state.vel_hall_estimate;
     }
 }
 
@@ -575,6 +575,10 @@ impl<
                 }
             }
         }
+    }
+
+    pub fn get_latest_state(&self) -> MotorResponse_Motion_Packet {
+        self.current_state
     }
 
     pub fn log_reset(&self, motor_id: &str) {

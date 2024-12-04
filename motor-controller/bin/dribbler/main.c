@@ -217,10 +217,10 @@ int main() {
             u_torque_loop = torque_setpoint;
 
             // torque control data
-            response_packet.data.motion.current_setpoint = r;
-            response_packet.data.motion.current_estimate = cur_measurement;
-            response_packet.data.motion.current_computed_error = torque_pid.prev_err;
-            response_packet.data.motion.current_computed_setpoint = torque_setpoint;
+            response_packet.data.motion.torque_setpoint = r;
+            response_packet.data.motion.torque_estimate = cur_measurement;
+            response_packet.data.motion.torque_computed_error = torque_pid.prev_err;
+            response_packet.data.motion.torque_computed_setpoint = torque_setpoint;
         }
 
         if (run_torque_loop) {
@@ -263,8 +263,6 @@ int main() {
             // loop time
             response_packet.data.motion.control_loop_time_error = slipped_control_frame_count > 10;
 
-            // timestamp
-            response_packet.data.motion.timestamp = time_local_epoch_s();
 
             // master error
             response_packet.data.motion.master_error = response_packet.data.motion.hall_power_error

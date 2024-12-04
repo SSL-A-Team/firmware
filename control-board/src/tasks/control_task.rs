@@ -1,4 +1,4 @@
-use ateam_common_packets::{bindings_radio::BasicTelemetry, bindings_stspin::MotorCommand_MotionType, radio::TelemetryPacket};
+use ateam_common_packets::{bindings::{BasicTelemetry, MotorCommand_MotionType}, radio::TelemetryPacket};
 use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::Uart;
@@ -188,10 +188,12 @@ impl <
             self.telemetry_publisher.publish_immediate(basic_telem);
 
             let mut control_debug_telem = robot_controller.get_control_debug_telem();
-            control_debug_telem.motor_fl.wheel_torque = self.motor_fl.read_hall_vel();
-            control_debug_telem.motor_bl.wheel_torque = self.motor_bl.read_hall_vel();
-            control_debug_telem.motor_br.wheel_torque = self.motor_br.read_hall_vel();
-            control_debug_telem.motor_fr.wheel_torque = self.motor_fr.read_hall_vel();
+
+            control_debug_telem.motor_fl = self.motor_fl.get_latest_state();
+            control_debug_telem.motor_bl = self.motor_bl.get_latest_state();
+            control_debug_telem.motor_br = self.motor_br.get_latest_state();
+            control_debug_telem.motor_fr = self.motor_fr.get_latest_state();
+
             control_debug_telem.imu_accel[0] = self.last_accel_x_ms;
             control_debug_telem.imu_accel[1] = self.last_accel_y_ms;
 

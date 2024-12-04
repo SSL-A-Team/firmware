@@ -4,7 +4,7 @@ use embassy_time::{Duration, Timer};
 
 use crate::stm32_interface::Stm32Interface;
 
-use ateam_common_packets::bindings_kicker::{KickerControl, KickerTelemetry, KickRequest};
+use ateam_common_packets::bindings::{KickerControl, KickerTelemetry, KickRequest};
 
 pub struct Kicker<
     'a,
