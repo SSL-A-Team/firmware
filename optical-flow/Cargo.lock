@@ -52,7 +52,7 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "defmt",
- "defmt-rtt",
+ "defmt-rtt 0.3.1",
  "embassy-executor 0.5.1",
  "embassy-futures",
  "embassy-stm32",
@@ -367,6 +367,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "defmt-rtt"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bab697b3dbbc1750b7c8b821aa6f6e7f2480b47a99bc057a2ed7b170ebef0c51"
+dependencies = [
+ "critical-section",
+ "defmt",
+]
+
+[[package]]
 name = "defmt-test"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -473,6 +483,9 @@ dependencies = [
 name = "embassy-futures"
 version = "0.1.1"
 source = "git+https://github.com/embassy-rs/embassy#406d377b7564d16e12b7fae4f42c0c709bf4f243"
+dependencies = [
+ "defmt",
+]
 
 [[package]]
 name = "embassy-hal-internal"
@@ -996,7 +1009,7 @@ dependencies = [
  "credentials",
  "critical-section",
  "defmt",
- "defmt-rtt",
+ "defmt-rtt 0.4.1",
  "defmt-test",
  "embassy-executor 0.6.3",
  "embassy-futures",
