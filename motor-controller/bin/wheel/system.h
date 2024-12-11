@@ -1,12 +1,12 @@
 /**
  * @file system.h
  * @author Will Stuckey
- * @brief 
+ * @brief
  * @version 0.1
  * @date 2022-05-22
- * 
+ *
  * @copyright Copyright (c) 2022
- * 
+ *
  */
 
 #pragma once
@@ -48,3 +48,5 @@
 #define MOTOR_MAXIMUM_ACCEL 6000 // rad/s^2
 
 // #define MOTOR_MAXIMUM_RAD_S 550.825911929f
+
+//#define COMP_MODE

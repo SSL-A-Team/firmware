@@ -133,7 +133,7 @@ impl<
         } else {
             self.reset_pin.set_high();
         }
-        Timer::after(Duration::from_millis(50)).await;
+        Timer::after(Duration::from_millis(10)).await;
     }
 
     pub async fn hard_reset(&mut self) {

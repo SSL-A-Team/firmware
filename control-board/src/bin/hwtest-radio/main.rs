@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use ateam_common_packets::{bindings_radio::{BasicTelemetry, ParameterCommandCode}, radio::{DataPacket, TelemetryPacket}};
+use ateam_common_packets::{bindings::{BasicTelemetry, ParameterCommandCode}, radio::{DataPacket, TelemetryPacket}};
 use embassy_executor::InterruptExecutor;
 use embassy_futures::select::{self, Either};
 use embassy_stm32::{
@@ -9,7 +9,7 @@ use embassy_stm32::{
 };
 use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 
-use defmt_rtt as _; 
+use defmt_rtt as _;
 
 use ateam_control_board::{create_io_task, create_radio_task, get_system_config, pins::{BatteryVoltPubSub, CommandsPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
 
