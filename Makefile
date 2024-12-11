@@ -159,6 +159,43 @@ control-board--clean: kicker-board--clean motor-controller--clean
 	cd control-board && \
 	cargo clean
 
+##########################
+#  Opticalflow Binaries  #
+##########################
+
+.PHONY: optical-flow-all
+opticalflow_binaries := ${shell cd optical-flow/src/bin && ls -d * && cd ../../..}
+# opticalflow_openocd_cfg_file := board/st_nucleo_h429zi.cfg
+opticalflow_openocd_cfg_file := board/stm32f429discovery.cfg
+
+define create-optical-flow-rust-targets
+$1-$2:
+	cd $1/ && \
+	cargo build --release --bin $2
+optical-flow-all:: $1-$2
+
+$1-$2-run:
+	cd $1/ && \
+	cargo run --release --bin $2
+
+$1-$2-prog: $1-$2
+	./util/program.sh $3 $1/target/thumbv7em-none-eabihf/release/$2
+
+$1-$2-debug:
+	cd $1/ && \
+	cargo build --bin $2
+optical-flow-all:: $1-$2-debug
+
+$1-$2-debug-run:
+	cd $1/ && \
+	cargo run --bin $2
+
+$1-$2-debug-prog: $1-$2-debug
+	./util/attach_gdb.sh $3 $1/target/thumbv7em-none-eabihf/debug/$2
+
+endef
+$(foreach element,$(opticalflow_binaries),$(eval $(call create-optical-flow-rust-targets,optical-flow,$(element),$(opticalflow_openocd_cfg_file))))
+
 ##################
 #  meta targets  #
 ##################
@@ -168,7 +205,7 @@ control:: control-board--control--run
 
 .PHONY: all
 .DEFAULT_GOAL := all
-all:: kicker-board--all motor-controller--all control-board--all
+all:: kicker-board--all motor-controller--all control-board--all optical-flow-all
 
 .PHONY: clean
-clean: software-communication--clean kicker-board--clean motor-controller--clean control-board--clean
+clean: software-communication--clean kicker-board--clean motor-controller--clean control-board--clean optical-flow--clean
