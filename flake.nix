@@ -13,15 +13,15 @@
         "aarch64-darwin"
         "x86_64-darwin"
         "x86_64-linux" ]
-    (system: 
-      let 
+    (system:
+      let
         overlays = [ (import rust-overlay) ];
 
         pkgs = import nixpkgs {
-          inherit system overlays; 
+          inherit system overlays;
         };
 
-        python = "python39";
+        python = "python310";
 
         packageName = "ateam-firmware";
 
@@ -41,7 +41,6 @@
 
             # programmers
             openocd
-            probe-run
 
             # userpsace clang and link vars for bindgen subtargets
             clang
@@ -51,8 +50,8 @@
               extensions = [ "rust-src" "rust-analyzer" ];
               targets = [ "thumbv7em-none-eabihf" "thumbv6m-none-eabi" ];
             }))
+
             # rust-analyzer
-            probe-run
             probe-rs
 
             # Python

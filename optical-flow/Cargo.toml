@@ -50,13 +50,8 @@ nalgebra = { version = "0.32.2", default-features = false, features = [
         "macros",
 ] }
 
-ateam-lib-stm32 = { path = "../lib-stm32", default-features = false  }
+ateam-lib-stm32 = { path = "../lib-stm32", default-features = false }
 ateam-common-packets = { path = "../software-communication/ateam-common-packets/rust-lib" }
-credentials = { path = "../credentials" }
-
-[features]
-default = []
-no-private-credentials = ["credentials/no-private-credentials"]
 
 [dev-dependencies]
 defmt-test = "0.3.0"
