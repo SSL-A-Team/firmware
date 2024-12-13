@@ -47,24 +47,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ateam-lib-stm32"
-version = "0.1.0"
-dependencies = [
- "critical-section",
- "defmt",
- "defmt-rtt 0.3.1",
- "embassy-executor 0.5.1",
- "embassy-futures",
- "embassy-stm32",
- "embassy-sync 0.5.0",
- "embassy-time",
- "heapless",
- "num-traits",
- "paste",
- "smart-leds",
-]
-
-[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -145,12 +127,6 @@ checksum = "44c051592f59fe68053524b4c4935249b806f72c1f544cfb7abe4f57c3be258e"
 dependencies = [
  "aligned",
 ]
-
-[[package]]
-name = "bytemuck"
-version = "1.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b37c88a63ffd85d15b406896cc343916d7cf57838a847b3a6f2ca5d39a5695a"
 
 [[package]]
 name = "byteorder"
@@ -354,16 +330,6 @@ dependencies = [
 
 [[package]]
 name = "defmt-rtt"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "757110fd3748162dddbea88854529888a7e9e36929058118efe06f9f88d93b64"
-dependencies = [
- "cortex-m",
- "defmt",
-]
-
-[[package]]
-name = "defmt-rtt"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bab697b3dbbc1750b7c8b821aa6f6e7f2480b47a99bc057a2ed7b170ebef0c51"
@@ -417,7 +383,7 @@ source = "git+https://github.com/embassy-rs/embassy#406d377b7564d16e12b7fae4f42c
 dependencies = [
  "defmt",
  "embassy-futures",
- "embassy-sync 0.6.1",
+ "embassy-sync",
  "embassy-time",
  "embedded-hal 0.2.7",
  "embedded-hal 1.0.0",
@@ -429,17 +395,6 @@ dependencies = [
 
 [[package]]
 name = "embassy-executor"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3d8701436bf0dc453703175459805045d049bf7404df7a68e59d05c7fbd1f04"
-dependencies = [
- "critical-section",
- "document-features",
- "embassy-executor-macros 0.4.2",
-]
-
-[[package]]
-name = "embassy-executor"
 version = "0.6.3"
 source = "git+https://github.com/embassy-rs/embassy#406d377b7564d16e12b7fae4f42c0c709bf4f243"
 dependencies = [
@@ -447,21 +402,9 @@ dependencies = [
  "critical-section",
  "defmt",
  "document-features",
- "embassy-executor-macros 0.6.2",
+ "embassy-executor-macros",
  "embassy-time-driver",
  "embassy-time-queue-driver",
-]
-
-[[package]]
-name = "embassy-executor-macros"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b11dfbb15afc12c4171ac6e2994567c00881f61a0c13ada4429028a3c7f425f"
-dependencies = [
- "darling",
- "proc-macro2",
- "quote",
- "syn 2.0.90",
 ]
 
 [[package]]
@@ -522,7 +465,7 @@ dependencies = [
  "embassy-futures",
  "embassy-hal-internal",
  "embassy-net-driver",
- "embassy-sync 0.6.1",
+ "embassy-sync",
  "embassy-time",
  "embassy-time-driver",
  "embassy-usb-driver",
@@ -547,19 +490,6 @@ dependencies = [
  "stm32-metapac",
  "vcell",
  "volatile-register",
-]
-
-[[package]]
-name = "embassy-sync"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd938f25c0798db4280fcd8026bf4c2f48789aebf8f77b6e5cf8a7693ba114ec"
-dependencies = [
- "cfg-if",
- "critical-section",
- "embedded-io-async",
- "futures-util",
- "heapless",
 ]
 
 [[package]]
@@ -622,7 +552,7 @@ source = "git+https://github.com/embassy-rs/embassy#406d377b7564d16e12b7fae4f42c
 dependencies = [
  "critical-section",
  "defmt",
- "embassy-sync 0.6.1",
+ "embassy-sync",
  "embassy-usb-driver",
 ]
 
@@ -998,18 +928,17 @@ name = "optical-flow"
 version = "0.1.0"
 dependencies = [
  "ateam-common-packets",
- "ateam-lib-stm32",
  "const_format",
  "cortex-m",
  "cortex-m-rt",
  "critical-section",
  "defmt",
- "defmt-rtt 0.4.1",
+ "defmt-rtt",
  "defmt-test",
- "embassy-executor 0.6.3",
+ "embassy-executor",
  "embassy-futures",
  "embassy-stm32",
- "embassy-sync 0.6.1",
+ "embassy-sync",
  "embassy-time",
  "futures-util",
  "heapless",
@@ -1143,15 +1072,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
-name = "rgb"
-version = "0.8.50"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57397d16646700483b67d2dd6511d79318f9d057fdbd21a4066aeac8b41d310a"
-dependencies = [
- "bytemuck",
-]
-
-[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1216,24 +1136,6 @@ dependencies = [
  "num-complex",
  "num-traits",
  "paste",
-]
-
-[[package]]
-name = "smart-leds"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66df34e571fa9993fa6f99131a374d58ca3d694b75f9baac93458fe0d6057bf0"
-dependencies = [
- "smart-leds-trait",
-]
-
-[[package]]
-name = "smart-leds-trait"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bc64ee02bbbf469603016df746c0ed224f263280b6ebb49b7ebadbff375c572"
-dependencies = [
- "rgb",
 ]
 
 [[package]]

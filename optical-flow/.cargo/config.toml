@@ -1,8 +1,8 @@
 [build]
-target = "thumbv7em-none-eabihf"
+target = "thumbv6em-none-eabi"
 
-[target.thumbv7em-none-eabihf]
-runner = 'probe-rs --chip STM32F429ZITx --connect-under-reset'
+[target.thumbv6em-none-eabi]
+runner = 'probe-rs --chip STM32G071RBTx --connect-under-reset'
 
 [env]
 DEFMT_LOG = "trace"
