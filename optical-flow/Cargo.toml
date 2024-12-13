@@ -38,6 +38,8 @@ defmt-rtt = "0.4"
 cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7.1"
 
+portable-atomic = { version = "1.5", features = ["unsafe-assume-single-core"] }
+
 static_cell = "2.1.0"
 futures-util = { version = "0.3.30", default-features = false }
 panic-probe = { version = "0.3", features = ["print-defmt"] }

@@ -1,6 +1,6 @@
 {
     // tell rust-analyzer which ABI this crate targets
-    "rust-analyzer.cargo.target": "thumbv7em-none-eabihf",
+    "rust-analyzer.cargo.target": "thumbv6m-none-eabi",
     "rust-analyzer.linkedProjects": [
         "optical-flow/Cargo.toml"]
 }
