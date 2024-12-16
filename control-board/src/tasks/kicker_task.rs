@@ -33,7 +33,7 @@ macro_rules! create_kicker_task {
             &$wifi_credentials,
             $p.USART10, $p.PE2, $p.PE3, $p.PG13, $p.PG14,
             $p.DMA2_CH1, $p.DMA2_CH0,
-            $p.PC13, $p.PE4).await; 
+            $p.PC13, $p.PE4).await;
     };
 }
 
@@ -112,12 +112,12 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
             if self.kicker_task_state == KickerTaskState::Connected && Instant::checked_duration_since(&cur_time, last_packet_sent_time).unwrap().as_millis() > TELEMETRY_TIMEOUT_MS {
                 defmt::error!("Kicker telemetry timed out! Will reset.");
                 self.kicker_driver.reset().await;
-                // Have a small delay for bring up to prevent boot looping. 
+                // Have a small delay for bring up to prevent boot looping.
                 Timer::after_millis(1000).await;
                 // Capture packet time to just in case UART is getting set up.
                 // TODO Remove this and actually get timing on bring up tuned in.
                 last_packet_sent_time = Instant::now();
-            } 
+            }
 
             // TODO global state overrides of kicker state
             // e.g. external shutdown requsts, battery votlage, etc

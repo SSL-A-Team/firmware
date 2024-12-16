@@ -108,11 +108,11 @@ async fn imu_task_entry(
             
                     // read accel data
                     // TODO: don't use raw data, impl conversion
-                    let accel_data = imu.accel_get_raw_data().await;
+                    let accel_data = imu.accel_get_data_mps().await;
                     accel_pub.publish_immediate(Vector3::new(accel_data[0] as f32, accel_data[1] as f32, accel_data[2] as f32));
 
                     // TODO: magic number, fix after raw data conversion
-                    if accel_data[2] < 8000 {
+                    if accel_data[2] < 4.0 {
                         if !first_tipped_seen {
                             // If it's the first time a tipping occured, start tracking.
                             first_tipped_seen = true;

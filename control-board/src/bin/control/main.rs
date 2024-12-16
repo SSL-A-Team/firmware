@@ -96,6 +96,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let imu_accel_data_publisher = ACCEL_DATA_CHANNEL.publisher().unwrap();
 
     let control_gyro_data_subscriber = GYRO_DATA_CHANNEL.subscriber().unwrap();
+    let control_accel_data_subscriber = ACCEL_DATA_CHANNEL.subscriber().unwrap();
 
     ///////////////////
     //  start tasks  //
@@ -129,7 +130,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     start_control_task(
         uart_queue_spawner, main_spawner, 
         robot_state, 
-        control_command_subscriber, control_telemetry_publisher, battery_volt_subscriber, control_gyro_data_subscriber,
+        control_command_subscriber, control_telemetry_publisher, battery_volt_subscriber, control_gyro_data_subscriber, control_accel_data_subscriber,
         p.UART4, p.PA1, p.PA0, p.DMA1_CH3, p.DMA1_CH2, p.PC1, p.PC0,
         p.UART7, p.PF6, p.PF7, p.DMA1_CH5, p.DMA1_CH4, p.PF8, p.PF9,
         p.UART8, p.PE0, p.PE1, p.DMA1_CH7, p.DMA1_CH6, p.PB9, p.PB8,

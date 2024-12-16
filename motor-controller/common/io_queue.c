@@ -1,4 +1,4 @@
-
+#include <stm32f031x6.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -18,6 +18,14 @@ void _increment_read_ind(IoQueue_t *q) {
     q->read_ind = (q->read_ind + 1) % IOQ_BUF_DEPTH;
 }
 
+void _decrement_write_ind(IoQueue_t *q) {
+    q->write_ind = (q->write_ind - 1) % IOQ_BUF_DEPTH;
+}
+
+void _decrement_read_ind(IoQueue_t *q) {
+    q->read_ind = (q->read_ind - 1) % IOQ_BUF_DEPTH;
+}
+
 ////////////////////////
 //  PUBLIC FUNCTIONS  //
 ////////////////////////
@@ -32,57 +40,68 @@ void ioq_initialize(IoQueue_t *q) {
     }
 }
 
-bool ioq_empty(IoQueue_t *q) {
+bool ioq_is_empty(IoQueue_t *q) {
     return (q->size == 0);
 }
 
-bool ioq_full(IoQueue_t *q) {
+bool ioq_is_full(IoQueue_t *q) {
     return (q->size == IOQ_BUF_DEPTH);
 }
 
-uint8_t ioq_cur_size(IoQueue_t *q) {
+uint8_t ioq_get_cur_size(IoQueue_t *q) {
     return (q->size);
 }
 
 bool ioq_write(IoQueue_t *q, uint8_t *buf, uint16_t len) {
-    if (ioq_full(q)) {
+    // Can't add to a full queue.
+    if (ioq_is_full(q)) {
         return false;
     }
 
+    // Can't write longer than our buffer size.
     if (len > IOQ_BUF_LENGTH) {
         return false;
     }
 
-    q->backing_sto[q->write_ind].len = len;
+    // Do copy first and then set the length to confirm data
+    // is valid in the buffer.
     memcpy(q->backing_sto[q->write_ind].buf, buf, len);
+    q->backing_sto[q->write_ind].len = len;
 
+    // Critical. A packet can be removed from the queue between assigning size. Should be fast.
+    __disable_irq();
     q->size++;
+    __enable_irq();
+
     _increment_write_ind(q);
 
     return true;
 }
 
-bool ioq_peek_write(IoQueue_t *q, IoBuf_t **buf) {
-    if (ioq_full(q)) {
-        return false;
+void ioq_peek_write(IoQueue_t *q, IoBuf_t **buf) {
+    if (ioq_is_full(q)) {
+        // If the queue is full, discard the back to maintain
+        // order and minimize data loss.
+        ioq_discard_write_back(q);
     }
 
+    // Gets the pointer for the next buffer to write to.
     *buf = &q->backing_sto[q->write_ind];
-
-    return true;
 }
 
-bool ioq_finalize_peek_write(IoQueue_t *q, IoBuf_t *buf) {
-    if (ioq_full(q)) {
+bool ioq_finalize_peek_write(IoQueue_t *q) {
+    // Can't add to a full queue.
+    if (ioq_is_full(q)) {
+        // Tried to clear with the peek write, so if still
+        // full probably filling too fast.
         return false;
     }
 
-    // if (buf != &q->backing_sto[q->write_ind]) {
-    //     return false;
-    // }
-
     _increment_write_ind(q);
+    // Critical. A packet can be removed from the queue between assigning size. Should be fast.
+    __disable_irq();
     q->size++;
+    __enable_irq();
 
     return true;
 }
@@ -91,55 +110,66 @@ bool ioq_finalize_peek_write(IoQueue_t *q, IoBuf_t *buf) {
 //  READING  //
 ///////////////
 
-uint8_t ioq_read(IoQueue_t *q, void *dest, uint8_t len) {
-    if (ioq_empty(q)) {
-        return 0;
-    }
-
-    uint8_t cpy_num_bytes = q->backing_sto[q->read_ind].len; 
-    if (len < cpy_num_bytes) {
-        return 0;
-    }
-
-    memcpy(dest, q->backing_sto[q->read_ind].buf, cpy_num_bytes);
-
-    _increment_read_ind(q);
-    q->size--;
-
-    return cpy_num_bytes;
-}
-
-bool ioq_peek_read(IoQueue_t *q, IoBuf_t **dest) {
-    if (ioq_empty(q)) {
+bool ioq_read(IoQueue_t *q, void *dest, uint16_t len, uint16_t* num_bytes_to_read) {
+    // Can't read an empty queue.
+    if (ioq_is_empty(q)) {
         return false;
     }
 
+    uint16_t cpy_num_bytes = q->backing_sto[q->read_ind].len;
+    // Updates the number of bytes to read so we can tell
+    // that we didn't have length to read the full packet.
+    *num_bytes_to_read = cpy_num_bytes;
+
+    // Intended read size is smaller than storage contents.
+    if (len < cpy_num_bytes) {
+        return false;
+    }
+
+    memcpy(dest, q->backing_sto[q->read_ind].buf, cpy_num_bytes);
+    _increment_read_ind(q);
+
+    // Critical. A packet can be added to the queue between assigning size. Should be fast.
+    __disable_irq();
+    q->size--;
+    __enable_irq();
+
+    return true;
+}
+
+bool ioq_peek_read(IoQueue_t *q, IoBuf_t **dest) {
+    // Can't read an empty queue.
+    if (ioq_is_empty(q)) {
+        return false;
+    }
+
+    // Gets the pointer for the next buffer to be read from.
     *dest = &q->backing_sto[q->read_ind];
 
     return true;
 }
 
 bool ioq_finalize_peek_read(IoQueue_t *q, IoBuf_t *dest) {
-    if (ioq_empty(q)) {
+    // Can't read an empty queue.
+    if (ioq_is_empty(q)) {
         return false;
     }
 
-    // looks like the hardware might actually increment the
-    // mem addr, so we can't do this comparison without additional
-    // storage and idt that's worth it
-    // if (dest != &q->backing_sto[q->read_ind]) {
-    //     return false;
-    // }
-
     _increment_read_ind(q);
+    // This is probably fine without disable since called from interrupt with high enough
+    // priority, but just to be safe.
+    __disable_irq();
     q->size--;
+    __enable_irq();
 
     return true;
 }
 
-void ioq_discard(IoQueue_t *q) {
-    while (q->size != 0) {
-        _increment_read_ind(q);
-        q->size--;
-    }
+void ioq_discard_write_back(IoQueue_t *q) {
+    // Critical. Should be quick but we don't want to infinite loop with
+    // additions and decrements.
+    __disable_irq();
+    _decrement_write_ind(q);
+    q->size--;
+    __enable_irq();
 }

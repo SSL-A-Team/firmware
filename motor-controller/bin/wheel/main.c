@@ -1,12 +1,12 @@
 /**
  * @file main.c
  * @author your name (you@domain.com)
- * @brief 
+ * @brief
  * @version 0.1
  * @date 2022-04-10
- * 
+ *
  * @copyright Copyright (c) 2022
- * 
+ *
  */
 
 #include <stm32f031x6.h>
@@ -16,6 +16,7 @@
 
 #include "ateam-common-packets/include/stspin.h"
 
+#include "debug.h"
 #include "6step.h"
 #include "conversions.h"
 #include "current_sensing.h"
@@ -38,14 +39,13 @@ int main() {
     RCC->CSR |= RCC_CSR_RMVF;
 
     // turn off LEDs
-    GPIOB->BSRR |= GPIO_BSRR_BR_6;
-    GPIOB->BSRR |= GPIO_BSRR_BR_7;
-    GPIOB->BSRR |= GPIO_BSRR_BR_8;
+    turn_off_red_led();
+    turn_off_yellow_led();
+    turn_off_green_led();
 
-    // turn on Red/Yl LED
-    GPIOB->BSRR |= GPIO_BSRR_BS_6;
-    GPIOB->BSRR |= GPIO_BSRR_BS_8;
-
+    // turn on Red/Yellow LED
+    turn_on_red_led();
+    turn_on_yellow_led();
 
     // Setups clocks
     setup();
@@ -76,32 +76,24 @@ int main() {
     quadenc_setup();
     quadenc_reset_encoder_delta();
 
-    // pwm6step_set_duty_cycle_f(0.05f);
-
-    // while (1) {
-    //     IWDG->KR = 0x0000AAAA; // feed the watchdog
-    // }
-
-    MotorCommandPacket motor_command_packet;
-    memset(&motor_command_packet, 0, sizeof(MotorCommandPacket));
-
+    // Initialized response_packet here to capture the reset method.
     MotorResponsePacket response_packet;
     memset(&response_packet, 0, sizeof(MotorResponsePacket));
 
-    response_packet.data.motion.reset_watchdog_independent = rcc_csr & RCC_CSR_IWDGRSTF != 0;
-    response_packet.data.motion.reset_watchdog_window = rcc_csr & RCC_CSR_WWDGRSTF != 0;
-    response_packet.data.motion.reset_low_power = rcc_csr & RCC_CSR_LPWRRSTF != 0;
-    response_packet.data.motion.reset_software = rcc_csr & RCC_CSR_SFTRSTF != 0;
-    response_packet.data.motion.reset_pin = rcc_csr & RCC_CSR_PINRSTF != 0;
+    response_packet.data.motion.reset_watchdog_independent = (rcc_csr & RCC_CSR_IWDGRSTF) != 0;
+    response_packet.data.motion.reset_watchdog_window = (rcc_csr & RCC_CSR_WWDGRSTF) != 0;
+    response_packet.data.motion.reset_low_power = (rcc_csr & RCC_CSR_LPWRRSTF) != 0;
+    response_packet.data.motion.reset_software = (rcc_csr & RCC_CSR_SFTRSTF) != 0;
+    response_packet.data.motion.reset_pin = (rcc_csr & RCC_CSR_PINRSTF) != 0;
 
     bool params_return_packet_requested = false;
 
     // setup the loop rate regulators
     SyncTimer_t vel_loop_timer;
-    SyncTimer_t torque_loop_timer;
-    SyncTimer_t telemetry_timer;
     time_sync_init(&vel_loop_timer, VELOCITY_LOOP_RATE_MS);
+    SyncTimer_t torque_loop_timer;
     time_sync_init(&torque_loop_timer, TORQUE_LOOP_RATE_MS);
+    SyncTimer_t telemetry_timer;
     time_sync_init(&telemetry_timer, TELEMETRY_LOOP_RATE_MS);
 
     // setup the velocity filter
@@ -113,7 +105,7 @@ int main() {
 
     // set the default command mode to open loop (no PID)
     MotorCommand_MotionType motion_control_type = OPEN_LOOP;
-    
+
     // define the control points the loops use to interact
     float r_motor_board = 0.0f;
     float control_setpoint_vel_duty = 0.0f;
@@ -161,9 +153,13 @@ int main() {
 
     torque_pid_constants.kP = 1.0f;
 
-    // turn off Red/Yl
-    GPIOB->BSRR |= GPIO_BSRR_BR_6;
-    GPIOB->BSRR |= GPIO_BSRR_BR_8;
+    // Turn off Red/Yellow LED after booting.
+    turn_off_red_led();
+    turn_off_yellow_led();
+
+    // UART logging status.
+    uart_logging_status_t uart_logging_status_receive;
+    uart_logging_status_t uart_logging_status_send;
 
     // toggle J1-1
     while (true) {
@@ -175,32 +171,52 @@ int main() {
 
         // process all available packets
         while (uart_can_read()) {
-            uint8_t bytes_moved = uart_read(&motor_command_packet, sizeof(MotorCommandPacket));
-            if (bytes_moved != sizeof(MotorCommandPacket)) {
-                // something went wrong, just purge all of the data
+            // Make a new packet and clear out before reading
+            // in the new data.
+            MotorCommandPacket motor_command_packet;
+            memset(&motor_command_packet, 0, sizeof(MotorCommandPacket));
+
+            // Read in the new packet data.
+            uart_read(&motor_command_packet, sizeof(MotorCommandPacket));
+
+            // If something goes wrong with the UART, we need to flag it.
+            if (uart_logging_status != UART_LOGGING_OK) {
+                // Capture the status of the UART.
+                uart_logging_status_receive = uart_logging_status;
+
+                // If something went wrong, just purge all of the data.
                 uart_discard();
 
+                // Go through the loop again to get the next packet.
                 continue;
+            } else {
+                // If we are in COMP_MODE, don't latch the status
+                // and clear it out if we get UART working.
+                #ifdef COMP_MODE
+                uart_logging_status_receive = UART_LOGGING_OK;
+                #endif
             }
 
-            if (motor_command_packet.type == MCP_MOTION) {
+            // Clear the logging for the next UART transmit / receive.
+            uart_clear_logging_status();
 
-                // we got a motion packet!
+            if (motor_command_packet.type == MCP_MOTION) {
+                // We got a motion packet!
                 ticks_since_last_command_packet = 0;
 
-                if (motor_command_packet.data.motion.reset) {
-                    // TODO handle hardware reset
-
-                    // while (true); // block, hardware reset flagged
-                }
+                //if (motor_command_packet.data.motion.reset) {
+                //    // Block, watchdog will trigger reset.
+                //
+                //    while (true);
+                //}
 
                 telemetry_enabled = motor_command_packet.data.motion.enable_telemetry;
                 r_motor_board = motor_command_packet.data.motion.setpoint;
                 motion_control_type = motor_command_packet.data.motion.motion_control_type;
             } else if (motor_command_packet.type == MCP_PARAMS) {
-                // a params update is issued (or the upstream just wants to readback current params)
+                // a params update is issued (or the upstream just wants to read back current params)
 
-                // everytime a params packet is received, we echo back the current params state
+                // Every time a params packet is received, we echo back the current params state
                 params_return_packet_requested = true;
 
                 if (motor_command_packet.data.params.update_timestamp) {
@@ -248,35 +264,25 @@ int main() {
         }
 #endif
 
-        // if upstream isn't listening or its been too long since we got a command packet, turn off the motor
-        if (!telemetry_enabled) {
+        // Coast motor based on failure states.
+        if (!telemetry_enabled ||
+            ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS ||
+            response_packet.data.motion.master_error ||
+            uart_logging_status_receive != UART_LOGGING_OK) {
+            // If telemetry is disabled, that means the upstream
+            // isn't ready.
+            // If we haven't received a command packet in a while,
+            // that means the upstream isn't ready or locked up.
+            // If we have a master error, means the motor is in a bad state.
+            // If we have a UART error, means something happened coming down
+            // stream from the upstream or something locally went wrong.
             r_motor_board = 0.0f;
-            GPIOB->BSRR |= GPIO_BSRR_BR_7;
-        } else {
-            GPIOB->BSRR |= GPIO_BSRR_BS_7;
         }
-        
-        if (ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
-            r_motor_board = 0.0f;
-            // Error pin enable.
-            GPIOB->BSRR |= GPIO_BSRR_BS_8;
-            // HACK Will force the watchdog to trigger. 
-            while(true);
-        } else {
-            GPIOB->BSRR |= GPIO_BSRR_BR_8;
-        }
-
-        // if any critical error is latched, coast the motor
-        if (response_packet.data.motion.master_error) {
-            r_motor_board = 0.0f;
-            // Error pin enable.
-            GPIOB->BSRR |= GPIO_BSRR_BS_7;
-        } 
 
         // determine which loops need to be run
         bool run_torque_loop = time_sync_ready_rst(&torque_loop_timer);
         bool run_vel_loop = time_sync_ready_rst(&vel_loop_timer);
-        bool run_telemtry = time_sync_ready_rst(&telemetry_timer);
+        bool run_telemetry = time_sync_ready_rst(&telemetry_timer);
 
         // run the torque loop if applicable
         if (run_torque_loop) {
@@ -290,7 +296,7 @@ int main() {
             // filter torque
             measured_torque_Nm = iir_filter_update(&torque_filter, measured_torque_Nm);
 
-            // TODO: add filter? 
+            // TODO: add filter?
 
             // correct torque sign from recovered velocity
             // TODO: this should probably be acceleration based not velocity
@@ -321,11 +327,11 @@ int main() {
 
             // load data frame
             // torque control data
-            response_packet.data.motion.current_setpoint = r_Nm;
-            // response_packet.data.motion.current_estimate = current_sense_I;
-            response_packet.data.motion.current_estimate = measured_torque_Nm;
-            response_packet.data.motion.current_computed_error = torque_pid.prev_err;
-            response_packet.data.motion.current_computed_setpoint = torque_setpoint_Nm;
+            response_packet.data.motion.torque_setpoint = r_Nm;
+            response_packet.data.motion.current_estimate = current_sense_I;
+            response_packet.data.motion.torque_estimate = measured_torque_Nm;
+            response_packet.data.motion.torque_computed_error = torque_pid.prev_err;
+            response_packet.data.motion.torque_computed_setpoint = torque_setpoint_Nm;
         }
 
         // run velocity loop if applicable
@@ -337,10 +343,10 @@ int main() {
 
             // filter the recovered velocity
             enc_rad_s_filt = iir_filter_update(&encoder_filter, enc_vel_rads);
-        
-            // compute the velcoity PID
+
+            // compute the velocity PID
             control_setpoint_vel_rads = pid_calculate(&vel_pid, r_motor_board, enc_rad_s_filt, VELOCITY_LOOP_RATE_S);
-            
+
             // Clamp setpoint acceleration
             float setpoint_accel_rads_2 = (control_setpoint_vel_rads - control_setpoint_vel_rads_prev)/VELOCITY_LOOP_RATE_S;
             if (setpoint_accel_rads_2 > MOTOR_MAXIMUM_ACCEL) {
@@ -357,13 +363,12 @@ int main() {
 
             // velocity control data
             response_packet.data.motion.vel_setpoint = r_motor_board;
+            response_packet.data.motion.vel_setpoint_clamped = control_setpoint_vel_rads;
             response_packet.data.motion.encoder_delta = enc_delta;
             response_packet.data.motion.vel_enc_estimate = enc_rad_s_filt;
-            response_packet.data.motion.vel_hall_estimate = control_setpoint_vel_rads;
             response_packet.data.motion.vel_computed_error = vel_pid.prev_err;
             response_packet.data.motion.vel_computed_setpoint = control_setpoint_vel_duty;
         }
-
 
         if (run_torque_loop || run_vel_loop) {
             // detect if the encoder is not pulling the detect pin down
@@ -374,7 +379,6 @@ int main() {
                 float r_motor = mm_rads_to_dc(&df45_model, r_motor_board);
                 response_packet.data.motion.vel_setpoint = r_motor_board;
                 response_packet.data.motion.vel_computed_setpoint = r_motor;
-                response_packet.data.motion.vel_hall_estimate = r_motor_board;
                 pwm6step_set_duty_cycle_f(r_motor);
             } else if (motion_control_type == VELOCITY) {
                 pwm6step_set_duty_cycle_f(control_setpoint_vel_duty);
@@ -411,7 +415,7 @@ int main() {
             response_packet.data.motion.torque_limited = false;
 
             // loop time
-            response_packet.data.motion.control_loop_time_error = false;
+            response_packet.data.motion.control_loop_time_error = slipped_control_frame_count > 10;
 
             // master error
             response_packet.data.motion.master_error = response_packet.data.motion.hall_power_error
@@ -427,18 +431,28 @@ int main() {
                     || response_packet.data.motion.overvoltage_error
                     || response_packet.data.motion.control_loop_time_error;
 
-            // timestamp
-            response_packet.data.motion.timestamp = time_local_epoch_s();
-
             // transmit packets
 #ifdef UART_ENABLED
-            // GPIOB->BSRR |= GPIO_BSRR_BS_8;
+            // If previous UART transmit is still occurring,
+            // wait for it to finish.
             uart_wait_for_transmission();
             // takes ~270uS, mostly hardware DMA
-            if (run_telemtry) {            
+            if (run_telemetry) {
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
+                // Capture the status for the response packet / LED.
+                if (uart_logging_status != UART_LOGGING_OK) {
+                    uart_logging_status_send = uart_logging_status;
+                } else {
+                    // If we are in COMP_MODE, don't latch the status if
+                    // we are able to send a packet successfully later.
+                    #ifdef COMP_MODE
+                    uart_logging_status_send = UART_LOGGING_OK;
+                    #endif
+                }
+
+                // Clear the logging for the next UART transmit / receive.
+                uart_clear_logging_status();
             }
-            // GPIOB->BSRR |= GPIO_BSRR_BR_8;
 #endif
 
             if (params_return_packet_requested) {
@@ -463,18 +477,66 @@ int main() {
 
 #ifdef UART_ENABLED
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
+                // Capture the status for the response packet / LED.
+                if (uart_logging_status != UART_LOGGING_OK) {
+                    uart_logging_status_send = uart_logging_status;
+                } else {
+                    // If we are in COMP_MODE, don't latch the status if
+                    // we are able to send a packet successfully later.
+                    #ifdef COMP_MODE
+                    uart_logging_status_send = UART_LOGGING_OK;
+                    #endif
+                }
+
+                // Clear the logging for the next UART transmit / receive.
+                uart_clear_logging_status();
 #endif
             }
         }
 
         // limit loop rate to smallest time step
         if (sync_systick()) {
+            // Track if we are slipping control frames.
             slipped_control_frame_count++;
         }
 
-        if (slipped_control_frame_count > 10) {
-            // Error pin enable.
-            GPIOB->BSRR |= GPIO_BSRR_BS_6;
+        // Set all status LEDs
+
+        // Red LED means we are in an error state.
+        // This latches and requires resetting the robot to clear.
+        if (response_packet.data.motion.master_error ||
+            (telemetry_enabled && ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS)) {
+            turn_on_red_led();
         }
+
+        // Yellow LED means we are in an warning state.
+        // Will clear if resolved.
+        if (uart_logging_status_receive != UART_LOGGING_OK ||
+            uart_logging_status_send != UART_LOGGING_OK) {
+            turn_on_yellow_led();
+        } else {
+            turn_off_yellow_led();
+        }
+
+        // Green LED means we are able to send telemetry upstream.
+        // This means the upstream sent a packet downstream with telemetry enabled.
+        if (!telemetry_enabled) {
+            turn_off_green_led();
+        } else {
+            turn_on_green_led();
+        }
+
+        #ifdef COMP_MODE
+        if (telemetry_enabled &&
+            ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
+            // If have telemetry enabled (meaning we at one
+            // point received a message from upstream) and haven't
+            // received a command packet in a while, we need to reset
+            // the system when in COMP_MODE.
+            // This is a safety feature to prevent the robot from
+            // running away if the upstream controller locks up.
+            while (true);
+        }
+        #endif
     }
 }

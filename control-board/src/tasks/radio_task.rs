@@ -1,5 +1,5 @@
 
-use ateam_common_packets::{bindings_radio::BasicTelemetry, radio::TelemetryPacket};
+use ateam_common_packets::{bindings::BasicTelemetry, radio::TelemetryPacket};
 use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_signals, queue_pair_rx_task, queue_pair_tx_task, uart::queue::{UartReadQueue, UartWriteQueue}};
 use credentials::WifiCredential;
 use embassy_executor::{SendSpawner, Spawner};
@@ -30,7 +30,7 @@ macro_rules! create_radio_task {
 
 pub const RADIO_LOOP_RATE_MS: u64 = 10;
 
-pub const RADIO_MAX_TX_PACKET_SIZE: usize = 256;
+pub const RADIO_MAX_TX_PACKET_SIZE: usize = 320;
 pub const RADIO_TX_BUF_DEPTH: usize = 4;
 pub const RADIO_MAX_RX_PACKET_SIZE: usize = 256;
 pub const RADIO_RX_BUF_DEPTH: usize = 4;

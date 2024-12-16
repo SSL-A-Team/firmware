@@ -49,5 +49,7 @@ fn generate_pitch_from_reference(ref_pitch: u16, semitones: i8) -> u16{
 fn main() {
     let a4 = 440;
     let pitch_set = generate_pitch_set(a4, 2, 2);
-    write_pitches_to_file(pitch_set);
+    // TODO compare contents, only write if different
+    // invalidates build caches and makes build times high
+    // write_pitches_to_file(pitch_set);
 }

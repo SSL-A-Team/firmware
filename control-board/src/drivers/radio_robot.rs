@@ -1,6 +1,6 @@
 use ateam_lib_stm32::drivers::radio::odin_w26x::{PeerConnection, OdinW262, WifiAuth};
 use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
-use ateam_common_packets::bindings_radio::{
+use ateam_common_packets::bindings::{
     self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data, BasicTelemetry, ControlDebugTelemetry, ParameterCommand,
 };
 use ateam_common_packets::radio::DataPacket;
@@ -356,8 +356,8 @@ impl<
     pub async fn send_ack(&self, nack: bool) -> Result<(), ()> {
         let packet = RadioPacket {
             crc32: 0,
-            major_version: bindings_radio::kProtocolVersionMajor,
-            minor_version: bindings_radio::kProtocolVersionMinor,
+            major_version: bindings::kProtocolVersionMajor,
+            minor_version: bindings::kProtocolVersionMinor,
             command_code: if nack {
                 CommandCode::CC_NACK
             } else {
@@ -399,16 +399,16 @@ impl<
     pub async fn send_hello(&self, id: u8, team: TeamColor) -> Result<(), ()> {
         let packet = RadioPacket {
             crc32: 0,
-            major_version: bindings_radio::kProtocolVersionMajor,
-            minor_version: bindings_radio::kProtocolVersionMinor,
+            major_version: bindings::kProtocolVersionMajor,
+            minor_version: bindings::kProtocolVersionMinor,
             command_code: CommandCode::CC_HELLO_REQ,
             data_length: size_of::<HelloRequest>() as u16,
             data: RadioPacket_Data {
                 hello_request: HelloRequest {
                     robot_id: id,
                     color: match team {
-                        TeamColor::Yellow => bindings_radio::TeamColor::TC_YELLOW,
-                        TeamColor::Blue => bindings_radio::TeamColor::TC_BLUE,
+                        TeamColor::Yellow => bindings::TeamColor::TC_YELLOW,
+                        TeamColor::Blue => bindings::TeamColor::TC_BLUE,
                     },
                 },
             },
@@ -428,8 +428,8 @@ impl<
     pub async fn send_telemetry(&self, telemetry: BasicTelemetry) -> Result<(), ()> {
         let packet = RadioPacket {
             crc32: 0,
-            major_version: bindings_radio::kProtocolVersionMajor,
-            minor_version: bindings_radio::kProtocolVersionMinor,
+            major_version: bindings::kProtocolVersionMajor,
+            minor_version: bindings::kProtocolVersionMinor,
             command_code: CommandCode::CC_TELEMETRY,
             data_length: size_of::<BasicTelemetry>() as u16,
             data: RadioPacket_Data {
@@ -451,8 +451,8 @@ impl<
     pub async fn send_control_debug_telemetry(&self, telemetry: ControlDebugTelemetry) -> Result<(), ()> {
         let packet = RadioPacket {
             crc32: 0,
-            major_version: bindings_radio::kProtocolVersionMajor,
-            minor_version: bindings_radio::kProtocolVersionMinor,
+            major_version: bindings::kProtocolVersionMajor,
+            minor_version: bindings::kProtocolVersionMinor,
             command_code: CommandCode::CC_CONTROL_DEBUG_TELEMETRY,
             data_length: size_of::<ControlDebugTelemetry>() as u16,
             data: RadioPacket_Data {
@@ -474,8 +474,8 @@ impl<
     pub async fn send_parameter_response(&self, parameter_cmd: ParameterCommand) -> Result<(), ()> {
         let packet = RadioPacket {
             crc32: 0,
-            major_version: bindings_radio::kProtocolVersionMajor,
-            minor_version: bindings_radio::kProtocolVersionMinor,
+            major_version: bindings::kProtocolVersionMajor,
+            minor_version: bindings::kProtocolVersionMinor,
             command_code: CommandCode::CC_ROBOT_PARAMETER_COMMAND,
             data_length: size_of::<ParameterCommand>() as u16,
             data: RadioPacket_Data {

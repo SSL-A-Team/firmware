@@ -34,7 +34,7 @@ use ateam_kicker_board::{
 use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
 use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
 
-use ateam_common_packets::bindings_kicker::{KickerControl, KickerTelemetry, KickRequest};
+use ateam_common_packets::bindings::{KickerControl, KickerTelemetry, KickRequest};
 
 const MAX_TX_PACKET_SIZE: usize = 16;
 const TX_BUF_DEPTH: usize = 3;

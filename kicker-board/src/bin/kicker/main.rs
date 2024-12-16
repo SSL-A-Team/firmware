@@ -35,7 +35,7 @@ use ateam_kicker_board::{
 use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
 use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
 
-use ateam_common_packets::bindings_kicker::{
+use ateam_common_packets::bindings::{
     KickRequest::{self, KR_ARM, KR_DISABLE},
     KickerControl, KickerTelemetry,
 };

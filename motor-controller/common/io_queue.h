@@ -14,14 +14,16 @@
 
 typedef struct IoBuf {
     uint8_t buf[IOQ_BUF_LENGTH];
-    volatile uint8_t len;
+    // u16 is underlying register size.
+    volatile uint16_t len;
 } IoBuf_t;
 
 typedef struct IoQueue {
     volatile uint8_t size;
     volatile uint8_t read_ind;
     volatile uint8_t write_ind;
-
+    // Holders are u8, so protect against bigger.
+    _Static_assert(IOQ_BUF_DEPTH < 255);
     IoBuf_t backing_sto[IOQ_BUF_DEPTH];
 } IoQueue_t;
 
@@ -31,15 +33,15 @@ typedef struct IoQueue {
 
 void ioq_initialize(IoQueue_t *q);
 
-bool ioq_empty(IoQueue_t *q);
-bool ioq_full(IoQueue_t *q);
-uint8_t ioq_cur_size(IoQueue_t *q);
+bool ioq_is_empty(IoQueue_t *q);
+bool ioq_is_full(IoQueue_t *q);
+uint8_t ioq_get_cur_size(IoQueue_t *q);
 
 bool ioq_write(IoQueue_t *q, uint8_t *buf, uint16_t len);
-bool ioq_peek_write(IoQueue_t *q, IoBuf_t **buf);
-bool ioq_finalize_peek_write(IoQueue_t *q, IoBuf_t *buf);
+void ioq_peek_write(IoQueue_t *q, IoBuf_t **buf);
+bool ioq_finalize_peek_write(IoQueue_t *q);
 
-uint8_t ioq_read(IoQueue_t *q, void *dest, uint8_t len);
+bool ioq_read(IoQueue_t *q, void *dest, uint16_t len, uint16_t *num_bytes_read);
 bool ioq_peek_read(IoQueue_t *q, IoBuf_t **dest);
 bool ioq_finalize_peek_read(IoQueue_t *q, IoBuf_t *dest);
-void ioq_discard(IoQueue_t *q);
+void ioq_discard_write_back(IoQueue_t *q);

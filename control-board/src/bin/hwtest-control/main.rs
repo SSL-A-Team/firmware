@@ -1,14 +1,14 @@
 #![no_std]
 #![no_main]
 
-use ateam_common_packets::{bindings_kicker::KickRequest, bindings_radio::BasicControl, radio::DataPacket};
+use ateam_common_packets::{bindings::KickRequest, bindings::BasicControl, radio::DataPacket};
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
     interrupt, pac::Interrupt
 };
 use embassy_sync::pubsub::PubSubChannel;
 
-use defmt_rtt as _; 
+use defmt_rtt as _;
 
 use ateam_control_board::{
     create_audio_task, create_imu_task, create_io_task, create_radio_task, create_shutdown_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::{control_task::start_control_task, kicker_task::start_kicker_task}};
@@ -99,6 +99,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let imu_accel_data_publisher = ACCEL_DATA_CHANNEL.publisher().unwrap();
 
     let control_gyro_data_subscriber = GYRO_DATA_CHANNEL.subscriber().unwrap();
+    let control_accel_data_subscriber = ACCEL_DATA_CHANNEL.subscriber().unwrap();
+
 
     ///////////////////
     //  start tasks  //
@@ -130,9 +132,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p);
 
     start_control_task(
-        uart_queue_spawner, main_spawner, 
-        robot_state, 
-        control_command_subscriber, control_telemetry_publisher, battery_volt_subscriber, control_gyro_data_subscriber,
+        uart_queue_spawner, main_spawner,
+        robot_state,
+        control_command_subscriber, control_telemetry_publisher, battery_volt_subscriber, control_gyro_data_subscriber, control_accel_data_subscriber,
         p.UART4, p.PA1, p.PA0, p.DMA1_CH3, p.DMA1_CH2, p.PC1, p.PC0,
         p.UART7, p.PF6, p.PF7, p.DMA1_CH5, p.DMA1_CH4, p.PF8, p.PF9,
         p.UART8, p.PE0, p.PE1, p.DMA1_CH7, p.DMA1_CH6, p.PB9, p.PB8,
@@ -157,8 +159,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             vel_y_linear: 0.0,
             vel_z_angular: 0.0,
             kick_vel: 0.0,
-            dribbler_speed: -0.1, 
-            kick_request: KickRequest::KR_ARM, 
+            dribbler_speed: -0.1,
+            kick_request: KickRequest::KR_ARM,
         }));
     }
 }
