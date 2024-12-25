@@ -1,14 +1,15 @@
 use core::{mem::MaybeUninit, f32::consts::PI};
 
+use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
 use defmt::*;
 use embassy_stm32::{
-    gpio::Pin,
+    gpio::{Pin, Pull},
     usart::{self, Parity},
 };
 use embassy_time::{Duration, Timer};
 use nalgebra::Vector3;
 
-use ateam_common_packets::bindings_stspin::{
+use ateam_common_packets::bindings::{
     MotorCommandPacket,
     MotorCommandPacketType::MCP_MOTION,
     MotorCommand_MotionType,
@@ -22,15 +23,13 @@ use crate::stm32_interface::Stm32Interface;
 
 pub struct WheelMotor<
     'a,
-    UART: usart::BasicInstance,
+    UART: usart::Instance,
     DmaRx: usart::RxDma<UART>,
     DmaTx: usart::TxDma<UART>,
     const LEN_RX: usize,
     const LEN_TX: usize,
     const DEPTH_RX: usize,
     const DEPTH_TX: usize,
-    Boot0Pin: Pin,
-    ResetPin: Pin,
 > {
     stm32_uart_interface: Stm32Interface<
         'a,
@@ -41,8 +40,6 @@ pub struct WheelMotor<
         LEN_TX,
         DEPTH_RX,
         DEPTH_TX,
-        Boot0Pin,
-        ResetPin,
     >,
     firmware_image: &'a [u8],
 
@@ -66,16 +63,14 @@ pub struct WheelMotor<
 
 impl<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         DmaRx: usart::RxDma<UART>,
         DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
         const LEN_TX: usize,
         const DEPTH_RX: usize,
         const DEPTH_TX: usize,
-        Boot0Pin: Pin,
-        ResetPin: Pin,
-    > WheelMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin>
+    > WheelMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
 {
     pub fn new(
         stm32_interface: Stm32Interface<
@@ -87,12 +82,49 @@ impl<
             LEN_TX,
             DEPTH_RX,
             DEPTH_TX,
-            Boot0Pin,
-            ResetPin,
         >,
         firmware_image: &'a [u8],
-    ) -> WheelMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin>
+    ) -> WheelMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
     {
+        let start_state: MotorResponse_Motion_Packet =
+            { unsafe { MaybeUninit::zeroed().assume_init() } };
+
+        let start_params_state: MotorResponse_Params_Packet =
+            { unsafe { MaybeUninit::zeroed().assume_init() } };
+
+        WheelMotor {
+            stm32_uart_interface: stm32_interface,
+            firmware_image,
+
+            version_major: 0,
+            version_minor: 0,
+            version_patch: 0,
+            current_state: start_state,
+            current_params_state: start_params_state,
+            vel_pid_constants: Vector3::new(0.0, 0.0, 0.0),
+            vel_pid_i_max: 0.0,
+            torque_pid_constants: Vector3::new(0.0, 0.0, 0.0),
+            torque_pid_i_max: 0.0,
+            torque_limit: 0.0,
+
+            setpoint: 0.0,
+            motion_type: OPEN_LOOP,
+            reset_flagged: false,
+            telemetry_enabled: false,
+        }
+    }
+
+    pub fn new_from_pins(
+        read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        boot0_pin: impl Pin,
+        reset_pin: impl Pin,
+        firmware_image: &'a [u8],
+    ) -> WheelMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
+    {
+        // Need a Pull None to allow for STSPIN watchdog usage.
+        let stm32_interface = Stm32Interface::new_from_pins(read_queue, write_queue, boot0_pin, reset_pin, Pull::None, false);
+
         let start_state: MotorResponse_Motion_Packet =
             { unsafe { MaybeUninit::zeroed().assume_init() } };
 
@@ -142,15 +174,9 @@ impl<
         // this is safe because load firmware image call will reset the target device
         // it will begin issueing telemetry updates
         // these are the only packets it sends so any blocked process should get the data it now needs
-        info!("update config");
-        unsafe {
-            self.stm32_uart_interface
-                .update_uart_config(2_000_000, Parity::ParityEven)
-        };
+        defmt::debug!("Drive Motor - Update config");
+        self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
         Timer::after(Duration::from_millis(1)).await;
-
-        // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
-        self.stm32_uart_interface.leave_reset().await?;
 
         return res;
     }
@@ -164,7 +190,7 @@ impl<
             let buf = res.data();
 
             if buf.len() != core::mem::size_of::<MotorResponsePacket>() {
-                defmt::warn!("got invalid packet of len {:?} data: {:?}", buf.len(), buf);
+                defmt::warn!("Drive Motor - Got invalid packet of len {:?} (expected {:?}) data: {:?}", buf.len(), core::mem::size_of::<MotorResponsePacket>(), buf);
                 continue;
             }
 
@@ -179,9 +205,9 @@ impl<
                     *state.offset(i as isize) = buf[i];
                 }
 
-                
+
                 // TODO probably do some checksum stuff eventually
-                
+
                 // decode union type, and reinterpret subtype
                 if mrp.type_ == MRP_MOTION {
                     self.current_state = mrp.data.motion;
@@ -191,7 +217,7 @@ impl<
                     // info!("vel enc {:?}", mrp.data.motion.vel_enc_estimate + 0.);
                     // // // info!("vel hall {:?}", mrp.data.motion.vel_hall_estimate + 0.);
                     if mrp.data.motion.master_error() != 0 {
-                        error!("motor error: {:?}", &mrp.data.motion._bitfield_1.get(0, 32));
+                        error!("Drive Motor - Error: {:?}", &mrp.data.motion._bitfield_1.get(0, 32));
                     }
                     // info!("hall_power_error {:?}", mrp.data.motion.hall_power_error());
                     // info!("hall_disconnected_error {:?}", mrp.data.motion.hall_disconnected_error());
@@ -218,19 +244,19 @@ impl<
 
     pub fn log_reset(&self, motor_id: &str) {
         if self.current_state.reset_watchdog_independent() != 0 {
-            defmt::warn!("Motor {} Reset: Watchdog Independent", motor_id);
+            defmt::warn!("Drive Motor {} Reset: Watchdog Independent", motor_id);
         }
         if self.current_state.reset_watchdog_window() != 0 {
-            defmt::warn!("Motor {} Reset: Watchdog Window", motor_id);
+            defmt::warn!("Drive Motor {} Reset: Watchdog Window", motor_id);
         }
         if self.current_state.reset_low_power() != 0 {
-            defmt::warn!("Motor {} Reset: Low Power", motor_id);
+            defmt::warn!("Drive Motor {} Reset: Low Power", motor_id);
         }
         if self.current_state.reset_software() != 0 {
-            defmt::warn!("Motor {} Reset: Software", motor_id);
+            defmt::warn!("Drive Motor {} Reset: Software", motor_id);
         }
         if self.current_state.reset_pin() != 0 {
-            defmt::warn!("Motor {} Reset: Pin", motor_id);
+            defmt::warn!("Drive Motor {} Reset: Pin", motor_id);
         }
     }
 
@@ -241,9 +267,7 @@ impl<
             cmd.type_ = MCP_MOTION;
             cmd.crc32 = 0;
             cmd.data.motion.set_reset(self.reset_flagged as u32);
-            cmd.data
-                .motion
-                .set_enable_telemetry(self.telemetry_enabled as u32);
+            cmd.data.motion.set_enable_telemetry(self.telemetry_enabled as u32);
             cmd.data.motion.motion_control_type = self.motion_type;
             cmd.data.motion.setpoint = self.setpoint;
             //info!("setpoint: {:?}", cmd.data.motion.setpoint);
@@ -257,6 +281,10 @@ impl<
         }
 
         self.reset_flagged = false;
+    }
+
+    pub fn get_latest_state(&self) -> MotorResponse_Motion_Packet {
+        self.current_state
     }
 
     pub fn set_motion_type(&mut self, motion_type: MotorCommand_MotionType::Type) {
@@ -298,19 +326,25 @@ impl<
     pub fn read_rpm(&self) -> f32 {
         return self.current_state.vel_enc_estimate * 60.0 / (2.0 * PI);
     }
+
+    pub fn read_vel_setpoint(&self) -> f32 {
+        return self.current_state.vel_setpoint;
+    }
+
+    pub fn read_vel_computed_setpoint(&self) -> f32 {
+        return self.current_state.vel_computed_setpoint;
+    }
 }
 
 pub struct DribblerMotor<
     'a,
-    UART: usart::BasicInstance,
+    UART: usart::Instance,
     DmaRx: usart::RxDma<UART>,
     DmaTx: usart::TxDma<UART>,
     const LEN_RX: usize,
     const LEN_TX: usize,
     const DEPTH_RX: usize,
     const DEPTH_TX: usize,
-    Boot0Pin: Pin,
-    ResetPin: Pin,
 > {
     stm32_uart_interface: Stm32Interface<
         'a,
@@ -321,8 +355,6 @@ pub struct DribblerMotor<
         LEN_TX,
         DEPTH_RX,
         DEPTH_TX,
-        Boot0Pin,
-        ResetPin,
     >,
     firmware_image: &'a [u8],
 
@@ -348,16 +380,14 @@ pub struct DribblerMotor<
 
 impl<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         DmaRx: usart::RxDma<UART>,
         DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
         const LEN_TX: usize,
         const DEPTH_RX: usize,
         const DEPTH_TX: usize,
-        Boot0Pin: Pin,
-        ResetPin: Pin,
-    > DribblerMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin>
+    > DribblerMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
 {
     pub fn new(
         stm32_interface: Stm32Interface<
@@ -369,13 +399,53 @@ impl<
             LEN_TX,
             DEPTH_RX,
             DEPTH_TX,
-            Boot0Pin,
-            ResetPin,
         >,
         firmware_image: &'a [u8],
         ball_detected_thresh: f32,
-    ) -> DribblerMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin>
+    ) -> DribblerMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
     {
+        let start_state: MotorResponse_Motion_Packet =
+            { unsafe { MaybeUninit::zeroed().assume_init() } };
+
+        let start_params_state: MotorResponse_Params_Packet =
+            { unsafe { MaybeUninit::zeroed().assume_init() } };
+
+        DribblerMotor {
+            stm32_uart_interface: stm32_interface,
+            firmware_image,
+
+            version_major: 0,
+            version_minor: 0,
+            version_patch: 0,
+            current_state: start_state,
+            current_params_state: start_params_state,
+            vel_pid_constants: Vector3::new(0.0, 0.0, 0.0),
+            vel_pid_i_max: 0.0,
+            torque_pid_constants: Vector3::new(0.0, 0.0, 0.0),
+            torque_pid_i_max: 0.0,
+            torque_limit: 0.0,
+
+            setpoint: 0.0,
+            motion_type: OPEN_LOOP,
+            reset_flagged: false,
+            telemetry_enabled: false,
+
+            ball_detected_thresh: ball_detected_thresh,
+        }
+    }
+
+    pub fn new_from_pins(
+        read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        boot0_pin: impl Pin,
+        reset_pin: impl Pin,
+        firmware_image: &'a [u8],
+        ball_detected_thresh: f32,
+    ) -> DribblerMotor<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
+    {
+        // Need a Pull None to allow for STSPIN watchdog usage.
+        let stm32_interface = Stm32Interface::new_from_pins(read_queue, write_queue, boot0_pin, reset_pin, Pull::None, false);
+
         let start_state: MotorResponse_Motion_Packet =
             { unsafe { MaybeUninit::zeroed().assume_init() } };
 
@@ -427,15 +497,12 @@ impl<
         // this is safe because load firmware image call will reset the target device
         // it will begin issueing telemetry updates
         // these are the only packets it sends so any blocked process should get the data it now needs
-        info!("update config");
-        unsafe {
-            self.stm32_uart_interface
-                .update_uart_config(2_000_000, Parity::ParityEven)
-        };
+        defmt::debug!("Dribbler - Update config");
+        self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
         Timer::after(Duration::from_millis(1)).await;
 
         // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
-        self.stm32_uart_interface.leave_reset().await?;
+        self.stm32_uart_interface.leave_reset().await;
 
         return res;
     }
@@ -449,7 +516,7 @@ impl<
             let buf = res.data();
 
             if buf.len() != core::mem::size_of::<MotorResponsePacket>() {
-                defmt::warn!("got invalid packet of len {:?} data: {:?}", buf.len(), buf);
+                defmt::warn!("Dribbler - Got invalid packet of len {:?} (expected {:?}) data: {:?}", buf.len(), core::mem::size_of::<MotorResponsePacket>(), buf);
                 continue;
             }
 
@@ -470,10 +537,10 @@ impl<
                 if mrp.type_ == MRP_MOTION {
                     self.current_state = mrp.data.motion;
 
-                    if mrp.data.motion.master_error() != 0 {
-                        error!("drib error: {:?}", &mrp.data.motion._bitfield_1.get(0, 32));
-                    }
-                 
+                    // if mrp.data.motion.master_error() != 0 {
+                    //     error!("drib error: {:?}", &mrp.data.motion._bitfield_1.get(0, 32));
+                    // }
+
                     // // // info!("{:?}", defmt::Debug2Format(&mrp.data.motion));
                     // // info!("\n");
                     // // // info!("vel set {:?}", mrp.data.motion.vel_setpoint + 0.);
@@ -505,6 +572,10 @@ impl<
         }
     }
 
+    pub fn get_latest_state(&self) -> MotorResponse_Motion_Packet {
+        self.current_state
+    }
+
     pub fn log_reset(&self, motor_id: &str) {
         if self.current_state.reset_watchdog_independent() != 0 {
             defmt::warn!("Dribbler {} Reset: Watchdog Independent", motor_id);
@@ -530,9 +601,7 @@ impl<
             cmd.type_ = MCP_MOTION;
             cmd.crc32 = 0;
             cmd.data.motion.set_reset(self.reset_flagged as u32);
-            cmd.data
-                .motion
-                .set_enable_telemetry(self.telemetry_enabled as u32);
+            cmd.data.motion.set_enable_telemetry(self.telemetry_enabled as u32);
             cmd.data.motion.motion_control_type = self.motion_type;
             cmd.data.motion.setpoint = self.setpoint;
 

@@ -1,154 +1,141 @@
 #![no_std]
 #![no_main]
-#![feature(type_alias_impl_trait)]
-#![feature(async_closure)]
-#![feature(const_mut_refs)]
-#![feature(ptr_metadata)]
 
-use defmt::*;
-use defmt_rtt as _;
-use panic_probe as _;
-
-use static_cell::StaticCell;
-
+use ateam_common_packets::{bindings::{BasicTelemetry, ParameterCommandCode}, radio::{DataPacket, TelemetryPacket}};
+use embassy_executor::InterruptExecutor;
+use embassy_futures::select::{self, Either};
 use embassy_stm32::{
-    self as _,
-    executor::InterruptExecutor,
-    interrupt::{self, InterruptExt},
-    peripherals::{DMA1_CH0, DMA1_CH1, USART2},
-    usart::{self, Uart},
-    time::mhz, gpio::{Input, Pull}
+    interrupt, pac::Interrupt
 };
-use embassy_time::{Duration, Timer};
+use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 
-use ateam_control_board::drivers::radio::{RobotRadio, TeamColor, WifiNetwork};
-use ateam_control_board::queue;
-use ateam_control_board::uart_queue::{UartReadQueue, UartWriteQueue};
+use defmt_rtt as _;
 
-use ateam_common_packets::{bindings_radio::BasicTelemetry, radio::DataPacket};
+use ateam_control_board::{create_io_task, create_radio_task, get_system_config, pins::{BatteryVoltPubSub, CommandsPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
 
 
-static EXECUTOR_UART_QUEUE: StaticCell<InterruptExecutor<interrupt::CEC>> = StaticCell::new();
+// load credentials from correct crate
+#[cfg(not(feature = "no-private-credentials"))]
+use credentials::private_credentials::wifi::wifi_credentials;
+#[cfg(feature = "no-private-credentials")]
+use credentials::public_credentials::wifi::wifi_credentials;
 
-#[link_section = ".axisram.buffers"]
-static mut BUFFERS_TX: [queue::Buffer<256>; 10] = [queue::Buffer::EMPTY; 10];
-static QUEUE_TX: UartWriteQueue<USART2, DMA1_CH0, 256, 10> =
-    UartWriteQueue::new(unsafe { &mut BUFFERS_TX });
+use embassy_time::Timer;
+// provide embedded panic probe
+use panic_probe as _;
+use static_cell::ConstStaticCell;
 
-#[link_section = ".axisram.buffers"]
-static mut BUFFERS_RX: [queue::Buffer<256>; 20] = [queue::Buffer::EMPTY; 20];
-static QUEUE_RX: UartReadQueue<USART2, DMA1_CH1, 256, 20> =
-    UartReadQueue::new(unsafe { &mut BUFFERS_RX });
+static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
+
+static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
+static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
+static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
+
+static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
+
+#[interrupt]
+unsafe fn CEC() {
+    UART_QUEUE_EXECUTOR.on_interrupt();
+}
 
 #[embassy_executor::main]
-async fn main(_spawner: embassy_executor::Spawner) {
-    info!("Startup");
+async fn main(main_spawner: embassy_executor::Spawner) {
+    // init system
+    let sys_config = get_system_config();
+    let p = embassy_stm32::init(sys_config);
 
-    let mut stm32_config: embassy_stm32::Config = Default::default();
-    stm32_config.rcc.hse = Some(mhz(8));
-    stm32_config.rcc.sys_ck = Some(mhz(400));
-    stm32_config.rcc.hclk = Some(mhz(200));
-    stm32_config.rcc.pclk1 = Some(mhz(100));
-    let p = embassy_stm32::init(stm32_config);
+    defmt::info!("embassy HAL configured.");
 
-    // Delay so dotstar can turn on
-    Timer::after(Duration::from_millis(50)).await;
+    let robot_state = ROBOT_STATE.take();
 
-    let config = usart::Config::default();
-    let int = interrupt::take!(USART2);
-    let usart = Uart::new(p.USART2, p.PD6, p.PD5, int, p.DMA1_CH0, p.DMA1_CH1, config);
+    ////////////////////////
+    //  setup task pools  //
+    ////////////////////////
 
-    let (tx, rx) = usart.split();
+    // uart queue executor should be highest priority
+    // NOTE: maybe this should be all DMA tasks? No computation tasks here
+    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CEC, embassy_stm32::interrupt::Priority::P5);
+    let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(Interrupt::CEC);
 
-    let irq = interrupt::take!(CEC);
-    irq.set_priority(interrupt::Priority::P6);
-    let executor = EXECUTOR_UART_QUEUE.init(InterruptExecutor::new(irq));
-    let spawner = executor.start();
-    info!("start");
+    //////////////////////////////////////
+    //  setup inter-task coms channels  //
+    //////////////////////////////////////
 
-    spawner.spawn(QUEUE_RX.spawn_task(rx)).unwrap();
-    spawner.spawn(QUEUE_TX.spawn_task(tx)).unwrap();
+    // commands channel
+    let radio_command_publisher = RADIO_C2_CHANNEL.publisher().unwrap();
+    let mut control_command_subscriber = RADIO_C2_CHANNEL.subscriber().unwrap();
 
-    // let reset = p.PC0;
-    let reset = p.PA3;
-    let mut radio = RobotRadio::new(&QUEUE_RX, &QUEUE_TX, reset).await.unwrap();
+    // telemetry channel
+    let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
+    let radio_telemetry_subscriber = RADIO_TELEMETRY_CHANNEL.subscriber().unwrap();
+
+    let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
 
 
-    /////////////////////
-    // Dip Switch Inputs
-    /////////////////////
-    let dip5 = Input::new(p.PG3, Pull::Down);
-    let dip6 = Input::new(p.PG4, Pull::Down);
+    ///////////////////
+    //  start tasks  //
+    ///////////////////
 
-    let wifi_network = if dip5.is_high() & dip6.is_high() {
-        WifiNetwork::Team
-    } else if dip5.is_low() & dip6.is_high() {
-        WifiNetwork::CompMain
-    } else if dip5.is_high() & dip6.is_low() {
-        WifiNetwork::CompPractice
-    } else {
-        WifiNetwork::Team
-    };
-    
-    info!("radio created");
-    radio.connect_to_network(wifi_network).await.unwrap();
-    info!("radio connected");
+    create_radio_task!(main_spawner, uart_queue_spawner, uart_queue_spawner,
+        robot_state,
+        radio_command_publisher, radio_telemetry_subscriber,
+        wifi_credentials,
+        p);
 
-    radio.open_multicast().await.unwrap();
-    info!("multicast open");
+    create_io_task!(main_spawner, robot_state, battery_volt_publisher, p);
 
     loop {
-        info!("sending hello");
-        radio.send_hello(0, TeamColor::Yellow).await.unwrap();
-        let hello = radio.wait_hello(Duration::from_millis(1000)).await;
+        match select::select(control_command_subscriber.next_message(), Timer::after_millis(1000)).await {
+            Either::First(gyro_data) => {
+                match gyro_data {
+                    WaitResult::Lagged(amnt) => {
+                        defmt::warn!("receiving control packets lagged by {}", amnt);
+                    }
+                    WaitResult::Message(msg) => {
+                        match msg {
+                            DataPacket::BasicControl(_bc) => {
+                                defmt::info!("got command packet");
 
-        match hello {
-            Ok(hello) => {
-                info!(
-                    "recieved hello resp to: {}.{}.{}.{}:{}",
-                    hello.ipv4[0], hello.ipv4[1], hello.ipv4[2], hello.ipv4[3], hello.port
-                );
-                radio.close_peer().await.unwrap();
-                info!("multicast peer closed");
-                radio.open_unicast(hello.ipv4, hello.port).await.unwrap();
-                info!("unicast open");
-                break;
+                                let basic_telem = BasicTelemetry {
+                                    sequence_number: 0,
+                                    robot_revision_major: 0,
+                                    robot_revision_minor: 0,
+                                    battery_level: 0.0,
+                                    battery_temperature: 0.0,
+                                    _bitfield_align_1: [0; 0],
+                                    _bitfield_1: BasicTelemetry::new_bitfield_1(
+                                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                    ),
+                                    motor_0_temperature: 0.0,
+                                    motor_1_temperature: 0.0,
+                                    motor_2_temperature: 0.0,
+                                    motor_3_temperature: 0.0,
+                                    motor_4_temperature: 0.0,
+                                    kicker_charge_level: 0.0
+                                };
+
+                                let pkt_wrapped = TelemetryPacket::Basic(basic_telem);
+                                control_telemetry_publisher.publish(pkt_wrapped).await;
+
+                                defmt::info!("send basic telem resp");
+                            }
+                            DataPacket::ParameterCommand(pc) => {
+                                defmt::info!("got parameter packet");
+
+                                let mut param_resp = pc;
+                                param_resp.command_code = ParameterCommandCode::PCC_ACK;
+
+                                let wrapped_pkt = TelemetryPacket::ParameterCommandResponse(param_resp);
+                                control_telemetry_publisher.publish(wrapped_pkt).await;
+
+                                defmt::info!("sent param resp packet");
+                            }
+                        }
+                    }
+                }
             }
-            Err(_) => {}
-        }
-    }
-
-    let mut seq: u16 = 0;
-    loop {
-        let _ = radio
-            .send_telemetry(BasicTelemetry {
-                sequence_number: seq,
-                robot_revision_major: 0,
-                robot_revision_minor: 0,
-                battery_level: 0.,
-                battery_temperature: 0.,
-                _bitfield_align_1: [],
-                _bitfield_1: BasicTelemetry::new_bitfield_1(
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                ),
-                motor_0_temperature: 0.,
-                motor_1_temperature: 0.,
-                motor_2_temperature: 0.,
-                motor_3_temperature: 0.,
-                motor_4_temperature: 0.,
-                kicker_charge_level: 0.,
-            })
-            .await;
-        info!("send");
-
-        let data_packet = radio.read_packet().await;
-        if let Ok(data_packet) = data_packet {
-            if let DataPacket::BasicControl(control) = data_packet {
-                info!("received control packet.");
-                info!("{:?}", defmt::Debug2Format(&control));
-
-                info!("{}", seq);
-                seq = (seq + 1) % 10000;
+            Either::Second(_) => {
+                // defmt::warn!("packet processing timed out.");
             }
         }
     }

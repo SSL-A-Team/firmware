@@ -2,82 +2,64 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 #![feature(const_mut_refs)]
+#![feature(sync_unsafe_cell)]
 
-use core::mem;
-use static_cell::StaticCell;
+use ateam_kicker_board::{drivers::breakbeam::Breakbeam, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin, GreenStatusLedPin}, tasks::{get_system_config, ClkSource}};
 
 use defmt::*;
 use {defmt_rtt as _, panic_probe as _};
 
-use cortex_m::peripheral::NVIC;
-use cortex_m_rt::entry;
-
 use libm::{fmaxf, fminf};
 
-use embassy_executor::{Executor, InterruptExecutor};
+use embassy_executor::{InterruptExecutor, Spawner};
 use embassy_stm32::{
     adc::{Adc, SampleTime},
     bind_interrupts,
     gpio::{Level, Output, Speed},
     interrupt,
-    pac::Interrupt,
-    peripherals,
-    time::mhz,
-    usart,
-    usart::{Config, Parity, StopBits, Uart},
+    interrupt::InterruptExt,
+    pac::Interrupt,peripherals,
+    usart::{self, Config, Parity, StopBits, Uart}
 };
-use embassy_time::{Delay, Duration, Instant, Ticker};
+use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use ateam_kicker_board::{
-    adc_raw_to_v, adc_v_to_battery_voltage, adc_v_to_rail_voltage,
+    adc_raw_to_v, adc_200v_to_rail_voltage,
     kick_manager::{KickManager, KickType},
     pins::{
-        BatteryVoltageReadPin, BlueStatusLedPin, ChargePin, ChipPin, ComsUartModule, ComsUartRxDma,
-        ComsUartTxDma, HighVoltageReadPin, KickPin, RedStatusLedPin, BreakbeamTxPin, BreakbeamRxPin,
+        BlueStatusLed1Pin, BlueStatusLed2Pin, ChargePin, ChipPin, ComsUartModule, ComsUartRxDma,
+        ComsUartTxDma, PowerRail200vReadPin, KickPin, RedStatusLedPin,
     },
-    queue::Buffer,
-    uart_queue::{UartReadQueue, UartWriteQueue}, drivers::breakbeam::Breakbeam,
 };
 
-use ateam_common_packets::bindings_kicker::{
+use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
+use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
+
+use ateam_common_packets::bindings::{
     KickRequest::{self, KR_ARM, KR_DISABLE},
     KickerControl, KickerTelemetry,
 };
+
+const MAX_KICK_SPEED: f32 = 5.5;
+const SHUTDOWN_KICK_SPEED: f32 = 0.15;
+
+pub const CHARGE_TARGET_VOLTAGE: f32 = 182.0;
+pub const CHARGE_OVERVOLT_THRESH_VOLTAGE: f32 = 195.0;
+pub const CHARGED_THRESH_VOLTAGE: f32 = 170.0;
+pub const CHARGE_SAFE_VOLTAGE: f32 = 10.0;
 
 const MAX_TX_PACKET_SIZE: usize = 16;
 const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 3;
 
-const MAX_KICK_SPEED: f32 = 5.5;
-const SHUTDOWN_KICK_DUTY: f32 = 0.20;
+const RAIL_BUFFER_SIZE: usize = 10;
 
-pub const CHARGE_TARGET_VOLTAGE: f32 = 182.0;
-pub const CHARGE_OVERVOLT_THRESH_VOLTAGE: f32 = 190.0;
-pub const CHARGED_THRESH_VOLTAGE: f32 = 170.0;
-pub const CHARGE_SAFE_VOLTAGE: f32 = 5.0;
-
-// control communications tx buffer
-// #[link_section = ".axisram.buffers"]
-static mut COMS_BUFFERS_TX: [Buffer<MAX_TX_PACKET_SIZE>; TX_BUF_DEPTH] =
-    [Buffer::EMPTY; TX_BUF_DEPTH];
-static COMS_QUEUE_TX: UartWriteQueue<
-    ComsUartModule,
-    ComsUartTxDma,
-    MAX_TX_PACKET_SIZE,
-    TX_BUF_DEPTH,
-> = UartWriteQueue::new(unsafe { &mut COMS_BUFFERS_TX });
-
-// control communications rx buffer
-// #[link_section = ".axisram.buffers"]
-static mut COMS_BUFFERS_RX: [Buffer<MAX_RX_PACKET_SIZE>; RX_BUF_DEPTH] =
-    [Buffer::EMPTY; RX_BUF_DEPTH];
-static COMS_QUEUE_RX: UartReadQueue<
-    ComsUartModule,
-    ComsUartRxDma,
-    MAX_RX_PACKET_SIZE,
-    RX_BUF_DEPTH,
-> = UartReadQueue::new(unsafe { &mut COMS_BUFFERS_RX });
+make_uart_queue_pair!(COMS,
+    ComsUartModule, ComsUartRxDma, ComsUartTxDma,
+    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
+    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
+    #[link_section = ".bss"]);
 
 fn get_empty_control_packet() -> KickerControl {
     KickerControl {
@@ -100,29 +82,28 @@ fn get_empty_telem_packet() -> KickerTelemetry {
 #[embassy_executor::task]
 async fn high_pri_kick_task(
     coms_reader: &'static UartReadQueue<
-        'static,
         ComsUartModule,
         ComsUartRxDma,
         MAX_RX_PACKET_SIZE,
         RX_BUF_DEPTH,
     >,
     coms_writer: &'static UartWriteQueue<
-        'static,
         ComsUartModule,
         ComsUartTxDma,
         MAX_TX_PACKET_SIZE,
         TX_BUF_DEPTH,
     >,
-    mut adc: Adc<'static, embassy_stm32::peripherals::ADC>,
+    mut adc: Adc<'static, embassy_stm32::peripherals::ADC1>,
     charge_pin: ChargePin,
     kick_pin: KickPin,
     chip_pin: ChipPin,
-    breakbeam_tx: BreakbeamTxPin,
-    breakbeam_rx: BreakbeamRxPin,
-    mut rail_pin: HighVoltageReadPin,
-    mut battery_voltage_pin: BatteryVoltageReadPin,
+    breakbeam_tx: BreakbeamLeftAgpioPin,
+    breakbeam_rx: BreakbeamRightAgpioPin,
+    mut rail_pin: PowerRail200vReadPin,
+    grn_led_pin: GreenStatusLedPin,
     err_led_pin: RedStatusLedPin,
-    ball_detected_led_pin: BlueStatusLedPin,
+    ball_detected_led1_pin: BlueStatusLed1Pin,
+    ball_detected_led2_pin: BlueStatusLed2Pin,
 ) -> ! {
     // pins/safety management
     let charge_pin = Output::new(charge_pin, Level::Low, Speed::Medium);
@@ -131,8 +112,11 @@ async fn high_pri_kick_task(
     let mut kick_manager = KickManager::new(charge_pin, kick_pin, chip_pin);
 
     // debug LEDs
+    let mut status_led = Output::new(grn_led_pin, Level::Low, Speed::Low);
     let mut err_led = Output::new(err_led_pin, Level::Low, Speed::Low);
-    let mut ball_detected_led = Output::new(ball_detected_led_pin, Level::Low, Speed::Low);
+    let mut ball_detected_led1 = Output::new(ball_detected_led1_pin, Level::Low, Speed::Low);
+    let mut ball_detected_led2 = Output::new(ball_detected_led2_pin, Level::Low, Speed::Low);
+
     // TODO dotstars
 
     let mut breakbeam = Breakbeam::new(breakbeam_tx, breakbeam_rx);
@@ -152,19 +136,40 @@ async fn high_pri_kick_task(
     let mut shutdown_requested: bool = false;
     let mut shutdown_completed: bool = false;
 
+    let mut rail_voltage_buffer: [f32; RAIL_BUFFER_SIZE] =
+        [0.0; RAIL_BUFFER_SIZE];
+    let mut rail_voltage_filt_indx: usize = 0;
+
     // loop rate control
     let mut ticker = Ticker::every(Duration::from_millis(1));
     let mut last_packet_sent_time = Instant::now();
 
     breakbeam.enable_tx();
-    loop {
-        let mut vrefint = adc.enable_vref(&mut Delay);
-        let vrefint_sample = adc.read_internal(&mut vrefint);
 
-        let rail_voltage = adc_v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32, vrefint_sample as f32));
-        let battery_voltage =
-            adc_v_to_battery_voltage(adc_raw_to_v(adc.read(&mut battery_voltage_pin) as f32, vrefint_sample as f32));
+    loop {
+        let mut vrefint = adc.enable_vrefint();
+        let vrefint_sample = adc.read(&mut vrefint);
+
+        let rail_voltage_cur = adc_200v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32, vrefint_sample as f32));
+        
+        // Add new battery read to cyclical buffer.
+        rail_voltage_buffer[rail_voltage_filt_indx] = rail_voltage_cur;
+
+        // Shift index for next run.
+        if rail_voltage_filt_indx == (RAIL_BUFFER_SIZE - 1) {
+            rail_voltage_filt_indx = 0;
+        } else {
+            rail_voltage_filt_indx += 1;
+        }
+
+        let rail_voltage_sum: f32 = rail_voltage_buffer.iter().sum();
+        // Calculate battery average
+        let rail_voltage_ave = rail_voltage_sum / (RAIL_BUFFER_SIZE as f32);
+        
+        // let battery_voltage =
+        //     adc_v_to_battery_voltage(adc_raw_to_v(adc.read(&mut battery_voltage_pin) as f32, vrefint_sample as f32));
         // optionally pre-flag errors?
+        let battery_voltage = 22.5;
 
         /////////////////////////////////////
         //  process any available packets  //
@@ -197,6 +202,11 @@ async fn high_pri_kick_task(
 
         // update telemetry requests
         telemetry_enabled = kicker_control_packet.telemetry_enabled() != 0;
+        if telemetry_enabled {
+            status_led.set_high();
+        } else {
+            status_led.set_low();
+        }
 
         // for now shutdown requests will be latched and a reboot is required to re-power
         if kicker_control_packet.request_power_down() != 0 {
@@ -204,11 +214,11 @@ async fn high_pri_kick_task(
         }
 
         // check if we've met the criteria for completed shutdown
-        if shutdown_requested && rail_voltage < CHARGE_SAFE_VOLTAGE {
+        if shutdown_requested && rail_voltage_ave < CHARGE_SAFE_VOLTAGE {
             shutdown_completed = true;
         }
 
-        if rail_voltage > CHARGE_OVERVOLT_THRESH_VOLTAGE {
+        if rail_voltage_ave > CHARGE_OVERVOLT_THRESH_VOLTAGE {
             error_latched = true;
         }
 
@@ -231,12 +241,12 @@ async fn high_pri_kick_task(
 
         // scale kick strength from m/s to duty for the critical section
         // if shutdown is requested and not complete, set kick discharge kick strength to 5%
-        let kick_strength = if shutdown_completed {
+        let kick_speed = if shutdown_completed {
             0.0
         } else if shutdown_requested {
-            SHUTDOWN_KICK_DUTY
+            SHUTDOWN_KICK_SPEED
         } else {
-            fmaxf(0.0, fminf(MAX_KICK_SPEED, kicker_control_packet.kick_speed)) / MAX_KICK_SPEED
+            fmaxf(0.0, fminf(MAX_KICK_SPEED, kicker_control_packet.kick_speed))
         };
 
         // if control requests only an ARM or DISABLE, clear the active command
@@ -257,7 +267,14 @@ async fn high_pri_kick_task(
         let kick_command = if shutdown_completed {
             KickType::None
         } else if shutdown_requested {
-            KickType::Kick
+            if ball_detected {
+                // If shutdown requested, person could be picking up the robot.
+                // Don't want to kick if ball detected since it might 
+                // be someone's finger.
+                KickType::None
+            } else {
+                KickType::Kick
+            }
         } else {
             match latched_command {
                 KickRequest::KR_DISABLE => KickType::None,
@@ -271,7 +288,7 @@ async fn high_pri_kick_task(
                     }
                 }
                 KickRequest::KR_KICK_CAPTURED => {
-                    if ball_detected && rail_voltage > CHARGED_THRESH_VOLTAGE {
+                    if ball_detected && rail_voltage_ave > CHARGED_THRESH_VOLTAGE {
                         KickType::Kick
                     } else {
                         KickType::None
@@ -286,7 +303,7 @@ async fn high_pri_kick_task(
                     }
                 }
                 KickRequest::KR_CHIP_CAPTURED => {
-                    if ball_detected && rail_voltage > CHARGED_THRESH_VOLTAGE {
+                    if ball_detected && rail_voltage_ave > CHARGED_THRESH_VOLTAGE {
                         KickType::Chip
                     } else {
                         KickType::None
@@ -308,7 +325,7 @@ async fn high_pri_kick_task(
         // if telemetry isn't enabled, the control board doesn't want to talk to us, don't permit any actions
         let res = if !telemetry_enabled || error_latched {
             kick_manager
-                .command(battery_voltage, rail_voltage, false, KickType::None, 0.0)
+                .command(battery_voltage, rail_voltage_ave, false, KickType::None, 0.0)
                 .await
         } else {
             if kick_command == KickType::Kick || kick_command == KickType::Chip {
@@ -317,13 +334,14 @@ async fn high_pri_kick_task(
                     false => KickRequest::KR_DISABLE,
                 }
             }
+            
             kick_manager
                 .command(
                     battery_voltage,
-                    rail_voltage,
+                    rail_voltage_ave,
                     charge_hv_rail,
                     kick_command,
-                    kick_strength,
+                    kick_speed
                 )
                 .await
         };
@@ -331,9 +349,9 @@ async fn high_pri_kick_task(
         // this will permanently latch an error if the rail voltages are low
         // which we probably don't want on boot up?
         // maybe this error should be clearable and the HV rail OV should not be
-        // if res.is_err() {
-        //     error_latched = true;
-        // }
+        if res.is_err() {
+            error_latched = true;
+        }
 
         // send telemetry packet
         if telemetry_enabled {
@@ -349,7 +367,7 @@ async fn high_pri_kick_task(
                     ball_detected as u32,
                     res.is_err() as u32,
                 );
-                kicker_telemetry_packet.rail_voltage = rail_voltage;
+                kicker_telemetry_packet.rail_voltage = rail_voltage_ave;
                 kicker_telemetry_packet.battery_voltage = battery_voltage;
 
                 // raw interpretaion of a struct for wire transmission is unsafe
@@ -376,9 +394,12 @@ async fn high_pri_kick_task(
         }
 
         if ball_detected {
-            ball_detected_led.set_high();
+            ball_detected_led1.set_high();
+            ball_detected_led2.set_high();
+
         } else {
-            ball_detected_led.set_low();
+            ball_detected_led1.set_low();
+            ball_detected_led2.set_low();
         }
         // TODO Dotstar
 
@@ -388,10 +409,9 @@ async fn high_pri_kick_task(
 }
 
 static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
-static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
 #[interrupt]
-unsafe fn I2C1() {
+unsafe fn TIM2() {
     EXECUTOR_HIGH.on_interrupt();
 }
 
@@ -399,43 +419,29 @@ bind_interrupts!(struct Irqs {
     USART1 => usart::InterruptHandler<peripherals::USART1>;
 });
 
-#[entry]
-fn main() -> ! {
-    let mut stm32_config: embassy_stm32::Config = Default::default();
-    stm32_config.rcc.sys_ck = Some(mhz(48));
-    stm32_config.rcc.hclk = Some(mhz(48));
-    stm32_config.rcc.pclk = Some(mhz(48));
 
+#[embassy_executor::main]
+async fn main(spawner: Spawner) -> ! {
+    let stm32_config = get_system_config(ClkSource::InternalOscillator);
     let p = embassy_stm32::init(stm32_config);
+
+    // Drives power on high in case of floating.
+    let _power_on = Output::new(p.PD6, Level::High, Speed::Low);
 
     info!("kicker startup!");
 
-    let mut nvic: NVIC = unsafe { mem::transmute(()) };
-
-    let _status_led = Output::new(p.PA11, Level::High, Speed::Low);
-
-    let mut adc = Adc::new(p.ADC, &mut Delay);
-    adc.set_sample_time(SampleTime::Cycles71_5);
+    let mut adc = Adc::new(p.ADC1);
+    adc.set_resolution(embassy_stm32::adc::Resolution::BITS12);
+    adc.set_sample_time(SampleTime::CYCLES480);
 
     // high priority executor handles kicking system
     // High-priority executor: I2C1, priority level 6
     // TODO CHECK THIS IS THE HIGHEST PRIORITY
-    unsafe { nvic.set_priority(Interrupt::I2C1, 6 << 4) };
-    let spawner = EXECUTOR_HIGH.start(Interrupt::I2C1);
-    unwrap!(spawner.spawn(high_pri_kick_task(
-        &COMS_QUEUE_RX,
-        &COMS_QUEUE_TX,
-        adc,
-        p.PB3,
-        p.PB0,
-        p.PB1,
-        p.PA3,
-        p.PA2,
-        p.PA0,
-        p.PA1,
-        p.PA12,
-        p.PA8
-    )));
+    embassy_stm32::interrupt::TIM2.set_priority(embassy_stm32::interrupt::Priority::P6);
+    let hp_spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
+
+    unwrap!(hp_spawner.spawn(high_pri_kick_task(&COMS_RX_UART_QUEUE, &COMS_TX_UART_QUEUE, adc, p.PE4, p.PE5, p.PE6, p.PA1, p.PA0, p.PC0, p.PE0, p.PE1, p.PE2, p.PE3)));
+
 
     //////////////////////////////////
     //  COMMUNICATIONS TASKS SETUP  //
@@ -451,18 +457,15 @@ fn main() -> ! {
         p.PA10,
         p.PA9,
         Irqs,
-        p.DMA1_CH2,
-        p.DMA1_CH3,
+        p.DMA2_CH7,
+        p.DMA2_CH2,
         coms_uart_config,
-    );
+    ).unwrap();
 
-    let (coms_uart_tx, coms_uart_rx) = coms_usart.split();
+    let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
+    queue_pair_register_and_spawn!(spawner, COMS, coms_uart_rx, coms_uart_tx);
 
-    // low priority executor handles coms and user IO
-    // Low priority executor: runs in thread mode, using WFE/SEV
-    let lp_executor = EXECUTOR_LOW.init(Executor::new());
-    lp_executor.run(|spawner| {
-        unwrap!(spawner.spawn(COMS_QUEUE_TX.spawn_task(coms_uart_tx)));
-        unwrap!(spawner.spawn(COMS_QUEUE_RX.spawn_task(coms_uart_rx)));
-    });
+    loop {
+        Timer::after_millis(1000).await;
+    }
 }

@@ -1,5 +1,6 @@
 
 #include <float.h>
+#include <math.h>
 
 #include "pid.h"
 
@@ -23,23 +24,27 @@ void pid_initialize(Pid_t *pid, PidConstants_t *pid_constants) {
 
 // this graphic might be helpful
 // https://upload.wikimedia.org/wikipedia/commons/4/43/PID_en.svg
-float pid_calculate(Pid_t *pid, float r, float y) {
+float pid_calculate(Pid_t *pid, float r, float y, float dt) {
     float err = r - y;
-    
+
     float termP = err * pid->pid_constants->kP;
 
-    float termI = pid->eI + (err * pid->pid_constants->kI);
-    if (termI > pid->pid_constants->kI_max) {
-        termI = pid->pid_constants->kI_max;
-    } else if (termI < pid->pid_constants->kI_min) {
-        termI = pid->pid_constants->kI_min;
+    pid->eI = pid->eI + (err * dt);
+
+    if (fabs(r) < 3.0) {
+        pid->eI = 0.0;
     }
-    pid->eI = termI;
+
+    if (pid->eI > pid->pid_constants->kI_max) {
+        pid->eI = pid->pid_constants->kI_max;
+    } else if (pid->eI < pid->pid_constants->kI_min) {
+        pid->eI = pid->pid_constants->kI_min;
+    }
+    float termI = pid->eI * pid->pid_constants->kI;
 
     float termD = (err - pid->prev_err) * pid->pid_constants->kD; // flip err and prev_err???
     pid->prev_err = err;
 
     float u = r + (termP + termI + termD);
-    //pid->prev_u = u;
     return u;
 }

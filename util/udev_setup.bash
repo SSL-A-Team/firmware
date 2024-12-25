@@ -12,11 +12,11 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 # check if we're in WSL, this will complete some extra steps for usb passthrough
 if grep -qi microsoft /proc/version; then
     echo "DETECTED PLATFORM - WSL"
-    
     echo "WSL - setup USB passthrough"
     apt update
     apt install -y linux-tools-generic hwdata
-    update-alternatives --install /usr/local/bin/usbip usbip /usr/lib/linux-tools/*-generic/usbip 20
+    LINUX_TOOLS_VERSION=$(apt list --installed 2>/dev/null | grep -oP 'linux-tools-\K[0-9]+\.[0-9]+\.[0-9]+-[0-9]+' | sort -V | tail -n 1)
+    update-alternatives --install /usr/local/bin/usbip usbip /usr/lib/linux-tools/${LINUX_TOOLS_VERSION}-generic/usbip 20
     echo "WSL - platform specific setup complete."
 elif grep -q "Ubuntu" /etc/lsb-release; then
     echo "DETECTED PLATFORM - Native Linux"
@@ -63,11 +63,7 @@ for udev_rule_file in $SCRIPT_DIR/udev/*.rules; do
     fi
 done
 
-if [ $any_rules_file_installed = true ]; then
-    echo "One or more rules file was installed. Reloading udevadm..."
-    udevadm control --reload
-    udevadm trigger
-    echo "Done."
-else
-    echo "No rules files were installed. No further actions to complete."
-fi
+service udev restart
+udevadm control --reload
+udevadm trigger
+echo "Done."

@@ -1,27 +1,20 @@
-
-use core::mem::MaybeUninit;
-
-use embassy_stm32::{
-    gpio::Pin,
-    usart::{self, Parity},
-};
+use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
+use embassy_stm32::{gpio::{Pin, Pull}, usart::{self, Parity}};
 use embassy_time::{Duration, Timer};
 
 use crate::stm32_interface::Stm32Interface;
 
-use ateam_common_packets::bindings_kicker::{KickerControl, KickerTelemetry, KickRequest};
+use ateam_common_packets::bindings::{KickerControl, KickerTelemetry, KickRequest};
 
 pub struct Kicker<
     'a,
-    UART: usart::BasicInstance,
+    UART: usart::Instance,
     DmaRx: usart::RxDma<UART>,
     DmaTx: usart::TxDma<UART>,
     const LEN_RX: usize,
     const LEN_TX: usize,
     const DEPTH_RX: usize,
     const DEPTH_TX: usize,
-    Boot0Pin: Pin,
-    ResetPin: Pin,
 > {
     stm32_uart_interface: Stm32Interface<
         'a,
@@ -32,8 +25,6 @@ pub struct Kicker<
         LEN_TX,
         DEPTH_RX,
         DEPTH_TX,
-        Boot0Pin,
-        ResetPin,
     >,
     firmware_image: &'a [u8],
 
@@ -45,16 +36,14 @@ pub struct Kicker<
 
 impl<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         DmaRx: usart::RxDma<UART>,
         DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
         const LEN_TX: usize,
         const DEPTH_RX: usize,
         const DEPTH_TX: usize,
-        Boot0Pin: Pin,
-        ResetPin: Pin,
-    > Kicker<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin>
+    > Kicker<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
 {
     pub fn new(
         stm32_interface: Stm32Interface<
@@ -66,11 +55,9 @@ impl<
             LEN_TX,
             DEPTH_RX,
             DEPTH_TX,
-            Boot0Pin,
-            ResetPin,
         >,
         firmware_image: &'a [u8],
-    ) -> Kicker<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin> {
+    ) -> Kicker<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         Kicker {
             stm32_uart_interface: stm32_interface,
             firmware_image,
@@ -82,7 +69,19 @@ impl<
         }
     }
 
-    pub fn process_telemetry(&mut self) {
+    pub fn new_from_pins(read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        boot0_pin: impl Pin,
+        reset_pin: impl Pin,
+        firmware_image: &'a [u8]) -> Self {
+
+        let stm32_interface = Stm32Interface::new_from_pins(read_queue, write_queue, boot0_pin, reset_pin, Pull::Up, true);
+
+        Self::new(stm32_interface, firmware_image)
+    }
+
+    pub fn process_telemetry(&mut self) -> bool {
+        let mut received_packet = false;
         while let Ok(res) = self.stm32_uart_interface.try_read_data() {
             let buf = res.data();
 
@@ -90,6 +89,8 @@ impl<
                 defmt::warn!("kicker interface - invalid packet of len {:?} data: {:?}", buf.len(), buf);
                 continue;
             }
+
+            received_packet = true;
 
             // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
             unsafe {
@@ -100,6 +101,8 @@ impl<
                 }
             }
         }
+
+        return received_packet; 
     }
 
     pub fn send_command(&mut self) {
@@ -178,29 +181,25 @@ impl<
         self.stm32_uart_interface.leave_reset().await;
     }
 
-    pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
-        // self
-        //     .stm32_uart_interface
-        //     .load_firmware_image(fw_image_bytes)
-        //     .await?;
+    pub async fn init_firmware_image(&mut self, flash: bool, fw_image_bytes: &[u8]) -> Result<(), ()> {
+        if flash {
+            self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await?;
+        } else {
+            defmt::warn!("currently skipping kicker firmware flash");
+        }
 
-        // this is safe because load firmware image call will reset the target device
-        // it will begin issueing telemetry updates
-        // these are the only packets it sends so any blocked process should get the data it now needs
-        unsafe {
-            self.stm32_uart_interface
-                .update_uart_config(2_000_000, Parity::ParityEven)
-        };
+        self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
+
         Timer::after(Duration::from_millis(1)).await;
 
         // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
-        self.stm32_uart_interface.leave_reset().await?;
+        self.stm32_uart_interface.leave_reset().await;
 
         return Ok(());
     }
 
-    pub async fn load_default_firmware_image(&mut self) -> Result<(), ()> {
-        return self.load_firmware_image(self.firmware_image).await;
+    pub async fn init_default_firmware_image(&mut self, flash: bool) -> Result<(), ()> {
+        return self.init_firmware_image(flash, self.firmware_image).await;
     }
 }
 

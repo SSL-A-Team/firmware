@@ -1,98 +1,102 @@
 #![no_std]
 #![no_main]
-#![feature(type_alias_impl_trait)]
-#![feature(const_mut_refs)]
 
-mod pins;
+use embassy_executor::InterruptExecutor;
+use embassy_futures::select::{self, Either3};
+use embassy_stm32::interrupt;
+use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 
-use defmt::*;
-use defmt_rtt as _;
+use defmt_rtt as _; 
+
+use ateam_control_board::{create_audio_task, create_imu_task, create_io_task, create_shutdown_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, GyroDataPubSub}, robot_state::SharedRobotState};
+
+use embassy_time::Timer;
+// provide embedded panic probe
 use panic_probe as _;
+use static_cell::ConstStaticCell;
 
-use embassy_stm32::{
-    dma::NoDma,
-    gpio::{Level, Output, Speed},
-    spi,
-    time::{hz, mhz},
-};
-use embassy_time::{Duration, Timer};
+static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
 
-use apa102_spi::Apa102;
-use smart_leds::{SmartLedsWrite, RGB8};
+static GYRO_DATA_CHANNEL: GyroDataPubSub = PubSubChannel::new();
+static ACCEL_DATA_CHANNEL: AccelDataPubSub = PubSubChannel::new();
+static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
 
-#[link_section = ".sram4"]
-static mut SPI6_BUF: [u8; 4] = [0x0; 4];
+static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
+
+#[interrupt]
+unsafe fn CEC() {
+    UART_QUEUE_EXECUTOR.on_interrupt();
+}
 
 #[embassy_executor::main]
-async fn main(_spawner: embassy_executor::Spawner) {
-    let mut stm32_config: embassy_stm32::Config = Default::default();
-    stm32_config.rcc.hse = Some(mhz(8));
-    stm32_config.rcc.sys_ck = Some(mhz(400));
-    stm32_config.rcc.hclk = Some(mhz(200));
-    stm32_config.rcc.pclk1 = Some(mhz(100));
+async fn main(main_spawner: embassy_executor::Spawner) {
+    // init system
+    let sys_config = get_system_config();
+    let p = embassy_stm32::init(sys_config);
 
-    info!("system core initialized");
+    defmt::info!("embassy HAL configured.");
 
-    let p = embassy_stm32::init(stm32_config);
+    let robot_state = ROBOT_STATE.take();
 
-    // Delay so dotstar can turn on
-    Timer::after(Duration::from_millis(50)).await;
+    ////////////////////////
+    //  setup task pools  //
+    ////////////////////////
 
-    let dot_spi = spi::Spi::new_txonly(
-        p.SPI3,
-        p.PB3,
-        p.PB5,
-        NoDma,
-        NoDma,
-        hz(1_000_000),
-        spi::Config::default(),
-    );
 
-    let mut dotstar = Apa102::new(dot_spi);
-    let _ = dotstar.write([RGB8 { r: 10, g: 0, b: 0 }].iter().cloned());
+    //////////////////////////////////////
+    //  setup inter-task coms channels  //
+    //////////////////////////////////////
 
-    let mut imu_spi = spi::Spi::new(
-        p.SPI6,
-        p.PA5,
-        p.PA7,
-        p.PA6,
-        p.BDMA_CH0,
-        p.BDMA_CH1,
-        hz(1_000_000),
-        spi::Config::default(),
-    );
+    let imu_gyro_data_publisher = GYRO_DATA_CHANNEL.publisher().unwrap();
+    let mut imu_gyro_data_subscriber = GYRO_DATA_CHANNEL.subscriber().unwrap();
+    let imu_accel_data_publisher = ACCEL_DATA_CHANNEL.publisher().unwrap();
+    let mut imu_accel_data_subscriber = ACCEL_DATA_CHANNEL.subscriber().unwrap();
 
-    // // acceleromter
-    let mut imu_cs1 = Output::new(p.PC4, Level::High, Speed::VeryHigh);
-    // // gyro
-    let mut imu_cs2 = Output::new(p.PC5, Level::High, Speed::VeryHigh);
+    let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
+    
 
-    Timer::after(Duration::from_millis(1)).await;
+    ///////////////////
+    //  start tasks  //
+    ///////////////////
 
-    unsafe {
-        SPI6_BUF[0] = 0x80;
-        // info!("xfer {=[u8]:x}", SPI6_BUF[0..1]);
-        imu_cs1.set_low();
-        let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
-        imu_cs1.set_high();
-        let accel_id = SPI6_BUF[1];
-        info!("accelerometer id: 0x{:x}", accel_id);
+    create_io_task!(main_spawner, robot_state, battery_volt_publisher, p);
 
-        SPI6_BUF[0] = 0x80;
-        imu_cs2.set_low();
-        let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..2]).await;
-        imu_cs2.set_high();
-        let gyro_id = SPI6_BUF[1];
-        info!("gyro id: 0x{:x}", gyro_id);
+    create_shutdown_task!(main_spawner, robot_state, p);
 
-        loop {
-            SPI6_BUF[0] = 0x86;
-            // SPI6_BUF[0] = 0x86;
-            imu_cs2.set_low();
-            let _ = imu_spi.transfer_in_place(&mut SPI6_BUF[0..3]).await;
-            imu_cs2.set_high();
-            let rate_z = (SPI6_BUF[2] as u16 * 256 + SPI6_BUF[1] as u16) as i16;
-            info!("z rate: {}", rate_z);
+    create_audio_task!(main_spawner, robot_state, p);
+
+    create_imu_task!(main_spawner,
+        robot_state,
+        imu_gyro_data_publisher, imu_accel_data_publisher,
+        p);
+
+    loop {
+        match select::select3(imu_gyro_data_subscriber.next_message(), imu_accel_data_subscriber.next_message(), Timer::after_millis(1000)).await {
+            Either3::First(gyro_data) => {
+                match gyro_data {
+                    WaitResult::Lagged(amnt) => {
+                        defmt::warn!("publishing gyro data lagged by {}", amnt);
+                    }
+                    WaitResult::Message(msg) => {
+                        defmt::info!("got gyro data (x: {}, y: {}, z: {})", msg[1], msg[1], msg[2]);
+
+                    }
+                }
+            }
+            Either3::Second(accel_data) => {
+                match accel_data {
+                    WaitResult::Lagged(amnt) => {
+                        defmt::warn!("publishing accel data lagged by {}", amnt);
+                    }
+                    WaitResult::Message(msg) => {
+                        defmt::info!("got accel data (x: {}, y: {}, z: {})", msg[0], msg[1], msg[2]);
+
+                    }
+                }
+            }
+            Either3::Third(_) => {
+                defmt::warn!("receiving timed out.");
+            }
         }
     }
 }

@@ -3,14 +3,14 @@ use core::cmp::min;
 use defmt_rtt as _;
 use defmt::*;
 
-use embassy_stm32::gpio::{Output, Pin};
+use embassy_stm32::gpio::{Level, Output, OutputOpenDrain, Pin, Speed, Pull};
 use embassy_stm32::pac;
-use embassy_stm32::usart::{self, Parity, Config};
+use embassy_stm32::usart::{self, Config, Parity, StopBits};
 use embassy_time::{Duration, Timer};
 use embassy_time::with_timeout;
 
-use crate::queue::{DequeueRef, Error};
-use crate::uart_queue::{Reader, Writer, UartReadQueue, UartWriteQueue};
+use ateam_lib_stm32::queue::{DequeueRef, Error};
+use ateam_lib_stm32::uart::queue::{Reader, Writer, UartReadQueue, UartWriteQueue};
 
 pub const STM32_BOOTLOADER_MAX_BAUD_RATE: u32 = 115_200;
 pub const STM32_BOOTLOADER_ACK: u8 = 0x79;
@@ -35,25 +35,24 @@ pub fn get_bootloader_uart_config() -> Config {
     let mut config = usart::Config::default();
     config.baudrate = 115_200; // max officially support baudrate
     config.parity = Parity::ParityEven;
+    config.stop_bits = StopBits::STOP1;
     config
 }
 
 pub struct Stm32Interface<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         DmaRx: usart::RxDma<UART>,
         DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
         const LEN_TX: usize,
-        const DEPTH_RX: usize, 
+        const DEPTH_RX: usize,
         const DEPTH_TX: usize,
-        Boot0Pin: Pin, 
-        ResetPin: Pin
 > {
-    reader: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
-    writer: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
-    boot0_pin: Option<Output<'a, Boot0Pin>>,
-    reset_pin: Option<Output<'a, ResetPin>>,
+    reader: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
+    writer: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+    boot0_pin: Output<'a>,
+    reset_pin: OutputOpenDrain<'a>,
 
     reset_pin_noninverted: bool,
 
@@ -62,63 +61,55 @@ pub struct Stm32Interface<
 
 impl<
         'a,
-        UART: usart::BasicInstance,
+        UART: usart::Instance,
         DmaRx: usart::RxDma<UART>,
         DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
         const LEN_TX: usize,
-        const DEPTH_RX: usize, 
+        const DEPTH_RX: usize,
         const DEPTH_TX: usize,
-        Boot0Pin: Pin, 
-        ResetPin: Pin
-    > Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin>
+    > Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
 {
-    pub fn new(        
-        read_queue: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
-        boot0_pin: Option<Output<'a, Boot0Pin>>,
-        reset_pin: Option<Output<'a, ResetPin>>
-    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin> {
-        // let the user set the initial state
-        // if boot0_pin.is_some() {
-        //     boot0_pin.as_mut().unwrap().set_low();
-        // }
-
-        // if reset_pin.is_some() {
-        //     reset_pin.as_mut().unwrap().set_high();
-        // }
-        
+    pub fn new(
+        read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        boot0_pin: Output<'a>,
+        reset_pin: OutputOpenDrain<'a>,
+        reset_polarity_high: bool,
+    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         Stm32Interface {
             reader: read_queue,
             writer: write_queue,
             boot0_pin,
             reset_pin,
-            reset_pin_noninverted: false,
+            reset_pin_noninverted: reset_polarity_high,
             in_bootloader: false,
         }
     }
 
-    pub fn new_noninverted_reset(        
-        read_queue: &'a UartReadQueue<'a, UART, DmaRx, LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<'a, UART, DmaTx, LEN_TX, DEPTH_TX>,
-        boot0_pin: Option<Output<'a, Boot0Pin>>,
-        reset_pin: Option<Output<'a, ResetPin>>
-    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, Boot0Pin, ResetPin> {
-        // let the user set the initial state
-        // if boot0_pin.is_some() {
-        //     boot0_pin.as_mut().unwrap().set_low();
-        // }
+    pub fn new_from_pins(
+        read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        boot0_pin: impl Pin,
+        reset_pin: impl Pin,
+        reset_pin_pull: Pull,
+        reset_polarity_high: bool,
+    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
+        let boot0_output = Output::new(boot0_pin, Level::Low, Speed::Medium);
 
-        // if reset_pin.is_some() {
-        //     reset_pin.as_mut().unwrap().set_high();
-        // }
-        
+        let initial_reset_level = if reset_polarity_high {
+            Level::Low
+        } else {
+            Level::High
+        };
+        let reset_output = OutputOpenDrain::new(reset_pin, initial_reset_level, Speed::Medium, reset_pin_pull);
+
         Stm32Interface {
             reader: read_queue,
             writer: write_queue,
-            boot0_pin,
-            reset_pin,
-            reset_pin_noninverted: true,
+            boot0_pin: boot0_output,
+            reset_pin: reset_output,
+            reset_pin_noninverted: reset_polarity_high,
             in_bootloader: false,
         }
     }
@@ -127,84 +118,74 @@ impl<
         defmt::panic!("implement soft reset if needed.");
     }
 
-    pub async fn enter_reset(&mut self) -> Result<(), ()> {
-        if self.reset_pin.is_none() {
-            return Err(());
-        }
-
+    pub async fn enter_reset(&mut self) {
         if self.reset_pin_noninverted {
-            self.reset_pin.as_mut().unwrap().set_high();
+            self.reset_pin.set_high();
         } else {
-            self.reset_pin.as_mut().unwrap().set_low();
+            self.reset_pin.set_low();
         }
-        Timer::after(Duration::from_micros(100)).await;
-        
-        Ok(())
+        Timer::after(Duration::from_millis(50)).await;
     }
 
-    pub async fn leave_reset(&mut self) -> Result<(), ()> {
-        if self.reset_pin.is_none() {
-            return Err(());
-        }
-
+    pub async fn leave_reset(&mut self) {
         if self.reset_pin_noninverted {
-            self.reset_pin.as_mut().unwrap().set_low();
+            self.reset_pin.set_low();
         } else {
-            self.reset_pin.as_mut().unwrap().set_high();
+            self.reset_pin.set_high();
         }
-        Timer::after(Duration::from_micros(100)).await;
-
-        Ok(())
+        Timer::after(Duration::from_millis(10)).await;
     }
 
-    pub async fn hard_reset(&mut self) -> Result<(), ()> {
-        if self.reset_pin.is_none() {
-            return Err(());
-        }
-
-        self.enter_reset().await?;
-        self.leave_reset().await?;
-
-        Ok(())
+    pub async fn hard_reset(&mut self) {
+        self.enter_reset().await;
+        // Timer::after_millis(1).await;
+        self.leave_reset().await;
+        // Timer::after_millis(1).await;
     }
 
     pub async fn reset_into_bootloader(&mut self) -> Result<(), ()> {
-        if self.boot0_pin.is_none() || self.reset_pin.is_none() {
-            return Err(());
-        }
+        // ensure UART is in the expected config for the bootloader
+        // this operation is unsafe because it takes the uart module offline
+        // when the executor may be relying on rx interrupts to unblock a thread
+        self.update_uart_config(STM32_BOOTLOADER_MAX_BAUD_RATE, Parity::ParityEven).await;
+        Timer::after_millis(100).await;
+
 
         // set the boot0 line high to enter the UART bootloader upon reset
-        self.boot0_pin.as_mut().unwrap().set_high();
+        self.boot0_pin.set_high();
+        Timer::after_millis(1).await;
 
         // reset the device
-        self.hard_reset().await?;
+        self.hard_reset().await;
 
         // ensure it has time to setup it's bootloader
         // this time isn't documented and can possibly be lowered.
         Timer::after(Duration::from_millis(10)).await;
 
-        // ensure UART is in the expected config for the bootloader
-        // this operation is unsafe because it takes the uart module offline
-        // when the executor may be relying on rx interrupts to unblock a thread
-        unsafe { self.update_uart_config(STM32_BOOTLOADER_MAX_BAUD_RATE, Parity::ParityEven); }
+
 
         defmt::debug!("sending the bootloader baud calibration command...");
-        self.writer
+        Timer::after_millis(1000).await;
+        if self.writer
         .write(|buf| {
             buf[0] = STM32_BOOTLOADER_CODE_SEQUENCE_BYTE;
             1
         })
-        .await?;
+        .await.is_err() {
+            defmt::debug!("failed to send bootloader start seq");
+            return Err(());
+        }
+        Timer::after_millis(10).await;
 
         let mut res = Err(());
-        let sync_res = with_timeout(Duration::from_millis(100), self.reader.read(|buf| {
+        let sync_res = with_timeout(Duration::from_millis(5000), self.reader.read(|buf| {
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
-                    defmt::info!("bootloader replied with ACK after calibration.");
+                    defmt::debug!("bootloader replied with ACK after calibration.");
                     self.in_bootloader = true;
                     res = Ok(());
                 } else {
-                    defmt::error!("bootloader replied with NACK after calibration.");
+                    defmt::debug!("bootloader replied with NACK after calibration.");
                 }
             }
         })).await;
@@ -217,106 +198,28 @@ impl<
         res
     }
 
-    pub async fn reset_into_program(&mut self, stay_in_reset: bool) -> Result<(), ()> {
-        if self.boot0_pin.is_none() || self.reset_pin.is_none() {
-            return Err(());
-        }
-
+    pub async fn reset_into_program(&mut self, stay_in_reset: bool) {
         // set the boot0 line low to disable startup bootloader
-        self.boot0_pin.as_mut().unwrap().set_low();
+        self.boot0_pin.set_low();
         Timer::after(Duration::from_millis(5)).await;
 
         if stay_in_reset {
             // nrst, so reset and hold
-            self.enter_reset().await?;
+            self.enter_reset().await;
         } else {
             // reset the device
-            self.hard_reset().await?;
+            self.hard_reset().await;
         }
-
-        Ok(())
     }
 
-    pub unsafe fn update_uart_config(&self, baudrate: u32, parity: Parity) {
-        let div = (UART::frequency().0 + (baudrate / 2)) / baudrate * UART::MULTIPLIER;
+    pub async fn update_uart_config(&self, baudrate: u32, parity: Parity) {
+        let mut config = usart::Config::default();
+        config.baudrate = baudrate;
+        config.parity = parity;
 
-        // let irq = UART::Interrupt::steal();
-        // irq.disable();
-
-        let r = UART::regs();
-        // disable the uart. Can't modify parity and baudrate while module is enabled
-        r.cr1().modify(|w| {
-            w.set_ue(false);
-        });
-
-        // set the baudrate
-        r.brr().modify(|w| {
-            w.set_brr(div);
-        });
-
-        // set parity 
-        r.cr1().modify(|w| {
-            if parity != Parity::ParityNone {
-                // configure 9 bit transmission and enable parity control
-                w.set_m0(pac::lpuart::vals::M0::BIT9);
-                w.set_pce(true);
-
-                // set polarity type
-                if parity == Parity::ParityEven {
-                    w.set_ps(pac::lpuart::vals::Ps::EVEN);
-                } else {
-                    w.set_ps(pac::lpuart::vals::Ps::ODD);
-                }
-            } else {
-                // disable parity (1 byte transmissions)
-                w.set_m0(pac::lpuart::vals::M0::BIT8);
-                w.set_pce(false);
-            }
-        });
-
-        // reenable UART
-        r.cr1().modify(|w| {
-            w.set_ue(true);
-        });
-
-        // let div = (pclk_freq.0 + (config.baudrate / 2)) / config.baudrate * multiplier;
-
-        // unsafe {
-        //     r.brr().write_value(regs::Brr(div));
-        //     r.cr2().write(|_w| {});
-        //     r.cr1().write(|w| {
-        //         // enable uart
-        //         w.set_ue(true);
-        //         // enable transceiver
-        //         w.set_te(true);
-        //         // enable receiver
-        //         w.set_re(true);
-        //         // configure word size
-        //         w.set_m0(if parity != Parity::ParityNone {
-        //             pac::lpuart::vals::M0::BIT9
-        //         } else {
-        //             pac::lpuart::vals::M0::BIT8
-        //         });
-        //         // configure parity
-        //         w.set_pce(parity != Parity::ParityNone);
-        //         w.set_ps(match parity {
-        //             Parity::ParityOdd => pac::lpuart::vals::Ps::ODD,
-        //             Parity::ParityEven => pac::lpuart::vals::Ps::EVEN,
-        //             _ => pac::lpuart::vals::Ps::EVEN,
-        //         });
-        //     });
-        // }
-
-        // r.icr().write(|w| {
-        //     w.set_fecf(true);
-        // });
-
-        // irq.unpend();
-        // irq.enable();
-
-        // r.cr1().modify(|w| {
-        //     w.set_idleie(true);
-        // });
+        if self.writer.update_uart_config(config).await.is_err() {
+            defmt::panic!("failed to update uart config");
+        }
     }
 
     pub async fn read_latest_packet(&self) {
@@ -332,7 +235,9 @@ impl<
     }
 
     pub fn send_or_discard_data(&self, data: &[u8]) {
-        let _ = self.try_send_data(data);
+        if self.try_send_data(data).is_err() {
+            defmt::error!("Failed to send motor data");
+        };
     }
 
     ////////////////////////////////////////////////
@@ -417,11 +322,11 @@ impl<
                 res = Err(());
             } else if buf.len() == 5 && buf[1] == 1 && buf[4] == STM32_BOOTLOADER_ACK {
                 let pid: u16 = buf[3] as u16;
-                defmt::info!("found 1 byte pid {:?}", pid);
+                defmt::trace!("found 1 byte pid {:?}", pid);
                 res = Ok(pid);
             } else if buf.len() == 5 && buf[1] == 2 && buf[4] == STM32_BOOTLOADER_ACK {
                 let pid: u16 = ((buf[2] as u16) << 8) | (buf[3] as u16);
-                defmt::info!("found 2 byte pid {:?}", pid);
+                defmt::trace!("found 2 byte pid {:?}", pid);
                 res = Ok(pid);
             } else {
                 defmt::error!("malformed response in device ID read.");
@@ -442,7 +347,7 @@ impl<
             return Err(());
         }
 
-        // stm bl can only support 256 byte data payloads, right now we don't automatically handle 
+        // stm bl can only support 256 byte data payloads, right now we don't automatically handle
         // larger chunks than the tx buffer
         if data.len() > 256 || data.len() + 1 > LEN_TX {
             return Err(());
@@ -551,7 +456,7 @@ impl<
             addr += step_size as u32;
         }
 
-        defmt::info!("wrote device memory");
+        defmt::debug!("wrote device memory");
 
         Ok(())
     }
@@ -573,7 +478,7 @@ impl<
 
         let mut res = Err(());
         self.reader.read(|buf| {
-            defmt::info!("extended erase reply {:?}", buf);
+            defmt::trace!("extended erase reply {:?}", buf);
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
                     res = Ok(());
@@ -595,10 +500,10 @@ impl<
 
         let mut res = Err(());
         self.reader.read(|buf| {
-            defmt::info!("erase reply {:?}", buf);
+            defmt::debug!("erase reply {:?}", buf);
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
-                    defmt::info!("flash erased");
+                    defmt::debug!("flash erased");
                     res = Ok(());
                 } else {
                     defmt::error!("bootloader replied with NACK");
@@ -615,17 +520,27 @@ impl<
                 return Err(err);
             }
         }
-        
+
         if let Err(err) = self.verify_bootloader().await {
             return Err(err);
         }
-    
-        // let device_id = self.get_device_id().await;
+
         match self.get_device_id().await {
             Err(err) => return Err(err),
-            Ok(device_id) => if device_id != 68 { return Err(()) } 
+            Ok(device_id) => match device_id {
+                68 => {
+                    defmt::trace!("found stm32f1 device");
+                }
+                19 => {
+                    defmt::trace!("found stm32f40xxx device");
+                }
+                _ => {
+                    defmt::trace!("found unknown device id {}", device_id);
+                    return Err(());
+                }
+            }
         };
-    
+
         // erase part
         if let Err(err) = self.erase_flash_memory().await {
             return Err(err);
@@ -636,20 +551,14 @@ impl<
             return Err(err);
         }
 
-        info!("before reset");
+        self.reset_into_program(false).await;
 
-        if let Err(err) = self.reset_into_program(false).await {
-            return Err(err);
-        }
-
-        info!("after reset");
-        
         Ok(())
     }
 
     pub async fn execute_code(&mut self, start_address: Option<u32>) -> Result<(), ()> {
-        defmt::info!("firmware jump/go command implementation not working. will reset part.");
-        self.reset_into_program(false).await?;
+        defmt::debug!("firmware jump/go command implementation not working. will reset part.");
+        self.reset_into_program(false).await;
         return Ok(());
 
         if !self.in_bootloader {
@@ -663,7 +572,7 @@ impl<
 
         // set the boot0 line low to disable startup bootloader
         // not needed for command, but makes sense on principle
-        self.boot0_pin.as_mut().unwrap().set_low();
+        self.boot0_pin.set_low();
 
         defmt::debug!("sending the go command...");
         self.writer
