@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use ateam_common_packets::bindings_radio::{
+use ateam_common_packets::bindings::{
     self, BasicControl, CommandCode, HelloRequest, HelloResponse, KickRequest, RadioPacket,
     RadioPacket_Data,
 };
@@ -42,8 +42,8 @@ fn main() -> std::io::Result<()> {
 
     let packet = RadioPacket {
         crc32: 0,
-        major_version: bindings_radio::kProtocolVersionMajor,
-        minor_version: bindings_radio::kProtocolVersionMinor,
+        major_version: bindings::kProtocolVersionMajor,
+        minor_version: bindings::kProtocolVersionMinor,
         command_code: CommandCode::CC_HELLO_RESP,
         data_length: size_of::<HelloResponse>() as u16,
         data: RadioPacket_Data {
@@ -64,8 +64,8 @@ fn main() -> std::io::Result<()> {
 
     let mut packet = RadioPacket {
         crc32: 0,
-        major_version: bindings_radio::kProtocolVersionMajor,
-        minor_version: bindings_radio::kProtocolVersionMinor,
+        major_version: bindings::kProtocolVersionMajor,
+        minor_version: bindings::kProtocolVersionMinor,
         command_code: CommandCode::CC_CONTROL,
         data_length: size_of::<BasicControl>() as u16,
         data: RadioPacket_Data {
