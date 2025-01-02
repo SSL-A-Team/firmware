@@ -59,6 +59,6 @@ impl<
         // defmt::info!("vref_int_cal: {}", vref_int_cal);
         // defmt::info!("vref_int_read_mv: {}", vref_int_read_mv);
 
-        return V_CAL_V * (self.inst.read(&mut self.pin) as f32) / (self.adc_bins as f32); // * vref_int_cal / vref_int_read_mv;
+        return V_CAL_V * (self.inst.blocking_read(&mut self.pin) as f32) / (self.adc_bins as f32); // * vref_int_cal / vref_int_read_mv;
     }
 }

@@ -21,7 +21,7 @@
           inherit system overlays; 
         };
 
-        python = "python39";
+        python = "python312";
 
         packageName = "ateam-firmware";
 
@@ -41,19 +41,16 @@
 
             # programmers
             openocd
-            probe-run
+            probe-rs
 
             # userpsace clang and link vars for bindgen subtargets
             clang
 
             # Rust Embedded
-            (rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override {
+            (rust-bin.nightly."2024-06-12".default.override {
               extensions = [ "rust-src" "rust-analyzer" ];
               targets = [ "thumbv7em-none-eabihf" "thumbv6m-none-eabi" ];
-            }))
-            # rust-analyzer
-            probe-run
-            probe-rs
+            })
 
             # Python
             (pkgs.${python}.withPackages

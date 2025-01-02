@@ -110,41 +110,33 @@ pub enum UartTaskCommand {
 }
 
 pub struct UartReadQueue<
-    UART: usart::Instance,
-    DMA: usart::RxDma<UART>,
     const LENGTH: usize,
     const DEPTH: usize,
 > {
     uart_mutex: Mutex<CriticalSectionRawMutex, bool>,
     queue_rx: Queue<LENGTH, DEPTH>,
-    task: TaskStorage<ReadTaskFuture<UART, DMA, LENGTH, DEPTH>>,
+    task: TaskStorage<ReadTaskFuture<LENGTH, DEPTH>>,
 }
 
 // TODO: pretty sure shouldn't do this
 unsafe impl<
         'a,
-        UART: usart::Instance,
-        DMA: usart::RxDma<UART>,
         const LENGTH: usize,
         const DEPTH: usize,
-    > Send for UartReadQueue<UART, DMA, LENGTH, DEPTH>
+    > Send for UartReadQueue<LENGTH, DEPTH>
 {
 }
 
 pub type ReadTaskFuture<
-    UART: usart::Instance,
-    DMA: usart::RxDma<UART>,
     const LENGTH: usize,
     const DEPTH: usize,
 > = impl Future;
 
 impl<
         'a,
-        UART: usart::Instance,
-        DMA: usart::RxDma<UART>,
         const LENGTH: usize,
         const DEPTH: usize,
-    > UartReadQueue<UART, DMA, LENGTH, DEPTH>
+    > UartReadQueue<LENGTH, DEPTH>
 {
     pub const fn new(buffers: &'static[SyncUnsafeCell<Buffer<LENGTH>>; DEPTH],
             uart_mutex: Mutex<CriticalSectionRawMutex, bool>        ) -> Self {
@@ -160,7 +152,7 @@ impl<
         queue_rx: &'static Queue<LENGTH, DEPTH>,
         mut rx: UartRx<'static, Async>,
         mut uart_config_signal_subscriber: UartQueueConfigSyncSub,
-    ) -> ReadTaskFuture<UART, DMA, LENGTH, DEPTH> {
+    ) -> ReadTaskFuture<LENGTH, DEPTH> {
         async move {
             // if you panic here you spawned multiple ReadQueues from the same instance
             // that isn't allowed
@@ -490,11 +482,9 @@ pub trait Writer {
 }
 
 impl<
-        UART: usart::Instance,
-        Dma: usart::RxDma<UART>,
         const LEN: usize,
         const DEPTH: usize,
-    > Reader for UartReadQueue<UART, Dma, LEN, DEPTH>
+    > Reader for UartReadQueue<LEN, DEPTH>
 {
     async fn read<RET, FN: FnOnce(&[u8]) -> RET>(&self, fn_read: FN) -> Result<RET, ()> {
         Ok(self.dequeue(|buf| fn_read(buf)).await)

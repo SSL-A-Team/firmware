@@ -48,13 +48,13 @@ pub struct OdinW262<
     'a,
     UART: usart::Instance,
     TxDma: usart::TxDma<UART>,
-    RxDma: usart::RxDma<UART>,
+    // RxDma: usart::RxDma<UART>,
     const LEN_TX: usize,
     const LEN_RX: usize,
     const DEPTH_TX: usize,
     const DEPTH_RX: usize,
 > {
-    reader: &'a UartReadQueue<UART, RxDma, LEN_RX, DEPTH_RX>,
+    reader: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
     writer: &'a UartWriteQueue<UART, TxDma, LEN_TX, DEPTH_TX>,
     mode: RadioMode,
 }
@@ -63,15 +63,15 @@ impl<
         'a,
         UART: usart::Instance,
         TxDma: usart::TxDma<UART>,
-        RxDma: usart::RxDma<UART>,
+        // RxDma: usart::RxDma<UART>,
         const LEN_TX: usize,
         const LEN_RX: usize,
         const DEPTH_TX: usize,
         const DEPTH_RX: usize,
-    > OdinW262<'a, UART, TxDma, RxDma, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>
+    > OdinW262<'a, UART, TxDma, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>
 {
     pub fn new(
-        reader: &'a UartReadQueue<UART, RxDma, LEN_RX, DEPTH_RX>,
+        reader: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
         writer: &'a UartWriteQueue<UART, TxDma, LEN_TX, DEPTH_TX>,
     ) -> Self {
         Self {
