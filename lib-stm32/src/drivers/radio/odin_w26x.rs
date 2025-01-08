@@ -479,7 +479,11 @@ impl<
                 // we read something
 
             },
-            Err(queue::Error::QueueFullEmpty) => {
+            Err(queue::Error::QueueFull) => {
+                // nothing to read
+                return Err(());
+            }
+            Err(queue::Error::QueueEmpty) => {
                 // nothing to read
                 return Err(());
             }
@@ -503,7 +507,7 @@ impl<
                     // queue was full
                     return Err(())
                 }
-                
+
                 Ok(())
             }
             RadioMode::ExtendedDataMode => {
@@ -590,7 +594,7 @@ impl<
             if brk {
                 break;
             }
-            
+
         }
 
         return res;
