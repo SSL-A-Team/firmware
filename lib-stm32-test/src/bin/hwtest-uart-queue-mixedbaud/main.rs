@@ -47,7 +47,7 @@ struct StupidPacket {
 }
 
 #[embassy_executor::task]
-async fn rx_task(coms_reader: &'static UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>) {
+async fn rx_task(coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>) {
     let mut rx_packet: StupidPacket = StupidPacket {
         fields_of_minimal_intelligence: [0x55AA55AA; 16]
     };
@@ -78,7 +78,7 @@ async fn rx_task(coms_reader: &'static UartReadQueue<ComsUartModule, ComsUartRxD
 }
 
 #[embassy_executor::task]
-async fn tx_task(coms_writer: &'static UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>) {
+async fn tx_task(coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>) {
     let tx_packet: StupidPacket = StupidPacket {
         fields_of_minimal_intelligence: [0x55AA55AA; 16]
     };
@@ -106,7 +106,7 @@ async fn handle_btn_press(usr_btn_pin: UserBtnPin,
     led_green_pin: LedGreenPin,
     led_yellow_pin: LedYellowPin,
     led_red_pin: LedRedPin,
-    coms_writer: &'static UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>) {
+    coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>) {
 
     let mut usr_btn = ExtiInput::new(usr_btn_pin, usr_btn_exti, Pull::Down);
 

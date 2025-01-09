@@ -7,13 +7,6 @@ use core::{
 };
 use critical_section;
 
-// #[macro_export]
-// macro_rules! create_queue_buffer {
-//     () => {
-        
-//     };
-// }
-
 pub struct Buffer<const LENGTH: usize> {
     pub data: [MaybeUninit<u8>; LENGTH],
     // pub len: MaybeUninit<usize>,

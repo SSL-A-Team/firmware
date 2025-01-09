@@ -47,7 +47,7 @@
             clang
 
             # Rust Embedded
-            (rust-bin.nightly."2024-06-12".default.override {
+            (rust-bin.nightly."2024-12-10".default.override {
               extensions = [ "rust-src" "rust-analyzer" ];
               targets = [ "thumbv7em-none-eabihf" "thumbv6m-none-eabi" ];
             })
