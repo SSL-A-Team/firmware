@@ -7,7 +7,8 @@ use core::sync::atomic::AtomicU32;
 use embassy_stm32::{
     bind_interrupts, exti::ExtiInput, gpio::{Level, Output, Pull, Speed}, interrupt, pac::Interrupt, peripherals::{self, *}, usart::{self, *}
 };
-use embassy_executor::{Executor, InterruptExecutor};
+use embassy_executor::{raw::TaskStorage, Executor, InterruptExecutor};
+use embassy_sync::{mutex::Mutex, pubsub::PubSubChannel};
 use embassy_time::Timer;
 
 use defmt::*;
@@ -16,7 +17,7 @@ use panic_probe as _;
 
 use static_cell::StaticCell;
 
-use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn, uart::queue::{UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{make_uart_queue_pair, queue::Queue, queue_pair_register_and_spawn, uart::queue::{ReadTaskFuture, UartQueueConfigMutex, UartQueueSyncPubSub, UartReadQueue, UartWriteQueue}};
 
 type ComsUartModule = USART2;
 type ComsUartTxDma = DMA1_CH0;
@@ -33,11 +34,22 @@ const RX_BUF_DEPTH: usize = 5;
 const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 5;
 
-make_uart_queue_pair!(COMS,
-    ComsUartModule, ComsUartRxDma, ComsUartTxDma,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
+// static UART_QUEUE: Queue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> = Queue::new();
+const UART_QUEUE_CONFIG_MUTEX: UartQueueConfigMutex = Mutex::new(false);
+const QUEUE_SYNC_PUBSUB: UartQueueSyncPubSub = PubSubChannel::new();
+
+#[link_section = ".axisram.buffers"]
+static UART_READ_QUEUE: UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> = UartReadQueue::new(Queue::new(), UART_QUEUE_CONFIG_MUTEX);
+#[link_section = ".axisram.buffers"]
+static UART_WRITE_QUEUE: UartReadQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = UartReadQueue::new(Queue::new(), UART_QUEUE_CONFIG_MUTEX);
+
+static UART_READ_TASK_STORAGE: TaskStorage<ReadTaskFuture<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>> = TaskStorage::new();
+
+// make_uart_queue_pair!(COMS,
+//     ComsUartModule, ComsUartRxDma, ComsUartTxDma,
+//     MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
+//     MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
+//     #[link_section = ".axisram.buffers"]);
 
 static BAUD_RATE: AtomicU32 = AtomicU32::new(115200);
 
@@ -198,7 +210,9 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
 
     let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
     
-    queue_pair_register_and_spawn!(high_pri_spawner, COMS, coms_uart_rx, coms_uart_tx);
+    let uart_read_task = UART_READ_TASK_STORAGE.spawn(|| { UART_READ_QUEUE.read_task(coms_uart_rx, QUEUE_SYNC_PUBSUB.subscriber().unwrap()) } );
+
+    // queue_pair_register_and_spawn!(high_pri_spawner, COMS, coms_uart_rx, coms_uart_tx);
 
 
     // MIGHT should put queues in mix prio, this could elicit the bug
@@ -208,7 +222,8 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
         unwrap!(spawner.spawn(handle_btn_press(p.PC13, p.EXTI13, p.PB0, p.PE1, p.PB14, &COMS_TX_UART_QUEUE)));
         // unwrap!(spawner.spawn(COMS_QUEUE_RX.spawn_task(coms_uart_rx)));
         // unwrap!(spawner.spawn(COMS_QUEUE_TX.spawn_task(coms_uart_tx)));
-        unwrap!(spawner.spawn(rx_task(&COMS_RX_UART_QUEUE)));
-        unwrap!(spawner.spawn(tx_task(&COMS_TX_UART_QUEUE)));
+        // unwrap!(spawner.spawn(rx_task(&COMS_RX_UART_QUEUE)));
+        // unwrap!(spawner.spawn(tx_task(&COMS_TX_UART_QUEUE)));
+        spawner.spawn(uart_read_task);
     });
 }

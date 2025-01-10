@@ -98,9 +98,21 @@ macro_rules! queue_pair_register_and_spawn {
     };
 }
 
+pub type UartQueueConfigMutex = Mutex<CriticalSectionRawMutex, bool>;
+
 pub type UartQueueSyncPubSub = PubSubChannel<CriticalSectionRawMutex, UartTaskCommand, 1, 3, 2>;
 type UartQueueConfigSyncPub = Publisher<'static, CriticalSectionRawMutex, UartTaskCommand, 1, 3, 2>;
 type UartQueueConfigSyncSub = Subscriber<'static, CriticalSectionRawMutex, UartTaskCommand, 1, 3, 2>;
+
+pub type ReadTaskFuture<
+    const LENGTH: usize,
+    const DEPTH: usize,
+> = impl Future;
+
+pub type WriteTaskFuture<
+    const LENGTH: usize,
+    const DEPTH: usize,
+> = impl Future;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum UartTaskCommand {
@@ -109,68 +121,12 @@ pub enum UartTaskCommand {
     UnpauseFailure,
 }
 
-pub struct IdleBufferedUart<
-const RD_LEN: usize,
-const RD_DEPTH: usize,
-const WR_LEN: usize,
-const WR_DEPTH: usize
-> {
-    // uart_config_mutex: Mutex<CriticalSectionRawMutex, bool>,
-    uart_read_queue: UartReadQueue<RD_LEN, RD_DEPTH>,
-    read_task_storage: TaskStorage<ReadTaskFuture<RD_LEN, RD_DEPTH>>,
-    uart_write_queue: UartWriteQueue<WR_LEN, WR_DEPTH>, 
-}
-
-impl<
-    const RD_LEN: usize,
-    const RD_DEPTH: usize,
-    const WR_LEN: usize,
-    const WR_DEPTH: usize
-    > IdleBufferedUart<RD_LEN, RD_DEPTH, WR_LEN, WR_DEPTH> {
-    pub const fn new() -> Self {
-        let uart_config_mutex: Mutex<CriticalSectionRawMutex, bool> = Mutex::new(false);
-
-        // const read_mem_entry: SyncUnsafeCell<Buffer<RD_LEN>> = SyncUnsafeCell::new(Buffer<RD_LEN>::EMPTY);
-        let read_mem = [const { SyncUnsafeCell::new(Buffer::<RD_LEN>::EMPTY) }; RD_DEPTH];
-        let read_queue = Queue::new(read_mem);
-        let write_mem = [const { SyncUnsafeCell::new(Buffer::<WR_LEN>::EMPTY) }; WR_DEPTH];
-
-
-        Self {
-            // uart_config_mutex: Mutex::new(false),
-            uart_read_queue: UartReadQueue::new(
-                // &read_mem,
-                uart_config_mutex),
-            read_task_storage: TaskStorage::new(),
-            uart_write_queue: UartWriteQueue::new(&write_mem, uart_config_mutex),
-        }
-    }
-
-    pub fn spawn_task(
-        &'static self,
-        rx: UartRx<'static, Async>,
-        uart_config_signal_subscriber: UartQueueConfigSyncSub
-    ) -> SpawnToken<impl Sized> {
-        self.read_task_storage.spawn(|| self.uart_read_queue.read_task(read_que, rx, uart_config_signal_subscriber))
-    }
-
-    // pub fn spawn_task_with_pubsub(
-    //     &'static self,
-    //     rx: UartRx<'static, Async>,
-    //     uart_config_signal_pubsub: &'static UartQueueSyncPubSub
-    // ) -> SpawnToken<impl Sized> {
-    //     self.task.spawn(|| self.read_task(&self.queue_rx, rx, uart_config_signal_pubsub.subscriber().unwrap()))
-    // }
-
-}
-
 pub struct UartReadQueue<
     const LENGTH: usize,
     const DEPTH: usize,
 > {
     uart_mutex: Mutex<CriticalSectionRawMutex, bool>,
-    // queue_rx: Queue<LENGTH, DEPTH>,
-    // task: TaskStorage<ReadTaskFuture<LENGTH, DEPTH>>,
+    queue_rx: Queue<LENGTH, DEPTH>,
 }
 
 // TODO: pretty sure shouldn't do this
@@ -182,11 +138,6 @@ unsafe impl<
 {
 }
 
-pub type ReadTaskFuture<
-    const LENGTH: usize,
-    const DEPTH: usize,
-> = impl Future;
-
 impl<
         'a,
         const LENGTH: usize,
@@ -194,17 +145,17 @@ impl<
     > UartReadQueue<LENGTH, DEPTH>
 {
     pub const fn new(
-        // buffers: &'a[SyncUnsafeCell<Buffer<LENGTH>>; DEPTH],
-            uart_mutex: Mutex<CriticalSectionRawMutex, bool>        ) -> Self {
+            queue: Queue<LENGTH, DEPTH>,
+            uart_mutex: Mutex<CriticalSectionRawMutex, bool>) -> Self {
         Self {
             uart_mutex: uart_mutex,
-            // queue_rx: Queue::new(buffers),
+            queue_rx: queue,
         }
     }
 
-    async fn read_task(
+    pub fn read_task(
         &'static self,
-        queue_rx: &'static Queue<LENGTH, DEPTH>,
+        // queue_rx: &'static Queue<LENGTH, DEPTH>,
         mut rx: UartRx<'static, Async>,
         mut uart_config_signal_subscriber: UartQueueConfigSyncSub,
     ) -> ReadTaskFuture<LENGTH, DEPTH> {
@@ -243,7 +194,7 @@ impl<
 
 
                 // get enqueue ref to pass to the DMA layer
-                let mut buf = queue_rx.enqueue().await.unwrap();
+                let mut buf = self.queue_rx.enqueue().await.unwrap();
                 match select(rx.read_until_idle(buf.data()), uart_config_signal_subscriber.next_message()).await {
                     Either::First(len) => {
                         if let Ok(len) = len {
@@ -307,13 +258,7 @@ pub struct UartWriteQueue<
     uart_config_signal_subscriber: Mutex<CriticalSectionRawMutex, Option<UartQueueConfigSyncSub>>,
     queue_tx: Queue<LENGTH, DEPTH>,
     new_uart_config: Mutex<CriticalSectionRawMutex, Option<usart::Config>>,
-    // task: TaskStorage<WriteTaskFuture<UART, DMA, LENGTH, DEPTH>>,
 }
-
-pub type WriteTaskFuture<
-    const LENGTH: usize,
-    const DEPTH: usize,
-> = impl Future;
 
 impl<
         'a,
@@ -321,16 +266,15 @@ impl<
         const DEPTH: usize,
     > UartWriteQueue<LENGTH, DEPTH>
 {
-    pub const fn new(buffers: &'a [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH],
+    pub const fn new(queue: Queue<LENGTH, DEPTH>,
             uart_mutex: Mutex<CriticalSectionRawMutex, bool>
             ) -> Self {
         Self {
             uart_mutex: uart_mutex,
             uart_config_signal_publisher: Mutex::new(None),
             uart_config_signal_subscriber: Mutex::new(None),
-            queue_tx: Queue::new(buffers),
+            queue_tx: queue,
             new_uart_config: Mutex::new(None),
-            // task: TaskStorage::new(),
         }
     }
 
@@ -345,9 +289,8 @@ impl<
         *sub = Some(uart_config_signal_subscriber);
     }
 
-    fn write_task(
+    pub fn write_task(
         &'static self,
-        queue_tx: &'static Queue<LENGTH, DEPTH>,
         mut tx: UartTx<'static, Async>,
         uart_config_signal_publisher: UartQueueConfigSyncPub,
         mut uart_config_signal_subscriber: UartQueueConfigSyncSub,
@@ -357,7 +300,7 @@ impl<
                 // the tx task primarily blocks on queue_tx.queue(), e.g. waiting for other async tasks
                 // to enqueue data. Use a select to break waiting if another task signals there's a UART
                 // config update. They probably want the update before the next data is enqueued
-                match select(queue_tx.dequeue(), uart_config_signal_subscriber.next_message()).await {
+                match select(self.queue_tx.dequeue(), uart_config_signal_subscriber.next_message()).await {
                     // we are dequeing data
                     Either::First(dq_res) => {
                         if let Ok(buf) = dq_res {
@@ -430,20 +373,20 @@ impl<
         }
     }
 
-    pub fn spawn_task(&'static self, 
-        tx: UartTx<'static, Async>,
-        uart_config_signal_publisher: UartQueueConfigSyncPub,
-        uart_config_signal_subscriber: UartQueueConfigSyncSub,
-    ) -> SpawnToken<impl Sized> {
-        self.task.spawn(|| self.write_task(&self.queue_tx, tx, uart_config_signal_publisher, uart_config_signal_subscriber))
-    }
+    // pub fn spawn_task(&'static self, 
+    //     tx: UartTx<'static, Async>,
+    //     uart_config_signal_publisher: UartQueueConfigSyncPub,
+    //     uart_config_signal_subscriber: UartQueueConfigSyncSub,
+    // ) -> SpawnToken<impl Sized> {
+    //     self.task.spawn(|| self.write_task(&self.queue_tx, tx, uart_config_signal_publisher, uart_config_signal_subscriber))
+    // }
 
-    pub fn spawn_task_with_pubsub(&'static self, 
-        tx: UartTx<'static, Async>,
-        uart_config_signal_pubsub: &'static UartQueueSyncPubSub
-    ) -> SpawnToken<impl Sized> {
-        self.task.spawn(|| self.write_task(&self.queue_tx, tx, uart_config_signal_pubsub.publisher().unwrap(), uart_config_signal_pubsub.subscriber().unwrap()))
-    }
+    // pub fn spawn_task_with_pubsub(&'static self, 
+    //     tx: UartTx<'static, Async>,
+    //     uart_config_signal_pubsub: &'static UartQueueSyncPubSub
+    // ) -> SpawnToken<impl Sized> {
+    //     self.task.spawn(|| self.write_task(&self.queue_tx, tx, uart_config_signal_pubsub.publisher().unwrap(), uart_config_signal_pubsub.subscriber().unwrap()))
+    // }
 
     pub fn enqueue(&self, fn_write: impl FnOnce(&mut [u8]) -> usize) -> Result<(), queue::Error> {
         let mut buf = self.queue_tx.try_enqueue()?;

@@ -8,15 +8,22 @@ use core::{
 use critical_section;
 
 pub struct Buffer<const LENGTH: usize> {
-    pub data: [MaybeUninit<u8>; LENGTH],
+    pub data: [u8; LENGTH],
     // pub len: MaybeUninit<usize>,
     len: usize,
 }
 
 impl<const LENGTH: usize> Buffer<LENGTH> {
+    pub const fn new() -> Self {
+        Self {
+            data: [0 as u8; LENGTH],
+            len: 0,
+        }
+    }
+
     pub const EMPTY: Buffer<LENGTH> = Buffer {
-        data: MaybeUninit::uninit_array(),
-        // len: MaybeUninit::uninit(),
+        // data: MaybeUninit::uninit_array(),
+        data: [0 as u8; LENGTH],
         len: 0
     };
 }
@@ -74,7 +81,7 @@ pub enum Error {
 }
 
 pub struct Queue<const LENGTH: usize, const DEPTH: usize> {
-    buffers: &'static [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH],
+    buffers: [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH],
     read_index: AtomicUsize,
     read_in_progress: AtomicBool,
     write_index: AtomicUsize,
@@ -88,9 +95,9 @@ unsafe impl<'a, const LENGTH: usize, const DEPTH: usize> Send for Queue<LENGTH, 
 unsafe impl<'a, const LENGTH: usize, const DEPTH: usize> Sync for Queue<LENGTH, DEPTH> {}
 
 impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
-    pub const fn new(buffers: &'static [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH]) -> Self {
+    pub const fn new() -> Self {
         Self {
-            buffers: buffers,
+            buffers: [const { SyncUnsafeCell::new(Buffer::<LENGTH>::new())}; DEPTH],
             read_index: AtomicUsize::new(0),
             read_in_progress: AtomicBool::new(false),
             write_index: AtomicUsize::new(0),
@@ -100,6 +107,19 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
             dequeue_waker: UnsafeCell::new(None),
         }
     }
+    
+    // pub const fn new_from_buffer(buffers: &'static [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH]) -> Self {
+    //     Self {
+    //         buffers: *buffers,
+    //         read_index: AtomicUsize::new(0),
+    //         read_in_progress: AtomicBool::new(false),
+    //         write_index: AtomicUsize::new(0),
+    //         write_in_progress: AtomicBool::new(false),
+    //         size: AtomicUsize::new(0),
+    //         enqueue_waker: UnsafeCell::new(None),
+    //         dequeue_waker: UnsafeCell::new(None),
+    //     }
+    // }
 
     pub fn can_dequeue(&self) -> bool {
         !self.read_in_progress.load(Ordering::Relaxed) && self.size.load(Ordering::Relaxed) > 0
@@ -125,7 +145,8 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                  * defined behavior constraints w.r.t data alignment and init values, and therefore referencing
                  * the buffer means the internal data is valid.
                  */
-                let data = unsafe { &MaybeUninit::slice_assume_init_ref(&buf.data)[..buf.len] };
+                let data = &buf.data[..buf.len];
+                // let data = unsafe { &MaybeUninit::slice_assume_init_ref(&buf.data)[..buf.len] };
 
                 Ok(DequeueRef { queue: self, data })
             } else {
@@ -197,7 +218,8 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                  * defined behavior constraints w.r.t data alignment and init values, and therefore referencing
                  * the buffer means the internal data is valid.
                  */
-                let data = unsafe { MaybeUninit::slice_assume_init_mut(&mut buf.data) };
+                // let data = unsafe { MaybeUninit::slice_assume_init_mut(&mut buf.data) };
+                let data = &mut buf.data;
 
                 // TODO CHCEK: https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#method.write-1 this should overwrite the value and
                 // return a mut ref to the new value
