@@ -18,10 +18,6 @@ use static_cell::StaticCell;
 
 use ateam_lib_stm32::{queue::Queue, uart::queue::{IdleBufferedUart, IdleBufferedUartReadFuture, IdleBufferedUartWriteFuture, UartReadQueue, UartWriteQueue}};
 
-type ComsUartModule = USART2;
-type ComsUartTxDma = DMA1_CH0;
-type ComsUartRxDma = DMA1_CH1;
-
 type LedGreenPin = PB0;
 type LedYellowPin = PE1;
 type LedRedPin = PB14;
@@ -36,8 +32,8 @@ const TX_BUF_DEPTH: usize = 5;
 #[link_section = ".axisram.buffers"]
 static IDLE_BUFFERED_UART: IdleBufferedUart<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = IdleBufferedUart::new(Queue::new(), Queue::new());
 
-static UART_READ_TASK_STORAGE: TaskStorage<IdleBufferedUartReadFuture<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>> = TaskStorage::new();
-static UART_WRITE_TASK_STORAGE: TaskStorage<IdleBufferedUartWriteFuture<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>> = TaskStorage::new();
+static UART_READ_TASK_STORAGE: TaskStorage = TaskStorage::new();
+static UART_WRITE_TASK_STORAGE: TaskStorage = TaskStorage::new();
 
 static BAUD_RATE: AtomicU32 = AtomicU32::new(115200);
 
@@ -203,15 +199,11 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
     let uart_read_task = UART_READ_TASK_STORAGE.spawn(|| { IDLE_BUFFERED_UART.read_task(coms_uart_rx) } );
     let uart_write_task = UART_WRITE_TASK_STORAGE.spawn(|| { IDLE_BUFFERED_UART.write_task(coms_uart_tx) });
 
-
-
     // MIGHT should put queues in mix prio, this could elicit the bug
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
         unwrap!(spawner.spawn(handle_btn_press(p.PC13, p.EXTI13, p.PB0, p.PE1, p.PB14, &IDLE_BUFFERED_UART)));
-
-
         unwrap!(spawner.spawn(rx_task(IDLE_BUFFERED_UART.get_uart_read_queue())));
         unwrap!(spawner.spawn(tx_task(IDLE_BUFFERED_UART.get_uart_write_queue())));
 
