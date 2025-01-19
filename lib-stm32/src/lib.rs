@@ -1,5 +1,6 @@
 #![no_std]
 #![feature(generic_const_exprs)]
+#![feature(const_precise_live_drops)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(sync_unsafe_cell)]
 #![feature(type_alias_impl_trait)]

@@ -7,7 +7,7 @@ use core::sync::atomic::AtomicU32;
 use embassy_stm32::{
     bind_interrupts, exti::ExtiInput, gpio::{Level, Output, Pull, Speed}, interrupt, peripherals::{self, *}, usart::{self, *}
 };
-use embassy_executor::{raw::TaskStorage, Executor, InterruptExecutor};
+use embassy_executor::{Executor, InterruptExecutor};
 use embassy_time::Timer;
 
 use defmt::*;
@@ -16,7 +16,7 @@ use panic_probe as _;
 
 use static_cell::StaticCell;
 
-use ateam_lib_stm32::{queue::Queue, uart::queue::{IdleBufferedUart, IdleBufferedUartReadFuture, IdleBufferedUartWriteFuture, UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{bind_task_storage, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 
 type LedGreenPin = PB0;
 type LedYellowPin = PE1;
@@ -29,11 +29,7 @@ const RX_BUF_DEPTH: usize = 5;
 const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 5;
 
-#[link_section = ".axisram.buffers"]
-static IDLE_BUFFERED_UART: IdleBufferedUart<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = IdleBufferedUart::new(Queue::new(), Queue::new());
-
-static UART_READ_TASK_STORAGE: TaskStorage<IdleBufferedUartReadFuture<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>> = TaskStorage::new();
-static UART_WRITE_TASK_STORAGE: TaskStorage<IdleBufferedUartWriteFuture<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>> = TaskStorage::new();
+static_idle_buffered_uart!(TEST, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
 
 static BAUD_RATE: AtomicU32 = AtomicU32::new(115200);
 
@@ -192,22 +188,24 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
         coms_uart_config,
     ).unwrap();
 
-    IDLE_BUFFERED_UART.init();
+    TEST_IDLE_BUFFERED_UART.init();
 
     let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
     
-    let uart_read_task = UART_READ_TASK_STORAGE.spawn(|| { IDLE_BUFFERED_UART.read_task(coms_uart_rx) } );
-    let uart_write_task = UART_WRITE_TASK_STORAGE.spawn(|| { IDLE_BUFFERED_UART.write_task(coms_uart_tx) });
+    // let test_uart_read_task = TEST_READ_TASK_STORAGE.spawn(|| { TEST_IDLE_BUFFERED_UART.read_task(coms_uart_rx) } );
+    // let test_uart_write_task = TEST_WRITE_TASK_STORAGE.spawn(|| { TEST_IDLE_BUFFERED_UART.write_task(coms_uart_tx) });
+
+    bind_task_storage!(TEST, coms_uart_rx, coms_uart_tx);
 
     // MIGHT should put queues in mix prio, this could elicit the bug
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        unwrap!(spawner.spawn(handle_btn_press(p.PC13, p.EXTI13, p.PB0, p.PE1, p.PB14, &IDLE_BUFFERED_UART)));
-        unwrap!(spawner.spawn(rx_task(IDLE_BUFFERED_UART.get_uart_read_queue())));
-        unwrap!(spawner.spawn(tx_task(IDLE_BUFFERED_UART.get_uart_write_queue())));
+        unwrap!(spawner.spawn(handle_btn_press(p.PC13, p.EXTI13, p.PB0, p.PE1, p.PB14, &TEST_IDLE_BUFFERED_UART)));
+        unwrap!(spawner.spawn(rx_task(TEST_IDLE_BUFFERED_UART.get_uart_read_queue())));
+        unwrap!(spawner.spawn(tx_task(TEST_IDLE_BUFFERED_UART.get_uart_write_queue())));
 
-        spawner.spawn(uart_read_task).unwrap();
-        spawner.spawn(uart_write_task).unwrap();
+        spawner.spawn(test_uart_read_task).unwrap();
+        spawner.spawn(test_uart_write_task).unwrap();
     });
 }

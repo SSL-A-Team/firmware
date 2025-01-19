@@ -22,78 +22,37 @@ use crate::queue::{
 };
 
 #[macro_export]
-macro_rules! make_uart_queue_pair {
-    ($name:ident, $uart:ty, $uart_rx_dma:ty, $uart_tx_dma:ty, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr, $(#[$m:meta])*) => {
+macro_rules! static_idle_buffered_uart {
+    ($name:ident, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr, $(#[$m:meta])*) => {
         $crate::paste::paste! {
-        // shared mutex allowing safe runtime update to UART config
-        const [<$name _UART_PERI_MUTEX>]: embassy_sync::mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, bool> = 
-            embassy_sync::mutex::Mutex::new(false);
-        static [<$name _UART_SYNC_PUBSUB>]: $crate::uart::queue::UartQueueSyncPubSub = embassy_sync::pubsub::PubSubChannel::new();
+            static [<$name _TASK_SYNC_MUTEX>]: $crate::uart::queue::IdleBufferedUartTaskSyncMutex =  embassy_sync::mutex::Mutex::new(false);
+            $(#[$m])*
+            static [<$name _IDLE_BUFFERED_UART>]: $crate::uart::queue::IdleBufferedUart<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth> = 
+                $crate::uart::queue::IdleBufferedUart::new($crate::queue::Queue::new(), $crate::queue::Queue::new(), &[<$name _TASK_SYNC_MUTEX>]);
 
-        // tx buffer
-        const [<$name _CONST_TX_BUF_VAL>]: core::cell::SyncUnsafeCell<$crate::queue::Buffer<$tx_buffer_size>> = 
-            core::cell::SyncUnsafeCell::new($crate::queue::Buffer::EMPTY);
-        $(#[$m])*
-        static [<$name _TX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::queue::Buffer<$tx_buffer_size>>; $tx_buffer_depth] = 
-            [[<$name _CONST_TX_BUF_VAL>]; $tx_buffer_depth];
-        static [<$name _TX_UART_QUEUE>]: $crate::uart::queue::UartWriteQueue<$tx_buffer_size, $tx_buffer_depth> = 
-        $crate::uart::queue::UartWriteQueue::new(&[<$name _TX_BUFFER>], [<$name _UART_PERI_MUTEX>]);
-
-        // rx buffer
-        const [<$name _CONST_RX_BUF_VAL>]: core::cell::SyncUnsafeCell<$crate::queue::Buffer<$rx_buffer_size>> = 
-            core::cell::SyncUnsafeCell::new($crate::queue::Buffer::EMPTY);
-        $(#[$m])*
-        static [<$name _RX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::queue::Buffer<$rx_buffer_size>>; $rx_buffer_depth] = 
-        [[<$name _CONST_RX_BUF_VAL>]; $rx_buffer_depth];
-        static [<$name _RX_UART_QUEUE>]: $crate::uart::queue::UartReadQueue<$rx_buffer_size, $rx_buffer_depth> = 
-            $crate::uart::queue::UartReadQueue::new(&[<$name _RX_BUFFER>], [<$name _UART_PERI_MUTEX>]);
+            static [<$name _READ_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
+                $crate::uart::queue::IdleBufferedUartReadFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth>> = 
+                embassy_executor::raw::TaskStorage::new();
+            static [<$name _WRITE_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
+                $crate::uart::queue::IdleBufferedUartWriteFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth>> = 
+                embassy_executor::raw::TaskStorage::new();
         }
     }
 }
 
 #[macro_export]
-macro_rules! queue_pair_register_signals {
-    ($name:ident) => {
+macro_rules! bind_task_storage {
+    ($name:ident, $uart_rx:ident, $uart_tx:ident) => {
         $crate::paste::paste! {
-        [<$name _TX_UART_QUEUE>].attach_pubsub(
-            [<$name _UART_SYNC_PUBSUB>].publisher().unwrap(),
-            [<$name _UART_SYNC_PUBSUB>].subscriber().unwrap()).await;
+            let [<$name:lower _uart_read_task>] = [<$name _READ_TASK_STORAGE>].spawn(|| { [<$name _IDLE_BUFFERED_UART>].read_task($uart_rx) } );
+            let [<$name:lower _uart_write_task>] = [<$name _WRITE_TASK_STORAGE>].spawn(|| { [<$name _IDLE_BUFFERED_UART>].write_task($uart_tx) });
         }
     }
 }
 
-#[macro_export]
-macro_rules! queue_pair_rx_task {
-    ($name:ident, $uart_rx:ident) => {
-        $crate::paste::paste! {
-        [<$name _RX_UART_QUEUE>].spawn_task_with_pubsub($uart_rx, &[<$name _UART_SYNC_PUBSUB>])
-        }
-    }
-}
+pub type IdleBufferedUartTaskSyncMutex = Mutex<CriticalSectionRawMutex, bool>;
 
-#[macro_export]
-macro_rules! queue_pair_tx_task {
-    ($name:ident, $uart_tx:ident) => {
-        $crate::paste::paste! {
-        [<$name _TX_UART_QUEUE>].spawn_task_with_pubsub($uart_tx, &[<$name _UART_SYNC_PUBSUB>])
-        }
-    }
-}
-
-#[macro_export]
-macro_rules! queue_pair_register_and_spawn {
-    ($spawner:ident, $name:ident, $uart_rx:ident, $uart_tx:ident) => {
-        $crate::paste::paste! {
-        $crate::queue_pair_register_signals!($name);
-        $spawner.spawn($crate::queue_pair_rx_task!($name, $uart_rx)).unwrap();
-        $spawner.spawn($crate::queue_pair_tx_task!($name, $uart_tx)).unwrap();
-        }
-    };
-}
-
-pub type UartQueueConfigMutex = Mutex<CriticalSectionRawMutex, bool>;
-
-pub type UartQueueSyncPubSub = PubSubChannel<CriticalSectionRawMutex, UartTaskCommand, 1, 3, 2>;
+type UartQueueSyncPubSub = PubSubChannel<CriticalSectionRawMutex, UartTaskCommand, 1, 3, 2>;
 type UartQueueConfigSyncPub = Publisher<'static, CriticalSectionRawMutex, UartTaskCommand, 1, 3, 2>;
 type UartQueueConfigSyncSub = Subscriber<'static, CriticalSectionRawMutex, UartTaskCommand, 1, 3, 2>;
 
@@ -152,13 +111,12 @@ impl <
     pub const fn new(
         read_queue: Queue<RLEN, RDEPTH>,
         write_queue: Queue<WLEN, WDEPTH>,
+        uart_task_mutex: &'static IdleBufferedUartTaskSyncMutex,
     ) -> Self {
-        const UART_TASK_MUTEX: UartQueueConfigMutex = Mutex::new(false);
-        const UART_CONFIG_SIGNAL: Mutex<CriticalSectionRawMutex, Option<usart::Config>> = Mutex::new(None);
         IdleBufferedUart { 
-            uart_read_queue: UartReadQueue::new(read_queue, UART_TASK_MUTEX),
-            uart_write_queue: UartWriteQueue::new(write_queue, UART_TASK_MUTEX),
-            uart_config: UART_CONFIG_SIGNAL,
+            uart_read_queue: UartReadQueue::new(read_queue, uart_task_mutex),
+            uart_write_queue: UartWriteQueue::new(write_queue, uart_task_mutex),
+            uart_config: Mutex::new(None),
             uart_config_signal: PubSubChannel::new(),
             uart_config_signal_publisher: Mutex::new(None),
             uart_config_signal_subscriber: Mutex::new(None),
@@ -254,7 +212,7 @@ pub struct UartReadQueue<
     const LENGTH: usize,
     const DEPTH: usize,
 > {
-    uart_mutex: Mutex<CriticalSectionRawMutex, bool>,
+    uart_mutex: &'static Mutex<CriticalSectionRawMutex, bool>,
     queue_rx: Queue<LENGTH, DEPTH>,
 }
 
@@ -265,7 +223,7 @@ impl<
 {
     pub const fn new(
             queue: Queue<LENGTH, DEPTH>,
-            uart_mutex: Mutex<CriticalSectionRawMutex, bool>) -> Self {
+            uart_mutex: &'static Mutex<CriticalSectionRawMutex, bool>) -> Self {
         Self {
             uart_mutex,
             queue_rx: queue,
@@ -372,7 +330,7 @@ pub struct UartWriteQueue<
     const LENGTH: usize,
     const DEPTH: usize,
 > {
-    uart_mutex: Mutex<CriticalSectionRawMutex, bool>,
+    uart_mutex: &'static Mutex<CriticalSectionRawMutex, bool>,
     uart_config_signal_publisher: Mutex<CriticalSectionRawMutex, Option<UartQueueConfigSyncPub>>,
     uart_config_signal_subscriber: Mutex<CriticalSectionRawMutex, Option<UartQueueConfigSyncSub>>,
     queue_tx: Queue<LENGTH, DEPTH>,
@@ -386,9 +344,7 @@ impl<
 {
     pub const fn new(
             queue: Queue<LENGTH, DEPTH>,
-            uart_mutex: Mutex<CriticalSectionRawMutex, bool>,
-            // uart_config_signal_publisher: Mutex<CriticalSectionRawMutex, Option<UartQueueConfigSyncPub>>,
-            // uart_config_signal_subscriber: Mutex<CriticalSectionRawMutex, Option<UartQueueConfigSyncSub>>,
+            uart_mutex: &'static Mutex<CriticalSectionRawMutex, bool>,
             ) -> Self {
         Self {
             uart_mutex,
