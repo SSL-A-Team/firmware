@@ -1,7 +1,6 @@
 use core::{
     cell::{SyncUnsafeCell, UnsafeCell},
     future::poll_fn,
-    mem::MaybeUninit,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     task::{Poll, Waker}
 };
@@ -9,7 +8,6 @@ use critical_section;
 
 pub struct Buffer<const LENGTH: usize> {
     pub data: [u8; LENGTH],
-    // pub len: MaybeUninit<usize>,
     len: usize,
 }
 
@@ -22,7 +20,6 @@ impl<const LENGTH: usize> Buffer<LENGTH> {
     }
 
     pub const EMPTY: Buffer<LENGTH> = Buffer {
-        // data: MaybeUninit::uninit_array(),
         data: [0 as u8; LENGTH],
         len: 0
     };
@@ -107,19 +104,6 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
             dequeue_waker: UnsafeCell::new(None),
         }
     }
-    
-    // pub const fn new_from_buffer(buffers: &'static [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH]) -> Self {
-    //     Self {
-    //         buffers: *buffers,
-    //         read_index: AtomicUsize::new(0),
-    //         read_in_progress: AtomicBool::new(false),
-    //         write_index: AtomicUsize::new(0),
-    //         write_in_progress: AtomicBool::new(false),
-    //         size: AtomicUsize::new(0),
-    //         enqueue_waker: UnsafeCell::new(None),
-    //         dequeue_waker: UnsafeCell::new(None),
-    //     }
-    // }
 
     pub fn can_dequeue(&self) -> bool {
         !self.read_in_progress.load(Ordering::Relaxed) && self.size.load(Ordering::Relaxed) > 0

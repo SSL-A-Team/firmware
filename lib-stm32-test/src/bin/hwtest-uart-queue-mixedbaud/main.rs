@@ -5,10 +5,9 @@
 use core::sync::atomic::AtomicU32;
 
 use embassy_stm32::{
-    bind_interrupts, exti::ExtiInput, gpio::{Level, Output, Pull, Speed}, interrupt, pac::Interrupt, peripherals::{self, *}, usart::{self, *}
+    bind_interrupts, exti::ExtiInput, gpio::{Level, Output, Pull, Speed}, interrupt, peripherals::{self, *}, usart::{self, *}
 };
 use embassy_executor::{raw::TaskStorage, Executor, InterruptExecutor};
-use embassy_sync::{mutex::Mutex, pubsub::PubSubChannel};
 use embassy_time::Timer;
 
 use defmt::*;
@@ -17,7 +16,7 @@ use panic_probe as _;
 
 use static_cell::StaticCell;
 
-use ateam_lib_stm32::{make_uart_queue_pair, queue::Queue, queue_pair_register_and_spawn, uart::queue::{ReadTaskFuture, UartQueueConfigMutex, UartQueueSyncPubSub, UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{queue::Queue, uart::queue::{IdleBufferedUart, IdleBufferedUartReadFuture, IdleBufferedUartWriteFuture, UartReadQueue, UartWriteQueue}};
 
 type ComsUartModule = USART2;
 type ComsUartTxDma = DMA1_CH0;
@@ -34,22 +33,11 @@ const RX_BUF_DEPTH: usize = 5;
 const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 5;
 
-// static UART_QUEUE: Queue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> = Queue::new();
-const UART_QUEUE_CONFIG_MUTEX: UartQueueConfigMutex = Mutex::new(false);
-const QUEUE_SYNC_PUBSUB: UartQueueSyncPubSub = PubSubChannel::new();
-
 #[link_section = ".axisram.buffers"]
-static UART_READ_QUEUE: UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> = UartReadQueue::new(Queue::new(), UART_QUEUE_CONFIG_MUTEX);
-#[link_section = ".axisram.buffers"]
-static UART_WRITE_QUEUE: UartReadQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = UartReadQueue::new(Queue::new(), UART_QUEUE_CONFIG_MUTEX);
+static IDLE_BUFFERED_UART: IdleBufferedUart<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = IdleBufferedUart::new(Queue::new(), Queue::new());
 
-static UART_READ_TASK_STORAGE: TaskStorage<ReadTaskFuture<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>> = TaskStorage::new();
-
-// make_uart_queue_pair!(COMS,
-//     ComsUartModule, ComsUartRxDma, ComsUartTxDma,
-//     MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-//     MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-//     #[link_section = ".axisram.buffers"]);
+static UART_READ_TASK_STORAGE: TaskStorage<IdleBufferedUartReadFuture<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>> = TaskStorage::new();
+static UART_WRITE_TASK_STORAGE: TaskStorage<IdleBufferedUartWriteFuture<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>> = TaskStorage::new();
 
 static BAUD_RATE: AtomicU32 = AtomicU32::new(115200);
 
@@ -118,7 +106,7 @@ async fn handle_btn_press(usr_btn_pin: UserBtnPin,
     led_green_pin: LedGreenPin,
     led_yellow_pin: LedYellowPin,
     led_red_pin: LedRedPin,
-    coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>) {
+    coms_writer: &'static IdleBufferedUart<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>) {
 
     let mut usr_btn = ExtiInput::new(usr_btn_pin, usr_btn_exti, Pull::Down);
 
@@ -187,7 +175,7 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
     // High-priority executor: I2C1, priority level 6
     // TODO CHECK THIS IS THE HIGHEST PRIORITY
     interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::TIM2, embassy_stm32::interrupt::Priority::P6);
-    let high_pri_spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
+    // let high_pri_spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
 
     //////////////////////////////////
     //  COMMUNICATIONS TASKS SETUP  //
@@ -208,22 +196,26 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
         coms_uart_config,
     ).unwrap();
 
+    IDLE_BUFFERED_UART.init();
+
     let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
     
-    let uart_read_task = UART_READ_TASK_STORAGE.spawn(|| { UART_READ_QUEUE.read_task(coms_uart_rx, QUEUE_SYNC_PUBSUB.subscriber().unwrap()) } );
+    let uart_read_task = UART_READ_TASK_STORAGE.spawn(|| { IDLE_BUFFERED_UART.read_task(coms_uart_rx) } );
+    let uart_write_task = UART_WRITE_TASK_STORAGE.spawn(|| { IDLE_BUFFERED_UART.write_task(coms_uart_tx) });
 
-    // queue_pair_register_and_spawn!(high_pri_spawner, COMS, coms_uart_rx, coms_uart_tx);
 
 
     // MIGHT should put queues in mix prio, this could elicit the bug
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        unwrap!(spawner.spawn(handle_btn_press(p.PC13, p.EXTI13, p.PB0, p.PE1, p.PB14, &COMS_TX_UART_QUEUE)));
-        // unwrap!(spawner.spawn(COMS_QUEUE_RX.spawn_task(coms_uart_rx)));
-        // unwrap!(spawner.spawn(COMS_QUEUE_TX.spawn_task(coms_uart_tx)));
-        // unwrap!(spawner.spawn(rx_task(&COMS_RX_UART_QUEUE)));
-        // unwrap!(spawner.spawn(tx_task(&COMS_TX_UART_QUEUE)));
-        spawner.spawn(uart_read_task);
+        unwrap!(spawner.spawn(handle_btn_press(p.PC13, p.EXTI13, p.PB0, p.PE1, p.PB14, &IDLE_BUFFERED_UART)));
+
+
+        unwrap!(spawner.spawn(rx_task(IDLE_BUFFERED_UART.get_uart_read_queue())));
+        unwrap!(spawner.spawn(tx_task(IDLE_BUFFERED_UART.get_uart_write_queue())));
+
+        spawner.spawn(uart_read_task).unwrap();
+        spawner.spawn(uart_write_task).unwrap();
     });
 }

@@ -4,7 +4,6 @@
 #![feature(sync_unsafe_cell)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
-// #![feature(const_maybe_uninit_uninit_array)]
 #![feature(maybe_uninit_slice)]
 #![feature(ptr_metadata)]
 #![feature(trait_alias)]

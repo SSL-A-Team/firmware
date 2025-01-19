@@ -5,7 +5,7 @@ use embassy_time::Timer;
 use heapless::String;
 
 use crate::queue;
-use crate::uart::queue::{UartReadQueue, UartWriteQueue};
+use crate::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
 
 use super::at_protocol::{ATEvent, ATResponse, WifiLinkDisconnectedReason};
 use super::edm_protocol::EdmPacket;
@@ -53,6 +53,7 @@ pub struct OdinW262<
 > {
     reader: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
     writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
+    uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
     mode: RadioMode,
 }
 
@@ -67,16 +68,18 @@ impl<
     pub fn new(
         reader: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
         writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
     ) -> Self {
         Self {
             reader,
             writer,
+            uart,
             mode: RadioMode::CommandMode,
         }
     }
 
     pub async fn update_host_uart_config(&self, config: usart::Config) -> Result<(), ()> {
-        self.writer.update_uart_config(config).await
+        self.uart.update_uart_config(config).await
     }
 
     pub async fn wait_startup(&mut self) -> Result<(), ()> {
@@ -533,8 +536,8 @@ impl<
                 // defmt::warn!("buf: {}", buf);
                 let brk = if let Ok(packet) = self.to_packet(buf) {
                     match packet {
-                        EdmPacket::ConnectEvent { channel, event_type } => false,
-                        EdmPacket::DisconnectEvent { channel } => false,
+                        EdmPacket::ConnectEvent { channel: _, event_type: _ } => false,
+                        EdmPacket::DisconnectEvent { channel: _ } => false,
                         EdmPacket::ATResponse(at_resp) => {
                             match at_resp {
                                 ATResponse::Ok(_) => {
@@ -550,17 +553,17 @@ impl<
                         },
                         EdmPacket::ATEvent(at_event) => {
                             match at_event {
-                                ATEvent::PeerConnectedIP { peer_handle, is_ipv6, protocol, local_address, local_port, remote_address, remote_port } => false,
-                                ATEvent::PeerDisconnected { peer_handle } => false,
-                                ATEvent::WifiLinkConnected { conn_id, bssid, channel } => false,
-                                ATEvent::WifiLinkDisconnected { conn_id, reason } => false,
-                                ATEvent::WifiAccessPointUp { id } => false,
-                                ATEvent::WifiAccessPointDown { id } => false,
-                                ATEvent::WifiAccessPointStationConnected { id, mac_addr } => false,
-                                ATEvent::WifiAccessPointStationDisconnected { id } => false,
-                                ATEvent::NetworkUp { interface_id } => false,
-                                ATEvent::NetworkDown { interface_id } => false,
-                                ATEvent::NetworkError { interface_id, code } => false,
+                                ATEvent::PeerConnectedIP { peer_handle: _, is_ipv6: _, protocol: _, local_address: _, local_port: _, remote_address: _, remote_port: _ } => false,
+                                ATEvent::PeerDisconnected { peer_handle: _ } => false,
+                                ATEvent::WifiLinkConnected { conn_id: _, bssid: _, channel: _ } => false,
+                                ATEvent::WifiLinkDisconnected { conn_id: _, reason: _ } => false,
+                                ATEvent::WifiAccessPointUp { id: _ } => false,
+                                ATEvent::WifiAccessPointDown { id: _ } => false,
+                                ATEvent::WifiAccessPointStationConnected { id: _, mac_addr: _ } => false,
+                                ATEvent::WifiAccessPointStationDisconnected { id: _ } => false,
+                                ATEvent::NetworkUp { interface_id: _ } => false,
+                                ATEvent::NetworkDown { interface_id: _ } => false,
+                                ATEvent::NetworkError { interface_id: _, code: _ } => false,
                                 _ => {
                                     defmt::debug!("ignoring ATEvent in read_ok(). event: {}", at_event);
                                     false
