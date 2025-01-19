@@ -5,7 +5,7 @@
 use core::sync::atomic::AtomicU32;
 
 use embassy_stm32::{
-    bind_interrupts, exti::ExtiInput, gpio::{Level, Output, Pull, Speed}, interrupt, peripherals::{self, *}, usart::{self, *}
+    bind_interrupts, dma::NoDma, exti::ExtiInput, gpio::{Level, Output, Pull, Speed}, interrupt, peripherals::{self, *}, usart::{self, *}
 };
 use embassy_executor::{raw::TaskStorage, Executor, InterruptExecutor};
 use embassy_time::Timer;
@@ -191,6 +191,19 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
         p.DMA1_CH2,
         coms_uart_config,
     ).unwrap();
+
+    let test_uart = Uart::new(
+        p.USART1,
+        p.PA0,
+        p.PA1,
+        Irqs,
+        NoDma,
+        NoDma,
+        coms_uart_config,
+    ).unwrap();
+
+    let mut buf = [0; 16];
+    test_uart.read(&mut buf).await;
 
     IDLE_BUFFERED_UART.init();
 

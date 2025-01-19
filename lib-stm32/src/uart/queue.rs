@@ -174,7 +174,7 @@ impl <
         rx: UartRx<'static, Async>,
     ) -> IdleBufferedUartReadFuture<RLEN, RDEPTH, WLEN, WDEPTH> {
         async move {
-            self.uart_read_queue.read_task(rx, self.uart_config_signal.subscriber().unwrap())
+            self.uart_read_queue.read_task(rx, self.uart_config_signal.subscriber().unwrap()).await
         }
     }
 
@@ -187,7 +187,7 @@ impl <
         tx: UartTx<'static, Async>,
     ) -> IdleBufferedUartWriteFuture<RLEN, RDEPTH, WLEN, WDEPTH> {
         async move {
-            self.uart_write_queue.write_task(tx, self.uart_config_signal.publisher().unwrap(), self.uart_config_signal.subscriber().unwrap())
+            self.uart_write_queue.write_task(tx, self.uart_config_signal.publisher().unwrap(), self.uart_config_signal.subscriber().unwrap()).await
         }
     }
 
