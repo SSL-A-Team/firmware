@@ -165,7 +165,7 @@ impl<
             self.mode = RadioMode::ExtendedDataMode;
         }
 
-        return res;
+        res
     }
 
     pub async fn set_host_name(&self, host_name: &str) -> Result<(), ()> {
@@ -258,11 +258,11 @@ impl<
             },
             Timer::after_millis(2500)).await {
                 embassy_futures::select::Either::First(_) => {
-                    return Ok(());
+                    Ok(())
                 },
                 embassy_futures::select::Either::Second(_) => {
                     defmt::warn!("disconnect timed out");
-                    return Err(());
+                    Err(())
                 },
             }
     }
@@ -423,7 +423,7 @@ impl<
         let res = self.writer.enqueue(|buf| {
                 EdmPacket::DataCommand {
                     channel: channel_id,
-                    data: data,
+                    data,
                 }
                 .write(buf).unwrap()
             });
@@ -462,15 +462,15 @@ impl<
                 match self.to_packet(buf.data()) {
                     Ok(pkt) => {
                         if let EdmPacket::DataEvent { channel: _ , data } = pkt {
-                            return Ok(fn_read(data))
+                            Ok(fn_read(data))
                         } else {
                             // defmt::trace!("got non data event");
-                            return Err(());
+                            Err(())
                         }
                     },
                     Err(_) => {
                         // defmt::trace!("got data that wasn't an edm packet: {}", buf.data());
-                        return Err(());
+                        Err(())
                     },
                 }
                 // we read something
@@ -478,11 +478,11 @@ impl<
             },
             Err(queue::Error::QueueFullEmpty) => {
                 // nothing to read
-                return Err(());
+                Err(())
             }
             Err(queue::Error::InProgress) => {
                 // you did something illegal
-                return Err(());
+                Err(())
             },
         }
     }
@@ -580,7 +580,7 @@ impl<
                     false
                 };
 
-                return brk;
+                brk
             })
             .await;
 
@@ -590,7 +590,7 @@ impl<
             
         }
 
-        return res;
+        res
     }
 
     // async fn read_ok(&self) -> Result<(), ()> {
@@ -607,19 +607,17 @@ impl<
 
     async fn read_ok_at_edm_transition(&self) -> Result<bool, ()> {
         let transition_buf: [u8; 12] = [13, 10, 79, 75, 13, 10, 170, 0, 2, 0, 113, 85];
-        let res = self.reader.dequeue(|buf| {
+        
+
+        self.reader.dequeue(|buf| {
             if buf.len() == transition_buf.len() && buf.iter().zip(transition_buf.iter()).all(|(a,b)| a == b) {
                 Ok(true)
+            } else if let EdmPacket::ATResponse(ATResponse::Ok("")) = self.to_packet(buf)? {
+                Ok(false)
             } else {
-                if let EdmPacket::ATResponse(ATResponse::Ok("")) = self.to_packet(buf)? {
-                    Ok(false)
-                } else {
-                    Err(())
-                }
+                Err(())
             }
-        }).await;
-
-        return res;
+        }).await
     }
 
     fn to_packet<'b>(&self, buf: &'b [u8]) -> Result<EdmPacket<'b>, ()> {

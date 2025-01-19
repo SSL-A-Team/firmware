@@ -237,9 +237,9 @@ impl<'a, 'buf>
         spi_buf: &'buf mut [u8; SPI_MIN_BUF_LEN],
     ) -> Self {
         Bmi323 {
-            spi: spi,
-            spi_cs: spi_cs,
-            spi_buf: spi_buf,
+            spi,
+            spi_cs,
+            spi_buf,
             accel_mode: AccelMode::Disabled,
             accel_range: AccelRange::Range8g,
             accel_bw_mode: Bandwidth3DbCutoffFreq::AccOdrOver2,
@@ -282,8 +282,8 @@ impl<'a, 'buf>
 
         Bmi323 { 
             spi: imu_spi,
-            spi_cs: spi_cs,
-            spi_buf: spi_buf,
+            spi_cs,
+            spi_buf,
             accel_mode: AccelMode::Disabled,
             accel_range: AccelRange::Range8g,
             accel_bw_mode: Bandwidth3DbCutoffFreq::AccOdrOver2,
@@ -331,7 +331,7 @@ impl<'a, 'buf>
         let _ = self.spi.transfer_in_place(&mut self.spi_buf[..trx_len]).await;
 
         for (i, dword) in dest.iter_mut().enumerate() {
-            *dword = (self.spi_buf[(i * 2) + 2 + 1] as u16) << 8 | self.spi_buf[(i * 2) + 2 + 0] as u16;
+            *dword = (self.spi_buf[(i * 2) + 2 + 1] as u16) << 8 | self.spi_buf[(i * 2) + 2] as u16;
         }
 
         self.deselect();
@@ -360,8 +360,8 @@ impl<'a, 'buf>
         self.spi_buf[0] = reg as u8 | READ_BIT;
 
         for (i, word) in data.iter().enumerate() {
-            self.spi_buf[(i * 2) + 1 + 0] = (*word & 0x00FF as u16) as u8;
-            self.spi_buf[(i * 2) + 1 + 1] = ((*word & 0xFF00 as u16) >> 8) as u8;
+            self.spi_buf[(i * 2) + 1] = (*word & 0x00FF_u16) as u8;
+            self.spi_buf[(i * 2) + 1 + 1] = ((*word & 0xFF00_u16) >> 8) as u8;
         }
 
         let _ = self.spi.transfer_in_place(&mut self.spi_buf[..trx_len]).await;
@@ -443,7 +443,7 @@ impl<'a, 'buf>
     pub async fn accel_get_data_g(&mut self) -> [f32; 3] {
         let raw_data = self.accel_get_raw_data().await;
 
-        return [self.convert_accel_raw_sample_g(raw_data[0]),
+        [self.convert_accel_raw_sample_g(raw_data[0]),
             self.convert_accel_raw_sample_g(raw_data[1]),
             self.convert_accel_raw_sample_g(raw_data[2])]
     }
@@ -451,7 +451,7 @@ impl<'a, 'buf>
     pub async fn accel_get_data_mps(&mut self) -> [f32; 3] {
         let raw_data = self.accel_get_raw_data().await;
 
-        return [self.convert_accel_raw_sample_mps(raw_data[0]),
+        [self.convert_accel_raw_sample_mps(raw_data[0]),
             self.convert_accel_raw_sample_mps(raw_data[1]),
             self.convert_accel_raw_sample_mps(raw_data[2])]
     }
@@ -462,7 +462,7 @@ impl<'a, 'buf>
         new_acc_conf_reg_val |= (self.accel_avg_window as u16 & 0x07) << 8;
         new_acc_conf_reg_val |= (self.accel_bw_mode as u16 & 0x01) << 7;
         new_acc_conf_reg_val |= (self.accel_range as u16 & 0x07) << 4;
-        new_acc_conf_reg_val |= (self.accel_odr as u16 & 0x0F) << 0;
+        new_acc_conf_reg_val |= self.accel_odr as u16 & 0x0F;
 
         self.write(ImuRegisters::ACC_CONF, new_acc_conf_reg_val).await;
 
@@ -532,7 +532,7 @@ impl<'a, 'buf>
     pub async fn gyro_get_data_dps(&mut self) -> [f32; 3] {
         let raw_data = self.gyro_get_raw_data().await;
 
-        return [self.convert_raw_gyro_sample_dps(raw_data[0]),
+        [self.convert_raw_gyro_sample_dps(raw_data[0]),
             self.convert_raw_gyro_sample_dps(raw_data[1]),
             self.convert_raw_gyro_sample_dps(raw_data[2])]
     }
@@ -540,7 +540,7 @@ impl<'a, 'buf>
     pub async fn gyro_get_data_rads(&mut self) -> [f32; 3] {
         let raw_data = self.gyro_get_raw_data().await;
 
-        return [self.convert_raw_gyro_sample_rads(raw_data[0]),
+        [self.convert_raw_gyro_sample_rads(raw_data[0]),
             self.convert_raw_gyro_sample_rads(raw_data[1]),
             self.convert_raw_gyro_sample_rads(raw_data[2])]
     }
@@ -551,7 +551,7 @@ impl<'a, 'buf>
         new_gyr_conf_reg_val |= (self.gyro_avg_window as u16 & 0x07) << 8;
         new_gyr_conf_reg_val |= (self.gyro_bw_mode as u16 & 0x01) << 7;
         new_gyr_conf_reg_val |= (self.gyro_range as u16 & 0x07) << 4;
-        new_gyr_conf_reg_val |= (self.gyro_odr as u16 & 0x0F) << 0;
+        new_gyr_conf_reg_val |= self.gyro_odr as u16 & 0x0F;
 
         self.write(ImuRegisters::GYR_CONF, new_gyr_conf_reg_val).await;
 

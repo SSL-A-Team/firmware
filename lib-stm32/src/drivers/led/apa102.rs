@@ -38,8 +38,8 @@ where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
         spi_buf[HEADER_FRAME_SIZE + (NUM_LEDS * COLOR_FRAME_SIZE) - 1] = 0xFF;
 
         Apa102 { 
-            spi: spi,
-            spi_buf: spi_buf,
+            spi,
+            spi_buf,
             needs_update: false,
         }
     }
@@ -66,7 +66,7 @@ where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
     }
 
     const fn l2d(led_index: usize) -> usize {
-        START_FRAME_SIZE + (led_index * COLOR_FRAME_SIZE) + 0
+        START_FRAME_SIZE + (led_index * COLOR_FRAME_SIZE)
     }
 
     // Calculates the frame index for red based on LED index.

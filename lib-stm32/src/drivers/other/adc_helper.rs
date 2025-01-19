@@ -42,8 +42,8 @@ impl<
         let adc_bins = u32::pow(2, res_bits) - 1;
         AdcHelper {
             inst: adc_inst,
-            pin: pin,
-            adc_bins: adc_bins
+            pin,
+            adc_bins
         }
     }
 
@@ -59,6 +59,6 @@ impl<
         // defmt::info!("vref_int_cal: {}", vref_int_cal);
         // defmt::info!("vref_int_read_mv: {}", vref_int_read_mv);
 
-        return V_CAL_V * (self.inst.blocking_read(&mut self.pin) as f32) / (self.adc_bins as f32); // * vref_int_cal / vref_int_read_mv;
+        V_CAL_V * (self.inst.blocking_read(&mut self.pin) as f32) / (self.adc_bins as f32)// * vref_int_cal / vref_int_read_mv;
     }
 }

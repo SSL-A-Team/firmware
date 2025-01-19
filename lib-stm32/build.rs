@@ -26,7 +26,7 @@ fn generate_pitch_set(ref_freq: u16, octaves_below: i8, octaves_above: i8) -> Ve
             pitches.push(pitch);
         }
     }
-    return pitches;
+    pitches
 }
 
 fn write_pitches_to_file(pitch_set: Vec<(String, u16)>){
@@ -43,7 +43,7 @@ fn write_pitches_to_file(pitch_set: Vec<(String, u16)>){
 
 fn generate_pitch_from_reference(ref_pitch: u16, semitones: i8) -> u16{
     let diff = semitones as f32 / 12_f32;
-    return (ref_pitch as f32/ 2_f32.powf(diff)) as u16;
+    (ref_pitch as f32/ 2_f32.powf(diff)) as u16
 }
 
 fn main() {

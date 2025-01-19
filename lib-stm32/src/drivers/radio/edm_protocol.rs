@@ -151,7 +151,7 @@ pub enum EdmPacket<'a> {
     StartEvent,
 }
 
-impl<'a> EdmPacket<'a> {
+impl EdmPacket<'_> {
     pub fn new(data: &[u8]) -> Result<EdmPacket, ()> {
         EdmPacketRaw::new(data)?.get_payload()
     }

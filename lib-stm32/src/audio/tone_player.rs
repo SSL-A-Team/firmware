@@ -13,7 +13,7 @@ pub struct TonePlayer<'a, D: PlayTone> {
 impl<'a, D: PlayTone> TonePlayer<'a, D> {
     pub fn new(audio_driver: D) -> Self {
         TonePlayer {
-            audio_driver: audio_driver,
+            audio_driver,
             song: None,
         }
     }

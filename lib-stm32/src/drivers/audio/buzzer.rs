@@ -17,8 +17,8 @@ pub struct Buzzer<'d, T: GeneralInstance4Channel> {
 impl<'d, T: GeneralInstance4Channel> Buzzer<'d, T> {
     pub fn new(pwm: SimplePwm<'d, T>, channel: SimplePwmChannel<'d, T>) -> Self {
         Buzzer {
-            pwm: pwm,
-            channel: channel,
+            pwm,
+            channel,
             min_freq: BUZZER_MIN_FREQ,
             max_freq: BUZZER_MAX_FREQ,
         }
@@ -26,10 +26,10 @@ impl<'d, T: GeneralInstance4Channel> Buzzer<'d, T> {
 
     pub fn new_with_fcontrs(pwm: SimplePwm<'d, T>, channel: SimplePwmChannel<'d, T>, min_freq: u16, max_freq: u16) -> Self {
         Buzzer {
-            pwm: pwm,
-            channel: channel,
-            min_freq: min_freq,
-            max_freq: max_freq,
+            pwm,
+            channel,
+            min_freq,
+            max_freq,
         }
     }
 
@@ -40,7 +40,7 @@ impl<'d, T: GeneralInstance4Channel> Buzzer<'d, T> {
     }
 }
 
-impl<'d, T: GeneralInstance4Channel> PlayTone for Buzzer<'d, T> {
+impl<T: GeneralInstance4Channel> PlayTone for Buzzer<'_, T> {
     fn play_tone(&mut self, freq: u16) {
         if freq == 0 {
             self.channel.disable();

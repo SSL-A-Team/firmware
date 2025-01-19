@@ -166,7 +166,7 @@ impl <
     }
 
     pub fn get_uart_read_queue(&'static self) -> &'static UartReadQueue<RLEN, RDEPTH> {
-        return &self.uart_read_queue
+        &self.uart_read_queue
     }
 
     pub fn read_task(
@@ -179,7 +179,7 @@ impl <
     }
 
     pub fn get_uart_write_queue(&'static self) -> &'static UartWriteQueue<WLEN, WDEPTH> {
-        return &self.uart_write_queue
+        &self.uart_write_queue
     }
 
     pub fn write_task(
@@ -246,7 +246,7 @@ impl <
             }
         } // subscriber lock freed here
 
-        return ret_val;
+        ret_val
     }
 }
 
@@ -259,7 +259,6 @@ pub struct UartReadQueue<
 }
 
 impl<
-        'a,
         const LENGTH: usize,
         const DEPTH: usize,
     > UartReadQueue<LENGTH, DEPTH>
@@ -268,7 +267,7 @@ impl<
             queue: Queue<LENGTH, DEPTH>,
             uart_mutex: Mutex<CriticalSectionRawMutex, bool>) -> Self {
         Self {
-            uart_mutex: uart_mutex,
+            uart_mutex,
             queue_rx: queue,
         }
     }
@@ -360,7 +359,7 @@ impl<
     }
 
     pub fn try_dequeue(&self) -> Result<DequeueRef<LENGTH, DEPTH>, Error> {
-        return self.queue_rx.try_dequeue();
+        self.queue_rx.try_dequeue()
     }
 
     pub async fn dequeue<RET>(&self, fn_write: impl FnOnce(&[u8]) -> RET) -> RET {
@@ -381,7 +380,6 @@ pub struct UartWriteQueue<
 }
 
 impl<
-        'a,
         const LENGTH: usize,
         const DEPTH: usize,
     > UartWriteQueue<LENGTH, DEPTH>
@@ -393,7 +391,7 @@ impl<
             // uart_config_signal_subscriber: Mutex<CriticalSectionRawMutex, Option<UartQueueConfigSyncSub>>,
             ) -> Self {
         Self {
-            uart_mutex: uart_mutex,
+            uart_mutex,
             uart_config_signal_publisher: Mutex::new(None),
             uart_config_signal_subscriber: Mutex::new(None),
             queue_tx: queue,

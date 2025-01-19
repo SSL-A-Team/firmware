@@ -174,7 +174,7 @@ pub enum ATEvent<'a> {
     NFCReadEvent,     // UUNFCRD
 }
 
-impl<'b> ATEvent<'b> {
+impl ATEvent<'_> {
     const CR_LF: &'static str = "\r\n";
 
     const PEER_CONNECTED: &'static str = "+UUDPC";
@@ -195,7 +195,7 @@ impl<'b> ATEvent<'b> {
     const PEER_CONNECTED_IPV4: &'static str = "2";
     const PEER_CONNECTED_IPV6: &'static str = "3";
 
-    pub fn new<'a>(buf: &'a [u8]) -> Result<ATEvent<'a>, ()> {
+    pub fn new(buf: &[u8]) -> Result<ATEvent<'_>, ()> {
         let s = core::str::from_utf8(buf).or(Err(()))?;
         let s = &s[Self::CR_LF.len()..];
         if !s.ends_with(Self::CR_LF) {
@@ -313,13 +313,13 @@ pub enum ATResponse<'a> {
     Other(&'a str),
 }
 
-impl<'b> ATResponse<'b> {
+impl ATResponse<'_> {
     const CR_LF: &'static str = "\r\n";
 
     const RESP_OK: &'static str = "OK";
     const RESP_ERROR: &'static str = "ERROR";
 
-    pub fn new<'a>(buf: &'a [u8]) -> Result<ATResponse<'a>, ()> {
+    pub fn new(buf: &[u8]) -> Result<ATResponse<'_>, ()> {
         // TODO: error handling in this function is bad
         let s = core::str::from_utf8(buf).or(Err(()))?;
         

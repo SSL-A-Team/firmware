@@ -40,6 +40,6 @@ impl<'a, const PIN_CT: usize> RotaryEncoder<'a, PIN_CT> {
             val |= (pin_state as u8 & 0x1) << i
         }
 
-        return val;
+        val
     }
 }

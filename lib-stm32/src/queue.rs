@@ -11,16 +11,22 @@ pub struct Buffer<const LENGTH: usize> {
     len: usize,
 }
 
+impl<const LENGTH: usize> Default for Buffer<LENGTH> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const LENGTH: usize> Buffer<LENGTH> {
     pub const fn new() -> Self {
         Self {
-            data: [0 as u8; LENGTH],
+            data: [0_u8; LENGTH],
             len: 0,
         }
     }
 
     pub const EMPTY: Buffer<LENGTH> = Buffer {
-        data: [0 as u8; LENGTH],
+        data: [0_u8; LENGTH],
         len: 0
     };
 }
@@ -30,7 +36,7 @@ pub struct DequeueRef<'a, const LENGTH: usize, const DEPTH: usize> {
     data: &'a [u8],
 }
 
-impl<'a, const LENGTH: usize, const DEPTH: usize> DequeueRef<'a, LENGTH, DEPTH> {
+impl<const LENGTH: usize, const DEPTH: usize> DequeueRef<'_, LENGTH, DEPTH> {
     pub fn data(&self) -> &[u8] {
         self.data
     }
@@ -39,7 +45,7 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> DequeueRef<'a, LENGTH, DEPTH> 
     }
 }
 
-impl<'a, const LENGTH: usize, const DEPTH: usize> Drop for DequeueRef<'a, LENGTH, DEPTH> {
+impl<const LENGTH: usize, const DEPTH: usize> Drop for DequeueRef<'_, LENGTH, DEPTH> {
     fn drop(&mut self) {
         self.queue.finish_dequeue();
     }
@@ -51,7 +57,7 @@ pub struct EnqueueRef<'a, const LENGTH: usize, const DEPTH: usize> {
     len: &'a mut usize,
 }
 
-impl<'a, const LENGTH: usize, const DEPTH: usize> EnqueueRef<'a, LENGTH, DEPTH> {
+impl<const LENGTH: usize, const DEPTH: usize> EnqueueRef<'_, LENGTH, DEPTH> {
     pub fn data(&mut self) -> &mut [u8] {
         self.data
     }
@@ -65,7 +71,7 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> EnqueueRef<'a, LENGTH, DEPTH> 
     }
 }
 
-impl<'a, const LENGTH: usize, const DEPTH: usize> Drop for EnqueueRef<'a, LENGTH, DEPTH> {
+impl<const LENGTH: usize, const DEPTH: usize> Drop for EnqueueRef<'_, LENGTH, DEPTH> {
     fn drop(&mut self) {
         self.queue.finish_enqueue();
     }
@@ -88,10 +94,16 @@ pub struct Queue<const LENGTH: usize, const DEPTH: usize> {
     dequeue_waker: UnsafeCell<Option<Waker>>,
 }
 
-unsafe impl<'a, const LENGTH: usize, const DEPTH: usize> Send for Queue<LENGTH, DEPTH> {}
-unsafe impl<'a, const LENGTH: usize, const DEPTH: usize> Sync for Queue<LENGTH, DEPTH> {}
+unsafe impl<const LENGTH: usize, const DEPTH: usize> Send for Queue<LENGTH, DEPTH> {}
+unsafe impl<const LENGTH: usize, const DEPTH: usize> Sync for Queue<LENGTH, DEPTH> {}
 
-impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
+impl<const LENGTH: usize, const DEPTH: usize> Default for Queue<LENGTH, DEPTH> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
     pub const fn new() -> Self {
         Self {
             buffers: [const { SyncUnsafeCell::new(Buffer::<LENGTH>::new())}; DEPTH],

@@ -5,7 +5,7 @@
 use core::sync::atomic::AtomicU32;
 
 use embassy_stm32::{
-    bind_interrupts, dma::NoDma, exti::ExtiInput, gpio::{Level, Output, Pull, Speed}, interrupt, peripherals::{self, *}, usart::{self, *}
+    bind_interrupts, exti::ExtiInput, gpio::{Level, Output, Pull, Speed}, interrupt, peripherals::{self, *}, usart::{self, *}
 };
 use embassy_executor::{raw::TaskStorage, Executor, InterruptExecutor};
 use embassy_time::Timer;
@@ -32,8 +32,8 @@ const TX_BUF_DEPTH: usize = 5;
 #[link_section = ".axisram.buffers"]
 static IDLE_BUFFERED_UART: IdleBufferedUart<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = IdleBufferedUart::new(Queue::new(), Queue::new());
 
-static UART_READ_TASK_STORAGE: TaskStorage = TaskStorage::new();
-static UART_WRITE_TASK_STORAGE: TaskStorage = TaskStorage::new();
+static UART_READ_TASK_STORAGE: TaskStorage<IdleBufferedUartReadFuture<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>> = TaskStorage::new();
+static UART_WRITE_TASK_STORAGE: TaskStorage<IdleBufferedUartWriteFuture<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>> = TaskStorage::new();
 
 static BAUD_RATE: AtomicU32 = AtomicU32::new(115200);
 
@@ -191,19 +191,6 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
         p.DMA1_CH2,
         coms_uart_config,
     ).unwrap();
-
-    let test_uart = Uart::new(
-        p.USART1,
-        p.PA0,
-        p.PA1,
-        Irqs,
-        NoDma,
-        NoDma,
-        coms_uart_config,
-    ).unwrap();
-
-    let mut buf = [0; 16];
-    test_uart.read(&mut buf).await;
 
     IDLE_BUFFERED_UART.init();
 
