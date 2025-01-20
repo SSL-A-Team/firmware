@@ -171,6 +171,8 @@ impl<
         let mut motors_need_flash = true;
         let control_git_hash: u32 = git::get_git_hash();
         let control_git_dirty: u32 = git::get_git_dirty();
+        defmt::debug!("Control Board Git Hash - {:?}", control_git_hash);
+        defmt::debug!("Control Board Git Dirty - {:?}", control_git_dirty);
 
         if control_git_dirty == 1 {
             motors_need_flash = true;
@@ -184,24 +186,29 @@ impl<
         defmt::debug!("Drive Motor - sending parameter command packet");
         self.send_params_command();
 
-        defmt::debug!("Drive Motor - waiting for parameter response packet");
         let get_motor_controller_git_status_future = async {
             loop {
+                defmt::debug!("Drive Motor - Checking for parameter response");
                 // Parse incoming packets
                 self.process_packets();
                 // Check if curret_params_state has updated
                 if self.current_params_state.git_hash != 0 {
+                    defmt::debug!("Motor Controller - Received parameter response");
+                    defmt::debug!("Motor Controller Git Hash - {:x}", self.current_params_state.git_hash);
+                    defmt::debug!("Motor Controller Git Dirty - {:?}", self.current_params_state.git_dirty());
                     // Grab both the dirty bit and git hash
                     return (self.current_params_state.git_hash, self.current_params_state.git_dirty());
                 };
                 Timer::after(Duration::from_millis(5)).await;
             }
         };
-        let motor_controller_response_timeout = Duration::from_millis((500));
+        let motor_controller_response_timeout = Duration::from_millis(500);
     
+        defmt::debug!("Drive Motor - waiting for parameter response packet");
         match with_timeout(motor_controller_response_timeout, get_motor_controller_git_status_future).await {
             Ok((motor_git_hash, motor_git_dirty)) => {
-                defmt::debug!("Drive Motor - Received parameter response");
+                defmt::debug!("Drive Motor Controller Git Hash - {:x}", self.current_params_state.git_hash);
+                defmt::debug!("Drive Motor Controller Git Dirty - {:?}", self.current_params_state.git_dirty());
                 if motor_git_dirty == 0 && motor_git_hash == control_git_hash {
                     motors_need_flash = false;
                 }
@@ -211,6 +218,7 @@ impl<
                 motors_need_flash = true;
             },
         }
+        defmt::debug!("Motor Controller Needs Flash - {:?}", motors_need_flash);
         return motors_need_flash;
     }
 

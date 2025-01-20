@@ -2,7 +2,7 @@
 Author: Nicholas Witten
 Data: 01/18/2025
 
-Embeds the git hash and git dirty status into the motor-controller firmware binaries
+Embeds the git hash and git dirty status into the motor-controller and control-board firmware binaries
 """
 import os
 import subprocess
@@ -68,11 +68,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     bin_path = os.path.join(firmware_dir_path,f"motor-controller/build/bin/{args.target}.bin")
-    target_component = args.target.split("--")[0]
+    target_module = args.target.split("--")[0]
     target_name = args.target.split("--")[1]
-    if  target_component == "motor-controller":
+    if  target_module == "motor-controller":
         bin_path = os.path.join(firmware_dir_path, f"motor-controller/build/bin/{target_name}.bin")
-    elif  target_component == "control-board":
+    elif  target_module == "control-board":
         bin_path = os.path.join(firmware_dir_path, f"control-board/target/thumbv7em-none-eabihf/release/{target_name}.bin")
     else:
         raise Exception(f"Unrecognized target '{args.target}'")
