@@ -83,15 +83,16 @@ motor_controller_binaries := ${shell cd motor-controller/bin && ls -d * && cd ..
 define create-motor-controller-targets
 motor-controller--$1: .motor-controller-setup
 	cd motor-controller/build/ && \
-	make $1
+	make $1 && \
+	python ../../util/embed_git_status.py --target motor-controller--$1
 motor-controller--all:: motor-controller--$1
 
 motor-controller--$1--prog: motor-controller--$1
-	cd motor-controller/build/ && \
+	python ../../util/embed_git_status.py --target motor-controller--$1
 	make $1-prog
 
 motor-controller--$1--debug: motor-controller--$1
-	cd motor-controller/build/ && \
+	python ../../util/embed_git_status.py --target motor-controller--$1
 	make $1-gdb
 endef
 $(foreach element,$(motor_controller_binaries),$(eval $(call create-motor-controller-targets,$(element))))
@@ -141,16 +142,16 @@ define create-control-board-rust-targets
 $1--$2: kicker-board--all motor-controller--all
 	cd $1 && \
 	cargo build $(additional_control_cargo_flags) --release --bin $2 && \
-	arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin
+	arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin && \
+	python ../util/embed_git_status.py --target $1--$2
 control-board--all:: $1--$2
 
-$1--$2--run: kicker-board--all motor-controller--all
+$1--$2--run: $1--$2
 	cd $1 && \
-	cargo run $(additional_control_cargo_flags) --release --bin $2
+	probe-rs run --chip STM32H723ZGTx --connect-under-reset target/thumbv7em-none-eabihf/release/$2
 
-$1--$2--debug: kicker-board--all motor-controller--all
+$1--$2--debug: $1--$2
 	cd $1 && \
-	cargo build $(additional_control_cargo_flags) --release --bin $2 && \
 	../util/program.sh $3 target/thumbv7em-none-eabihf/release/$2
 endef
 $(foreach element,$(control_binaries),$(eval $(call create-control-board-rust-targets,control-board,$(element),$(control_openocd_cfg_file))))
