@@ -30,6 +30,7 @@
 #include "system.h"
 #include "time.h"
 #include "uart.h"
+#include "git.h"
 
 static int slipped_control_frame_count = 0;
 
@@ -475,6 +476,8 @@ int main() {
                 response_packet.data.params.torque_i_max = torque_pid_constants.kI_max;
                 response_packet.data.params.cur_clamp = (uint16_t) cur_limit;
 
+                response_packet.data.params.git_hash = get_git_hash();
+                response_packet.data.params.git_dirty = get_git_dirty();
 #ifdef UART_ENABLED
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
                 // Capture the status for the response packet / LED.

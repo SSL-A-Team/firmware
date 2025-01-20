@@ -32,6 +32,7 @@ pub mod robot_state;
 pub mod songs;
 pub mod stm32_interface;
 pub mod stspin_motor;
+pub mod git;
 
 pub mod drivers;
 pub mod motion;

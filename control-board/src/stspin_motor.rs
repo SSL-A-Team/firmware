@@ -6,12 +6,13 @@ use embassy_stm32::{
     gpio::{Pin, Pull},
     usart::{self, Parity},
 };
-use embassy_time::{Duration, Timer};
+use embassy_time::{with_timeout, Duration, Timer};
 use nalgebra::Vector3;
 
 use ateam_common_packets::bindings::{
     MotorCommandPacket,
     MotorCommandPacketType::MCP_MOTION,
+    MotorCommandPacketType::MCP_PARAMS,
     MotorCommand_MotionType,
     MotorCommand_MotionType::OPEN_LOOP,
     MotorResponsePacket,
@@ -20,6 +21,7 @@ use ateam_common_packets::bindings::{
 };
 
 use crate::stm32_interface::Stm32Interface;
+use crate::git;
 
 pub struct WheelMotor<
     'a,
@@ -165,11 +167,64 @@ impl<
         self.stm32_uart_interface.leave_reset().await;
     }
 
+    pub async fn check_motor_controller_needs_flash(&mut self) -> bool {
+        let mut motors_need_flash = true;
+        let control_git_hash: u32 = git::get_git_hash();
+        let control_git_dirty: u32 = git::get_git_dirty();
+
+        if control_git_dirty == 1 {
+            motors_need_flash = true;
+            return motors_need_flash;
+        }
+
+        defmt::debug!("Drive Motor - Update UART config 2 MHz");
+        self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
+        Timer::after(Duration::from_millis(1)).await;
+
+        defmt::debug!("Drive Motor - sending parameter command packet");
+        self.send_params_command();
+
+        defmt::debug!("Drive Motor - waiting for parameter response packet");
+        let get_motor_controller_git_status_future = async {
+            loop {
+                // Parse incoming packets
+                self.process_packets();
+                // Check if curret_params_state has updated
+                if self.current_params_state.git_hash != 0 {
+                    // Grab both the dirty bit and git hash
+                    return (self.current_params_state.git_hash, self.current_params_state.git_dirty());
+                };
+                Timer::after(Duration::from_millis(5)).await;
+            }
+        };
+        let motor_controller_response_timeout = Duration::from_millis((500));
+    
+        match with_timeout(motor_controller_response_timeout, get_motor_controller_git_status_future).await {
+            Ok((motor_git_hash, motor_git_dirty)) => {
+                defmt::debug!("Drive Motor - Received parameter response");
+                if motor_git_dirty == 0 && motor_git_hash == control_git_hash {
+                    motors_need_flash = false;
+                }
+            },
+            Err(_) => {
+                defmt::debug!("Drive Motor - No parameter response, motor controller needs flashing");
+                motors_need_flash = true;
+            },
+        }
+        return motors_need_flash;
+    }
+
     pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
-        let res = self
-            .stm32_uart_interface
-            .load_firmware_image(fw_image_bytes)
-            .await;
+        let controller_needs_flash: bool = self.check_motor_controller_needs_flash().await;
+
+        let res;
+        if controller_needs_flash {
+            defmt::debug!("Drive Motor - Update UART config 115200 Hz");
+            self.stm32_uart_interface.update_uart_config(115_200, Parity::ParityEven).await;
+            res = self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await;
+        } else {
+            res = Ok(());
+        }
 
         // this is safe because load firmware image call will reset the target device
         // it will begin issueing telemetry updates
@@ -257,6 +312,27 @@ impl<
         }
         if self.current_state.reset_pin() != 0 {
             defmt::warn!("Drive Motor {} Reset: Pin", motor_id);
+        }
+    }
+
+    pub fn send_params_command(&mut self) {
+        unsafe {
+            let mut cmd: MotorCommandPacket = { MaybeUninit::zeroed().assume_init() };
+
+            cmd.type_ = MCP_PARAMS;
+            cmd.crc32 = 0;
+
+            // TODO figure out what to set here
+            // Update a param like this
+            // cmd.data.params.set_update_timestamp(1);
+            // cmd.data.params.timestamp = 0x0;
+
+            let struct_bytes = core::slice::from_raw_parts(
+                (&cmd as *const MotorCommandPacket) as *const u8,
+                core::mem::size_of::<MotorCommandPacket>(),
+            );
+
+            self.stm32_uart_interface.send_or_discard_data(struct_bytes);
         }
     }
 

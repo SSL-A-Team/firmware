@@ -83,7 +83,9 @@ motor_controller_binaries := ${shell cd motor-controller/bin && ls -d * && cd ..
 define create-motor-controller-targets
 motor-controller--$1: .motor-controller-setup
 	cd motor-controller/build/ && \
-	make $1
+	make $1 && \
+	cd ../../ && \
+	python util/embed_git_status.py --target motor-controller--$1
 motor-controller--all:: motor-controller--$1
 
 motor-controller--$1--prog: motor-controller--$1
@@ -141,7 +143,9 @@ define create-control-board-rust-targets
 $1--$2: kicker-board--all motor-controller--all
 	cd $1 && \
 	cargo build $(additional_control_cargo_flags) --release --bin $2 && \
-	arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin
+	arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin && \
+	cd .. && \
+	python util/embed_git_status.py --target $1--$2
 control-board--all:: $1--$2
 
 $1--$2--run: kicker-board--all motor-controller--all
