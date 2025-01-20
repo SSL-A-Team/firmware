@@ -193,11 +193,13 @@ impl<
                 self.process_packets();
                 // Check if curret_params_state has updated
                 if self.current_params_state.git_hash != 0 {
+                    let git_hash = self.current_params_state.git_hash;
+                    let git_dirty = self.current_params_state.git_dirty();
                     defmt::debug!("Motor Controller - Received parameter response");
-                    defmt::debug!("Motor Controller Git Hash - {:x}", self.current_params_state.git_hash);
-                    defmt::debug!("Motor Controller Git Dirty - {:?}", self.current_params_state.git_dirty());
+                    defmt::debug!("Motor Controller Git Hash - {:x}", git_hash);
+                    defmt::debug!("Motor Controller Git Dirty - {:?}", git_dirty);
                     // Grab both the dirty bit and git hash
-                    return (self.current_params_state.git_hash, self.current_params_state.git_dirty());
+                    return (git_hash, git_dirty);
                 };
                 Timer::after(Duration::from_millis(5)).await;
             }
@@ -207,8 +209,6 @@ impl<
         defmt::debug!("Drive Motor - waiting for parameter response packet");
         match with_timeout(motor_controller_response_timeout, get_motor_controller_git_status_future).await {
             Ok((motor_git_hash, motor_git_dirty)) => {
-                defmt::debug!("Drive Motor Controller Git Hash - {:x}", self.current_params_state.git_hash);
-                defmt::debug!("Drive Motor Controller Git Dirty - {:?}", self.current_params_state.git_dirty());
                 if motor_git_dirty == 0 && motor_git_hash == control_git_hash {
                     motors_need_flash = false;
                 }
