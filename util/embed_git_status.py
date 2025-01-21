@@ -70,20 +70,40 @@ if __name__ == "__main__":
     bin_path = os.path.join(firmware_dir_path,f"motor-controller/build/bin/{args.target}.bin")
     target_module = args.target.split("--")[0]
     target_name = args.target.split("--")[1]
-    if  target_module == "motor-controller":
-        bin_path = os.path.join(firmware_dir_path, f"motor-controller/build/bin/{target_name}.bin")
-    elif  target_module == "control-board":
-        bin_path = os.path.join(firmware_dir_path, f"control-board/target/thumbv7em-none-eabihf/release/{target_name}.bin")
+
+    if target_module == "motor-controller":
+        bin_path = os.path.join(firmware_dir_path, f"motor-controller/build/bin/{target_name}")
+    elif target_module == "control-board":
+        bin_path = os.path.join(firmware_dir_path, f"control-board/target/thumbv7em-none-eabihf/release/{target_name}")
     else:
         raise Exception(f"Unrecognized target '{args.target}'")
+
     try:
-        embed_git_status(bin_path)
-        print(f"embed_git_status.py - SUCCUESS - Embedded the current git tree status into {bin_path}")
+        if os.path.exists(bin_path):
+            embed_git_status(bin_path)
+            print(f"embed_git_status.py - SUCCUESS - Embedded the current git tree status into {bin_path}")
+        else:
+            error_message = f"path not found - {bin_path}"
+            print(error_message)
+            raise Exception(error_message)
     except:
         print(f"embed_git_status.py - WARNING - Unable to embed the current git tree status into {bin_path}")
 
-    # # Print out the new bytes
-    # with open(bin_path, "rb") as f:
-    #     new_binary = f.read()
-    # sequence_start_idx = new_binary.find(git_id_sequence[::-1])
-    # print(' '.join(f'{byte:02x}' for byte in new_binary[sequence_start_idx:sequence_start_idx+12]))
+    bin_path = bin_path + ".bin"
+
+    try:
+        if os.path.exists(bin_path):
+            embed_git_status(bin_path)
+            print(f"embed_git_status.py - SUCCUESS - Embedded the current git tree status into {bin_path}")
+        else:
+            error_message = f"path not found - {bin_path}"
+            print(error_message)
+            raise Exception(error_message)
+    except:
+        print(f"embed_git_status.py - WARNING - Unable to embed the current git tree status into {bin_path}")
+
+    # Print out the new bytes
+    with open(bin_path, "rb") as f:
+        new_binary = f.read()
+    sequence_start_idx = new_binary.find(git_id_sequence[::-1])
+    print(' '.join(f'{byte:02x}' for byte in new_binary[sequence_start_idx:sequence_start_idx+12]))
