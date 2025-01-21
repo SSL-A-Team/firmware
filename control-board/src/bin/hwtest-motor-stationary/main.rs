@@ -57,7 +57,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     // commands channel
     let control_command_subscriber = RADIO_C2_CHANNEL.subscriber().unwrap();
-    let test_command_publisher = RADIO_C2_CHANNEL.publisher().unwrap();
 
     // telemetry channel
     let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
@@ -101,17 +100,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p.USART1, p.PB15, p.PB14, p.DMA1_CH1, p.DMA1_CH0, p.PD8, p.PD9,
         p.UART5, p.PB12, p.PB13, p.DMA2_CH3, p.DMA2_CH2, p.PD13, p.PD12).await;
 
-
     loop {
         Timer::after_millis(100).await;
-
-        test_command_publisher.publish(DataPacket::BasicControl(BasicControl {
-            vel_x_linear: 0.2,
-            vel_y_linear: 0.0,
-            vel_z_angular: 0.0,
-            kick_vel: 0.0,
-            dribbler_speed: 10.0,
-            kick_request: KickRequest::KR_DISABLE,
-        })).await;
     }
 }
