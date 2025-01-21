@@ -1,8 +1,5 @@
 use core::{
-    cell::{SyncUnsafeCell, UnsafeCell},
-    future::poll_fn,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-    task::{Poll, Waker}
+    cell::{SyncUnsafeCell, UnsafeCell}, future::poll_fn, sync::atomic::{AtomicBool, AtomicUsize, Ordering}, task::{Poll, Waker}
 };
 use critical_section;
 
@@ -184,7 +181,11 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                 self.read_in_progress.store(false, Ordering::SeqCst);
 
                 self.read_index.store((self.read_index.load(Ordering::SeqCst) + 1) % DEPTH, Ordering::SeqCst);
-                self.size.fetch_sub(1, Ordering::SeqCst);
+
+                // NOTE: this was an atomic fetch_add but that isn't supported on
+                // thumbv6m
+                let cur_size = self.size.load(Ordering::SeqCst);
+                self.size.store(cur_size - 1, Ordering::SeqCst);
             }
 
             /* Safety: this raw pointer write is safe because the underlying memory is statically allocated
@@ -268,7 +269,11 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                 self.write_in_progress.store(false, Ordering::SeqCst);
 
                 self.write_index.store((self.write_index.load(Ordering::SeqCst) + 1) % DEPTH, Ordering::SeqCst);
-                self.size.fetch_add(1, Ordering::SeqCst);
+
+                // NOTE: this was an atomic fetch_add but that isn't supported on
+                // thumbv6m
+                let cur_size = self.size.load(Ordering::SeqCst);
+                self.size.store(cur_size + 1, Ordering::SeqCst);
             }
 
             /* Safety: this raw pointer write is safe because the underlying memory is statically allocated

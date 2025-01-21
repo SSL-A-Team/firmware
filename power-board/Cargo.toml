@@ -38,7 +38,7 @@ panic-probe = { version = "0.3", features = ["print-defmt"] }
 critical-section = "1.2.0"
 const_format = "0.2.34"
 
-# ateam-lib-stm32 = { path = "../lib-stm32", default-features = false }
+ateam-lib-stm32 = { path = "../lib-stm32", default-features = false }
 
 
 [dev-dependencies]
