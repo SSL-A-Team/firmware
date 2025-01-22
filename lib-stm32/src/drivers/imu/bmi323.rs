@@ -34,7 +34,7 @@ pub struct Bmi323<'a, 'buf> {
 }
 
 #[repr(u8)]
-#[allow(non_camel_case_types, dead_code)]
+#[allow(non_camel_case_types, dead_code, clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug)]
 enum ImuRegisters {
     CHIP_ID = 0x00,

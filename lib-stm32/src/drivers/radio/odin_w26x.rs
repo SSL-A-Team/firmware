@@ -8,7 +8,31 @@ use crate::queue;
 use crate::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
 
 use super::at_protocol::{ATEvent, ATResponse, WifiLinkDisconnectedReason};
-use super::edm_protocol::EdmPacket;
+use super::edm_protocol::{EdmPacket, EdmPacketError};
+
+#[derive(Debug)]
+pub enum OdinRadioError {
+    CommandConstructionFailed,
+    EdmPacketError(EdmPacketError),
+    SendCommandLowLevelBufferFull,
+    SendCommandCommunicationModeInvalid,
+    ReadDataInvalid,
+    ReadLowLevelBufferEmpty,
+    ReadLowLevelBufferBusy,
+    AtEventUnsupported,
+    AuthModeUnsupported,
+    OperationTimedOut,
+    PeerConnectionReceivedInvalidResponse,
+    PeerConnectionFailed,
+    PeerCloseFailed,
+    EdmTransitionFailed,
+}
+
+impl From<EdmPacketError> for OdinRadioError {
+    fn from(err: EdmPacketError) -> Self {
+        OdinRadioError::EdmPacketError(err)
+    }
+}
 
 #[allow(dead_code)]
 pub enum RadioMode {
@@ -82,7 +106,7 @@ impl<
         self.uart.update_uart_config(config).await
     }
 
-    pub async fn wait_startup(&mut self) -> Result<(), ()> {
+    pub async fn wait_startup(&mut self) -> Result<(), OdinRadioError> {
         // if were waiting for startup, we fellback to command mode
         self.mode = RadioMode::CommandMode;
 
@@ -92,32 +116,32 @@ impl<
                 if let EdmPacket::ATResponse(ATResponse::Other("+STARTUP")) = self.to_packet(buf)? {
                     Ok(())
                 } else {
-                    Err(())
+                    Err(OdinRadioError::ReadDataInvalid)
                 }
             })
             .await
     }
 
-    pub async fn wait_edm_startup(&self) -> Result<(), ()> {
+    pub async fn wait_edm_startup(&self) -> Result<(), OdinRadioError> {
         self.reader
             .dequeue(|buf| {
                 if let EdmPacket::StartEvent = self.to_packet(buf)? {
                     Ok(())
                 } else {
-                    Err(())
+                    Err(OdinRadioError::ReadDataInvalid)
                 }
             })
             .await
     }
 
     #[allow(dead_code)]
-    pub async fn attention(&self) -> Result<(), ()> {
+    pub async fn attention(&self) -> Result<(), OdinRadioError> {
         self.send_command("AT").await?;
         self.read_ok().await?;
         Ok(())
     }
 
-    pub async fn set_echo(&self, echo_on: bool) -> Result<(), ()> {
+    pub async fn set_echo(&self, echo_on: bool) -> Result<(), OdinRadioError> {
         let echo_on = if echo_on { '1' } else { '0' };
         let mut str: String<4> = String::new();
         write!(&mut str, "ATE{echo_on}").unwrap();
@@ -132,7 +156,7 @@ impl<
         flow_control: bool,
         data_bits: u8,
         parity: bool,
-    ) -> Result<(), ()> {
+    ) -> Result<(), OdinRadioError> {
         let mut str: String<28> = String::new();
         let flow_control = if flow_control { '1' } else { '2' };
         let stop_bits = '1';
@@ -147,10 +171,11 @@ impl<
         Ok(())
     }
 
-    pub async fn enter_edm(&mut self) -> Result<bool, ()> {
-        if self.send_command("ATO2").await.is_err() {
-            return Err(());
-        }
+    pub async fn enter_edm(&mut self) -> Result<bool, OdinRadioError> {
+        self.send_command("ATO2").await?;
+        // if self.send_command("ATO2").await.is_err() {
+        //     return Err(());
+        // }
 
         // TODO this is getting CR LF O K CR LF [EDM START, 0, 2, 0, 113, EDM END]
         // 0, 2 decodes as payload length 2
@@ -168,9 +193,9 @@ impl<
         res
     }
 
-    pub async fn set_host_name(&self, host_name: &str) -> Result<(), ()> {
+    pub async fn set_host_name(&self, host_name: &str) -> Result<(), OdinRadioError> {
         let mut str: String<64> = String::new();
-        write!(str, "AT+UNHN=\"{host_name}\"").or(Err(()))?;
+        write!(str, "AT+UNHN=\"{host_name}\"").or(Err(OdinRadioError::CommandConstructionFailed))?;
         defmt::trace!("host configuration string: {}", str.as_str());
         self.send_command(str.as_str()).await?;
         defmt::trace!("sent configuration command");
@@ -180,33 +205,33 @@ impl<
         Ok(())
     }
 
-    pub async fn config_wifi<'b>(
+    pub async fn config_wifi(
         &self,
         config_id: u8,
         ssid: &str,
-        auth: WifiAuth<'b>,
-    ) -> Result<(), ()> {
+        auth: WifiAuth<'_>,
+    ) -> Result<(), OdinRadioError> {
         let mut str: String<64> = String::new();
-        write!(str, "AT+UWSC={config_id},2,\"{ssid}\"").or(Err(()))?;
+        write!(str, "AT+UWSC={config_id},2,\"{ssid}\"").or(Err(OdinRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
         str.clear();
         match auth {
             WifiAuth::Open => {
-                write!(str, "AT+UWSC={config_id},5,1").or(Err(()))?;
+                write!(str, "AT+UWSC={config_id},5,1").or(Err(OdinRadioError::CommandConstructionFailed))?;
                 self.send_command(str.as_str()).await?;
                 self.read_ok().await?;
             }
             WifiAuth::WPA { passphrase } => {
-                write!(str, "AT+UWSC={config_id},5,2").or(Err(()))?;
+                write!(str, "AT+UWSC={config_id},5,2").or(Err(OdinRadioError::CommandConstructionFailed))?;
                 self.send_command(str.as_str()).await?;
                 self.read_ok().await?;
                 str.clear();
-                write!(str, "AT+UWSC={config_id},8,\"{passphrase}\"").or(Err(()))?;
+                write!(str, "AT+UWSC={config_id},8,\"{passphrase}\"").or(Err(OdinRadioError::CommandConstructionFailed))?;
                 self.send_command(str.as_str()).await?;
                 self.read_ok().await?;
             }
-            _ => return Err(()),
+            _ => return Err(OdinRadioError::AuthModeUnsupported),
         }
 
         Ok(())
@@ -225,9 +250,9 @@ impl<
         todo!("implement if needed");
     }
 
-    pub async fn disconnect_wifi(&self, config_id: u8) -> Result<(), ()> {
+    pub async fn disconnect_wifi(&self, config_id: u8) -> Result<(), OdinRadioError> {
         let mut str: String<64> = String::new();
-        write!(str, "AT+UWSCA={config_id},4").or(Err(()))?;
+        write!(str, "AT+UWSCA={config_id},4").or(Err(OdinRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
 
@@ -262,14 +287,14 @@ impl<
                 },
                 embassy_futures::select::Either::Second(_) => {
                     defmt::warn!("disconnect timed out");
-                    Err(())
+                    Err(OdinRadioError::OperationTimedOut)
                 },
             }
     }
 
-    pub async fn connect_wifi(&self, config_id: u8) -> Result<(), ()> {
+    pub async fn connect_wifi(&self, config_id: u8) -> Result<(), OdinRadioError> {
         let mut str: String<64> = String::new();
-        write!(str, "AT+UWSCA={config_id},3").or(Err(()))?;
+        write!(str, "AT+UWSCA={config_id},3").or(Err(OdinRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
 
@@ -291,7 +316,7 @@ impl<
                         // TODO
                         // self.wifiConnected = true;
                     } else {
-                        return Err(());
+                        return Err(OdinRadioError::AtEventUnsupported);
                     }
                     Ok(())
                 })
@@ -307,18 +332,18 @@ impl<
         server_id: u8,
         server_type: ServerType,
         port: u16,
-    ) -> Result<(), ()> {
+    ) -> Result<(), OdinRadioError> {
         let mut str: String<64> = String::new();
         let server_type = server_type as u8;
-        write!(str, "AT+UDSC={server_id},{server_type},{port},1,0").or(Err(()))?;
+        write!(str, "AT+UDSC={server_id},{server_type},{port},1,0").or(Err(OdinRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
         Ok(())
     }
 
-    pub async fn connect_peer(&self, url: &str) -> Result<PeerConnection, ()> {
+    pub async fn connect_peer(&self, url: &str) -> Result<PeerConnection, OdinRadioError> {
         let mut str: String<64> = String::new();
-        write!(str, "AT+UDCP={url}").or(Err(()))?;
+        write!(str, "AT+UDCP={url}").or(Err(OdinRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
 
         let mut peer_id = None;
@@ -360,13 +385,13 @@ impl<
                             // defmt::info!("AT resp connect event");
 
                             if let Some(i) = resp.find("+UDCP:") {
-                                peer_id = Some(resp[i + 6..].parse::<u8>().or(Err(()))?);
+                                peer_id = Some(resp[i + 6..].parse::<u8>().or(Err(OdinRadioError::PeerConnectionReceivedInvalidResponse))?);
                             } else {
-                                return Err(());
+                                return Err(OdinRadioError::PeerConnectionFailed);
                             }
                         }
                         _ => {
-                            return Err(());
+                            return Err(OdinRadioError::AtEventUnsupported);
                         }
                     };
 
@@ -380,9 +405,9 @@ impl<
         })
     }
 
-    pub async fn close_peer(&self, peer_id: u8) -> Result<(), ()> {
+    pub async fn close_peer(&self, peer_id: u8) -> Result<(), OdinRadioError> {
         let mut str: String<12> = String::new();
-        write!(str, "AT+UDCPC={peer_id}").or(Err(()))?;
+        write!(str, "AT+UDCPC={peer_id}").or(Err(OdinRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
 
         let mut ok = false;
@@ -407,7 +432,7 @@ impl<
                             data: _,
                         } => {}
                         _ => {
-                            return Err(());
+                            return Err(OdinRadioError::PeerCloseFailed);
                         }
                     };
 
@@ -436,7 +461,7 @@ impl<
         Ok(())
     }
 
-    pub async fn read_data<RET, FN>(&'a self, fn_read: FN) -> Result<RET, ()>
+    pub async fn read_data<RET, FN>(&'a self, fn_read: FN) -> Result<RET, OdinRadioError>
     where
         FN: FnOnce(&[u8]) -> RET,
     {
@@ -445,7 +470,7 @@ impl<
                 if let EdmPacket::DataEvent { channel: _, data } = self.to_packet(buf)? {
                     Ok(fn_read(data))
                 } else {
-                    Err(())
+                    Err(OdinRadioError::ReadDataInvalid)
                 }
             }).await
     }
@@ -454,7 +479,7 @@ impl<
         self.reader.can_dequque()
     }
 
-    pub fn try_read_data<RET, FN>(&'a self, fn_read: FN) -> Result<RET, ()>
+    pub fn try_read_data<RET, FN>(&'a self, fn_read: FN) -> Result<RET, OdinRadioError>
     where FN: FnOnce(&[u8]) -> RET,
     {
         match self.reader.try_dequeue() {
@@ -465,12 +490,12 @@ impl<
                             Ok(fn_read(data))
                         } else {
                             // defmt::trace!("got non data event");
-                            Err(())
+                            Err(OdinRadioError::ReadDataInvalid)
                         }
                     },
                     Err(_) => {
                         // defmt::trace!("got data that wasn't an edm packet: {}", buf.data());
-                        Err(())
+                        Err(OdinRadioError::ReadDataInvalid)
                     },
                 }
                 // we read something
@@ -478,16 +503,16 @@ impl<
             },
             Err(queue::Error::QueueFullEmpty) => {
                 // nothing to read
-                Err(())
+                Err(OdinRadioError::ReadLowLevelBufferEmpty)
             }
             Err(queue::Error::InProgress) => {
                 // you did something illegal
-                Err(())
+                Err(OdinRadioError::ReadLowLevelBufferBusy)
             },
         }
     }
 
-    pub async fn send_command(&self, cmd: &str) -> Result<(), ()> {
+    pub async fn send_command(&self, cmd: &str) -> Result<(), OdinRadioError> {
         match self.mode {
             RadioMode::CommandMode => {
                 let res = self.writer.enqueue(|buf| {
@@ -498,7 +523,7 @@ impl<
 
                 if res.is_err() {
                     // queue was full
-                    return Err(())
+                    return Err(OdinRadioError::SendCommandLowLevelBufferFull)
                 }
                 
                 Ok(())
@@ -508,12 +533,12 @@ impl<
 
                 if res.is_err() {
                     // queue was full
-                    return Err(())
+                    return Err(OdinRadioError::SendCommandLowLevelBufferFull)
                 }
 
                 Ok(())
             }
-            _ => Err(()),
+            _ => Err(OdinRadioError::SendCommandCommunicationModeInvalid),
         }
     }
 
@@ -529,8 +554,8 @@ impl<
             .await;
     }
 
-    async fn read_ok(&self) -> Result<(), ()> {
-        let mut res = Err(());
+    async fn read_ok(&self) -> Result<(), OdinRadioError> {
+        let mut res = Err(OdinRadioError::ReadDataInvalid);
         loop {
             let brk = self.reader.dequeue(|buf| {
                 // defmt::warn!("buf: {}", buf);
@@ -593,19 +618,7 @@ impl<
         res
     }
 
-    // async fn read_ok(&self) -> Result<(), ()> {
-    //     self.reader
-    //         .dequeue(|buf| {
-    //             if let EdmPacket::ATResponse(ATResponse::Ok("")) = self.to_packet(buf)? {
-    //                 Ok(())
-    //             } else {
-    //                 Err(())
-    //             }
-    //         })
-    //         .await
-    // }
-
-    async fn read_ok_at_edm_transition(&self) -> Result<bool, ()> {
+    async fn read_ok_at_edm_transition(&self) -> Result<bool, OdinRadioError> {
         let transition_buf: [u8; 12] = [13, 10, 79, 75, 13, 10, 170, 0, 2, 0, 113, 85];
         
 
@@ -615,16 +628,16 @@ impl<
             } else if let EdmPacket::ATResponse(ATResponse::Ok("")) = self.to_packet(buf)? {
                 Ok(false)
             } else {
-                Err(())
+                Err(OdinRadioError::EdmTransitionFailed)
             }
         }).await
     }
 
-    fn to_packet<'b>(&self, buf: &'b [u8]) -> Result<EdmPacket<'b>, ()> {
+    fn to_packet<'b>(&self, buf: &'b [u8]) -> Result<EdmPacket<'b>, EdmPacketError> {
         match self.mode {
             RadioMode::CommandMode => Ok(EdmPacket::ATResponse(ATResponse::new(buf)?)),
             RadioMode::ExtendedDataMode => EdmPacket::new(buf),
-            _ => Err(()),
+            _ => Err(EdmPacketError::PacketTypeDecodingFailed),
         }
     }
 }

@@ -7,7 +7,7 @@ use defmt_rtt as _;
 #[defmt_test::tests]
 mod tests{
     use ateam_lib_stm32::math::linear::LinearMap;
-    use defmt::*;
+    
 
     #[test]
     fn small_to_large() {
