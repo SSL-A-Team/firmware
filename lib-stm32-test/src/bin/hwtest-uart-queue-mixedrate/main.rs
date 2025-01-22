@@ -63,9 +63,9 @@ async fn rx_task(coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_
             unsafe {
                 // copy receieved uart bytes into packet
                 let state = &mut rx_packet as *mut _ as *mut u8;
-                for i in 0..core::mem::size_of::<StupidPacket>() {
-                    *state.offset(i as isize) = buf[i];
-                }                
+                for (i, val) in buf.iter().enumerate().take(core::mem::size_of::<StupidPacket>()) {
+                    *state.add(i) = *val;
+                }       
             }
         }
 
