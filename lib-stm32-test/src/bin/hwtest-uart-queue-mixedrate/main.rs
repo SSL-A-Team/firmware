@@ -22,11 +22,7 @@ use panic_probe as _;
 
 use static_cell::StaticCell;
 
-use ateam_lib_stm32::{make_uart_queue_pair, uart::queue::{UartReadQueue, UartWriteQueue}};
-
-type ComsUartModule = USART2;
-type ComsUartTxDma = DMA1_CH0;
-type ComsUartRxDma = DMA1_CH1;
+use ateam_lib_stm32::{idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart, uart::queue::{UartReadQueue, UartWriteQueue}};
 
 type LedGreenPin = PB0;
 type LedYellowPin = PE1;
@@ -39,11 +35,7 @@ const TX_BUF_DEPTH: usize = 5;
 const MAX_RX_PACKET_SIZE: usize = 64;
 const RX_BUF_DEPTH: usize = 200;
 
-make_uart_queue_pair!(COMS,
-    ComsUartModule, ComsUartRxDma, ComsUartTxDma,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(coms, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
 
 static LOOP_RATE_MS: AtomicU16 = AtomicU16::new(100);
 
@@ -53,7 +45,7 @@ struct StupidPacket {
 }
 
 #[embassy_executor::task]
-async fn rx_task(coms_reader: &'static UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>) {
+async fn rx_task(coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>) {
     let mut rx_packet: StupidPacket = StupidPacket {
         fields_of_minimal_intelligence: [0x55AA55AA; 16]
     };
@@ -83,7 +75,7 @@ async fn rx_task(coms_reader: &'static UartReadQueue<ComsUartModule, ComsUartRxD
 }
 
 #[embassy_executor::task]
-async fn tx_task(coms_writer: &'static UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>) {
+async fn tx_task(coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>) {
     let tx_packet: StupidPacket = StupidPacket {
         fields_of_minimal_intelligence: [0x55AA55AA; 16]
     };
@@ -168,7 +160,7 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
     // High-priority executor: I2C1, priority level 6
     // TODO CHECK THIS IS THE HIGHEST PRIORITY
     interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::TIM2, embassy_stm32::interrupt::Priority::P6);
-    let high_pri_spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
+    let _high_pri_spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
 
     //////////////////////////////////
     //  COMMUNICATIONS TASKS SETUP  //
@@ -191,19 +183,16 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
 
     let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
 
-    COMS_TX_UART_QUEUE.attach_pubsub(COMS_UART_SYNC_PUBSUB.publisher().unwrap(), COMS_UART_SYNC_PUBSUB.subscriber().unwrap()).await;
-    unwrap!(high_pri_spawner.spawn(COMS_RX_UART_QUEUE.spawn_task_with_pubsub(coms_uart_rx, &COMS_UART_SYNC_PUBSUB)));
-    unwrap!(high_pri_spawner.spawn(COMS_TX_UART_QUEUE.spawn_task_with_pubsub(coms_uart_tx, &COMS_UART_SYNC_PUBSUB)));
-
+    COMS_IDLE_BUFFERED_UART.init();
 
     // MIGHT should put queues in mix prio, this could elicit the bug
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
         unwrap!(spawner.spawn(handle_btn_press(p.PC13, p.EXTI13, p.PB0, p.PE1, p.PB14)));
-        // unwrap!(spawner.spawn(COMS_QUEUE_RX.spawn_task(coms_uart_rx)));
-        // unwrap!(spawner.spawn(COMS_QUEUE_TX.spawn_task(coms_uart_tx)));
-        unwrap!(spawner.spawn(rx_task(&COMS_RX_UART_QUEUE)));
-        unwrap!(spawner.spawn(tx_task(&COMS_TX_UART_QUEUE)));
+        unwrap!(spawner.spawn(rx_task(COMS_IDLE_BUFFERED_UART.get_uart_read_queue())));
+        unwrap!(spawner.spawn(tx_task(COMS_IDLE_BUFFERED_UART.get_uart_write_queue())));
+        spawner.spawn(idle_buffered_uart_read_task!(coms, coms_uart_rx)).unwrap();
+        spawner.spawn(idle_buffered_uart_write_task!(coms, coms_uart_tx)).unwrap();
     });
 }

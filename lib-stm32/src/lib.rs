@@ -1,4 +1,7 @@
 #![no_std]
+
+#![allow(incomplete_features)]
+
 #![feature(generic_const_exprs)]
 #![feature(const_precise_live_drops)]
 #![feature(maybe_uninit_uninit_array)]

@@ -25,15 +25,15 @@ use crate::queue::{
 macro_rules! static_idle_buffered_uart {
     ($name:ident, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr, $(#[$m:meta])*) => {
         $crate::paste::paste! {
-            static [<$name _TASK_SYNC_MUTEX>]: $crate::uart::queue::IdleBufferedUartTaskSyncMutex =  embassy_sync::mutex::Mutex::new(false);
+            static [<$name:upper _TASK_SYNC_MUTEX>]: $crate::uart::queue::IdleBufferedUartTaskSyncMutex =  embassy_sync::mutex::Mutex::new(false);
             $(#[$m])*
-            static [<$name _IDLE_BUFFERED_UART>]: $crate::uart::queue::IdleBufferedUart<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth> = 
-                $crate::uart::queue::IdleBufferedUart::new($crate::queue::Queue::new(), $crate::queue::Queue::new(), &[<$name _TASK_SYNC_MUTEX>]);
+            static [<$name:upper _IDLE_BUFFERED_UART>]: $crate::uart::queue::IdleBufferedUart<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth> = 
+                $crate::uart::queue::IdleBufferedUart::new($crate::queue::Queue::new(), $crate::queue::Queue::new(), &[<$name:upper _TASK_SYNC_MUTEX>]);
 
-            static [<$name _READ_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
+            static [<$name:upper _READ_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
                 $crate::uart::queue::IdleBufferedUartReadFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth>> = 
                 embassy_executor::raw::TaskStorage::new();
-            static [<$name _WRITE_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
+            static [<$name:upper _WRITE_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
                 $crate::uart::queue::IdleBufferedUartWriteFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth>> = 
                 embassy_executor::raw::TaskStorage::new();
         }
@@ -41,14 +41,41 @@ macro_rules! static_idle_buffered_uart {
 }
 
 #[macro_export]
-macro_rules! bind_task_storage {
-    ($name:ident, $uart_rx:ident, $uart_tx:ident) => {
-        $crate::paste::paste! {
-            let [<$name:lower _uart_read_task>] = [<$name _READ_TASK_STORAGE>].spawn(|| { [<$name _IDLE_BUFFERED_UART>].read_task($uart_rx) } );
-            let [<$name:lower _uart_write_task>] = [<$name _WRITE_TASK_STORAGE>].spawn(|| { [<$name _IDLE_BUFFERED_UART>].write_task($uart_tx) });
+macro_rules! idle_buffered_uart_read_task {
+    ($name:ident, $uart_rx:ident) => {
+        $crate::paste::item! {
+            [<$name:upper _READ_TASK_STORAGE>].spawn(|| { [<$name:upper _IDLE_BUFFERED_UART>].read_task($uart_rx) } )
         }
-    }
+    };
 }
+
+#[macro_export]
+macro_rules! idle_buffered_uart_write_task {
+    ($name:ident, $uart_tx:ident) => {
+        $crate::paste::item! {
+            [<$name:upper _WRITE_TASK_STORAGE>].spawn(|| { [<$name:upper _IDLE_BUFFERED_UART>].write_task($uart_tx) })
+        }
+    };
+}
+
+// #[macro_export]
+// macro_rules! queue_test {
+//     ($name:ident, $uart_rx:ident, $uart_tx:ident) => {
+//         $crate::paste::item! {
+//             const TEST_CONST: usize = 2;
+//         }
+//     }
+// }
+
+// #[macro_export]
+// macro_rules! bind_task_storage {
+//     ($name:ident, $uart_rx:ident, $uart_tx:ident) => {
+//         $crate::paste::item! {
+//             let [<$name:lower _uart_read_task>] = [<$name _READ_TASK_STORAGE>].spawn(|| { [<$name _IDLE_BUFFERED_UART>].read_task($uart_rx) } );
+//             let [<$name:lower _uart_write_task>] = [<$name _WRITE_TASK_STORAGE>].spawn(|| { [<$name _IDLE_BUFFERED_UART>].write_task($uart_tx) });
+//         }
+//     }
+// }
 
 pub type IdleBufferedUartTaskSyncMutex = Mutex<CriticalSectionRawMutex, bool>;
 
