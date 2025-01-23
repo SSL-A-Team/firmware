@@ -12,8 +12,8 @@ import argparse
 
 firmware_dir_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 git_id_sequence = b'\xAA\xBB\xCC\xDD'
-git_dirty_offset = 4  # bytes into the GitStatus_t struct
-git_hash_offset = 8 # bytes into the GitStatus_t struct
+git_hash_offset = 4 # bytes into the GitStatus_t struct
+git_dirty_offset = 8  # bytes into the GitStatus_t struct
 
 
 def embed_git_status(fpath):
@@ -67,7 +67,6 @@ if __name__ == "__main__":
     parser.add_argument('-t', '--target', type=str, help="Name of the target: motor-controller--wheel, motor-controller--dribbler, control-board--control)", required=True)
     args = parser.parse_args()
 
-    bin_path = os.path.join(firmware_dir_path,f"motor-controller/build/bin/{args.target}.bin")
     target_module = args.target.split("--")[0]
     target_name = args.target.split("--")[1]
 
