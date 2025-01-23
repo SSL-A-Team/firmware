@@ -4,7 +4,7 @@ use super::at_protocol::*;
 
 // Data to/from radio is in big endian mode, ensure proper conversions are done
 
-#[derive(Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum EdmPacketError {
     PacketTypeDecodingFailed,
     PacketTypeDecodeLengthMismatch,

@@ -4,7 +4,7 @@ use embassy_futures::select;
 use embassy_stm32::gpio::{Level, Output, OutputOpenDrain, Pull, Speed};
 use embassy_time::Timer;
 
-use crate::{pins::{PowerBtnPressedIntExti, PowerBtnPressedIntPin, PowerKillPin, ShutdownInitiatedLedPin}, robot_state::{self, SharedRobotState}};
+use crate::{pins::{PowerBtnPressedIntExti, PowerBtnPressedIntPin, PowerKillPin, ShutdownInitiatedLedPin}, robot_state::SharedRobotState};
 
 pub const HARD_SHUTDOWN_TIME_MS: u64 = 15000;
 
@@ -59,7 +59,7 @@ pub fn start_shutdown_task(spawner: Spawner,
     shutdown_initiated_led_pin: ShutdownInitiatedLedPin) {
 
     let power_btn: AdvExtiButton = AdvExtiButton::new_from_pins(power_btn_pin, power_btn_pin_exti, true);
-    let system_kill_output = OutputOpenDrain::new(system_kill_pin, Level::High, Speed::Medium, Pull::None);
+    let system_kill_output = OutputOpenDrain::new_pull(system_kill_pin, Level::High, Speed::Medium, Pull::None);
     let shutdown_initiated_led = Output::new(shutdown_initiated_led_pin, Level::Low, Speed::Medium);
 
     spawner.spawn(shutdown_task_entry(robot_state, power_btn, system_kill_output, shutdown_initiated_led)).unwrap();

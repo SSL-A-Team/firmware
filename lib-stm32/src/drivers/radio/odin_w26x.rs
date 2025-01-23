@@ -10,7 +10,7 @@ use crate::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
 use super::at_protocol::{ATEvent, ATResponse, WifiLinkDisconnectedReason};
 use super::edm_protocol::{EdmPacket, EdmPacketError};
 
-#[derive(Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum OdinRadioError {
     CommandConstructionFailed,
     EdmPacketError(EdmPacketError),
@@ -25,6 +25,7 @@ pub enum OdinRadioError {
     PeerConnectionReceivedInvalidResponse,
     PeerConnectionFailed,
     PeerCloseFailed,
+    PeerMissing,
     EdmTransitionFailed,
 }
 
@@ -444,7 +445,7 @@ impl<
         Ok(())
     }
 
-    pub async fn send_data(&self, channel_id: u8, data: &[u8]) -> Result<(), ()> {
+    pub async fn send_data(&self, channel_id: u8, data: &[u8]) -> Result<(), OdinRadioError> {
         let res = self.writer.enqueue(|buf| {
                 EdmPacket::DataCommand {
                     channel: channel_id,
@@ -455,7 +456,7 @@ impl<
 
         if res.is_err() {
             // queue was full
-            return Err(());
+            return Err(OdinRadioError::SendCommandLowLevelBufferFull);
         }
 
         Ok(())

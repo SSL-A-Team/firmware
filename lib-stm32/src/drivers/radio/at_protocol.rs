@@ -1,6 +1,6 @@
 
 
-#[derive(Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum AtPacketError {
     Utf8DecodeFailed,
     FramingDecodeFailed,
