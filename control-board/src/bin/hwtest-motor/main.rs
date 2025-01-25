@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use ateam_common_packets::{bindings::KickRequest, bindings::{BasicControl, BasicTelemetry}, radio::DataPacket};
+use ateam_common_packets::{bindings::KickRequest, bindings::BasicControl, radio::DataPacket};
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
     interrupt, pac::Interrupt

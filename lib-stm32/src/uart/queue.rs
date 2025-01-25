@@ -58,24 +58,16 @@ macro_rules! idle_buffered_uart_write_task {
     };
 }
 
-// #[macro_export]
-// macro_rules! queue_test {
-//     ($name:ident, $uart_rx:ident, $uart_tx:ident) => {
-//         $crate::paste::item! {
-//             const TEST_CONST: usize = 2;
-//         }
-//     }
-// }
-
-// #[macro_export]
-// macro_rules! bind_task_storage {
-//     ($name:ident, $uart_rx:ident, $uart_tx:ident) => {
-//         $crate::paste::item! {
-//             let [<$name:lower _uart_read_task>] = [<$name _READ_TASK_STORAGE>].spawn(|| { [<$name _IDLE_BUFFERED_UART>].read_task($uart_rx) } );
-//             let [<$name:lower _uart_write_task>] = [<$name _WRITE_TASK_STORAGE>].spawn(|| { [<$name _IDLE_BUFFERED_UART>].write_task($uart_tx) });
-//         }
-//     }
-// }
+#[macro_export]
+macro_rules! idle_buffered_uart_spawn_tasks {
+    ($spawner:ident, $name:ident, $uart:ident) => {
+        $crate::paste::item! {
+            let ([<$name:lower _uart_tx>], [<$name:lower _uart_rx>]) = Uart::split($uart);
+            $spawner.spawn($crate::idle_buffered_uart_read_task!($name, [<$name:lower _uart_rx>])).unwrap();
+            $spawner.spawn($crate::idle_buffered_uart_write_task!($name, [<$name:lower _uart_tx>])).unwrap();
+        }
+    };
+}
 
 pub type IdleBufferedUartTaskSyncMutex = Mutex<CriticalSectionRawMutex, bool>;
 

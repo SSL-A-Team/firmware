@@ -43,10 +43,10 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
     Timer::after(Duration::from_millis(500)).await;
 
     let mut vrefint = adc.enable_vrefint();
-    let vrefint_sample = adc.read(&mut vrefint) as f32;
+    let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
 
-    let mut hv = adc.read(&mut hv_pin) as f32;
-    let mut regv = adc.read(&mut rail_12v0_pin) as f32;
+    let mut hv = adc.blocking_read(&mut hv_pin) as f32;
+    let mut regv = adc.blocking_read(&mut rail_12v0_pin) as f32;
     info!("hv V: {}, 12v reg mv: {}", adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)), adc_12v_to_rail_voltage(adc_raw_to_v(regv, vrefint_sample)));
 
     let start_up_battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(regv, vrefint_sample));
@@ -70,20 +70,20 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
     reg_charge.set_low();
 
     let mut vrefint = adc.enable_vrefint();
-    let vrefint_sample = adc.read(&mut vrefint) as f32;
+    let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
 
-    hv = adc.read(&mut hv_pin) as f32;
-    regv = adc.read(&mut rail_12v0_pin) as f32;
+    hv = adc.blocking_read(&mut hv_pin) as f32;
+    regv = adc.blocking_read(&mut rail_12v0_pin) as f32;
     info!("hv V: {}, batt mv: {}", adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)), adc_12v_to_rail_voltage(adc_raw_to_v(regv, vrefint_sample)));
 
     Timer::after(Duration::from_millis(1000)).await;
 
     loop {
         let mut vrefint = adc.enable_vrefint();
-        let vrefint_sample = adc.read(&mut vrefint) as f32;
+        let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
 
-        hv = adc.read(&mut hv_pin) as f32;
-        regv = adc.read(&mut rail_12v0_pin) as f32;
+        hv = adc.blocking_read(&mut hv_pin) as f32;
+        regv = adc.blocking_read(&mut rail_12v0_pin) as f32;
 
         info!("hv V: {}, batt mv: {}", adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)), adc_12v_to_rail_voltage(adc_raw_to_v(regv, vrefint_sample)));
 

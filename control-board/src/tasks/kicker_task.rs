@@ -1,7 +1,7 @@
 use ateam_common_packets::radio::DataPacket;
-use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn, uart::queue::{UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use embassy_executor::{SendSpawner, Spawner};
-use embassy_stm32::{gpio::{Level, Output, Pin, Speed}, usart::{self, Uart}};
+use embassy_stm32::{gpio::{Level, Output, Pin, Speed}, usart::Uart};
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Ticker, Timer, Instant};
 
@@ -15,11 +15,7 @@ const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 20;
 const TELEMETRY_TIMEOUT_MS: u64 = 2000;
 
-make_uart_queue_pair!(KICKER,
-    KickerUart, KickerRxDma, KickerTxDma,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(KICKER, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
 
 #[macro_export]
 macro_rules! create_kicker_task {
@@ -48,14 +44,11 @@ enum KickerTaskState {
 }
 
 pub struct KickerTask<'a,
-    UART: usart::Instance,
-    DmaRx: usart::RxDma<UART>,
-    DmaTx: usart::TxDma<UART>,
     const LEN_RX: usize,
     const LEN_TX: usize,
     const DEPTH_RX: usize,
     const DEPTH_TX: usize> {
-    kicker_driver: Kicker<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>,
+    kicker_driver: Kicker<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>,
     remote_power_btn: Output<'a>,
     kicker_task_state: KickerTaskState,
     robot_state: &'static SharedRobotState,
@@ -63,14 +56,11 @@ pub struct KickerTask<'a,
 }
 
 impl<'a,
-UART: usart::Instance,
-DmaRx: usart::RxDma<UART>,
-DmaTx: usart::TxDma<UART>,
 const LEN_RX: usize,
 const LEN_TX: usize,
 const DEPTH_RX: usize,
-const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
-    pub fn new(kicker_driver: Kicker<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>,
+const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
+    pub fn new(kicker_driver: Kicker<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>,
             power_output: Output<'a>,
             robot_state: &'static SharedRobotState,
             command_subscriber: CommandsSubscriber) -> Self {
@@ -83,8 +73,10 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
         }
     }
 
-    pub fn new_from_pins(read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+    pub fn new_from_pins(
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
         power_pin: impl Pin,
@@ -92,7 +84,7 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
         robot_state: &'static SharedRobotState,
         command_subscriber: CommandsSubscriber) -> Self {
 
-        let kicker_driver = Kicker::new_from_pins(read_queue, write_queue, boot0_pin, reset_pin, firmware_image);
+        let kicker_driver = Kicker::new_from_pins(uart, read_queue, write_queue, boot0_pin, reset_pin, firmware_image);
         let power_output = Output::new(power_pin, Level::Low, Speed::Medium);
 
         Self::new(kicker_driver, power_output, robot_state, command_subscriber)
@@ -243,7 +235,7 @@ const DEPTH_TX: usize> KickerTask<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_
 }
 
 #[embassy_executor::task]
-async fn kicker_task_entry(mut kicker_task: KickerTask<'static, KickerUart, KickerRxDma, KickerTxDma, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>) {
+async fn kicker_task_entry(mut kicker_task: KickerTask<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>) {
     loop {
         kicker_task.kicker_task_entry().await;
         defmt::error!("radio task returned");
@@ -267,9 +259,9 @@ pub async fn start_kicker_task(kicker_task_spawner: Spawner,
 
     let kicker_uart = Uart::new(kicker_uart, kicker_uart_rx_pin, kicker_uart_tx_pin, SystemIrqs, kicker_uart_tx_dma, kicker_uart_rx_dma, initial_kicker_uart_conifg).unwrap();
 
-    let (kicker_tx, kicker_rx) = Uart::split(kicker_uart);
-    queue_pair_register_and_spawn!(queue_spawner, KICKER, kicker_rx, kicker_tx);
+    KICKER_IDLE_BUFFERED_UART.init();
+    idle_buffered_uart_spawn_tasks!(queue_spawner, KICKER, kicker_uart);
 
-    let kicker_task = KickerTask::new_from_pins(&KICKER_RX_UART_QUEUE, &KICKER_TX_UART_QUEUE, kicker_boot0_pin, kicker_reset_pin, kicker_power_pin, KICKER_FW_IMG, robot_state, command_subscriber);
+    let kicker_task = KickerTask::new_from_pins(&KICKER_IDLE_BUFFERED_UART, KICKER_IDLE_BUFFERED_UART.get_uart_read_queue(), KICKER_IDLE_BUFFERED_UART.get_uart_write_queue(), kicker_boot0_pin, kicker_reset_pin, kicker_power_pin, KICKER_FW_IMG, robot_state, command_subscriber);
     kicker_task_spawner.spawn(kicker_task_entry(kicker_task)).unwrap();
 }

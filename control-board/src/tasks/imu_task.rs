@@ -5,10 +5,8 @@ use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Pull;
 use embassy_stm32::spi::{SckPin, MisoPin, MosiPin};
 
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{Instant, Timer};
 use nalgebra::Vector3;
-
-use static_cell::ConstStaticCell;
 
 use ateam_lib_stm32::drivers::imu::bmi323::{self, *};
 
@@ -30,9 +28,6 @@ macro_rules! create_imu_task {
             $p.PF11);
     };
 }
-
-// #[link_section = ".axisram.buffers"]
-// static IMU_BUFFER_CELL: ConstStaticCell<[u8; bmi323::SPI_MIN_BUF_LEN]> = ConstStaticCell::new([0; bmi323::SPI_MIN_BUF_LEN]);
 
 #[link_section = ".axisram.buffers"]
 static mut IMU_BUFFER_CELL: [u8; bmi323::SPI_MIN_BUF_LEN] = [0; bmi323::SPI_MIN_BUF_LEN];

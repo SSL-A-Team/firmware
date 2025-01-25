@@ -1,5 +1,5 @@
 use ateam_common_packets::{bindings::{BasicTelemetry, MotorCommand_MotionType}, radio::TelemetryPacket};
-use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
+use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::Uart;
 use embassy_time::{Duration, Ticker, Timer};
@@ -17,35 +17,11 @@ const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 64;
 const RX_BUF_DEPTH: usize = 20;
 
-make_uart_queue_pair!(FRONT_LEFT,
-    MotorFLUart, MotorFLDmaRx, MotorFLDmaTx,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
-
-make_uart_queue_pair!(BACK_LEFT,
-    MotorBLUart, MotorBLDmaRx, MotorBLDmaTx,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
-
-make_uart_queue_pair!(BACK_RIGHT,
-    MotorBRUart, MotorBRDmaRx, MotorBRDmaTx,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
-
-make_uart_queue_pair!(FRONT_RIGHT,
-    MotorFRUart, MotorFRDmaRx, MotorFRDmaTx,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
-
-make_uart_queue_pair!(DRIB,
-    MotorDUart, MotorDDmaRx, MotorDDmaTx,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(FRONT_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(BACK_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(FRONT_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(DRIB, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
 
 const TICKS_WITHOUT_PACKET_STOP: usize = 20;
 const BATTERY_MIN_VOLTAGE: f32 = 18.0;
@@ -66,11 +42,11 @@ pub struct ControlTask<
     last_accel_y_ms: f32,
     telemetry_publisher: TelemetryPublisher,
     
-    motor_fl: WheelMotor<'static, MotorFLUart, MotorFLDmaRx, MotorFLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-    motor_bl: WheelMotor<'static, MotorBLUart, MotorBLDmaRx, MotorBLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-    motor_br: WheelMotor<'static, MotorBRUart, MotorBRDmaRx, MotorBRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-    motor_fr: WheelMotor<'static, MotorFRUart, MotorFRDmaRx, MotorFRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-    motor_drib: DribblerMotor<'static, MotorDUart, MotorDDmaRx, MotorDDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH> 
+    motor_fl: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
+    motor_bl: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
+    motor_br: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
+    motor_fr: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
+    motor_drib: DribblerMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH> 
 }
 
 impl <
@@ -87,11 +63,11 @@ impl <
                 battery_subscriber: BatteryVoltSubscriber,
                 gyro_subscriber: GyroDataSubscriber,
                 accel_subscriber: AccelDataSubscriber,
-                motor_fl: WheelMotor<'static, MotorFLUart, MotorFLDmaRx, MotorFLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-                motor_bl: WheelMotor<'static, MotorBLUart, MotorBLDmaRx, MotorBLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-                motor_br: WheelMotor<'static, MotorBRUart, MotorBRDmaRx, MotorBRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-                motor_fr: WheelMotor<'static, MotorFRUart, MotorFRDmaRx, MotorFRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-                motor_drib: DribblerMotor<'static, MotorDUart, MotorDDmaRx, MotorDDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH> 
+                motor_fl: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
+                motor_bl: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
+                motor_br: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
+                motor_fr: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
+                motor_drib: DribblerMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH> 
         ) -> Self {
             ControlTask {
                 shared_robot_state: robot_state,
@@ -477,27 +453,27 @@ pub async fn start_control_task(
     //  register motor queues and DMA hardware  //
     //////////////////////////////////////////////
 
-    let (fl_uart_tx, fl_uart_rx) = Uart::split(fl_uart);
-    queue_pair_register_and_spawn!(uart_queue_spawner, FRONT_LEFT, fl_uart_rx, fl_uart_tx);
-    let (bl_uart_tx, bl_uart_rx) = Uart::split(bl_uart);
-    queue_pair_register_and_spawn!(uart_queue_spawner, BACK_LEFT, bl_uart_rx, bl_uart_tx);
-    let (br_uart_tx, br_uart_rx) = Uart::split(br_uart);
-    queue_pair_register_and_spawn!(uart_queue_spawner, BACK_RIGHT, br_uart_rx, br_uart_tx);
-    let (fr_uart_tx, fr_uart_rx) = Uart::split(fr_uart);
-    queue_pair_register_and_spawn!(uart_queue_spawner, FRONT_RIGHT, fr_uart_rx, fr_uart_tx);
+    FRONT_LEFT_IDLE_BUFFERED_UART.init();
+    BACK_LEFT_IDLE_BUFFERED_UART.init();
+    BACK_RIGHT_IDLE_BUFFERED_UART.init();
+    FRONT_RIGHT_IDLE_BUFFERED_UART.init();
+    DRIB_IDLE_BUFFERED_UART.init();
 
-    let (drib_uart_tx, drib_uart_rx) = Uart::split(drib_uart);
-    queue_pair_register_and_spawn!(uart_queue_spawner, DRIB, drib_uart_rx, drib_uart_tx);
+    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, FRONT_LEFT, fl_uart);
+    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, BACK_LEFT, bl_uart);
+    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, BACK_RIGHT, br_uart);
+    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, FRONT_RIGHT, fr_uart);
+    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, DRIB, drib_uart);
 
     ////////////////////////////////
     //  create motor controllers  //
     ////////////////////////////////
     
-    let motor_fl = WheelMotor::new_from_pins(&FRONT_LEFT_RX_UART_QUEUE,  &FRONT_LEFT_TX_UART_QUEUE,  motor_fl_boot0_pin, motor_fl_nrst_pin, WHEEL_FW_IMG);
-    let motor_bl = WheelMotor::new_from_pins(&BACK_LEFT_RX_UART_QUEUE,   &BACK_LEFT_TX_UART_QUEUE,   motor_bl_boot0_pin, motor_bl_nrst_pin, WHEEL_FW_IMG);
-    let motor_br = WheelMotor::new_from_pins(&BACK_RIGHT_RX_UART_QUEUE,  &BACK_RIGHT_TX_UART_QUEUE,  motor_br_boot0_pin, motor_br_nrst_pin, WHEEL_FW_IMG);
-    let motor_fr = WheelMotor::new_from_pins(&FRONT_RIGHT_RX_UART_QUEUE, &FRONT_RIGHT_TX_UART_QUEUE, motor_fr_boot0_pin, motor_fr_nrst_pin, WHEEL_FW_IMG);
-    let motor_drib = DribblerMotor::new_from_pins(&DRIB_RX_UART_QUEUE,   &DRIB_TX_UART_QUEUE,        motor_d_boot0_pin,  motor_d_nrst_pin,  DRIB_FW_IMG, 1.0);
+    let motor_fl = WheelMotor::new_from_pins(&FRONT_LEFT_IDLE_BUFFERED_UART, FRONT_LEFT_IDLE_BUFFERED_UART.get_uart_read_queue(),  FRONT_LEFT_IDLE_BUFFERED_UART.get_uart_write_queue(),  motor_fl_boot0_pin, motor_fl_nrst_pin, WHEEL_FW_IMG);
+    let motor_bl = WheelMotor::new_from_pins(&BACK_LEFT_IDLE_BUFFERED_UART, BACK_LEFT_IDLE_BUFFERED_UART.get_uart_read_queue(), BACK_LEFT_IDLE_BUFFERED_UART.get_uart_write_queue(),  motor_bl_boot0_pin, motor_bl_nrst_pin, WHEEL_FW_IMG);
+    let motor_br = WheelMotor::new_from_pins(&BACK_RIGHT_IDLE_BUFFERED_UART,  BACK_RIGHT_IDLE_BUFFERED_UART.get_uart_read_queue(), BACK_RIGHT_IDLE_BUFFERED_UART.get_uart_write_queue(), motor_br_boot0_pin, motor_br_nrst_pin, WHEEL_FW_IMG);
+    let motor_fr = WheelMotor::new_from_pins(&FRONT_RIGHT_IDLE_BUFFERED_UART, FRONT_RIGHT_IDLE_BUFFERED_UART.get_uart_read_queue(), FRONT_RIGHT_IDLE_BUFFERED_UART.get_uart_write_queue(), motor_fr_boot0_pin, motor_fr_nrst_pin, WHEEL_FW_IMG);
+    let motor_drib = DribblerMotor::new_from_pins(&DRIB_IDLE_BUFFERED_UART, DRIB_IDLE_BUFFERED_UART.get_uart_read_queue(), DRIB_IDLE_BUFFERED_UART.get_uart_write_queue(), motor_d_boot0_pin,  motor_d_nrst_pin,  DRIB_FW_IMG, 1.0);
 
     let control_task = ControlTask::new(
         robot_state, command_subscriber, telemetry_publisher, battery_subscriber,

@@ -17,9 +17,6 @@ use embassy_time::{Duration, Timer};
 
 use static_cell::StaticCell;
 
-use smart_leds::{SmartLedsWrite, RGB8};
-use apa102_spi::Apa102;
-
 use ateam_kicker_board::{tasks::get_system_config, *};
 use ateam_kicker_board::pins::*;
 
@@ -77,13 +74,13 @@ async fn blink(
         Timer::after(Duration::from_millis(500)).await;
 
         let mut vrefint = adc.enable_vrefint();
-        let vrefint_sample = adc.read(&mut vrefint) as f32;
+        let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
 
-        let raw_200v = adc.read(&mut rail_200v_pin) as f32;
-        let raw_12v = adc.read(&mut rail_12v0_pin) as f32;
-        let raw_6v2 = adc.read(&mut rail_6v2_pin) as f32;
-        let raw_5v0 = adc.read(&mut rail_5v0_pin) as f32;
-        let raw_int = adc.read(&mut vrefint) as f32;
+        let raw_200v = adc.blocking_read(&mut rail_200v_pin) as f32;
+        let raw_12v = adc.blocking_read(&mut rail_12v0_pin) as f32;
+        let raw_6v2 = adc.blocking_read(&mut rail_6v2_pin) as f32;
+        let raw_5v0 = adc.blocking_read(&mut rail_5v0_pin) as f32;
+        let raw_int = adc.blocking_read(&mut vrefint) as f32;
 
         defmt::info!("voltages - 200v ({}), 12v0 ({}), 6v2 ({}), 5v0 ({}), 3v3 ({})",
         adc_200v_to_rail_voltage(adc_raw_to_v(raw_200v, vrefint_sample)),

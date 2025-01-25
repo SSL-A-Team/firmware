@@ -1,5 +1,10 @@
 #![no_std]
 #![no_main]
+
+#![allow(incomplete_features)]
+#![feature(inherent_associated_types)]
+#![feature(generic_const_exprs)]
+
 #![feature(type_alias_impl_trait)]
 #![feature(async_closure)]
 #![feature(
@@ -9,6 +14,7 @@
 )]
 #![feature(ptr_metadata)]
 #![feature(sync_unsafe_cell)]
+
 
 use embassy_stm32::{
     bind_interrupts, peripherals, rcc::{

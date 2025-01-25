@@ -112,7 +112,7 @@ impl<
     ) -> WheelMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
     {
         // Need a Pull None to allow for STSPIN watchdog usage.
-        let stm32_interface = Stm32Interface::new_from_pins(uart, read_queue, write_queue, boot0_pin, reset_pin, false);
+        let stm32_interface = Stm32Interface::new_from_pins(uart, read_queue, write_queue, boot0_pin, reset_pin, Pull::None, false);
 
         let start_state: MotorResponse_Motion_Packet =
             { unsafe { MaybeUninit::zeroed().assume_init() } };
@@ -422,7 +422,7 @@ impl<
     ) -> DribblerMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
     {
         // Need a Pull None to allow for STSPIN watchdog usage.
-        let stm32_interface = Stm32Interface::new_from_pins(uart, read_queue, write_queue, boot0_pin, reset_pin, false);
+        let stm32_interface = Stm32Interface::new_from_pins(uart, read_queue, write_queue, boot0_pin, reset_pin, Pull::None, false);
 
         let start_state: MotorResponse_Motion_Packet =
             { unsafe { MaybeUninit::zeroed().assume_init() } };

@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 #![feature(type_alias_impl_trait)]
-#![feature(const_mut_refs)]
 #![feature(sync_unsafe_cell)]
 
 use ateam_kicker_board::{drivers::breakbeam::Breakbeam, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin, GreenStatusLedPin}, tasks::{get_system_config, ClkSource}};
@@ -27,13 +26,11 @@ use ateam_kicker_board::{
     adc_raw_to_v, adc_200v_to_rail_voltage,
     kick_manager::{KickManager, KickType},
     pins::{
-        BlueStatusLed1Pin, BlueStatusLed2Pin, ChargePin, ChipPin, ComsUartModule, ComsUartRxDma,
-        ComsUartTxDma, PowerRail200vReadPin, KickPin, RedStatusLedPin,
+        BlueStatusLed1Pin, BlueStatusLed2Pin, ChargePin, ChipPin, PowerRail200vReadPin, KickPin, RedStatusLedPin,
     },
 };
 
-use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
-use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
+use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, uart::queue::{UartReadQueue, UartWriteQueue}};
 
 use ateam_common_packets::bindings::{
     KickRequest::{self, KR_ARM, KR_DISABLE},
@@ -55,11 +52,7 @@ const RX_BUF_DEPTH: usize = 3;
 
 const RAIL_BUFFER_SIZE: usize = 10;
 
-make_uart_queue_pair!(COMS,
-    ComsUartModule, ComsUartRxDma, ComsUartTxDma,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".bss"]);
+static_idle_buffered_uart!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".static"]);
 
 fn get_empty_control_packet() -> KickerControl {
     KickerControl {
@@ -82,14 +75,10 @@ fn get_empty_telem_packet() -> KickerTelemetry {
 #[embassy_executor::task]
 async fn high_pri_kick_task(
     coms_reader: &'static UartReadQueue<
-        ComsUartModule,
-        ComsUartRxDma,
         MAX_RX_PACKET_SIZE,
         RX_BUF_DEPTH,
     >,
     coms_writer: &'static UartWriteQueue<
-        ComsUartModule,
-        ComsUartTxDma,
         MAX_TX_PACKET_SIZE,
         TX_BUF_DEPTH,
     >,
@@ -148,9 +137,9 @@ async fn high_pri_kick_task(
 
     loop {
         let mut vrefint = adc.enable_vrefint();
-        let vrefint_sample = adc.read(&mut vrefint);
+        let vrefint_sample = adc.blocking_read(&mut vrefint);
 
-        let rail_voltage_cur = adc_200v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32, vrefint_sample as f32));
+        let rail_voltage_cur = adc_200v_to_rail_voltage(adc_raw_to_v(adc.blocking_read(&mut rail_pin) as f32, vrefint_sample as f32));
         
         // Add new battery read to cyclical buffer.
         rail_voltage_buffer[rail_voltage_filt_indx] = rail_voltage_cur;
@@ -440,7 +429,7 @@ async fn main(spawner: Spawner) -> ! {
     embassy_stm32::interrupt::TIM2.set_priority(embassy_stm32::interrupt::Priority::P6);
     let hp_spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
 
-    unwrap!(hp_spawner.spawn(high_pri_kick_task(&COMS_RX_UART_QUEUE, &COMS_TX_UART_QUEUE, adc, p.PE4, p.PE5, p.PE6, p.PA1, p.PA0, p.PC0, p.PE0, p.PE1, p.PE2, p.PE3)));
+    unwrap!(hp_spawner.spawn(high_pri_kick_task(COMS_IDLE_BUFFERED_UART.get_uart_read_queue(), COMS_IDLE_BUFFERED_UART.get_uart_write_queue(), adc, p.PE4, p.PE5, p.PE6, p.PA1, p.PA0, p.PC0, p.PE0, p.PE1, p.PE2, p.PE3)));
 
 
     //////////////////////////////////
@@ -462,8 +451,8 @@ async fn main(spawner: Spawner) -> ! {
         coms_uart_config,
     ).unwrap();
 
-    let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
-    queue_pair_register_and_spawn!(spawner, COMS, coms_uart_rx, coms_uart_tx);
+    COMS_IDLE_BUFFERED_UART.init();
+    idle_buffered_uart_spawn_tasks!(spawner, COMS, coms_usart);
 
     loop {
         Timer::after_millis(1000).await;
