@@ -102,7 +102,7 @@ if __name__ == "__main__":
         print(f"embed_git_status.py - WARNING - Unable to embed the current git tree status into {bin_path}")
 
     # Print out the new bytes
-    with open(bin_path, "rb") as f:
-        new_binary = f.read()
-    sequence_start_idx = new_binary.find(git_id_sequence[::-1])
-    print(' '.join(f'{byte:02x}' for byte in new_binary[sequence_start_idx:sequence_start_idx+12]))
+    # with open(bin_path, "rb") as f:
+    #     new_binary = f.read()
+    # sequence_start_idx = new_binary.find(git_id_sequence[::-1])
+    # print(' '.join(f'{byte:02x}' for byte in new_binary[sequence_start_idx:sequence_start_idx+12]))
