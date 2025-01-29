@@ -143,10 +143,10 @@ int main() {
                 // we got a motion packet!
                 ticks_since_last_command_packet = 0;
 
-                //if (motor_command_packet.data.motion.reset) {
-                //    // Block, watchdog will trigger reset.
-                //    while (true);
-                //}
+                if (motor_command_packet.data.motion.reset) {
+                    // Block, watchdog will trigger reset.
+                    while (true);
+                }
 
                 telemetry_enabled = motor_command_packet.data.motion.enable_telemetry;
                 r_motor_board = motor_command_packet.data.motion.setpoint;

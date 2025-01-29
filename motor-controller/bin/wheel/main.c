@@ -161,7 +161,6 @@ int main() {
     uart_initialize();
     uart_logging_status_rx_t uart_logging_status_receive;
     uart_logging_status_tx_t uart_logging_status_send;
-    uint16_t flash_led_counter = 0;
 
     // toggle J1-1
     while (true) {
@@ -206,11 +205,10 @@ int main() {
                 // We got a motion packet!
                 ticks_since_last_command_packet = 0;
 
-                //if (motor_command_packet.data.motion.reset) {
-                //    // Block, watchdog will trigger reset.
-                //
-                //    while (true);
-                //}
+                if (motor_command_packet.data.motion.reset) {
+                    // Block, watchdog will trigger reset.
+                    while (true);
+                }
 
                 telemetry_enabled = motor_command_packet.data.motion.enable_telemetry;
                 r_motor_board = motor_command_packet.data.motion.setpoint;
@@ -506,23 +504,10 @@ int main() {
 
         // Red LED means we are in an error state.
         // This latches and requires resetting the robot to clear.
-        #ifdef COMP_MODE
         if (response_packet.data.motion.master_error ||
             (telemetry_enabled && ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS)) {
             turn_on_red_led();
         }
-        #else
-        if (run_telemetry) {
-            flash_led_counter += 1;
-            if (flash_led_counter > 200) {
-                flash_led_counter = 0;
-                turn_off_red_led();
-            }
-            else if (flash_led_counter > 100) {
-                turn_on_red_led();
-            }
-        }
-        #endif
 
         // Yellow LED means we are in an warning state.
         // Will clear if resolved.
