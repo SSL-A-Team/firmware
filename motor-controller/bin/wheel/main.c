@@ -157,9 +157,11 @@ int main() {
     turn_off_red_led();
     turn_off_yellow_led();
 
-    // UART logging status.
-    uart_logging_status_t uart_logging_status_receive;
-    uart_logging_status_t uart_logging_status_send;
+    // Initialize UART and logging status.
+    uart_initialize();
+    uart_logging_status_rx_t uart_logging_status_receive;
+    uart_logging_status_tx_t uart_logging_status_send;
+    uint16_t flash_led_counter = 0;
 
     // toggle J1-1
     while (true) {
@@ -180,9 +182,9 @@ int main() {
             uart_read(&motor_command_packet, sizeof(MotorCommandPacket));
 
             // If something goes wrong with the UART, we need to flag it.
-            if (uart_logging_status != UART_LOGGING_OK) {
+            if (uart_rx_get_logging_status() != UART_LOGGING_OK) {
                 // Capture the status of the UART.
-                uart_logging_status_receive = uart_logging_status;
+                uart_logging_status_receive = uart_rx_get_logging_status();
 
                 // If something went wrong, just purge all of the data.
                 uart_discard();
@@ -197,8 +199,8 @@ int main() {
                 #endif
             }
 
-            // Clear the logging for the next UART transmit / receive.
-            uart_clear_logging_status();
+            // Clear the logging for the next UART receive.
+            uart_rx_clear_logging_status();
 
             if (motor_command_packet.type == MCP_MOTION) {
                 // We got a motion packet!
@@ -391,7 +393,7 @@ int main() {
             // read error states
             const MotorErrors_t reported_motor_errors = pwm6step_get_motor_errors();
 
-            response_packet.type = MCP_MOTION;
+            response_packet.type = MRP_MOTION;
 
             // bldc errors
             response_packet.data.motion.hall_power_error = reported_motor_errors.hall_power;
@@ -433,15 +435,15 @@ int main() {
 
             // transmit packets
 #ifdef UART_ENABLED
-            // If previous UART transmit is still occurring,
-            // wait for it to finish.
-            uart_wait_for_transmission();
-            // takes ~270uS, mostly hardware DMA
-            if (run_telemetry) {
+            if (telemetry_enabled && run_telemetry) {
+                // If previous UART transmit is still occurring,
+                // wait for it to finish.
+                uart_wait_for_transmission();
+                // takes ~270uS, mostly hardware DMA, but should be cleared out by now.
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
                 // Capture the status for the response packet / LED.
-                if (uart_logging_status != UART_LOGGING_OK) {
-                    uart_logging_status_send = uart_logging_status;
+                if (uart_tx_get_logging_status() != UART_LOGGING_OK) {
+                    uart_logging_status_send = uart_tx_get_logging_status();
                 } else {
                     // If we are in COMP_MODE, don't latch the status if
                     // we are able to send a packet successfully later.
@@ -451,14 +453,14 @@ int main() {
                 }
 
                 // Clear the logging for the next UART transmit / receive.
-                uart_clear_logging_status();
+                uart_tx_clear_logging_status();
             }
 #endif
 
             if (params_return_packet_requested) {
                 params_return_packet_requested = false;
 
-                response_packet.type = MCP_PARAMS;
+                response_packet.type = MRP_PARAMS;
 
                 response_packet.data.params.version_major = VERSION_MAJOR;
                 response_packet.data.params.version_major = VERSION_MINOR;
@@ -478,8 +480,8 @@ int main() {
 #ifdef UART_ENABLED
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
                 // Capture the status for the response packet / LED.
-                if (uart_logging_status != UART_LOGGING_OK) {
-                    uart_logging_status_send = uart_logging_status;
+                if (uart_tx_get_logging_status() != UART_LOGGING_OK) {
+                    uart_logging_status_send = uart_tx_get_logging_status();
                 } else {
                     // If we are in COMP_MODE, don't latch the status if
                     // we are able to send a packet successfully later.
@@ -489,7 +491,7 @@ int main() {
                 }
 
                 // Clear the logging for the next UART transmit / receive.
-                uart_clear_logging_status();
+                uart_tx_clear_logging_status();
 #endif
             }
         }
@@ -504,10 +506,23 @@ int main() {
 
         // Red LED means we are in an error state.
         // This latches and requires resetting the robot to clear.
+        #ifdef COMP_MODE
         if (response_packet.data.motion.master_error ||
             (telemetry_enabled && ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS)) {
             turn_on_red_led();
         }
+        #else
+        if (run_telemetry) {
+            flash_led_counter += 1;
+            if (flash_led_counter > 200) {
+                flash_led_counter = 0;
+                turn_off_red_led();
+            }
+            else if (flash_led_counter > 100) {
+                turn_on_red_led();
+            }
+        }
+        #endif
 
         // Yellow LED means we are in an warning state.
         // Will clear if resolved.

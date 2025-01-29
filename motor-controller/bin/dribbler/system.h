@@ -58,4 +58,4 @@
 
 #define MOTOR_MAXIMUM_RAD_S 550.825911929f
 
-//#define COMP_MODE
+#define COMP_MODE
