@@ -29,20 +29,20 @@ void turn_off_green_led() {
 
 void _debug_value_manchester_8(uint8_t val) {
     turn_off_yellow_led();
-    wait_ms(1);
+    wait_cyc(50);
 
     for (int i = 8; i >= 0; i--) {
         turn_on_yellow_led();
-        wait_ms(1);
+        wait_cyc(50);
         if (((val >> i) & 0x1) != 0) {
-            wait_ms(1);
+            wait_cyc(50);
             turn_off_yellow_led();
         } else {
             turn_off_yellow_led();
-            wait_ms(1);
+            wait_cyc(50);
         }
 
-        wait_ms(1);
+        wait_cyc(50);
     }
 }
 

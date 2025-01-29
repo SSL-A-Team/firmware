@@ -26,6 +26,10 @@ volatile bool uart_dma_rx_active = false;
 volatile int uart_dma_rx_num_bytes = 0;
 IoQueue_t uart_rx_queue;
 
+static bool init_run = false;
+
+static volatile uart_logging_status_tx_t uart_logging_status_tx;
+static volatile uart_logging_status_rx_t uart_logging_status_rx;
 /////////////////////////
 //  PRIVATE FUNCTIONS  //
 /////////////////////////
@@ -39,7 +43,6 @@ void _uart_receive_dma(bool parity_error);
 ////////////////////////
 
 void uart_initialize() {
-
     ioq_initialize(&uart_tx_queue);
     ioq_initialize(&uart_rx_queue);
 
@@ -49,6 +52,8 @@ void uart_initialize() {
     SYSCFG->CFGR1 &= ~(SYSCFG_CFGR1_USART1RX_DMA_RMP);
 
     _uart_start_receive_dma();
+
+    init_run = true;
 }
 
 //////////
@@ -60,15 +65,17 @@ bool uart_is_transmit_dma_pending() {
 }
 
 void uart_wait_for_transmission() {
-    while (uart_is_transmit_dma_pending());
+    while (!init_run || uart_is_transmit_dma_pending());
 }
 
 void uart_transmit(uint8_t *data_buf, uint16_t len) {
     if (!ioq_write(&uart_tx_queue, data_buf, len)) {
         // Queue is either full or the length is too long.
-        uart_logging_status = UART_LOGGING_UART_TX_BUFFER_FULL;
         if (len > IOQ_BUF_LENGTH) {
-            uart_logging_status = UART_LOGGING_UART_TX_SIZE_MISMATCH;
+            uart_logging_status_tx |= UART_LOGGING_UART_TX_SIZE_MISMATCH;
+        }
+        else {
+            uart_logging_status_tx |= UART_LOGGING_UART_TX_BUFFER_FULL;
         }
         return;
     }
@@ -93,9 +100,9 @@ void _uart_start_transmit_dma() {
     uart_dma_tx_active = true;
 
     // clear the transfer complete flag
-    USART1->ICR = USART_ICR_TCCF;
+    USART1->ICR |= USART_ICR_TCCF;
     // clear all interrupt flags on the tx dma channel
-    DMA1->IFCR = DMA_IFCR_CGIF2;
+    DMA1->IFCR |= DMA_IFCR_CGIF2;
 
     // set the transmit buffer and length
     DMA1_Channel2->CMAR = (uint32_t) tx_buf->buf;
@@ -110,7 +117,7 @@ void _uart_start_transmit_dma() {
 //////////
 
 bool uart_can_read() {
-    return (!ioq_is_empty(&uart_rx_queue));
+    return (init_run && !ioq_is_empty(&uart_rx_queue));
 }
 
 void uart_discard() {
@@ -127,19 +134,32 @@ void uart_discard() {
     }
 }
 
-void uart_clear_logging_status() {
-    uart_logging_status = UART_LOGGING_OK;
+void uart_tx_clear_logging_status() {
+    uart_logging_status_tx = UART_LOGGING_OK;
+}
+
+uart_logging_status_tx_t uart_tx_get_logging_status() {
+    return uart_logging_status_tx;
+}
+
+void uart_rx_clear_logging_status() {
+    uart_logging_status_rx = UART_LOGGING_OK;
+}
+
+uart_logging_status_rx_t uart_rx_get_logging_status() {
+    return uart_logging_status_rx;
 }
 
 void uart_read(void *dest, uint16_t len) {
     uint16_t num_bytes_to_read = 0;
     if (!ioq_read(&uart_rx_queue, dest, len, &num_bytes_to_read)) {
         // Can fail from empty queue or size mismatch.
-        uart_logging_status = UART_LOGGING_UART_RX_BUFFER_EMPTY;
         // If the size number of bytes to read is not zero and
         // not matching, then we have a size mismatch.
         if (num_bytes_to_read != 0 && len != num_bytes_to_read) {
-            uart_logging_status = UART_LOGGING_UART_RX_SIZE_MISMATCH;
+            uart_logging_status_rx |= UART_LOGGING_UART_RX_SIZE_MISMATCH;
+        } else {
+            uart_logging_status_rx |= UART_LOGGING_UART_RX_BUFFER_EMPTY;
         }
     }
 }
@@ -179,12 +199,12 @@ void _uart_receive_dma(bool parity_error) {
         // data and len now correct, finalize write
         // If this returns false, implies RX happens twice without handling.
         if (!ioq_finalize_peek_write(&uart_rx_queue)) {
-            uart_logging_status = UART_LOGGING_UART_RX_BUFFER_FULL;
+            uart_logging_status_rx |= UART_LOGGING_UART_RX_BUFFER_FULL;
         }
     } else {
         // If we have a parity error, we can just overwrite the queue
         // with the next packet.
-        uart_logging_status = UART_LOGGING_UART_RX_PARITY_ERROR;
+        uart_logging_status_rx |= UART_LOGGING_UART_RX_PARITY_ERROR;
     }
 
     // Get the NEXT buffer for the DMA to write into.
@@ -213,16 +233,14 @@ void DMA1_Channel2_3_IRQHandler() {
         // Transmit had a DMA error. Occurs when the USART is
         // reading / writing at a reserved address.
         if (DMA1->ISR & DMA_ISR_TEIF2) {
-            uart_logging_status = UART_LOGGING_DMA_TX_ERROR;
-            // In COMP_MODE, try to just clear the error and then
+            uart_logging_status_tx |= UART_LOGGING_DMA_TX_ERROR;
+            // Try to just clear the error and then
             // continue with transfers.
-            #ifdef COMP_MODE
             // If TEIF2 is set, the CCR is disabled automatically.
             // First need to clear Transfer Error Flag.
             DMA1->IFCR |= DMA_IFCR_CTEIF2;
             // Then reset the DMA channel control (CCR).
             DMA1_Channel2->CCR |= DMA_CCR_EN;
-            #endif
         }
 
         // DMA finished transfer to USART
@@ -243,16 +261,14 @@ void DMA1_Channel2_3_IRQHandler() {
     if (DMA1->ISR & DMA_ISR_GIF3) {
         // Receive had a DMA error
         if (DMA1->ISR & DMA_ISR_TEIF3) {
-            uart_logging_status = UART_LOGGING_DMA_RX_ERROR;
-            // In COMP_MODE, try to just clear the error and then
+            uart_logging_status_rx |= UART_LOGGING_DMA_RX_ERROR;
+            // Try to just clear the error and then
             // continue with transfers.
-            #ifdef COMP_MODE
             // If TEIF3 is set, the CCR is disabled automatically.
             // First need to clear Transfer Error Flag.
             DMA1->IFCR |= DMA_IFCR_CTEIF3;
             // Then reset the DMA channel control (CCR).
             DMA1_Channel3->CCR |= DMA_CCR_EN;
-            #endif
         }
 
         // Receive, got a full buffer
@@ -260,7 +276,7 @@ void DMA1_Channel2_3_IRQHandler() {
         // max buffer length, which fires USART line idle. We probably got
         // two packets back to back and need to sort that out.
         if (DMA1->ISR & DMA_ISR_TCIF3) {
-            uart_logging_status = UART_LOGGING_DMA_RX_BUFFER_FULL;
+            uart_logging_status_rx |= UART_LOGGING_DMA_RX_BUFFER_FULL;
         }
 
         // Clears the interrupt flags for Ch3.
