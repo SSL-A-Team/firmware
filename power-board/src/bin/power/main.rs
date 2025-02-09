@@ -5,16 +5,23 @@
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_stm32::{adc::{Adc, AdcChannel, SampleTime},
-    gpio::{Input, Level, Output, OutputOpenDrain, Pull, Speed},
-    rcc::Hse, timer::{low_level::CountingMode, simple_pwm::SimplePwm}, 
-    Config};
+    gpio::{Input, Level, Output, OutputOpenDrain, Pull, Speed, OutputType},
+    rcc::Hse, timer::{low_level::CountingMode, simple_pwm::{SimplePwm, PwmPin}, Channel}, 
+    Config,
+    time::hz};
 use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _};
 
-use ateam_lib_stm32::drivers::led::apa102::{Apa102, Apa102Anim};
+use ateam_lib_stm32::{drivers::{led::apa102::Apa102,
+    audio::{buzzer::Buzzer}}, audio::{note::Beat, tone_player::TonePlayer}};
 use smart_leds::colors::{BLUE, WHITE, BLACK};
 
 static mut DOTSTAR_SPI_BUFFER_CELL: [u8; 16] = [0; 16];
+
+pub const TEST_SONG: [Beat; 2] = [
+    Beat::Note { tone: 440, duration: 250_000 },
+    Beat::Note { tone: 587, duration: 250_000 },
+];
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -51,6 +58,14 @@ async fn main(_spawner: Spawner) {
     dotstars.set_drv_str_all(32);
 
     let mut adc_buf: [u16; 7] = [0; 7];
+
+    // p.PC6 - Buzzer io pin
+    let mut ch1 = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
+    // p.TIM3 - Buzzer timer
+    let mut pwm = SimplePwm::new(p.TIM3, Some(ch1), None, None, None, hz(1), Default::default());
+    
+    let mut audio_driver = Buzzer::new(pwm, Channel::Ch1);
+    let mut tone_player = TonePlayer::new(audio_driver);
 
     loop {
         adc.read(
@@ -97,6 +112,9 @@ async fn main(_spawner: Spawner) {
         // en_3v3.set_high();
         // en_5v0.set_high();
         Timer::after_millis(1000).await;
+        
+        let _ = tone_player.load_song(&TEST_SONG);
+        tone_player.play_song().await;
 
         info!("low");
         led_red.set_low();
