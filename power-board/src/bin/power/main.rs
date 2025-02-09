@@ -60,11 +60,11 @@ async fn main(_spawner: Spawner) {
     let mut adc_buf: [u16; 7] = [0; 7];
 
     // p.PC6 - Buzzer io pin
-    let mut ch1 = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
+    let ch1 = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
     // p.TIM3 - Buzzer timer
-    let mut pwm = SimplePwm::new(p.TIM3, Some(ch1), None, None, None, hz(1), Default::default());
+    let pwm = SimplePwm::new(p.TIM3, Some(ch1), None, None, None, hz(1), Default::default());
     
-    let mut audio_driver = Buzzer::new(pwm, Channel::Ch1);
+    let audio_driver = Buzzer::new(pwm, Channel::Ch1);
     let mut tone_player = TonePlayer::new(audio_driver);
 
     loop {
