@@ -3,9 +3,17 @@
 
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_stm32::{adc::{Adc, AdcChannel, SampleTime}, gpio::{Input, Level, Output, OutputOpenDrain, Pull, Speed}, rcc::Hse, timer::{low_level::CountingMode, simple_pwm::SimplePwm}, Config};
+use embassy_stm32::{adc::{Adc, AdcChannel, SampleTime},
+    gpio::{Input, Level, Output, OutputOpenDrain, Pull, Speed},
+    rcc::Hse, timer::{low_level::CountingMode, simple_pwm::SimplePwm}, 
+    Config};
 use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _};
+
+use ateam_lib_stm32::drivers::led::apa102::{Apa102, Apa102Anim};
+use smart_leds::colors::{BLUE, WHITE, BLACK};
+
+static mut DOTSTAR_SPI_BUFFER_CELL: [u8; 16] = [0; 16];
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -33,6 +41,13 @@ async fn main(_spawner: Spawner) {
     let mut cell4_adc_pin = p.PA4.degrade_adc();
     let mut cell5_adc_pin = p.PA5.degrade_adc();
     let mut vrefint_channel = adc.enable_vrefint().degrade_adc();
+
+    // Use the pin constant directly
+    // Get the pins from the schematic 
+    let dotstar_spi_buf: &'static mut [u8; 16] = unsafe { &mut DOTSTAR_SPI_BUFFER_CELL };
+    // Dotstar SPI, SCK, MOSI, and TX_DMA
+    let dotstars = Apa102::<2>::new_from_pins(p.SPI1, p.PB3, p.PB5, p.DMA1_CH1, dotstar_spi_buf.into());
+    dotstars.set_drv_str_all(32);
 
     let mut adc_buf: [u16; 7] = [0; 7];
 
@@ -73,6 +88,10 @@ async fn main(_spawner: Spawner) {
         info!("high");
         led_red.set_high();
         led_grn.set_high();
+
+        info!("white!");
+        dotstars.set_color(WHITE, 0);
+        dotstars.set_color(WHITE, 1);
         // en_3v3.set_high();
         // en_5v0.set_high();
         Timer::after_millis(1000).await;
@@ -80,11 +99,17 @@ async fn main(_spawner: Spawner) {
         info!("low");
         led_red.set_low();
         led_grn.set_low();
+
+        info!("blue!");
+        dotstars.set_color(BLUE, 0);
+        dotstars.set_color(BLUE, 1);
         // en_3v3.set_low();
         // en_5v0.set_low();
         Timer::after_millis(1000).await;
 
         if pwr_btn.is_low() {
+            dotstars.set_color(BLACK, 0);
+            dotstars.set_color(BLACK, 1);
             shutdown_ind.set_low();
             warn!("power down requested...");
             Timer::after_millis(1000).await;
