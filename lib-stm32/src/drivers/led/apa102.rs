@@ -6,6 +6,8 @@ use smart_leds::RGB8;
 
 use crate::anim::{AnimInterface, CompositeAnimation};
 
+use super::LedChainError;
+
 const START_FRAME_SIZE: usize = 4;
 const COLOR_FRAME_SIZE: usize = 4;
 const END_FRAME_SIZE: usize = 4;
@@ -224,9 +226,9 @@ where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
         self.apa102_driver.update().await;
     }
 
-    fn set_animation_enabled(&mut self, led_index: usize, anim_id: usize, enable: bool) -> Result<(), ()> {
+    fn set_animation_enabled(&mut self, led_index: usize, anim_id: usize, enable: bool) -> Result<(), LedChainError> {
         if led_index >= NUM_LEDS {
-            return Err(())
+            return Err(LedChainError::InvalidLedIndex)
         }
 
         if let Some(animation_playbook) = self.animation_playbook_buf[led_index].as_deref_mut() {
@@ -249,11 +251,11 @@ where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
         Ok(())
     }
 
-    pub fn enable_animation(&mut self, led_index: usize, anim_id: usize) -> Result<(), ()>  {
+    pub fn enable_animation(&mut self, led_index: usize, anim_id: usize) -> Result<(), LedChainError>  {
         self.set_animation_enabled(led_index, anim_id, true)
     }
 
-    pub fn disable_animation(&mut self, led_index: usize, anim_id: usize) -> Result<(), ()>  {
+    pub fn disable_animation(&mut self, led_index: usize, anim_id: usize) -> Result<(), LedChainError>  {
         self.set_animation_enabled(led_index, anim_id, false)
     }
 }

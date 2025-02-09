@@ -1,18 +1,20 @@
 #![no_std]
 #![no_main]
+
+#![allow(incomplete_features)]
+#![feature(inherent_associated_types)]
+#![feature(generic_const_exprs)]
+
 #![feature(type_alias_impl_trait)]
 #![feature(async_closure)]
 #![feature(
     maybe_uninit_uninit_array,
-    const_maybe_uninit_uninit_array,
     maybe_uninit_slice,
     maybe_uninit_write_slice
 )]
-#![feature(const_mut_refs)]
 #![feature(ptr_metadata)]
-#![feature(const_fn_floating_point_arithmetic)]
 #![feature(sync_unsafe_cell)]
-#![feature(inherent_associated_types)]
+
 
 use embassy_stm32::{
     bind_interrupts, peripherals, rcc::{

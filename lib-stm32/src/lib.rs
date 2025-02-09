@@ -1,4 +1,8 @@
 #![no_std]
+
+#![allow(incomplete_features)]
+#![allow(clippy::too_many_arguments)]  // too many functions passing pins to device drivers exceed the bound
+
 #![feature(generic_const_exprs)]
 #![feature(const_precise_live_drops)]
 #![feature(maybe_uninit_uninit_array)]

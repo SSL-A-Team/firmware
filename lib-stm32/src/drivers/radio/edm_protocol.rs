@@ -4,6 +4,28 @@ use super::at_protocol::*;
 
 // Data to/from radio is in big endian mode, ensure proper conversions are done
 
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum EdmPacketError {
+    PacketTypeDecodingFailed,
+    PacketTypeDecodeLengthMismatch,
+    PacketDecodeFramingInvalid,
+    PacketDecodeTargetMemorySizeInvalid,
+    PacketEncodePayloadSizeInvalid,
+    PacketEncodeTypeUnknown,
+    ConnectEventDecodeError,
+    ConnectEventUnsupported,
+    DisconnectEventDecodeError,
+    AtRequestEventDecodeError,
+    AtPacketError(AtPacketError),
+    PayloadTypeUnknown,
+}
+
+impl From<AtPacketError> for EdmPacketError {
+    fn from(err: AtPacketError) -> Self {
+        EdmPacketError::AtPacketError(err)
+    }
+}
+
 #[repr(C)]
 #[derive(Debug)]
 struct EdmPacketRaw<P: ?Sized = [u8]> {
@@ -26,27 +48,27 @@ impl EdmPacketRaw {
     const RESEND_CONNECT_EVENTS: u16 = 0x0056;
     const START_EVENT: u16 = 0x0071;
 
-    fn new(data: &[u8]) -> Result<&EdmPacketRaw, ()> {
+    fn new(data: &[u8]) -> Result<&EdmPacketRaw, EdmPacketError> {
         if data.len() >= 2 && data[0] == Self::START && data[data.len() - 1] == Self::END {
             let packet = data_to_ref::<EdmPacketRaw, EdmPacketRaw<()>>(&data[1..data.len() - 1])?;
             if (u16::from_be(packet.payload_length) & 0x0FFF) as usize == packet.payload.len() + 2 {
                 Ok(packet)
             } else {
-                Err(())
+                Err(EdmPacketError::PacketTypeDecodeLengthMismatch)
             }
         } else {
-            Err(())
+            Err(EdmPacketError::PacketDecodeFramingInvalid)
         }
     }
 
-    fn write(buf: &mut [u8], packet: &EdmPacket) -> Result<usize, ()> {
+    fn write(buf: &mut [u8], packet: &EdmPacket) -> Result<usize, EdmPacketError> {
         let buf_len = buf.len();
         let buf_packet = data_to_mut::<EdmPacketRaw, EdmPacketRaw<()>>(&mut buf[1..buf_len - 1])?;
         let len = match packet {
             EdmPacket::DataCommand { channel, data } => {
                 let payload_size = mem::size_of::<DataCommand<()>>() + data.len();
                 if buf_packet.payload.len() < payload_size {
-                    return Err(());
+                    return Err(EdmPacketError::PacketEncodePayloadSizeInvalid);
                 }
                 buf_packet.identifier = u16::to_be(Self::DATA_COMMAND);
                 let command = data_to_mut::<DataCommand, DataCommand<()>>(&mut buf_packet.payload)?;
@@ -57,7 +79,7 @@ impl EdmPacketRaw {
             EdmPacket::ATRequest(req) => {
                 let payload_size = req.len() + 1;
                 if buf_packet.payload.len() < payload_size {
-                    return Err(());
+                    return Err(EdmPacketError::PacketEncodePayloadSizeInvalid);
                 }
                 buf_packet.identifier = u16::to_be(Self::AT_REQUEST);
                 buf_packet.payload[..req.len()].copy_from_slice(req.as_bytes());
@@ -69,7 +91,7 @@ impl EdmPacketRaw {
                 buf_packet.identifier = u16::to_be(Self::RESEND_CONNECT_EVENTS);
                 0
             }
-            _ => return Err(()),
+            _ => return Err(EdmPacketError::PacketEncodeTypeUnknown),
         };
         // Payload length is (payload size + identifier field size)
         buf_packet.payload_length = u16::to_be(2 + len as u16);
@@ -80,7 +102,7 @@ impl EdmPacketRaw {
         Ok(total_len)
     }
 
-    fn get_payload(&self) -> Result<EdmPacket, ()> {
+    fn get_payload(&self) -> Result<EdmPacket, EdmPacketError> {
         match u16::from_be(self.identifier) {
             Self::CONNECT_EVENT => {
                 let event = data_to_ref::<ConnectEvent, ConnectEvent<()>>(&self.payload)?;
@@ -97,7 +119,7 @@ impl EdmPacketRaw {
                         channel: event.channel_id,
                     })
                 } else {
-                    Err(())
+                    Err(EdmPacketError::DisconnectEventDecodeError)
                 }
             }
             Self::DATA_EVENT => {
@@ -115,14 +137,14 @@ impl EdmPacketRaw {
                 })
             }
             Self::AT_REQUEST => Ok(EdmPacket::ATRequest(
-                core::str::from_utf8(&self.payload).or(Err(()))?,
+                core::str::from_utf8(&self.payload).or(Err(EdmPacketError::AtRequestEventDecodeError))?,
             )),
             Self::AT_RESPONSE => Ok(EdmPacket::ATResponse(ATResponse::new(&self.payload)?)),
             Self::AT_EVENT => Ok(EdmPacket::ATEvent(ATEvent::new(&self.payload)?)),
             Self::RESEND_CONNECT_EVENTS => Ok(EdmPacket::ResendConnectEvents),
             Self::START_EVENT => Ok(EdmPacket::StartEvent),
 
-            _ => Err(()),
+            _ => Err(EdmPacketError::PayloadTypeUnknown),
         }
     }
 }
@@ -152,11 +174,11 @@ pub enum EdmPacket<'a> {
 }
 
 impl EdmPacket<'_> {
-    pub fn new(data: &[u8]) -> Result<EdmPacket, ()> {
+    pub fn new(data: &[u8]) -> Result<EdmPacket, EdmPacketError> {
         EdmPacketRaw::new(data)?.get_payload()
     }
 
-    pub fn write(&self, buf: &mut [u8]) -> Result<usize, ()> {
+    pub fn write(&self, buf: &mut [u8]) -> Result<usize, EdmPacketError> {
         EdmPacketRaw::write(buf, self)
     }
 
@@ -169,9 +191,9 @@ impl EdmPacket<'_> {
     // }
 }
 
-/////////////////////
-/// Connect Event ///
-/////////////////////
+///////////////////
+// Connect Event //
+///////////////////
 
 #[repr(C)]
 struct ConnectEvent<P: ?Sized = [u8]> {
@@ -214,7 +236,7 @@ pub struct ConnectEventIPv6 {
 }
 
 impl ConnectEvent {
-    fn get_payload(&self) -> Result<ConnectEventType, ()> {
+    fn get_payload(&self) -> Result<ConnectEventType, EdmPacketError> {
         match self.connect_type {
             0x02 => {
                 // IPv4 Connect Event
@@ -237,26 +259,26 @@ impl ConnectEvent {
                         local_port: u16::from_be_bytes([self.payload[11], self.payload[12]]),
                     }))
                 } else {
-                    Err(())
+                    Err(EdmPacketError::ConnectEventDecodeError)
                 }
             }
-            _ => Err(()),
+            _ => Err(EdmPacketError::ConnectEventUnsupported),
         }
     }
 }
 
-////////////////////////
-/// Disconnect Event ///
-////////////////////////
+//////////////////////
+// Disconnect Event //
+//////////////////////
 
 #[repr(C)]
 struct DisconnectEvent {
     channel_id: u8,
 }
 
-////////////////////
-/// Data Packets ///
-////////////////////
+//////////////////
+// Data Packets //
+//////////////////
 
 #[repr(C)]
 struct DataEvent<P: ?Sized = [u8]> {
@@ -272,9 +294,9 @@ struct DataCommand<P: ?Sized = [u8]> {
 
 // misc
 
-fn data_to_ref<T: ?Sized, BASE>(data: &[u8]) -> Result<&T, ()>
+fn data_to_ref<T, BASE>(data: &[u8]) -> Result<&T, EdmPacketError>
 where
-    T: core::ptr::Pointee<Metadata = usize>,
+    T: core::ptr::Pointee<Metadata = usize> + ?Sized,
 {
     if data.len() >= mem::size_of::<BASE>() {
         Ok(unsafe {
@@ -284,13 +306,13 @@ where
             )
         })
     } else {
-        Err(())
+        Err(EdmPacketError::PacketDecodeTargetMemorySizeInvalid)
     }
 }
 
-fn data_to_mut<T: ?Sized, BASE>(data: &mut [u8]) -> Result<&mut T, ()>
+fn data_to_mut<T, BASE>(data: &mut [u8]) -> Result<&mut T, EdmPacketError>
 where
-    T: core::ptr::Pointee<Metadata = usize>,
+    T: core::ptr::Pointee<Metadata = usize> + ?Sized,
 {
     if data.len() >= mem::size_of::<BASE>() {
         Ok(unsafe {
@@ -300,6 +322,6 @@ where
             )
         })
     } else {
-        Err(())
+        Err(EdmPacketError::PacketDecodeTargetMemorySizeInvalid)
     }
 }
