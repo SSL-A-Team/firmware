@@ -57,6 +57,7 @@ dependencies = [
  "embassy-time",
  "futures-util",
  "panic-probe",
+ "smart-leds",
 ]
 
 [[package]]

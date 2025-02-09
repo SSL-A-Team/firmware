@@ -40,6 +40,7 @@ const_format = "0.2.34"
 
 ateam-lib-stm32 = { path = "../lib-stm32", default-features = false }
 
+smart-leds = "0.4.0"
 
 [dev-dependencies]
 defmt-test = "0.3.0"

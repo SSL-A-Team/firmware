@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(generic_const_exprs)]
 
 use defmt::*;
 use embassy_executor::Spawner;
@@ -46,7 +47,7 @@ async fn main(_spawner: Spawner) {
     // Get the pins from the schematic 
     let dotstar_spi_buf: &'static mut [u8; 16] = unsafe { &mut DOTSTAR_SPI_BUFFER_CELL };
     // Dotstar SPI, SCK, MOSI, and TX_DMA
-    let dotstars = Apa102::<2>::new_from_pins(p.SPI1, p.PB3, p.PB5, p.DMA1_CH1, dotstar_spi_buf.into());
+    let mut dotstars = Apa102::<2>::new_from_pins(p.SPI1, p.PB3, p.PB5, p.DMA1_CH2, dotstar_spi_buf.into());
     dotstars.set_drv_str_all(32);
 
     let mut adc_buf: [u16; 7] = [0; 7];
@@ -92,6 +93,7 @@ async fn main(_spawner: Spawner) {
         info!("white!");
         dotstars.set_color(WHITE, 0);
         dotstars.set_color(WHITE, 1);
+        dotstars.update().await;
         // en_3v3.set_high();
         // en_5v0.set_high();
         Timer::after_millis(1000).await;
@@ -103,6 +105,7 @@ async fn main(_spawner: Spawner) {
         info!("blue!");
         dotstars.set_color(BLUE, 0);
         dotstars.set_color(BLUE, 1);
+        dotstars.update().await;
         // en_3v3.set_low();
         // en_5v0.set_low();
         Timer::after_millis(1000).await;
@@ -110,6 +113,7 @@ async fn main(_spawner: Spawner) {
         if pwr_btn.is_low() {
             dotstars.set_color(BLACK, 0);
             dotstars.set_color(BLACK, 1);
+            dotstars.update().await;
             shutdown_ind.set_low();
             warn!("power down requested...");
             Timer::after_millis(1000).await;
