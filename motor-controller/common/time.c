@@ -4,9 +4,9 @@
  * @brief defines all functions related to time keeping
  * @version 0.1
  * @date 2022-04-19
- * 
+ *
  * @copyright Copyright (c) 2022
- * 
+ *
  */
 
 #include <stdbool.h>
@@ -18,7 +18,7 @@
 
 /**
  * @brief blocks for a number of milliseconds
- * 
+ *
  */
 __attribute__((optimize("O0")))
 void wait_ms(uint32_t time_ms) {
@@ -31,7 +31,7 @@ void wait_ms(uint32_t time_ms) {
 
 /**
  * @brief blocks until SysTick fires
- * 
+ *
  * @return true if the tick has already elapsed and no waiting occurred
  *          can be used to determine if a core process is not meeting timing slack requirements
  */
@@ -69,10 +69,10 @@ uint32_t time_local_epoch_s() {
 }
 
 /**
- * @brief 
- * 
- * @param time_sync 
- * @param ticks 
+ * @brief
+ *
+ * @param time_sync
+ * @param ticks
  */
 void time_sync_init(SyncTimer_t *time_sync, uint32_t ticks) {
     time_sync->sync_time_ticks = ticks;
@@ -110,4 +110,8 @@ bool time_sync_block_rst(SyncTimer_t *time_sync) {
     return res;
 }
 
-
+void wait_cyc(uint32_t cycles) {
+    for (uint32_t count = 0; count < cycles; count++) {
+        asm volatile("nop");
+    }
+}
