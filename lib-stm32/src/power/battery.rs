@@ -1,8 +1,16 @@
 use mod::math::LinearMap;
 
+const f32 FULL_BATT_VOLTAGE = 4.2;
+const f32 EMPTY_BATT_VOLTAGE = 3.4;
+const f32 CRITICAL_BATT_VOLTAGE = 3.2;
+
 pub struct BatteryCell {
+    // TODO (Christian) : Eventually we'll use a non linear mapping
+    // that more realistically resembles the real "S" curve of battery
+    // voltage drain
     ref_map: LinearMap,
-    real_map: LinearMap 
+    real_map: LinearMap,
+    vref_critical: f32
 };
 
 pub struct Battery {
@@ -10,8 +18,8 @@ pub struct Battery {
 };
 
 impl Battery {
-    pub fn new(vref_empties: [f32; 6], vref_fulls: [f32; 6], v_max: f32) -> Self {
-         
+    pub fn new(vref_criticals: [f32; 6], vref_fulls: [f32; 6]) -> Self {
+
     }
 
     pub fn get_total_voltage() -> f32 {
@@ -20,10 +28,10 @@ impl Battery {
 }
 
 impl BatteryCell {
-    pub fn new(vref_empty: f32, vref_full: f32, v_max: f32) -> Self {
+    pub fn new(vref_critical: f32, vref_full: f32) -> Self {
         BatteryCell {
-            LinearMap::new(vref_empty, vref_full),
-            LinearMap::new(0.0, v_max)
+            LinearMap::new(vref_critical, vref_full),
+            LinearMap::new(CRITICAL_BATT_VOLTAGE, FULL_BATT_VOLTAGE)
         }
     }
 
