@@ -98,9 +98,10 @@ int main() {
     turn_off_red_led();
     turn_off_yellow_led();
 
-    // UART logging status.
-    uart_logging_status_t uart_logging_status_receive;
-    uart_logging_status_t uart_logging_status_send;
+    // Initialize UART and logging status.
+    uart_initialize();
+    uart_logging_status_rx_t uart_logging_status_receive;
+    uart_logging_status_tx_t uart_logging_status_send;
     // toggle J1-1
     while (true) {
         IWDG->KR = 0x0000AAAA; // feed the watchdog
@@ -117,11 +118,10 @@ int main() {
 
             // Read in the new packet data.
             uart_read(&motor_command_packet, sizeof(MotorCommandPacket));
-
             // If something goes wrong with the UART, we need to flag it.
-            if (uart_logging_status != UART_LOGGING_OK) {
+            if (uart_rx_get_logging_status() != UART_LOGGING_OK) {
                 // Capture the status of the UART.
-                uart_logging_status_receive = uart_logging_status;
+                uart_logging_status_receive = uart_rx_get_logging_status();
 
                 // If something went wrong, just purge all of the data.
                 uart_discard();
@@ -136,17 +136,17 @@ int main() {
                 #endif
             }
 
-            // Clear the logging for the next UART transmit / receive.
-            uart_clear_logging_status();
+            // Clear the logging for the next UART receive.
+            uart_rx_clear_logging_status();
 
             if (motor_command_packet.type == MCP_MOTION) {
                 // we got a motion packet!
                 ticks_since_last_command_packet = 0;
 
-                //if (motor_command_packet.data.motion.reset) {
-                //    // Block, watchdog will trigger reset.
-                //    while (true);
-                //}
+                if (motor_command_packet.data.motion.reset) {
+                    // Does a software reset.
+                    NVIC_SystemReset();
+                }
 
                 telemetry_enabled = motor_command_packet.data.motion.enable_telemetry;
                 r_motor_board = motor_command_packet.data.motion.setpoint;
@@ -235,7 +235,7 @@ int main() {
             // read error states
             const MotorErrors_t reported_motor_errors = pwm6step_get_motor_errors();
 
-            response_packet.type = MCP_MOTION;
+            response_packet.type = MRP_MOTION;
             response_packet.data.motion.master_error = false; // TODO update any error
 
             // bldc errors
@@ -279,15 +279,15 @@ int main() {
 
             // transmit packets
 #ifdef UART_ENABLED
-            // If previous UART transmit is still occurring,
-            // wait for it to finish.
-            uart_wait_for_transmission();
-            // takes ~270uS, mostly hardware DMA
-            if (run_telemetry) {
+            if (telemetry_enabled && run_telemetry) {
+                // If previous UART transmit is still occurring,
+                // wait for it to finish.
+                uart_wait_for_transmission();
+                // takes ~270uS, mostly hardware DMA, but should be cleared out by now.
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
                 // Capture the status for the response packet / LED.
-                if (uart_logging_status != UART_LOGGING_OK) {
-                    uart_logging_status_send = uart_logging_status;
+                if (uart_tx_get_logging_status() != UART_LOGGING_OK) {
+                    uart_logging_status_send = uart_tx_get_logging_status();
                 } else {
                     // If we are in COMP_MODE, don't latch the status if
                     // we are able to send a packet successfully later.
@@ -296,15 +296,15 @@ int main() {
                     #endif
                 }
 
-                // Clear the logging for the next UART transmit / receive.
-                uart_clear_logging_status();
+                // Clear the logging for the next UART transmit.
+                uart_tx_clear_logging_status();
             }
 #endif
 
             if (params_return_packet_requested) {
                 params_return_packet_requested = false;
 
-                response_packet.type = MCP_PARAMS;
+                response_packet.type = MRP_PARAMS;
 
                 response_packet.data.params.vel_p = FLT_MIN;
                 response_packet.data.params.vel_i = FLT_MIN;
@@ -319,8 +319,8 @@ int main() {
 #ifdef UART_ENABLED
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
                 // Capture the status for the response packet / LED.
-                if (uart_logging_status != UART_LOGGING_OK) {
-                    uart_logging_status_send = uart_logging_status;
+                if (uart_tx_get_logging_status() != UART_LOGGING_OK) {
+                    uart_logging_status_send = uart_tx_get_logging_status();
                 } else {
                     // If we are in COMP_MODE, don't latch the status if
                     // we are able to send a packet successfully later.
@@ -329,8 +329,8 @@ int main() {
                     #endif
                 }
 
-                // Clear the logging for the next UART transmit / receive.
-                uart_clear_logging_status();
+                // Clear the logging for the next UART transmit.
+                uart_tx_clear_logging_status();
 #endif
             }
         }
