@@ -17,7 +17,7 @@ use panic_probe as _;
 
 use static_cell::StaticCell;
 
-use ateam_lib_stm32::{idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, IdleBufferedUartTaskSyncMutex, UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{idle_buffered_uart_read_task, idle_buffered_uart_write_task, queue::Queue, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, IdleBufferedUartTaskSyncMutex, UartReadQueue, UartWriteQueue}};
 
 type LedGreenPin = PB0;
 type LedYellowPin = PE1;
@@ -32,9 +32,12 @@ const TX_BUF_DEPTH: usize = 5;
 
 // static_idle_buffered_uart!(coms, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
 
+static COMS_TASK_RX_QUEUE: Queue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH> = Queue::new();
+
+// #[link_section = ".axisram.buffers"]
 static COMS_TASK_SYNC_MUTEX: IdleBufferedUartTaskSyncMutex = Mutex::new(false);
-#[link_section = ".axisram.buffers"]
-static COMS_IDLE_BUFFERED_UART: IdleBufferedUart<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = IdleBufferedUart::new(&COMS_TASK_SYNC_MUTEX);
+// #[link_section = ".axisram.buffers"]
+static COMS_IDLE_BUFFERED_UART: IdleBufferedUart<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = IdleBufferedUart::new(Queue::new(), Queue::new(), &COMS_TASK_SYNC_MUTEX);
 
 struct LockTest {
     lock: Mutex<CriticalSectionRawMutex, bool>,

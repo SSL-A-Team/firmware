@@ -22,22 +22,47 @@ use crate::queue::{
 };
 
 #[macro_export]
+macro_rules! static_idle_buffered_uart_nl {
+    ($name:ident, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr) => {
+    // ($name:ident, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr) => {
+        $crate::paste::paste! {
+            // $(#[$m])*
+            static [<$name:upper _TASK_SYNC_MUTEX>]: $crate::uart::queue::IdleBufferedUartTaskSyncMutex =  embassy_sync::mutex::Mutex::new(false);
+            // $(#[$m])*
+            static [<$name:upper _IDLE_BUFFERED_UART>]: $crate::uart::queue::IdleBufferedUart<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth> = 
+                $crate::uart::queue::IdleBufferedUart::new($crate::queue::Queue::new(), $crate::queue::Queue::new(), &[<$name:upper _TASK_SYNC_MUTEX>]);
+                // $crate::uart::queue::IdleBufferedUart::new(&[<$name:upper _TASK_SYNC_MUTEX>]);
+
+
+            static [<$name:upper _READ_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
+                $crate::uart::queue::IdleBufferedUartReadFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth>> = 
+                embassy_executor::raw::TaskStorage::new();
+            static [<$name:upper _WRITE_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
+                $crate::uart::queue::IdleBufferedUartWriteFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth>> = 
+                embassy_executor::raw::TaskStorage::new();
+        }
+    }
+}
+
+#[macro_export]
 macro_rules! static_idle_buffered_uart {
     ($name:ident, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr, $(#[$m:meta])*) => {
+    // ($name:ident, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr) => {
         $crate::paste::paste! {
+            // $(#[$m])*
             static [<$name:upper _TASK_SYNC_MUTEX>]: $crate::uart::queue::IdleBufferedUartTaskSyncMutex =  embassy_sync::mutex::Mutex::new(false);
-            $(#[$m])*
+            // $(#[$m])*
             static [<$name:upper _IDLE_BUFFERED_UART>]: $crate::uart::queue::IdleBufferedUart<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth> = 
-                // $crate::uart::queue::IdleBufferedUart::new($crate::queue::Queue::new(), $crate::queue::Queue::new(), &[<$name:upper _TASK_SYNC_MUTEX>]);
-                $crate::uart::queue::IdleBufferedUart::new(&[<$name:upper _TASK_SYNC_MUTEX>]);
+                $crate::uart::queue::IdleBufferedUart::new($crate::queue::Queue::new(), $crate::queue::Queue::new(), &[<$name:upper _TASK_SYNC_MUTEX>]);
+                // $crate::uart::queue::IdleBufferedUart::new(&[<$name:upper _TASK_SYNC_MUTEX>]);
 
 
-            // static [<$name:upper _READ_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
-            //     $crate::uart::queue::IdleBufferedUartReadFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth>> = 
-            //     embassy_executor::raw::TaskStorage::new();
-            // static [<$name:upper _WRITE_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
-            //     $crate::uart::queue::IdleBufferedUartWriteFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth>> = 
-            //     embassy_executor::raw::TaskStorage::new();
+            static [<$name:upper _READ_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
+                $crate::uart::queue::IdleBufferedUartReadFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth>> = 
+                embassy_executor::raw::TaskStorage::new();
+            static [<$name:upper _WRITE_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
+                $crate::uart::queue::IdleBufferedUartWriteFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth>> = 
+                embassy_executor::raw::TaskStorage::new();
         }
     }
 }
@@ -77,19 +102,19 @@ type UartQueueSyncPubSub = PubSubChannel<CriticalSectionRawMutex, UartTaskComman
 type UartQueueConfigSyncPub = Publisher<'static, CriticalSectionRawMutex, UartTaskCommand, 1, 3, 2>;
 type UartQueueConfigSyncSub = Subscriber<'static, CriticalSectionRawMutex, UartTaskCommand, 1, 3, 2>;
 
-// pub type IdleBufferedUartReadFuture<
-//     const RLEN: usize,
-//     const RDEPTH: usize,
-//     const WLEN: usize,
-//     const WDEPTH: usize,
-// > = impl Future;
+pub type IdleBufferedUartReadFuture<
+    const RLEN: usize,
+    const RDEPTH: usize,
+    const WLEN: usize,
+    const WDEPTH: usize,
+> = impl Future;
 
-// pub type IdleBufferedUartWriteFuture<
-//     const RLEN: usize,
-//     const RDEPTH: usize,
-//     const WLEN: usize,
-//     const WDEPTH: usize,
-// > = impl Future;
+pub type IdleBufferedUartWriteFuture<
+    const RLEN: usize,
+    const RDEPTH: usize,
+    const WLEN: usize,
+    const WDEPTH: usize,
+> = impl Future;
 
 pub type ReadTaskFuture<
     const LENGTH: usize,
@@ -114,8 +139,8 @@ pub struct IdleBufferedUart<
     const WLEN: usize,
     const WDEPTH: usize,
 > {
-    // uart_read_queue: UartReadQueue<RLEN, RDEPTH>,
-    // uart_write_queue: UartWriteQueue<WLEN, WDEPTH>,
+    uart_read_queue: UartReadQueue<RLEN, RDEPTH>,
+    uart_write_queue: UartWriteQueue<WLEN, WDEPTH>,
     uart_config: Mutex<CriticalSectionRawMutex, Option<usart::Config>>,
     uart_config_signal: UartQueueSyncPubSub,
     uart_config_signal_publisher: Mutex<CriticalSectionRawMutex, Option<UartQueueConfigSyncPub>>,
@@ -130,13 +155,13 @@ impl <
     > IdleBufferedUart<RLEN, RDEPTH, WLEN, WDEPTH> 
 {
     pub const fn new(
-        // read_queue: Queue<RLEN, RDEPTH>,
-        // write_queue: Queue<WLEN, WDEPTH>,
+        read_queue: Queue<RLEN, RDEPTH>,
+        write_queue: Queue<WLEN, WDEPTH>,
         uart_task_mutex: &'static IdleBufferedUartTaskSyncMutex,
     ) -> Self {
         IdleBufferedUart { 
-            // uart_read_queue: UartReadQueue::new(read_queue, uart_task_mutex),
-            // uart_write_queue: UartWriteQueue::new(write_queue, uart_task_mutex),
+            uart_read_queue: UartReadQueue::new(read_queue, uart_task_mutex),
+            uart_write_queue: UartWriteQueue::new(write_queue, uart_task_mutex),
             uart_config: Mutex::new(None),
             uart_config_signal: PubSubChannel::new(),
             uart_config_signal_publisher: Mutex::new(None),
@@ -144,34 +169,34 @@ impl <
         }
     }
 
-    // pub fn get_uart_read_queue(&'static self) -> &'static UartReadQueue<RLEN, RDEPTH> {
-    //     &self.uart_read_queue
-    // }
+    pub fn get_uart_read_queue(&'static self) -> &'static UartReadQueue<RLEN, RDEPTH> {
+        &self.uart_read_queue
+    }
 
-    // pub fn read_task(
-    //     &'static self,
-    //     rx: UartRx<'static, Async>,
-    // ) -> IdleBufferedUartReadFuture<RLEN, RDEPTH, WLEN, WDEPTH> {
-    //     async move {
-    //         self.uart_read_queue.read_task(rx, self.uart_config_signal.subscriber().unwrap()).await
-    //     }
-    // }
+    pub fn read_task(
+        &'static self,
+        rx: UartRx<'static, Async>,
+    ) -> IdleBufferedUartReadFuture<RLEN, RDEPTH, WLEN, WDEPTH> {
+        async move {
+            self.uart_read_queue.read_task(rx, self.uart_config_signal.subscriber().unwrap()).await
+        }
+    }
 
-    // pub fn get_uart_write_queue(&'static self) -> &'static UartWriteQueue<WLEN, WDEPTH> {
-    //     &self.uart_write_queue
-    // }
+    pub fn get_uart_write_queue(&'static self) -> &'static UartWriteQueue<WLEN, WDEPTH> {
+        &self.uart_write_queue
+    }
 
-    // pub fn write_task(
-    //     &'static self,
-    //     tx: UartTx<'static, Async>,
-    // ) -> IdleBufferedUartWriteFuture<RLEN, RDEPTH, WLEN, WDEPTH> {
-    //     async move {
-    //         self.uart_write_queue.write_task(tx, self.uart_config_signal.publisher().unwrap(), self.uart_config_signal.subscriber().unwrap()).await
-    //     }
-    // }
+    pub fn write_task(
+        &'static self,
+        tx: UartTx<'static, Async>,
+    ) -> IdleBufferedUartWriteFuture<RLEN, RDEPTH, WLEN, WDEPTH> {
+        async move {
+            self.uart_write_queue.write_task(tx, self.uart_config_signal.publisher().unwrap(), self.uart_config_signal.subscriber().unwrap()).await
+        }
+    }
 
-    pub async fn init(&'static self) {
-        defmt::info!("init write queue");
+    pub fn init(&'static self) {
+        // defmt::info!("init write queue");
         // self.uart_write_queue.attach_pubsub(
         //     self.uart_config_signal.publisher().unwrap(),
         //     self.uart_config_signal.subscriber().unwrap()).await;
@@ -180,7 +205,7 @@ impl <
         {   
             if let Ok(mut p) = self.uart_config_signal_publisher.try_lock() {
                 defmt::info!("set p");
-                // p.replace(self.uart_config_signal.publisher().unwrap());
+                p.replace(self.uart_config_signal.publisher().unwrap());
             }
         }
 
@@ -188,7 +213,7 @@ impl <
         {
             if let Ok(mut s) = self.uart_config_signal_subscriber.try_lock() {
                 defmt::info!("set s");
-                // s.replace(self.uart_config_signal.subscriber().unwrap());
+                s.replace(self.uart_config_signal.subscriber().unwrap());
             }
         }
     }
@@ -365,8 +390,8 @@ pub struct UartWriteQueue<
     const DEPTH: usize,
 > {
     uart_mutex: &'static Mutex<CriticalSectionRawMutex, bool>,
-    uart_config_signal_publisher: Mutex<CriticalSectionRawMutex, Option<UartQueueConfigSyncPub>>,
-    uart_config_signal_subscriber: Mutex<CriticalSectionRawMutex, Option<UartQueueConfigSyncSub>>,
+    // uart_config_signal_publisher: Mutex<CriticalSectionRawMutex, Option<UartQueueConfigSyncPub>>,
+    // uart_config_signal_subscriber: Mutex<CriticalSectionRawMutex, Option<UartQueueConfigSyncSub>>,
     queue_tx: Queue<LENGTH, DEPTH>,
     new_uart_config: Mutex<CriticalSectionRawMutex, Option<usart::Config>>,
 }
@@ -382,23 +407,23 @@ impl<
             ) -> Self {
         Self {
             uart_mutex,
-            uart_config_signal_publisher: Mutex::new(None),
-            uart_config_signal_subscriber: Mutex::new(None),
+            // uart_config_signal_publisher: Mutex::new(None),
+            // uart_config_signal_subscriber: Mutex::new(None),
             queue_tx: queue,
             new_uart_config: Mutex::new(None),
         }
     }
 
-    pub async fn attach_pubsub(&self,
-        uart_config_signal_publisher: UartQueueConfigSyncPub,
-        uart_config_signal_subscriber: UartQueueConfigSyncSub
-    ) {
-        let mut pb = self.uart_config_signal_publisher.lock().await;
-        *pb = Some(uart_config_signal_publisher);
+    // pub async fn attach_pubsub(&self,
+    //     uart_config_signal_publisher: UartQueueConfigSyncPub,
+    //     uart_config_signal_subscriber: UartQueueConfigSyncSub
+    // ) {
+    //     let mut pb = self.uart_config_signal_publisher.lock().await;
+    //     *pb = Some(uart_config_signal_publisher);
 
-        let mut sub = self.uart_config_signal_subscriber.lock().await;
-        *sub = Some(uart_config_signal_subscriber);
-    }
+    //     let mut sub = self.uart_config_signal_subscriber.lock().await;
+    //     *sub = Some(uart_config_signal_subscriber);
+    // }
 
     pub fn write_task(
         &'static self,
