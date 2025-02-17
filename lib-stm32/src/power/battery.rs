@@ -48,4 +48,12 @@ impl BatteryCell {
         let voltage = self.ref_map.linear_map_to_new_bounds(vref, self.real_map);
         return voltage;
     }
+
+    pub fn set_last_read_voltage(&mut self, v: f32) {
+        self.last_read = Some(v);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.last_read.is_some_and(|x| x <= self.vref_empty) 
+    }
 }
