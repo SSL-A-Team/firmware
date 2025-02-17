@@ -8,6 +8,7 @@ use embassy_stm32::{
     bind_interrupts, exti::ExtiInput, gpio::{Level, Output, Pull, Speed}, interrupt, peripherals::{self, *}, usart::{self, *}
 };
 use embassy_executor::{Executor, InterruptExecutor};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, pubsub::DynImmediatePublisher};
 use embassy_time::Timer;
 
 use defmt::*;
@@ -16,7 +17,7 @@ use panic_probe as _;
 
 use static_cell::StaticCell;
 
-use ateam_lib_stm32::{idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, IdleBufferedUartTaskSyncMutex, UartReadQueue, UartWriteQueue}};
 
 type LedGreenPin = PB0;
 type LedYellowPin = PE1;
@@ -29,7 +30,31 @@ const RX_BUF_DEPTH: usize = 5;
 const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 5;
 
-static_idle_buffered_uart!(coms, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+// static_idle_buffered_uart!(coms, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+
+static COMS_TASK_SYNC_MUTEX: IdleBufferedUartTaskSyncMutex = Mutex::new(false);
+#[link_section = ".axisram.buffers"]
+static COMS_IDLE_BUFFERED_UART: IdleBufferedUart<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH> = IdleBufferedUart::new(&COMS_TASK_SYNC_MUTEX);
+
+struct LockTest {
+    lock: Mutex<CriticalSectionRawMutex, bool>,
+}
+
+impl LockTest {
+    const fn new() -> Self {
+        LockTest {
+            lock: Mutex::new(false)
+        }
+    }
+
+    fn lock_test(&self) {
+        if let Ok(bv) = self.lock.try_lock() {
+            defmt::info!("acqd");
+        }
+    }
+}
+
+static lt: LockTest = LockTest::new();
 
 static BAUD_RATE: AtomicU32 = AtomicU32::new(115200);
 
@@ -154,7 +179,7 @@ unsafe fn TIM2() {
 }
 
 bind_interrupts!(struct Irqs {
-    USART2 => usart::InterruptHandler<peripherals::USART2>;
+    USART6 => usart::InterruptHandler<peripherals::USART6>;
 });
 
 #[embassy_executor::main]
@@ -179,16 +204,18 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
     coms_uart_config.stop_bits = StopBits::STOP1;
 
     let coms_usart = Uart::new(
-        p.USART2,
-        p.PD6, // rx
-        p.PD5, // tx
+        p.USART6,
+        p.PC7, // rx
+        p.PC6, // tx
         Irqs,
         p.DMA1_CH1,
         p.DMA1_CH2,
         coms_uart_config,
     ).unwrap();
 
-    COMS_IDLE_BUFFERED_UART.init();
+    lt.lock_test();
+
+    COMS_IDLE_BUFFERED_UART.init().await;
 
     let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
 
@@ -196,10 +223,10 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        unwrap!(spawner.spawn(handle_btn_press(p.PC13, p.EXTI13, p.PB0, p.PE1, p.PB14, &COMS_IDLE_BUFFERED_UART)));
-        unwrap!(spawner.spawn(rx_task(COMS_IDLE_BUFFERED_UART.get_uart_read_queue())));
-        unwrap!(spawner.spawn(tx_task(COMS_IDLE_BUFFERED_UART.get_uart_write_queue())));
-        spawner.spawn(idle_buffered_uart_read_task!(coms, coms_uart_rx)).unwrap();
-        spawner.spawn(idle_buffered_uart_write_task!(coms, coms_uart_tx)).unwrap();
+        // unwrap!(spawner.spawn(handle_btn_press(p.PC13, p.EXTI13, p.PB0, p.PE1, p.PB14, &COMS_IDLE_BUFFERED_UART)));
+        // unwrap!(spawner.spawn(rx_task(COMS_IDLE_BUFFERED_UART.get_uart_read_queue())));
+        // unwrap!(spawner.spawn(tx_task(COMS_IDLE_BUFFERED_UART.get_uart_write_queue())));
+        // spawner.spawn(idle_buffered_uart_read_task!(coms, coms_uart_rx)).unwrap();
+        // spawner.spawn(idle_buffered_uart_write_task!(coms, coms_uart_tx)).unwrap();
     });
 }
