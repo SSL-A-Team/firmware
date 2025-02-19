@@ -35,8 +35,7 @@ pub const RADIO_TX_BUF_DEPTH: usize = 4;
 pub const RADIO_MAX_RX_PACKET_SIZE: usize = 256;
 pub const RADIO_RX_BUF_DEPTH: usize = 4;
 
-// static_idle_buffered_uart!(RADIO, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
-static_idle_buffered_uart_nl!(RADIO, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH);
+static_idle_buffered_uart!(RADIO, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
 
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]

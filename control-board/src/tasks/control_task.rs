@@ -227,11 +227,11 @@ impl <
                 self.motor_fr.process_packets();
                 self.motor_drib.process_packets();
 
-                self.motor_fl.log_reset("FL");
-                self.motor_bl.log_reset("BL");
-                self.motor_br.log_reset("BR");
-                self.motor_fr.log_reset("FR");
-                self.motor_drib.log_reset("DRIB");
+                // self.motor_fl.log_reset("FL");
+                // self.motor_bl.log_reset("BL");
+                // self.motor_br.log_reset("BR");
+                // self.motor_fr.log_reset("FR");
+                // self.motor_drib.log_reset("DRIB");
 
                 if self.motor_drib.ball_detected() {
                     defmt::info!("ball detected");

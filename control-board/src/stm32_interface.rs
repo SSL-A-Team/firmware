@@ -4,7 +4,7 @@ use defmt_rtt as _;
 use defmt::*;
 
 use embassy_stm32::gpio::{Level, Output, OutputOpenDrain, Pin, Speed, Pull};
-use embassy_stm32::usart::{self, Config, Parity, StopBits};
+use embassy_stm32::usart::{self, Config, DataBits, Parity, StopBits};
 use embassy_time::{Duration, Timer};
 use embassy_time::with_timeout;
 
@@ -213,6 +213,7 @@ impl<
     pub async fn update_uart_config(&self, baudrate: u32, parity: Parity) {
         let mut config = usart::Config::default();
         config.baudrate = baudrate;
+        config.data_bits = DataBits::DataBits8;
         config.parity = parity;
 
         if self.uart.update_uart_config(config).await.is_err() {
