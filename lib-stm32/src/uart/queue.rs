@@ -491,7 +491,7 @@ impl<
                                     }
 
                                     // report resuming
-                                    uart_config_response_publisher.publish_immediate(UartTaskResponse::ReadTaskRunning);
+                                    uart_config_response_publisher.publish(UartTaskResponse::ReadTaskRunning).await;
                                 } else {
                                     defmt::warn!("UartReadQueue - config update standdown cancelled read to idle. Should this event sequence occur?");
                                 }
@@ -589,7 +589,7 @@ impl<
                                         defmt::error!("uart write task received invalid command expecting unpause");
                                     }
 
-                                    uart_config_response_publisher.publish_immediate(UartTaskResponse::WriteTaskRunning);
+                                    uart_config_response_publisher.publish(UartTaskResponse::WriteTaskRunning).await;
                                 } else {
                                     defmt::warn!("uart write task received spurious command during write.");
                                 }
