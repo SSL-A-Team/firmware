@@ -1,6 +1,6 @@
 
 use ateam_common_packets::{bindings::BasicTelemetry, radio::TelemetryPacket};
-use ateam_lib_stm32::{idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart, static_idle_buffered_uart_nl, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use credentials::WifiCredential;
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_futures::select::{select, Either};
@@ -24,7 +24,7 @@ macro_rules! create_radio_task {
             &$wifi_credentials,
             $p.USART10, $p.PE2, $p.PE3, $p.PG13, $p.PG14,
             $p.DMA2_CH1, $p.DMA2_CH0,
-            $p.PC13, $p.PE4).await; 
+            $p.PC13, $p.PE4); 
     };
 }
 
@@ -36,6 +36,7 @@ pub const RADIO_MAX_RX_PACKET_SIZE: usize = 256;
 pub const RADIO_RX_BUF_DEPTH: usize = 4;
 
 static_idle_buffered_uart!(RADIO, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
 enum RadioConnectionState {
@@ -408,7 +409,7 @@ async fn radio_task_entry(mut radio_task: RadioTask<RADIO_MAX_TX_PACKET_SIZE, RA
     }
 }
 
-pub async fn start_radio_task(radio_task_spawner: Spawner,
+pub fn start_radio_task(radio_task_spawner: Spawner,
         rx_queue_spawner: SendSpawner,
         tx_queue_spawner: SendSpawner,
         robot_state: &'static SharedRobotState,
@@ -431,11 +432,20 @@ pub async fn start_radio_task(radio_task_spawner: Spawner,
     // let radio_uart = Uart::new_with_rtscts(radio_uart, radio_uart_rx_pin, radio_uart_tx_pin, SystemIrqs, _radio_uart_rts_pin, _radio_uart_cts_pin, radio_uart_tx_dma, radio_uart_rx_dma, radio_uart_config).unwrap();
     let (radio_uart_tx, radio_uart_rx) = Uart::split(radio_uart);
 
+    defmt::info!("uart initialized");
     RADIO_IDLE_BUFFERED_UART.init();
+
+    defmt::info!("uart queue init");
+
+
     rx_queue_spawner.spawn(idle_buffered_uart_read_task!(RADIO, radio_uart_rx)).unwrap();
+    defmt::info!("radio uart read task online");
     tx_queue_spawner.spawn(idle_buffered_uart_write_task!(RADIO, radio_uart_tx)).unwrap();
+    defmt::info!("radio uart write task online");
+
 
     let radio_task = RadioTask::new_from_pins(robot_state, command_publisher, telemetry_subscriber, &RADIO_IDLE_BUFFERED_UART, RADIO_IDLE_BUFFERED_UART.get_uart_read_queue(), RADIO_IDLE_BUFFERED_UART.get_uart_write_queue(), radio_reset_pin, radio_ndet_pin, wifi_credentials);
 
     radio_task_spawner.spawn(radio_task_entry(radio_task)).unwrap();
+    defmt::info!("radio task online");
 }

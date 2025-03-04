@@ -81,7 +81,7 @@ pub enum Error {
 }
 
 pub struct Queue<const LENGTH: usize, const DEPTH: usize> {
-    buffers: [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH],
+    buffers: &'static [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH],
     read_index: AtomicUsize,
     read_in_progress: AtomicBool,
     write_index: AtomicUsize,
@@ -94,16 +94,11 @@ pub struct Queue<const LENGTH: usize, const DEPTH: usize> {
 unsafe impl<const LENGTH: usize, const DEPTH: usize> Send for Queue<LENGTH, DEPTH> {}
 unsafe impl<const LENGTH: usize, const DEPTH: usize> Sync for Queue<LENGTH, DEPTH> {}
 
-impl<const LENGTH: usize, const DEPTH: usize> Default for Queue<LENGTH, DEPTH> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
-    pub const fn new() -> Self {
+    pub const fn new(buffers: &'static [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH]) -> Self {
         Self {
-            buffers: [const { SyncUnsafeCell::new(Buffer::<LENGTH>::new())}; DEPTH],
+            buffers,
             read_index: AtomicUsize::new(0),
             read_in_progress: AtomicBool::new(false),
             write_index: AtomicUsize::new(0),

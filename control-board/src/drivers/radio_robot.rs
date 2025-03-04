@@ -134,7 +134,7 @@ impl<
         let mut highspeed_radio_uart_config = usart::Config::default();
         highspeed_radio_uart_config.baudrate = 5_250_000;
         highspeed_radio_uart_config.stop_bits = StopBits::STOP1;
-        highspeed_radio_uart_config.data_bits = DataBits::DataBits9;
+        highspeed_radio_uart_config.data_bits = DataBits::DataBits8;
         highspeed_radio_uart_config.parity = usart::Parity::ParityEven;
 
         highspeed_radio_uart_config
@@ -171,12 +171,7 @@ impl<
         defmt::trace!("configured radio link speed");
 
 
-        let mut radio_uart_config = usart::Config::default();
-        radio_uart_config.baudrate = 5_250_000;
-        radio_uart_config.stop_bits = StopBits::STOP1;
-        radio_uart_config.data_bits = DataBits::DataBits9;
-        radio_uart_config.parity = usart::Parity::ParityEven;
-        if self.odin_driver.update_host_uart_config(radio_uart_config).await.is_err() {
+        if self.odin_driver.update_host_uart_config(self.get_highspeed_uart_config()).await.is_err() {
             defmt::debug!("error increasing host baud rate.");
             return Err(RobotRadioError::ConnectUartBadHostConfigUpdate);
         }

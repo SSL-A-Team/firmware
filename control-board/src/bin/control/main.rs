@@ -112,9 +112,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p);
 
     // TODO Come back to. Extra compute.
-    //create_audio_task!(main_spawner,
-    //    robot_state,
-    //    p);
+    create_audio_task!(main_spawner,
+       robot_state,
+       p);
 
     create_radio_task!(main_spawner, radio_uart_queue_spawner, uart_queue_spawner,
         robot_state,
@@ -137,13 +137,13 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p.USART1, p.PB15, p.PB14, p.DMA1_CH1, p.DMA1_CH0, p.PD8, p.PD9,
         p.UART5, p.PB12, p.PB13, p.DMA2_CH3, p.DMA2_CH2, p.PD13, p.PD12).await;
 
-    start_kicker_task(
-        main_spawner, uart_queue_spawner,
-        robot_state,
-        kicker_command_subscriber,
-        p.USART6,
-        p.PC7, p.PC6, p.DMA2_CH5, p.DMA2_CH4, p.PA8, p.PA9, p.PG8,
-    ).await;
+    // start_kicker_task(
+    //     main_spawner, uart_queue_spawner,
+    //     robot_state,
+    //     kicker_command_subscriber,
+    //     p.USART6,
+    //     p.PC7, p.PC6, p.DMA2_CH5, p.DMA2_CH4, p.PA8, p.PA9, p.PG8,
+    // ).await;
 
     loop {
         Timer::after_millis(10).await;
