@@ -11,6 +11,8 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(maybe_uninit_slice)]
 #![feature(ptr_metadata)]
+#![feature(stmt_expr_attributes)]
+#![feature(cfg_target_has_atomic_equal_alignment)]
 #![feature(trait_alias)]
 #![feature(never_type)]
 

@@ -235,8 +235,25 @@ impl <
     }
 
     pub async fn update_uart_config(&self, config: usart::Config) -> Result<(), ()> {
+        #[cfg(target_has_atomic)]
         if let Err(_) = self.uart_config_update_in_progress.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed) {
             return Err(());
+        }
+
+        #[cfg(not(target_has_atomic))] {
+            let mut early_ret = false;
+            critical_section::with(|_| {
+                let update_in_progress = self.uart_config_update_in_progress.load(Ordering::SeqCst);
+                if update_in_progress {
+                    early_ret = true;
+                } else {
+                    self.uart_config_update_in_progress.store(true, Ordering::SeqCst);
+                }
+            });
+
+            if early_ret {
+                return Err(());
+            }
         }
 
         let mut config_update_success = false;
@@ -321,8 +338,20 @@ impl <
         // pub and sub mutex guards dropped here
         }
 
+        #[cfg(target_has_atomic)]
         if let Err(_) = self.uart_config_update_in_progress.compare_exchange(true, false, Ordering::SeqCst, Ordering::Acquire) {
             defmt::error!("uart config update state became inchoerant. This should not be possible.");
+        }
+
+        #[cfg(not(target_has_atomic))] {
+            critical_section::with(|_| {
+                let update_in_progress = self.uart_config_update_in_progress.load(Ordering::SeqCst);
+                if !update_in_progress {
+                    defmt::error!("uart config update state became inchoerant. This should not be possible.");
+                }
+
+                self.uart_config_update_in_progress.store(false, Ordering::SeqCst);
+            });
         }
 
         if config_update_success {
