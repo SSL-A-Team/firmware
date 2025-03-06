@@ -23,9 +23,9 @@ macro_rules! create_imu_task {
             $imu_gyro_data_publisher, $imu_accel_data_publisher,
             $p.SPI1, $p.PA5, $p.PA7, $p.PA6,
             $p.DMA2_CH7, $p.DMA2_CH6,
-            $p.PA4, $p.PC4, $p.PC5,
-            $p.PB1, $p.PB2, $p.EXTI1, $p.EXTI2,
-            $p.PF11);
+            $p.PA4, $p.PA3, $p.PC4,
+            $p.PB0, $p.PB1, $p.EXTI0, $p.EXTI1,
+            $p.PB2);
     };
 }
 

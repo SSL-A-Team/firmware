@@ -22,9 +22,9 @@ macro_rules! create_radio_task {
             $robot_state,
             $radio_command_publisher, $radio_telemetry_subscriber,
             &$wifi_credentials,
-            $p.USART10, $p.PE2, $p.PE3, $p.PG13, $p.PG14,
+            $p.USART2, $p.PD6, $p.PD5, $p.PD3, $p.PD4,
             $p.DMA2_CH1, $p.DMA2_CH0,
-            $p.PC13, $p.PE4); 
+            $p.PD7, $p.PA15); 
     };
 }
 

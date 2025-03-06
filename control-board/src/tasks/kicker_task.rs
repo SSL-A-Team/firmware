@@ -20,16 +20,14 @@ static_idle_buffered_uart!(KICKER, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACK
 #[macro_export]
 macro_rules! create_kicker_task {
     ($main_spawner:ident, $uart_queue_spawner:ident, $robot_state:ident,
-        $radio_command_publisher:ident, $radio_telemetry_subscriber:ident,
-        $wifi_credentials:ident, $p:ident) => {
-        ateam_control_board::tasks::radio_task::start_radio_task(
+        $command_subscriber:ident, $p:ident) => {
+        ateam_control_board::tasks::kicker_task::start_kicker_task(
             $main_spawner, $uart_queue_spawner,
             $robot_state,
-            $radio_command_publisher, $radio_telemetry_subscriber,
-            &$wifi_credentials,
-            $p.USART10, $p.PE2, $p.PE3, $p.PG13, $p.PG14,
-            $p.DMA2_CH1, $p.DMA2_CH0,
-            $p.PC13, $p.PE4).await;
+            $command_subscriber,
+            $p.UART8, $p.PE0, $p.PE1,
+            $p.DMA2_CH2, $p.DMA2_CH3,
+            $p.PG2, $p.PG3).await;
     };
 }
 
@@ -49,7 +47,6 @@ pub struct KickerTask<'a,
     const DEPTH_RX: usize,
     const DEPTH_TX: usize> {
     kicker_driver: Kicker<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>,
-    remote_power_btn: Output<'a>,
     kicker_task_state: KickerTaskState,
     robot_state: &'static SharedRobotState,
     commands_subscriber: CommandsSubscriber,
@@ -61,12 +58,10 @@ const LEN_TX: usize,
 const DEPTH_RX: usize,
 const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
     pub fn new(kicker_driver: Kicker<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>,
-            power_output: Output<'a>,
             robot_state: &'static SharedRobotState,
             command_subscriber: CommandsSubscriber) -> Self {
         KickerTask {
             kicker_driver: kicker_driver,
-            remote_power_btn: power_output,
             kicker_task_state: KickerTaskState::PoweredOff,
             robot_state: robot_state,
             commands_subscriber: command_subscriber,
@@ -79,15 +74,13 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
-        power_pin: impl Pin,
         firmware_image: &'a [u8],
         robot_state: &'static SharedRobotState,
         command_subscriber: CommandsSubscriber) -> Self {
 
         let kicker_driver = Kicker::new_from_pins(uart, read_queue, write_queue, boot0_pin, reset_pin, firmware_image);
-        let power_output = Output::new(power_pin, Level::Low, Speed::Medium);
 
-        Self::new(kicker_driver, power_output, robot_state, command_subscriber)
+        Self::new(kicker_driver, robot_state, command_subscriber)
     }
 
     pub async fn kicker_task_entry(&mut self) {
@@ -125,16 +118,8 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
                 },
                 KickerTaskState::PowerOn => {
                     // lets power settle on kicker
-                    Timer::after_millis(2000).await;
-                    defmt::debug!("turn on kicker");
-                    // TODO Don't spam the power button.
-                    // Spam power button press on to make sure it is on.
-                    self.remote_power_btn_press().await;
-                    Timer::after_millis(500).await;
-                    self.remote_power_btn_press().await;
-                    Timer::after_millis(500).await;
-                    self.remote_power_btn_press().await;
-                    Timer::after_millis(50).await;
+                    defmt::debug!("reset kicker");
+
                     self.kicker_driver.enter_reset().await;
                     self.kicker_driver.leave_reset().await;
                     // power should be coming on, attempt connection
@@ -196,20 +181,6 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         }
     }
 
-    async fn remote_power_btn_press(&mut self) {
-        self.remote_power_btn.set_high();
-        Timer::after_millis(300).await;
-        self.remote_power_btn.set_low();
-        Timer::after_millis(250).await;
-    }
-
-    async fn remote_power_btn_hold(&mut self) {
-        self.remote_power_btn.set_high();
-        Timer::after_millis(1000).await;
-        self.remote_power_btn.set_low();
-        Timer::after_millis(10).await;
-    }
-
     async fn connected_poll_loop(&mut self) {
         self.kicker_driver.set_telemetry_enabled(true);
 
@@ -252,8 +223,7 @@ pub async fn start_kicker_task(kicker_task_spawner: Spawner,
     kicker_uart_rx_dma: KickerRxDma,
     kicker_uart_tx_dma: KickerTxDma,
     kicker_boot0_pin: KickerBootPin,
-    kicker_reset_pin: KickerResetPin,
-    kicker_power_pin: KickerPowerOnPin) {
+    kicker_reset_pin: KickerResetPin) {
 
     let initial_kicker_uart_conifg = stm32_interface::get_bootloader_uart_config();
 
@@ -262,6 +232,6 @@ pub async fn start_kicker_task(kicker_task_spawner: Spawner,
     KICKER_IDLE_BUFFERED_UART.init();
     idle_buffered_uart_spawn_tasks!(queue_spawner, KICKER, kicker_uart);
 
-    let kicker_task = KickerTask::new_from_pins(&KICKER_IDLE_BUFFERED_UART, KICKER_IDLE_BUFFERED_UART.get_uart_read_queue(), KICKER_IDLE_BUFFERED_UART.get_uart_write_queue(), kicker_boot0_pin, kicker_reset_pin, kicker_power_pin, KICKER_FW_IMG, robot_state, command_subscriber);
+    let kicker_task = KickerTask::new_from_pins(&KICKER_IDLE_BUFFERED_UART, KICKER_IDLE_BUFFERED_UART.get_uart_read_queue(), KICKER_IDLE_BUFFERED_UART.get_uart_write_queue(), kicker_boot0_pin, kicker_reset_pin, KICKER_FW_IMG, robot_state, command_subscriber);
     kicker_task_spawner.spawn(kicker_task_entry(kicker_task)).unwrap();
 }

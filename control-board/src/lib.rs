@@ -40,13 +40,15 @@ pub mod motion;
 pub mod tasks;
 
 bind_interrupts!(pub struct SystemIrqs {
+    USART2 => usart::InterruptHandler<peripherals::USART2>;
+    UART7 => usart::InterruptHandler<peripherals::UART7>;
     USART10 => usart::InterruptHandler<peripherals::USART10>;
     USART6 => usart::InterruptHandler<peripherals::USART6>;
-    USART1 => usart::InterruptHandler<peripherals::USART1>;
-    UART4 => usart::InterruptHandler<peripherals::UART4>;
-    UART7 => usart::InterruptHandler<peripherals::UART7>;
+    USART3 => usart::InterruptHandler<peripherals::USART3>;
     UART8 => usart::InterruptHandler<peripherals::UART8>;
-    UART5 => usart::InterruptHandler<peripherals::UART5>;
+    UART9 => usart::InterruptHandler<peripherals::UART9>;
+    UART4 => usart::InterruptHandler<peripherals::UART4>;
+    USART1 => usart::InterruptHandler<peripherals::USART1>;
 });
 
 pub mod colors {
