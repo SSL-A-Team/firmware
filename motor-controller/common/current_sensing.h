@@ -1,15 +1,25 @@
 /**
  * @file setup.h
  * @author your name (you@domain.com)
- * @brief 
+ * @brief
  * @version 0.1
  * @date 2022-04-10
- * 
+ *
  * @copyright Copyright (c) 2022
- * 
+ *
  */
 
 #pragma once
+
+#define V_DDA 3300 // mV
+#define V_ADC_SCALE V_DDA / 4095
+
+// From A.7.16 of RM0091
+#define TEMP110_CAL_ADDR ((uint16_t*) ((uint32_t) 0x1FFFF7C2))
+#define TEMP30_CAL_ADDR ((uint16_t*) ((uint32_t) 0x1FFFF7B8))
+
+#define VDD_CALIB ((uint16_t) (3300))
+#define VDD_APPLI ((uint16_t) (V_DDA/10))
 
 typedef enum {
   CS_MODE_POLLING,
@@ -17,7 +27,7 @@ typedef enum {
   CS_MODE_TIMER_DMA
 } CS_Mode_t;
 
-typedef enum 
+typedef enum
 {
   CS_OK       = 0x00U,
   CS_ERROR    = 0x01U,
@@ -83,30 +93,26 @@ typedef enum
 #define ADC_STP_TIMEOUT 5 //ms
 
 
-// this struct is used as a DMA target. 
+// this struct is used as a DMA target.
 // ADC->DR reads are two bytes, DMA will do half word transfers
 // rm0091 tells us the 16->32 bit port mapping packing scheme
 // which all us to derive that this struct should be packed
-// hald words. Additionally, result must be at the end since a
+// half words. Additionally, result must be at the end since a
 // ref to this struct will be passed into DMAR register for N
 // transfers
-typedef struct 
+typedef struct
 __attribute__((__packed__)) ADC_Result {
-    uint16_t    I_motor_filt;
-    uint16_t    I_motor;
-    uint16_t    T_spin;
-    uint16_t    V_int;
-    CS_Status_t status;
+    uint16_t    Motor_current_raw;
+    uint16_t    Spin_temperature_raw;
 } ADC_Result_t;
 
 void currsen_enable_ht();
 void currsen_read_dma();
 void currsen_read(ADC_Result_t *res);
-CS_Status_t currsen_setup(CS_Mode_t mode, ADC_Result_t *res, uint8_t num_ch, uint32_t ch_sel, uint32_t sr_sel);
-CS_Status_t currsen_adc_group_config();
-CS_Status_t currsen_adc_conf();
+CS_Status_t currsen_setup(CS_Mode_t mode, uint8_t motor_adc_ch);
 CS_Status_t currsen_adc_cal();
 CS_Status_t currsen_adc_en();
 CS_Status_t currsen_adc_dis();
 
-
+float currsen_get_motor_current();
+float currsen_get_temp();

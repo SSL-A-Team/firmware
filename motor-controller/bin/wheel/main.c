@@ -63,7 +63,7 @@ int main() {
 
     // initialize current sensing setup
     ADC_Result_t res;
-    currsen_setup(ADC_MODE, &res, ADC_NUM_CHANNELS, ADC_CH_MASK, ADC_SR_MASK);
+    CS_Status_t cs_status = currsen_setup(ADC_MODE, &res, ADC_NUM_CHANNELS, ADC_CH_MASK, ADC_SR_MASK);
 
     // initialize motor driver
     pwm6step_setup();

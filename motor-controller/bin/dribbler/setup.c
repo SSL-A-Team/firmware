@@ -78,13 +78,14 @@ inline void setup_clocks() {
         asm volatile("nop");
     }
 
-    // Set AHB clock freq to sysclk (48MHz)
-    // HPRE -> 1
-    RCC->CFGR |= RCC_CFGR_HPRE_0;
+    // Set AHB clock (HCLK) freq to sysclk (48 MHz)
+    // HPRE 0xxx -> SYSCLK not divided.
+    RCC->CFGR &= ~RCC_CFGR_HPRE_3;
 
-    // Set APB clock freq to AHB clk (48MHz)
-    // PPRE div -> 1
-    RCC->CFGR |= RCC_CFGR_PPRE_0;
+    // Set APB clock (PCLK) freq to AHB clk (48 MHz)
+    // PPRE 0xxx -> HCLK not divided.
+    RCC->CFGR &= ~RCC_CFGR_PPRE_3;
+
     // PPRE mul -> 1
     // ??? dont see this cfg
     // USART1SW src -> PCLK
@@ -101,8 +102,8 @@ inline void setup_clocks() {
     // RTCSEL -> LSI (40Khz)
     RCC->BDCR |= RCC_BDCR_RTCSEL_LSI;
 
-    // HSI14 enable (for ADC)
-    // on by default??
+    // ADC Clock Divider set in ADC setup.
+    // Based on PCLK (APB clock).
 
     // Setup TIM14 sysclk source
     RCC->CFGR |= RCC_CFGR_MCO_SYSCLK;
