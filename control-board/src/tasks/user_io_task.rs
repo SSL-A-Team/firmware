@@ -122,7 +122,7 @@ async fn user_io_task_entry(
         // FIXME: Vref_int is not returning valid value. Embassy issue. 
         // let vref_int_read_mv = vref_int_adc.read(&mut vref_int_ch);
         let vref_int_read_mv = 1216.0;
-        let batt_res_div_v = battery_volt_adc.read_volt_raw_f32(vref_int_read_mv as f32, vref_int_cal);
+        let batt_res_div_v = battery_volt_adc.read_volt_raw_f32(vref_int_read_mv as f32, vref_int_cal) * 0.9090;
         let battery_voltage_cur = adc_v_to_battery_voltage(batt_res_div_v);
         
         // Add new battery read to cyclical buffer.

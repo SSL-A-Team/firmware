@@ -295,8 +295,9 @@ impl <
                 
                 let controls_enabled = true;
 
-                let wheel_vels = if !(self.shared_robot_state.get_battery_low() || self.shared_robot_state.get_battery_crit()) && !self.shared_robot_state.shutdown_requested() {
-                    // TODO check order
+                // let kill_vel = self.shared_robot_state.get_battery_low() || self.shared_robot_state.get_battery_crit() || self.shared_robot_state.shutdown_requested();
+                let kill_vel = false;
+                let wheel_vels = if !kill_vel {
                     self.do_control_update(&mut robot_controller, cmd_vel, self.last_gyro_rads, controls_enabled)
                 } else {
                     // Battery is too low, set velocity to zero
@@ -308,6 +309,8 @@ impl <
                 self.motor_bl.set_setpoint(wheel_vels[1]);
                 self.motor_br.set_setpoint(wheel_vels[2]);
                 self.motor_fr.set_setpoint(wheel_vels[3]);
+
+                // defmt::info!("wheel vels: {} {} {} {}", self.motor_fl.read_rads(), self.motor_bl.read_rads(), self.motor_br.read_rads(), self.motor_fr.read_rads());
 
                 self.send_motor_commands_and_telemetry(
                     &mut robot_controller, self.last_battery_v);

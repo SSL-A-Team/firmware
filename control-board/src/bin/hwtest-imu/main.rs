@@ -61,7 +61,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     create_io_task!(main_spawner, robot_state, battery_volt_publisher, p);
 
-    create_audio_task!(main_spawner, robot_state, p);
+    // create_audio_task!(main_spawner, robot_state, p);
 
     create_imu_task!(main_spawner,
         robot_state,
