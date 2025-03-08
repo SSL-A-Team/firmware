@@ -6,14 +6,13 @@ use defmt::*;
 use embassy_executor::Spawner;
 use embassy_stm32::{adc::{Adc, AdcChannel, SampleTime},
     gpio::{Input, Level, Output, OutputOpenDrain, Pull, Speed, OutputType},
-    rcc::Hse, timer::{low_level::CountingMode, simple_pwm::{SimplePwm, PwmPin}, Channel}, 
-    Config,
+    timer::{simple_pwm::{SimplePwm, PwmPin}, Channel}, 
     time::hz};
 use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _};
 
 use ateam_lib_stm32::{drivers::{led::apa102::Apa102,
-    audio::{buzzer::Buzzer}}, audio::{note::Beat, tone_player::TonePlayer}};
+    audio::buzzer::Buzzer}, audio::{note::Beat, tone_player::TonePlayer}};
 use smart_leds::colors::{BLUE, WHITE, BLACK};
 
 static mut DOTSTAR_SPI_BUFFER_CELL: [u8; 16] = [0; 16];
