@@ -49,7 +49,7 @@ pub struct Stm32Interface<
     reader: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
     writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
     boot0_pin: Output<'a>,
-    reset_pin: OutputOpenDrain<'a>,
+    reset_pin: Output<'a>,
 
     reset_pin_noninverted: bool,
 
@@ -69,7 +69,7 @@ impl<
         read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
         write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
         boot0_pin: Output<'a>,
-        reset_pin: OutputOpenDrain<'a>,
+        reset_pin: Output<'a>,
         reset_polarity_high: bool,
     ) -> Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         Stm32Interface {
@@ -99,7 +99,7 @@ impl<
         } else {
             Level::High
         };
-        let reset_output = OutputOpenDrain::new_pull(reset_pin, initial_reset_level, Speed::Medium, reset_pin_pull);
+        let reset_output = Output::new(reset_pin, initial_reset_level, Speed::Medium);
 
         Stm32Interface {
             uart,

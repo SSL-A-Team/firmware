@@ -30,7 +30,7 @@ use ateam_kicker_board::{
     },
 };
 
-use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, uart::queue::{UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, static_idle_buffered_uart_nl, uart::queue::{UartReadQueue, UartWriteQueue}};
 
 use ateam_common_packets::bindings::{
     KickRequest::{self, KR_ARM, KR_DISABLE},
@@ -52,7 +52,7 @@ const RX_BUF_DEPTH: usize = 3;
 
 const RAIL_BUFFER_SIZE: usize = 10;
 
-static_idle_buffered_uart!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".static"]);
+static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH);
 
 fn get_empty_control_packet() -> KickerControl {
     KickerControl {
