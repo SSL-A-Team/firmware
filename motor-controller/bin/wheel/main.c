@@ -62,8 +62,7 @@ int main() {
     bool telemetry_enabled = false;
 
     // initialize current sensing setup
-    ADC_Result_t res;
-    CS_Status_t cs_status = currsen_setup(ADC_MODE, &res, ADC_NUM_CHANNELS, ADC_CH_MASK, ADC_SR_MASK);
+    CS_Status_t cs_status = currsen_setup(ADC_MODE, ADC_CH_MASK);
 
     // initialize motor driver
     pwm6step_setup();
@@ -288,7 +287,7 @@ int main() {
         if (run_torque_loop) {
             // recover torque using the shunt voltage drop, amplification network model and motor model
             // pct of voltage range 0-3.3V
-            float current_sense_shunt_v = ((float) res.I_motor_filt / (float) UINT16_MAX) * AVDD_V;
+            float current_sense_shunt_v = currsen_get_motor_current();
             // map voltage given by the amp network to current
             float current_sense_I = mm_voltage_to_current(&df45_model, current_sense_shunt_v);
             // map current to torque using the motor model
@@ -332,6 +331,7 @@ int main() {
             response_packet.data.motion.torque_estimate = measured_torque_Nm;
             response_packet.data.motion.torque_computed_error = torque_pid.prev_err;
             response_packet.data.motion.torque_computed_setpoint = torque_setpoint_Nm;
+            //response_packet.data.motion.temperature = currsen_get_temperature();
         }
 
         // run velocity loop if applicable

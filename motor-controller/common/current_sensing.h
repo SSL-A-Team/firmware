@@ -12,7 +12,7 @@
 #pragma once
 
 #define V_DDA 3300 // mV
-#define V_ADC_SCALE V_DDA / 4095
+#define V_ADC_SCALE V_DDA / 4095.0f
 
 // From A.7.16 of RM0091
 #define TEMP110_CAL_ADDR ((uint16_t*) ((uint32_t) 0x1FFFF7C2))
@@ -115,4 +115,4 @@ CS_Status_t currsen_adc_en();
 CS_Status_t currsen_adc_dis();
 
 float currsen_get_motor_current();
-float currsen_get_temp();
+int32_t currsen_get_temperature();

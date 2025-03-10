@@ -83,8 +83,8 @@ inline void setup_clocks() {
     RCC->CFGR &= ~RCC_CFGR_HPRE_3;
 
     // Set APB clock (PCLK) freq to AHB clk (48 MHz)
-    // PPRE 0xxx -> HCLK not divided.
-    RCC->CFGR &= ~RCC_CFGR_PPRE_3;
+    // PPRE 0xx -> HCLK not divided.
+    RCC->CFGR &= ~RCC_CFGR_PPRE_2;
 
     // PPRE mul -> 1
     // ??? dont see this cfg

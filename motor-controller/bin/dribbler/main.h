@@ -1,12 +1,12 @@
 /**
  * @file main.h
  * @author your name (you@domain.com)
- * @brief 
+ * @brief
  * @version 0.1
  * @date 2022-07-10
- * 
+ *
  * @copyright Copyright (c) 2022
- * 
+ *
  */
 
 #pragma once
@@ -16,8 +16,6 @@
 #define COMMAND_PACKET_TIMEOUT_TICKS 100
 
 #define IOQ_BUF_LEN 64
-
-#define AVDD_V 3.3f
 
 ///////////////////////////////////////////
 //  current sense amplification network  //

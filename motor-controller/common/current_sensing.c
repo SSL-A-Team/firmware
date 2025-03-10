@@ -40,7 +40,7 @@ void DMA1_Channel1_IRQHandler() {
  *
  * @return ADC_Result result of the ADC operation
  */
-void currsen_read(ADC_Result_t *res)
+/*void currsen_read(ADC_Result_t *res)
 {
     const int NUM_CHANNELS = 4;
 
@@ -92,6 +92,7 @@ void currsen_read(ADC_Result_t *res)
         }
     }
 }
+*/
 
 /**
  * @brief configure, calibrate, and enable the ADC
@@ -102,7 +103,7 @@ CS_Status_t currsen_setup(CS_Mode_t mode, uint8_t motor_adc_ch)
 {
     m_cs_mode = mode;
 
-    memset(m_adc_result, 0, sizeof(ADC_Result_t));
+    memset(&m_adc_result, 0, sizeof(ADC_Result_t));
 
     // Assume ADC has not been set up yet
     CS_Status_t status = CS_OK;
@@ -131,7 +132,7 @@ CS_Status_t currsen_setup(CS_Mode_t mode, uint8_t motor_adc_ch)
         // Set DMA Channel 1 Peripheral Address to ADC1 Data Register.
         DMA1_Channel1->CPAR = (uint32_t) (&(ADC1->DR));
         // Set DMA Channel 1 Memory Address to the result struct.
-        DMA1_Channel1->CMAR = (uint32_t) res;
+        DMA1_Channel1->CMAR = (uint32_t) (&m_adc_result);
         // Set DMA Channel 1 Number of Data to Transfer to the number of channels.
         // Temperature and motor so 2.
         // Since in circular mode, this will reset.
@@ -329,7 +330,7 @@ CS_Status_t currsen_adc_en()
 
     // Enable the ADC
     ADC1->CR |= ADC_CR_ADEN;
-    if (cs_mode == CS_MODE_DMA || cs_mode == CS_MODE_TIMER_DMA) {
+    if (m_cs_mode == CS_MODE_DMA || m_cs_mode == CS_MODE_TIMER_DMA) {
         ADC1->CFGR1 |= ADC_CFGR1_DMAEN;
     }
 
@@ -423,7 +424,7 @@ float currsen_get_motor_current()
  * @return int32_t temperature in C
  */
 
-int32_t currsen_get_temp()
+int32_t currsen_get_temperature()
 {
     // From A.7.16 of RM0091
     int32_t temperature; /* will contain the temperature in degrees Celsius */
