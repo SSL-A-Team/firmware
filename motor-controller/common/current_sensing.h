@@ -11,7 +11,7 @@
 
 #pragma once
 
-#define V_DDA 3300 // mV
+#define V_DDA 3000.0f // mV
 #define V_ADC_SCALE V_DDA / 4095.0f
 
 // From A.7.16 of RM0091

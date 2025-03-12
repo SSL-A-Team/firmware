@@ -28,7 +28,7 @@
 #define ADC_MODE CS_MODE_DMA
 #define ADC_NUM_CHANNELS 4
 // ADC Motor Current Filtered (Ch 3), Motor Current Unfiltered (Ch 4), Temperature Sensor (Ch 16), Vrefint (Ch 17)
-#define ADC_CH_MASK (ADC_CHSELR_CHSEL3)
+#define ADC_CH_MASK (ADC_CHSELR_CHSEL4)
 // 110 = 71.5 ADC clock cycles for t_SMPR
 #define ADC_SR_MASK (ADC_SMPR_SMP_2 | ADC_SMPR_SMP_1)
 

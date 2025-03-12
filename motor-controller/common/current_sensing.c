@@ -120,6 +120,8 @@ CS_Status_t currsen_setup(CS_Mode_t mode, uint8_t motor_adc_ch)
         DMA1_Channel1->CCR &= ~DMA_CCR_PSIZE_1;
         // Set DMA to circular mode
         DMA1_Channel1->CCR |= DMA_CCR_CIRC;
+        // Incrememnt memory address
+        DMA1_Channel1->CCR |= DMA_CCR_MINC;
         // Set DMA Channel 1 transfer error interrupt enable.
         DMA1_Channel1->CCR |= DMA_CCR_TEIE;
         // Set DMA Channel 1 half transfer interrupt and transfer complete interrupt to disable.
@@ -158,7 +160,7 @@ CS_Status_t currsen_setup(CS_Mode_t mode, uint8_t motor_adc_ch)
         ADC_CFGR1_RES |
         ADC_CFGR1_ALIGN,
         ADC_RESOLUTION_12B |
-        ADC_DATA_ALIGN_LEFT);
+        ADC_DATA_ALIGN_RIGHT);
 
     // Set ADC low power mode - None
     MODIFY_REG(
@@ -414,10 +416,11 @@ CS_Status_t currsen_adc_dis()
 float currsen_get_motor_current()
 {
     // TODO need more for motor current scaling
-    return V_ADC_SCALE * m_adc_result.Motor_current_raw;
+    // return ((float) m_adc_result.Motor_current_raw);
+    return V_ADC_SCALE * ((float) m_adc_result.Motor_current_raw);
 }
 
-/**
+/**Motor_current_raw
  * @brief gets the temperature. Translate from raw ADC value to
  *       to scaled raw ADC value to temperature.
  *

@@ -62,8 +62,7 @@ int main() {
     bool telemetry_enabled = false;
 
     // initialize current sensing setup
-    ADC_Result_t res;
-    currsen_setup(ADC_MODE, &res, ADC_NUM_CHANNELS, ADC_CH_MASK, ADC_SR_MASK);
+    CS_Status_t cs_status = currsen_setup(ADC_MODE, ADC_CH_MASK);
 
     // initialize motor driver
     pwm6step_setup();
@@ -156,9 +155,6 @@ int main() {
     // Turn off Red/Yellow LED after booting.
     turn_off_red_led();
     turn_off_yellow_led();
-
-    // For test image, always turn on green LED first
-    turn_on_green_led();
 
     // Initialize UART and logging status.
     uart_initialize();
@@ -291,7 +287,7 @@ int main() {
         if (run_torque_loop) {
             // recover torque using the shunt voltage drop, amplification network model and motor model
             // pct of voltage range 0-3.3V
-            float current_sense_shunt_v = ((float) res.I_motor_filt / (float) UINT16_MAX) * AVDD_V;
+            float current_sense_shunt_v = currsen_get_motor_current();
             // map voltage given by the amp network to current
             float current_sense_I = mm_voltage_to_current(&df45_model, current_sense_shunt_v);
             // map current to torque using the motor model
@@ -335,6 +331,7 @@ int main() {
             response_packet.data.motion.torque_estimate = measured_torque_Nm;
             response_packet.data.motion.torque_computed_error = torque_pid.prev_err;
             response_packet.data.motion.torque_computed_setpoint = torque_setpoint_Nm;
+            //response_packet.data.motion.temperature = currsen_get_temperature();
         }
 
         // run velocity loop if applicable
@@ -375,9 +372,20 @@ int main() {
 
         if (run_torque_loop || run_vel_loop) {
             // detect if the encoder is not pulling the detect pin down
-            bool encoder_disconnected = (GPIOA->IDR & GPIO_IDR_5) != 0;
+            // bool encoder_disconnected = (GPIOA->IDR & GPIO_IDR_5) != 0;
+            bool encoder_disconnected = false;
 
-            pwm6step_set_duty_cycle_f(0.10);
+            // set the motor duty cycle
+            if (motion_control_type == OPEN_LOOP) {
+                float r_motor = mm_rads_to_dc(&df45_model, r_motor_board);
+                response_packet.data.motion.vel_setpoint = r_motor_board;
+                response_packet.data.motion.vel_computed_setpoint = r_motor;
+                pwm6step_set_duty_cycle_f(r_motor);
+            } else if (motion_control_type == VELOCITY) {
+                pwm6step_set_duty_cycle_f(control_setpoint_vel_duty);
+            } else {
+                pwm6step_set_duty_cycle_f(u_torque_loop);
+            }
 
             // load system state for transmit
 
@@ -510,5 +518,26 @@ int main() {
         } else {
             turn_off_yellow_led();
         }
+
+        // Green LED means we are able to send telemetry upstream.
+        // This means the upstream sent a packet downstream with telemetry enabled.
+        if (!telemetry_enabled) {
+            turn_off_green_led();
+        } else {
+            turn_on_green_led();
+        }
+
+        #ifdef COMP_MODE
+        if (telemetry_enabled &&
+            ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
+            // If have telemetry enabled (meaning we at one
+            // point received a message from upstream) and haven't
+            // received a command packet in a while, we need to reset
+            // the system when in COMP_MODE.
+            // This is a safety feature to prevent the robot from
+            // running away if the upstream controller locks up.
+            while (true);
+        }
+        #endif
     }
 }

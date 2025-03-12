@@ -442,6 +442,8 @@ static void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
     TIM1->CCMR1 = CCMR1_PHASE1_OFF | CCMR1_PHASE2_OFF;
     TIM1->CCMR2 = CCMR2_PHASE3_OFF;
 
+    // ADC trigger delay
+    TIM1->CCR4 = 20;
     // set channel 4 PWM mode 1, affects OC4REF as input to ADC
     // should be co triggered with ch1-3 commutation
     TIM1->CCMR2 |= CCMR2_TIM4_ADC_TRIG;

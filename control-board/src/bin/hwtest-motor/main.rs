@@ -102,7 +102,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
 
     loop {
-        Timer::after_millis(100).await;
+        Timer::after_millis(10).await;
 
         test_command_publisher.publish(DataPacket::BasicControl(BasicControl {
             vel_x_linear: 1.0,
