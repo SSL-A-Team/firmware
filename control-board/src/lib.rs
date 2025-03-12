@@ -1,18 +1,20 @@
 #![no_std]
 #![no_main]
+
+#![allow(incomplete_features)]
+#![feature(inherent_associated_types)]
+#![feature(generic_const_exprs)]
+
 #![feature(type_alias_impl_trait)]
 #![feature(async_closure)]
 #![feature(
     maybe_uninit_uninit_array,
-    const_maybe_uninit_uninit_array,
     maybe_uninit_slice,
     maybe_uninit_write_slice
 )]
-#![feature(const_mut_refs)]
 #![feature(ptr_metadata)]
-#![feature(const_fn_floating_point_arithmetic)]
 #![feature(sync_unsafe_cell)]
-#![feature(inherent_associated_types)]
+
 
 use embassy_stm32::{
     bind_interrupts, peripherals, rcc::{
@@ -38,13 +40,15 @@ pub mod motion;
 pub mod tasks;
 
 bind_interrupts!(pub struct SystemIrqs {
+    USART2 => usart::InterruptHandler<peripherals::USART2>;
+    UART7 => usart::InterruptHandler<peripherals::UART7>;
     USART10 => usart::InterruptHandler<peripherals::USART10>;
     USART6 => usart::InterruptHandler<peripherals::USART6>;
-    USART1 => usart::InterruptHandler<peripherals::USART1>;
-    UART4 => usart::InterruptHandler<peripherals::UART4>;
-    UART7 => usart::InterruptHandler<peripherals::UART7>;
+    USART3 => usart::InterruptHandler<peripherals::USART3>;
     UART8 => usart::InterruptHandler<peripherals::UART8>;
-    UART5 => usart::InterruptHandler<peripherals::UART5>;
+    UART9 => usart::InterruptHandler<peripherals::UART9>;
+    UART4 => usart::InterruptHandler<peripherals::UART4>;
+    USART1 => usart::InterruptHandler<peripherals::USART1>;
 });
 
 pub mod colors {
@@ -77,10 +81,10 @@ pub const BATTERY_MIN_SAFE_VOLTAGE: f32 = 21.0;
 pub const BATTERY_MIN_CRIT_VOLTAGE: f32 = 19.5;
 pub const BATTERY_MAX_VOLTAGE: f32 = 26.0;
 pub const BATTERY_BUFFER_SIZE: usize = 20;
-pub const ADC_TO_BATTERY_DIVIDER: f32 = (130_000.0 + 11_000.0) / 11_000.0; 
+pub const ADC_TO_BATTERY_DIVIDER: f32 = (11_500.0 + 1_000.0) / 1_000.0; 
 
 pub const fn adc_v_to_battery_voltage(adc_v: f32) -> f32 {
-    (adc_v * ADC_TO_BATTERY_DIVIDER) - 0.5 // Conservatively offset the battery voltage
+    adc_v * ADC_TO_BATTERY_DIVIDER
 }
 
 pub fn get_system_config() -> Config {

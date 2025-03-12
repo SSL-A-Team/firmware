@@ -1,5 +1,5 @@
-use ateam_lib_stm32::drivers::radio::odin_w26x::{PeerConnection, OdinW262, WifiAuth};
-use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
+use ateam_lib_stm32::drivers::radio::odin_w26x::{OdinRadioError, OdinW262, PeerConnection, WifiAuth};
+use ateam_lib_stm32::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
 use ateam_common_packets::bindings::{
     self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data, BasicTelemetry, ControlDebugTelemetry, ParameterCommand,
 };
@@ -34,6 +34,10 @@ pub enum TeamColor {
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum RobotRadioError {
+    DriverError(OdinRadioError),
+
+    RequestTimedOut,
+
     ConnectUartBadStartup,
     ConnectUartBadEcho,
     ConnectUartBadRadioConfigUpdate,
@@ -48,25 +52,34 @@ pub enum RobotRadioError {
     OpenMulticastError,
 
     DisconnectFailed,
+
+    PeerMissing,
+
+    SoftwareConnectAckHeaderInvalid,
+    SoftwareHelloHeaderInvalid,
+
+    ControlPacketDecodeInvalid,
+    ParameterPacketDecodeInvalid,
+    PacketTypeUnknown,
+}
+
+impl From<OdinRadioError> for RobotRadioError {
+    fn from(err: OdinRadioError) -> Self {
+        RobotRadioError::DriverError(err)
+    }
 }
 
 unsafe impl<
         'a,
-        UART: usart::Instance,
-        DmaRx: usart::RxDma<UART>,
-        DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
         const LEN_TX: usize,
         const DEPTH_TX: usize,
         const DEPTH_RX: usize,
-    > Send for RobotRadio<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_TX, DEPTH_RX> {}
+    > Send for RobotRadio<'a, LEN_RX, LEN_TX, DEPTH_TX, DEPTH_RX> {}
 
 
 pub struct RobotRadio<
     'a,
-    UART: usart::Instance,
-    DmaRx: usart::RxDma<UART>,
-    DmaTx: usart::TxDma<UART>,
     const LEN_TX: usize,
     const LEN_RX: usize,
     const DEPTH_TX: usize,
@@ -74,9 +87,6 @@ pub struct RobotRadio<
 > {
     odin_driver: OdinW262<
         'a,
-        UART,
-        DmaTx,
-        DmaRx,
         LEN_TX,
         LEN_RX,
         DEPTH_TX,
@@ -88,22 +98,20 @@ pub struct RobotRadio<
 
 impl<
         'a,
-        UART: usart::Instance,
-        DmaRx: usart::RxDma<UART>,
-        DmaTx: usart::TxDma<UART>,
         const LEN_TX: usize,
         const LEN_RX: usize,
         const DEPTH_TX: usize,
         const DEPTH_RX: usize,
-    > RobotRadio<'a, UART, DmaRx, DmaTx, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>
+    > RobotRadio<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>
 {
     pub fn new(
-        read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
         reset_pin: impl Pin,
-    ) -> RobotRadio<'a, UART, DmaRx, DmaTx, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX> {
+    ) -> RobotRadio<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX> {
         let reset_pin = Output::new(reset_pin, Level::High, Speed::Medium);
-        let radio = OdinW262::new(read_queue, write_queue);
+        let radio = OdinW262::new(read_queue, write_queue, uart);
 
         Self {
             odin_driver: radio,
@@ -126,7 +134,7 @@ impl<
         let mut highspeed_radio_uart_config = usart::Config::default();
         highspeed_radio_uart_config.baudrate = 5_250_000;
         highspeed_radio_uart_config.stop_bits = StopBits::STOP1;
-        highspeed_radio_uart_config.data_bits = DataBits::DataBits9;
+        highspeed_radio_uart_config.data_bits = DataBits::DataBits8;
         highspeed_radio_uart_config.parity = usart::Parity::ParityEven;
 
         highspeed_radio_uart_config
@@ -163,12 +171,7 @@ impl<
         defmt::trace!("configured radio link speed");
 
 
-        let mut radio_uart_config = usart::Config::default();
-        radio_uart_config.baudrate = 5_250_000;
-        radio_uart_config.stop_bits = StopBits::STOP1;
-        radio_uart_config.data_bits = DataBits::DataBits9;
-        radio_uart_config.parity = usart::Parity::ParityEven;
-        if self.odin_driver.update_host_uart_config(radio_uart_config).await.is_err() {
+        if self.odin_driver.update_host_uart_config(self.get_highspeed_uart_config()).await.is_err() {
             defmt::debug!("error increasing host baud rate.");
             return Err(RobotRadioError::ConnectUartBadHostConfigUpdate);
         }
@@ -282,7 +285,7 @@ impl<
         Ok(())
     }
 
-    pub async fn open_unicast(&mut self, ipv4: [u8; 4], port: u16) -> Result<(), ()> {
+    pub async fn open_unicast(&mut self, ipv4: [u8; 4], port: u16) -> Result<(), RobotRadioError> {
         let mut s = String::<50>::new();
         core::write!(
             &mut s,
@@ -300,36 +303,38 @@ impl<
         Ok(())
     }
 
-    pub async fn close_peer(&mut self) -> Result<(), ()> {
+    pub async fn close_peer(&mut self) -> Result<(), RobotRadioError> {
         if let Some(peer) = &self.peer {
             self.odin_driver.close_peer(peer.peer_id).await?;
             self.peer = None;
             Ok(())
         } else {
-            Err(())
+            Err(RobotRadioError::PeerMissing)
         }
     }
 
-    pub async fn send_data(&self, data: &[u8]) -> Result<(), ()> {
+    pub async fn send_data(&self, data: &[u8]) -> Result<(), RobotRadioError> {
         if let Some(peer) = &self.peer {
-            self.odin_driver.send_data(peer.channel_id, data).await
+            self.odin_driver.send_data(peer.channel_id, data).await?;
+            Ok(())
         } else {
-            Err(())
+            Err(RobotRadioError::PeerMissing)
         }
     }
 
-    pub async fn read_data<RET, FN>(&'a self, fn_read: FN) -> Result<RET, ()>
+    pub async fn read_data<RET, FN>(&'a self, fn_read: FN) -> Result<RET, RobotRadioError>
     where
         FN: FnOnce(&[u8]) -> RET,
     {
         if self.peer.is_some() {
-            self.odin_driver.read_data(fn_read).await
+            let ret = self.odin_driver.read_data(fn_read).await?;
+            Ok(ret)
         } else {
-            Err(())
+            Err(RobotRadioError::PeerMissing)
         }
     }
 
-    fn read_data_nonblocking<RET, FN>(&'a self, fn_read: FN) -> Result<Option<RET>, ()>
+    fn read_data_nonblocking<RET, FN>(&'a self, fn_read: FN) -> Result<Option<RET>, RobotRadioError>
     where
         FN: FnOnce(&[u8]) -> RET,
     {
@@ -339,9 +344,9 @@ impl<
                     Ok(ret) => {
                         Ok(Some(ret))
                     },
-                    Err(_) => {
+                    Err(e) => {
                         defmt::trace!("try read data failed after can read data reported data ready");
-                        Err(())
+                        Err(RobotRadioError::DriverError(e))
                     },
                 }
             } else {
@@ -349,11 +354,11 @@ impl<
             }
         } else {
             defmt::trace!("peer was none");
-            Err(())
+            Err(RobotRadioError::PeerMissing)
         }
     }
 
-    pub async fn send_ack(&self, nack: bool) -> Result<(), ()> {
+    pub async fn send_ack(&self, nack: bool) -> Result<(), RobotRadioError> {
         let packet = RadioPacket {
             crc32: 0,
             major_version: bindings::kProtocolVersionMajor,
@@ -377,26 +382,26 @@ impl<
         Ok(())
     }
 
-    pub async fn wait_ack(&self, timeout: Duration) -> Result<bool, ()> {
+    pub async fn wait_ack(&self, timeout: Duration) -> Result<bool, RobotRadioError> {
         let read_fut = self.read_data(|data| {
             if data.len() != size_of::<RadioPacket>() - size_of::<RadioPacket_Data>() {
-                return Err(());
+                return Err(RobotRadioError::SoftwareConnectAckHeaderInvalid);
             }
             let packet = unsafe { &*(data as *const _ as *const RadioPacket) };
 
             match packet.command_code {
                 CommandCode::CC_ACK => Ok(true),
                 CommandCode::CC_NACK => Ok(false),
-                _ => Err(()),
+                _ => Err(RobotRadioError::SoftwareConnectAckHeaderInvalid),
             }
         });
         match select(read_fut, Timer::after(timeout)).await {
             Either::First(ret) => ret?,
-            Either::Second(_) => Err(()),
+            Either::Second(_) => Err(RobotRadioError::RequestTimedOut),
         }
     }
 
-    pub async fn send_hello(&self, id: u8, team: TeamColor) -> Result<(), ()> {
+    pub async fn send_hello(&self, id: u8, team: TeamColor) -> Result<(), RobotRadioError> {
         let packet = RadioPacket {
             crc32: 0,
             major_version: bindings::kProtocolVersionMajor,
@@ -425,7 +430,7 @@ impl<
         Ok(())
     }
 
-    pub async fn send_telemetry(&self, telemetry: BasicTelemetry) -> Result<(), ()> {
+    pub async fn send_telemetry(&self, telemetry: BasicTelemetry) -> Result<(), RobotRadioError> {
         let packet = RadioPacket {
             crc32: 0,
             major_version: bindings::kProtocolVersionMajor,
@@ -448,7 +453,7 @@ impl<
         Ok(())
     }
 
-    pub async fn send_control_debug_telemetry(&self, telemetry: ControlDebugTelemetry) -> Result<(), ()> {
+    pub async fn send_control_debug_telemetry(&self, telemetry: ControlDebugTelemetry) -> Result<(), RobotRadioError> {
         let packet = RadioPacket {
             crc32: 0,
             major_version: bindings::kProtocolVersionMajor,
@@ -471,7 +476,7 @@ impl<
         Ok(())
     }
 
-    pub async fn send_parameter_response(&self, parameter_cmd: ParameterCommand) -> Result<(), ()> {
+    pub async fn send_parameter_response(&self, parameter_cmd: ParameterCommand) -> Result<(), RobotRadioError> {
         let packet = RadioPacket {
             crc32: 0,
             major_version: bindings::kProtocolVersionMajor,
@@ -494,12 +499,12 @@ impl<
         Ok(())
     }
 
-    pub async fn wait_hello(&self, timeout: Duration) -> Result<HelloResponse, ()> {
+    pub async fn wait_hello(&self, timeout: Duration) -> Result<HelloResponse, RobotRadioError> {
         let read_fut = self.read_data(|data| {
             const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
                 + size_of::<HelloResponse>();
             if data.len() != PACKET_SIZE {
-                return Err(());
+                return Err(RobotRadioError::SoftwareHelloHeaderInvalid);
             }
 
             let mut data_copy = [0u8; size_of::<RadioPacket>()];
@@ -508,7 +513,7 @@ impl<
             let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
 
             if packet.command_code != CommandCode::CC_HELLO_RESP {
-                return Err(());
+                return Err(RobotRadioError::SoftwareHelloHeaderInvalid);
             }
             // TODO: handle nack
 
@@ -517,11 +522,11 @@ impl<
 
         match select(read_fut, Timer::after(timeout)).await {
             Either::First(ret) => ret?,
-            Either::Second(_) => Err(()),
+            Either::Second(_) => Err(RobotRadioError::SoftwareHelloHeaderInvalid),
         }
     }
 
-    pub fn parse_data_packet(&self, data: &[u8]) -> Result<DataPacket, ()> {
+    pub fn parse_data_packet(&self, data: &[u8]) -> Result<DataPacket, RobotRadioError> {
         const CONTROL_PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
             + size_of::<BasicControl>();
         const PARAMERTER_PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
@@ -534,7 +539,7 @@ impl<
             let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
 
             if packet.command_code != CommandCode::CC_CONTROL {
-                return Err(());
+                return Err(RobotRadioError::ControlPacketDecodeInvalid);
             }
 
             Ok(unsafe { DataPacket::BasicControl(packet.data.control) })
@@ -545,16 +550,16 @@ impl<
             let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
 
             if packet.command_code != CommandCode::CC_ROBOT_PARAMETER_COMMAND {
-                return Err(());
+                return Err(RobotRadioError::ParameterPacketDecodeInvalid);
             }
 
             Ok(unsafe { DataPacket::ParameterCommand(packet.data.robot_parameter_command) })
         } else {
-            return Err(());
+            return Err(RobotRadioError::PacketTypeUnknown);
         }
     }
 
-    pub async fn read_packet(&self) -> Result<DataPacket, ()> {
+    pub async fn read_packet(&self) -> Result<DataPacket, RobotRadioError> {
         self.read_data(|data| {
             self.parse_data_packet(data)
         })

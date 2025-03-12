@@ -48,6 +48,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     let robot_state = ROBOT_STATE.take();
 
+    defmt::info!("robot state taken");
+
     ////////////////////////
     //  setup task pools  //
     ////////////////////////
@@ -75,12 +77,16 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     ///////////////////
     //  start tasks  //
     ///////////////////
+    
+    defmt::info!("starting tasks");
 
     create_radio_task!(main_spawner, uart_queue_spawner, uart_queue_spawner,
         robot_state,
         radio_command_publisher, radio_telemetry_subscriber,
         wifi_credentials,
         p);
+
+    defmt::info!("radio task started");
 
     create_io_task!(main_spawner, robot_state, battery_volt_publisher, p);
 

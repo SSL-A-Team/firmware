@@ -25,8 +25,8 @@ where
 
     pub fn linear_map_to_new_bounds(&self, val: T, new_bounds: LinearMap<T>) -> T {
         let scale = (new_bounds.max - new_bounds.min) / (self.max - self.min);
-        let mapped_val = (val - self.min) * scale + new_bounds.min;
-        return mapped_val;
+        
+        (val - self.min) * scale + new_bounds.min
     }
 }
 

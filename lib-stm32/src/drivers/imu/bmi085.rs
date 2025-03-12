@@ -210,10 +210,10 @@ impl<'a, 'buf>
         spi_buf: &'buf mut [u8; SPI_MIN_BUF_LEN],
     ) -> Self {
         Bmi085 {
-            spi: spi,
-            accel_cs: accel_cs,
-            gyro_cs: gyro_cs,
-            spi_buf: spi_buf,
+            spi,
+            accel_cs,
+            gyro_cs,
+            spi_buf,
             accel_range: AccelRange::Range4g,
             gyro_range: GyroRange::PlusMinus2000DegPerSec,
         }
@@ -249,9 +249,9 @@ impl<'a, 'buf>
 
         Bmi085 { 
             spi: imu_spi,
-            accel_cs: accel_cs,
+            accel_cs,
             gyro_cs: imu_cs,
-            spi_buf: spi_buf,
+            spi_buf,
             accel_range: AccelRange::Range4g,
             gyro_range: GyroRange::PlusMinus2000DegPerSec,
         }
@@ -475,7 +475,7 @@ impl<'a, 'buf>
     pub async fn accel_get_data_mg(&mut self) -> [f32; 3] {
         let raw_data = self.accel_get_raw_data().await;
 
-        return [self.convert_accel_raw_sample_mg(raw_data[0]),
+        [self.convert_accel_raw_sample_mg(raw_data[0]),
             self.convert_accel_raw_sample_mg(raw_data[1]),
             self.convert_accel_raw_sample_mg(raw_data[2])]
     }
@@ -483,7 +483,7 @@ impl<'a, 'buf>
     pub async fn accel_get_data_mps(&mut self) -> [f32; 3] {
         let raw_data = self.accel_get_raw_data().await;
 
-        return [self.convert_accel_raw_sample_mps(raw_data[0]),
+        [self.convert_accel_raw_sample_mps(raw_data[0]),
             self.convert_accel_raw_sample_mps(raw_data[1]),
             self.convert_accel_raw_sample_mps(raw_data[2])]
     }
@@ -542,7 +542,7 @@ impl<'a, 'buf>
     pub async fn gyro_get_data_dps(&mut self) -> [f32; 3] {
         let raw_data = self.gyro_get_raw_data().await;
 
-        return [self.convert_raw_gyro_sample_dps(raw_data[0]),
+        [self.convert_raw_gyro_sample_dps(raw_data[0]),
             self.convert_raw_gyro_sample_dps(raw_data[1]),
             self.convert_raw_gyro_sample_dps(raw_data[2])]
     }
@@ -550,7 +550,7 @@ impl<'a, 'buf>
     pub async fn gyro_get_data_rads(&mut self) -> [f32; 3] {
         let raw_data = self.gyro_get_raw_data().await;
 
-        return [self.convert_raw_gyro_sample_rads(raw_data[0]),
+        [self.convert_raw_gyro_sample_rads(raw_data[0]),
             self.convert_raw_gyro_sample_rads(raw_data[1]),
             self.convert_raw_gyro_sample_rads(raw_data[2])]
     }

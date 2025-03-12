@@ -1,5 +1,5 @@
 use ateam_common_packets::{bindings::{BasicTelemetry, MotorCommand_MotionType}, radio::TelemetryPacket};
-use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
+use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::Uart;
 use embassy_time::{Duration, Ticker, Timer};
@@ -7,48 +7,44 @@ use nalgebra::{Vector3, Vector4};
 
 use crate::{include_external_cpp_bin, motion::{self, params::robot_physical_params::{
         WHEEL_ANGLES_DEG, WHEEL_DISTANCE_TO_ROBOT_CENTER_M, WHEEL_RADIUS_M
-    }, robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, parameter_interface::ParameterInterface, pins::*, robot_state::SharedRobotState, stm32_interface, stspin_motor::{DribblerMotor, WheelMotor}, SystemIrqs};
+    }, robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, parameter_interface::ParameterInterface, pins::*, robot_state::SharedRobotState, stm32_interface, stspin_motor::WheelMotor, SystemIrqs};
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
-include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
 
 const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 64;
 const RX_BUF_DEPTH: usize = 20;
 
-make_uart_queue_pair!(FRONT_LEFT,
-    MotorFLUart, MotorFLDmaRx, MotorFLDmaTx,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
-
-make_uart_queue_pair!(BACK_LEFT,
-    MotorBLUart, MotorBLDmaRx, MotorBLDmaTx,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
-
-make_uart_queue_pair!(BACK_RIGHT,
-    MotorBRUart, MotorBRDmaRx, MotorBRDmaTx,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
-
-make_uart_queue_pair!(FRONT_RIGHT,
-    MotorFRUart, MotorFRDmaRx, MotorFRDmaTx,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
-
-make_uart_queue_pair!(DRIB,
-    MotorDUart, MotorDDmaRx, MotorDDmaTx,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(FRONT_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(BACK_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(FRONT_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
 
 const TICKS_WITHOUT_PACKET_STOP: usize = 20;
 const BATTERY_MIN_VOLTAGE: f32 = 18.0;
+
+#[macro_export]
+macro_rules! create_control_task {
+    ($main_spawner:ident, $uart_queue_spawner:ident, $robot_state:ident,
+        $control_command_subscriber:ident, $control_telemetry_publisher:ident,
+        $battery_volt_subscriber:ident,
+        $control_gyro_data_subscriber:ident, $control_accel_data_subscriber:ident,
+        $p:ident
+    ) => {
+        ateam_control_board::tasks::control_task::start_control_task(
+            $main_spawner, $uart_queue_spawner,
+            $robot_state,
+            $control_command_subscriber, $control_telemetry_publisher,
+            $battery_volt_subscriber,
+            $control_gyro_data_subscriber, $control_accel_data_subscriber,
+            $p.UART7, $p.PF6, $p.PF7, $p.DMA1_CH1, $p.DMA1_CH0, $p.PF5, $p.PF4,
+            $p.USART10, $p.PE2, $p.PE3, $p.DMA1_CH3, $p.DMA1_CH2, $p.PE5, $p.PE4,
+            $p.USART6, $p.PC7, $p.PC6, $p.DMA1_CH5, $p.DMA1_CH4, $p.PG7, $p.PG8,
+            $p.USART3, $p.PD9, $p.PD8, $p.DMA1_CH7, $p.DMA1_CH6, $p.PB12, $p.PB13,
+        ).await;
+    };
+}
 
 pub struct ControlTask<
     const MAX_RX_PACKET_SIZE: usize,
@@ -66,11 +62,10 @@ pub struct ControlTask<
     last_accel_y_ms: f32,
     telemetry_publisher: TelemetryPublisher,
     
-    motor_fl: WheelMotor<'static, MotorFLUart, MotorFLDmaRx, MotorFLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-    motor_bl: WheelMotor<'static, MotorBLUart, MotorBLDmaRx, MotorBLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-    motor_br: WheelMotor<'static, MotorBRUart, MotorBRDmaRx, MotorBRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-    motor_fr: WheelMotor<'static, MotorFRUart, MotorFRDmaRx, MotorFRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-    motor_drib: DribblerMotor<'static, MotorDUart, MotorDDmaRx, MotorDDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH> 
+    motor_fl: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
+    motor_bl: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
+    motor_br: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
+    motor_fr: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
 }
 
 impl <
@@ -87,11 +82,10 @@ impl <
                 battery_subscriber: BatteryVoltSubscriber,
                 gyro_subscriber: GyroDataSubscriber,
                 accel_subscriber: AccelDataSubscriber,
-                motor_fl: WheelMotor<'static, MotorFLUart, MotorFLDmaRx, MotorFLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-                motor_bl: WheelMotor<'static, MotorBLUart, MotorBLDmaRx, MotorBLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-                motor_br: WheelMotor<'static, MotorBRUart, MotorBRDmaRx, MotorBRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-                motor_fr: WheelMotor<'static, MotorFRUart, MotorFRDmaRx, MotorFRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-                motor_drib: DribblerMotor<'static, MotorDUart, MotorDDmaRx, MotorDDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH> 
+                motor_fl: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
+                motor_bl: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
+                motor_br: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
+                motor_fr: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
         ) -> Self {
             ControlTask {
                 shared_robot_state: robot_state,
@@ -108,7 +102,6 @@ impl <
                 motor_bl: motor_bl,
                 motor_br: motor_br,
                 motor_fr: motor_fr,
-                motor_drib: motor_drib 
             }
         }
 
@@ -154,19 +147,16 @@ impl <
             self.motor_bl.send_motion_command();
             self.motor_br.send_motion_command();
             self.motor_fr.send_motion_command();
-            self.motor_drib.send_motion_command();
 
             let err_fr = self.motor_fr.read_is_error() as u32;
             let err_fl = self.motor_fl.read_is_error() as u32;
             let err_br = self.motor_br.read_is_error() as u32;
             let err_bl = self.motor_bl.read_is_error() as u32;
-            let err_drib = self.motor_drib.read_is_error() as u32;
 
             let hall_err_fr = self.motor_fr.check_hall_error() as u32;
             let hall_err_fl = self.motor_fl.check_hall_error() as u32;
             let hall_err_br = self.motor_br.check_hall_error() as u32;
             let hall_err_bl = self.motor_bl.check_hall_error() as u32;
-            let hall_err_drib = self.motor_drib.check_hall_error() as u32;
 
             let basic_telem = TelemetryPacket::Basic(BasicTelemetry {
                 sequence_number: 0,
@@ -176,7 +166,7 @@ impl <
                 battery_temperature: 0.,
                 _bitfield_align_1: [],
                 _bitfield_1: BasicTelemetry::new_bitfield_1(
-                    0, 0, 0, self.shared_robot_state.ball_detected() as u32, 0, 0, 0, 0, err_fl, hall_err_fl, err_bl, hall_err_bl, err_br, hall_err_br, err_fr, hall_err_fr, err_drib, hall_err_drib, 0, 0, 0,
+                    0, 0, 0, self.shared_robot_state.ball_detected() as u32, 0, 0, 0, 0, err_fl, hall_err_fl, err_bl, hall_err_bl, err_br, hall_err_br, err_fr, hall_err_fr, 0, 0, 0, 0, 0,
                 ),
                 motor_0_temperature: 0.,
                 motor_1_temperature: 0.,
@@ -212,12 +202,11 @@ impl <
             self.flash_motor_firmware(
                 self.shared_robot_state.hw_in_debug_mode()).await;
              
-            embassy_futures::join::join5(
+            embassy_futures::join::join4(
                 self.motor_fl.leave_reset(),
                 self.motor_bl.leave_reset(),
                 self.motor_br.leave_reset(),
                 self.motor_fr.leave_reset(),
-                self.motor_drib.leave_reset(),
             ).await;
 
 
@@ -225,7 +214,6 @@ impl <
             self.motor_bl.set_telemetry_enabled(true);
             self.motor_br.set_telemetry_enabled(true);
             self.motor_fr.set_telemetry_enabled(true);
-            self.motor_drib.set_telemetry_enabled(true);
 
             self.motor_fl.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
             self.motor_bl.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
@@ -241,7 +229,6 @@ impl <
             let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));
 
             let mut cmd_vel = Vector3::new(0.0, 0.0, 0.0);
-            let mut drib_vel = 0.0;
             let mut ticks_since_control_packet = 0;
 
             loop {
@@ -249,17 +236,12 @@ impl <
                 self.motor_bl.process_packets();
                 self.motor_br.process_packets();
                 self.motor_fr.process_packets();
-                self.motor_drib.process_packets();
 
-                self.motor_fl.log_reset("FL");
-                self.motor_bl.log_reset("BL");
-                self.motor_br.log_reset("BR");
-                self.motor_fr.log_reset("FR");
-                self.motor_drib.log_reset("DRIB");
+                // self.motor_fl.log_reset("FL");
+                // self.motor_bl.log_reset("BL");
+                // self.motor_br.log_reset("BR");
+                // self.motor_fr.log_reset("FR");
 
-                if self.motor_drib.ball_detected() {
-                    defmt::info!("ball detected");
-                }
 
                 ticks_since_control_packet += 1;
                 while let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
@@ -273,7 +255,6 @@ impl <
                             );
 
                             cmd_vel = new_cmd_vel;
-                            drib_vel = latest_control.dribbler_speed;
                             ticks_since_control_packet = 0;
                         },
                         ateam_common_packets::radio::DataPacket::ParameterCommand(latest_param_cmd) => {
@@ -294,7 +275,6 @@ impl <
                 
                 if ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
                     cmd_vel = Vector3::new(0., 0., 0.);
-                    drib_vel = 0.0;
                     //defmt::warn!("ticks since packet lockout");
                 }
 
@@ -314,12 +294,12 @@ impl <
                 
                 let controls_enabled = true;
 
-                let wheel_vels = if !(self.shared_robot_state.get_battery_low() || self.shared_robot_state.get_battery_crit()) && !self.shared_robot_state.shutdown_requested() {
-                    // TODO check order
+                // let kill_vel = self.shared_robot_state.get_battery_low() || self.shared_robot_state.get_battery_crit() || self.shared_robot_state.shutdown_requested();
+                let kill_vel = false;
+                let wheel_vels = if !kill_vel {
                     self.do_control_update(&mut robot_controller, cmd_vel, self.last_gyro_rads, controls_enabled)
                 } else {
                     // Battery is too low, set velocity to zero
-                    drib_vel = 0.0;
                     defmt::warn!("CT - low battery / shutting down command lockout");
                     Vector4::new(0.0, 0.0, 0.0, 0.0)
                 };
@@ -329,8 +309,7 @@ impl <
                 self.motor_br.set_setpoint(wheel_vels[2]);
                 self.motor_fr.set_setpoint(wheel_vels[3]);
 
-                let drib_dc = -1.0 * drib_vel / 1000.0;
-                self.motor_drib.set_setpoint(drib_dc);
+                // defmt::info!("wheel vels: {} {} {} {}", self.motor_fl.read_rads(), self.motor_bl.read_rads(), self.motor_br.read_rads(), self.motor_fr.read_rads());
 
                 self.send_motor_commands_and_telemetry(
                     &mut robot_controller, self.last_battery_v);
@@ -371,25 +350,17 @@ impl <
                     defmt::info!("FR flashed");
                 }
 
-                if self.motor_drib.load_default_firmware_image().await.is_err() {
-                    defmt::error!("failed to flash DRIB");
-                    had_motor_error = true;
-                } else {
-                    defmt::info!("DRIB flashed");
-                }
-
                 if had_motor_error {
                     defmt::error!("one or more motors failed to flash.")
                 } else {
                     defmt::debug!("all motors flashed");
                 }
             } else {
-                let res = embassy_futures::join::join5(
+                let res = embassy_futures::join::join4(
                     self.motor_fl.load_default_firmware_image(),
                     self.motor_bl.load_default_firmware_image(),
                     self.motor_br.load_default_firmware_image(),
                     self.motor_fr.load_default_firmware_image(),
-                    self.motor_drib.load_default_firmware_image(),
                 )
                 .await;
                 
@@ -399,7 +370,6 @@ impl <
                         | ((res.3.is_err() as u8) & 0x01) << 3;
 
                 self.shared_robot_state.set_wheels_inop(error_mask);
-                self.shared_robot_state.set_dribbler_inop(res.4.is_err());
 
                 if error_mask != 0 {
                     defmt::error!("failed to flash drive motor (FL, BL, BR, FR, DRIB): {}", res);
@@ -446,8 +416,8 @@ async fn control_task_entry(mut control_task: ControlTask<MAX_RX_PACKET_SIZE, MA
 }
 
 pub async fn start_control_task(
-    uart_queue_spawner: SendSpawner,
     control_task_spawner: Spawner,
+    uart_queue_spawner: SendSpawner,
     robot_state: &'static SharedRobotState,
     command_subscriber: CommandsSubscriber,
     telemetry_publisher: TelemetryPublisher,
@@ -458,7 +428,6 @@ pub async fn start_control_task(
     motor_bl_uart: MotorBLUart, motor_bl_rx_pin: MotorBLUartRxPin, motor_bl_tx_pin: MotorBLUartTxPin, motor_bl_rx_dma: MotorBLDmaRx, motor_bl_tx_dma: MotorBLDmaTx, motor_bl_boot0_pin: MotorBLBootPin, motor_bl_nrst_pin: MotorBLResetPin,
     motor_br_uart: MotorBRUart, motor_br_rx_pin: MotorBRUartRxPin, motor_br_tx_pin: MotorBRUartTxPin, motor_br_rx_dma: MotorBRDmaRx, motor_br_tx_dma: MotorBRDmaTx, motor_br_boot0_pin: MotorBRBootPin, motor_br_nrst_pin: MotorBRResetPin,
     motor_fr_uart: MotorFRUart, motor_fr_rx_pin: MotorFRUartRxPin, motor_fr_tx_pin: MotorFRUartTxPin, motor_fr_rx_dma: MotorFRDmaRx, motor_fr_tx_dma: MotorFRDmaTx, motor_fr_boot0_pin: MotorFRBootPin, motor_fr_nrst_pin: MotorFRResetPin,
-    motor_d_uart: MotorDUart,   motor_d_rx_pin: MotorDUartRxPin,   motor_d_tx_pin: MotorDUartTxPin,   motor_d_rx_dma: MotorDDmaRx,   motor_d_tx_dma: MotorDDmaTx,  motor_d_boot0_pin: MotorDBootPin,  motor_d_nrst_pin: MotorDResetPin,
 
 ) {
     let initial_motor_controller_uart_conifg = stm32_interface::get_bootloader_uart_config();
@@ -471,37 +440,33 @@ pub async fn start_control_task(
     let bl_uart = Uart::new(motor_bl_uart, motor_bl_rx_pin, motor_bl_tx_pin, SystemIrqs, motor_bl_tx_dma, motor_bl_rx_dma, initial_motor_controller_uart_conifg).unwrap();
     let br_uart = Uart::new(motor_br_uart, motor_br_rx_pin, motor_br_tx_pin, SystemIrqs, motor_br_tx_dma, motor_br_rx_dma, initial_motor_controller_uart_conifg).unwrap();
     let fr_uart = Uart::new(motor_fr_uart, motor_fr_rx_pin, motor_fr_tx_pin, SystemIrqs, motor_fr_tx_dma, motor_fr_rx_dma, initial_motor_controller_uart_conifg).unwrap();
-    let drib_uart = Uart::new(motor_d_uart, motor_d_rx_pin, motor_d_tx_pin, SystemIrqs, motor_d_tx_dma, motor_d_rx_dma, initial_motor_controller_uart_conifg).unwrap();
 
     //////////////////////////////////////////////
     //  register motor queues and DMA hardware  //
     //////////////////////////////////////////////
 
-    let (fl_uart_tx, fl_uart_rx) = Uart::split(fl_uart);
-    queue_pair_register_and_spawn!(uart_queue_spawner, FRONT_LEFT, fl_uart_rx, fl_uart_tx);
-    let (bl_uart_tx, bl_uart_rx) = Uart::split(bl_uart);
-    queue_pair_register_and_spawn!(uart_queue_spawner, BACK_LEFT, bl_uart_rx, bl_uart_tx);
-    let (br_uart_tx, br_uart_rx) = Uart::split(br_uart);
-    queue_pair_register_and_spawn!(uart_queue_spawner, BACK_RIGHT, br_uart_rx, br_uart_tx);
-    let (fr_uart_tx, fr_uart_rx) = Uart::split(fr_uart);
-    queue_pair_register_and_spawn!(uart_queue_spawner, FRONT_RIGHT, fr_uart_rx, fr_uart_tx);
+    FRONT_LEFT_IDLE_BUFFERED_UART.init();
+    BACK_LEFT_IDLE_BUFFERED_UART.init();
+    BACK_RIGHT_IDLE_BUFFERED_UART.init();
+    FRONT_RIGHT_IDLE_BUFFERED_UART.init();
 
-    let (drib_uart_tx, drib_uart_rx) = Uart::split(drib_uart);
-    queue_pair_register_and_spawn!(uart_queue_spawner, DRIB, drib_uart_rx, drib_uart_tx);
+    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, FRONT_LEFT, fl_uart);
+    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, BACK_LEFT, bl_uart);
+    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, BACK_RIGHT, br_uart);
+    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, FRONT_RIGHT, fr_uart);
 
     ////////////////////////////////
     //  create motor controllers  //
     ////////////////////////////////
     
-    let motor_fl = WheelMotor::new_from_pins(&FRONT_LEFT_RX_UART_QUEUE,  &FRONT_LEFT_TX_UART_QUEUE,  motor_fl_boot0_pin, motor_fl_nrst_pin, WHEEL_FW_IMG);
-    let motor_bl = WheelMotor::new_from_pins(&BACK_LEFT_RX_UART_QUEUE,   &BACK_LEFT_TX_UART_QUEUE,   motor_bl_boot0_pin, motor_bl_nrst_pin, WHEEL_FW_IMG);
-    let motor_br = WheelMotor::new_from_pins(&BACK_RIGHT_RX_UART_QUEUE,  &BACK_RIGHT_TX_UART_QUEUE,  motor_br_boot0_pin, motor_br_nrst_pin, WHEEL_FW_IMG);
-    let motor_fr = WheelMotor::new_from_pins(&FRONT_RIGHT_RX_UART_QUEUE, &FRONT_RIGHT_TX_UART_QUEUE, motor_fr_boot0_pin, motor_fr_nrst_pin, WHEEL_FW_IMG);
-    let motor_drib = DribblerMotor::new_from_pins(&DRIB_RX_UART_QUEUE,   &DRIB_TX_UART_QUEUE,        motor_d_boot0_pin,  motor_d_nrst_pin,  DRIB_FW_IMG, 1.0);
+    let motor_fl = WheelMotor::new_from_pins(&FRONT_LEFT_IDLE_BUFFERED_UART, FRONT_LEFT_IDLE_BUFFERED_UART.get_uart_read_queue(),  FRONT_LEFT_IDLE_BUFFERED_UART.get_uart_write_queue(),  motor_fl_boot0_pin, motor_fl_nrst_pin, WHEEL_FW_IMG);
+    let motor_bl = WheelMotor::new_from_pins(&BACK_LEFT_IDLE_BUFFERED_UART, BACK_LEFT_IDLE_BUFFERED_UART.get_uart_read_queue(), BACK_LEFT_IDLE_BUFFERED_UART.get_uart_write_queue(),  motor_bl_boot0_pin, motor_bl_nrst_pin, WHEEL_FW_IMG);
+    let motor_br = WheelMotor::new_from_pins(&BACK_RIGHT_IDLE_BUFFERED_UART,  BACK_RIGHT_IDLE_BUFFERED_UART.get_uart_read_queue(), BACK_RIGHT_IDLE_BUFFERED_UART.get_uart_write_queue(), motor_br_boot0_pin, motor_br_nrst_pin, WHEEL_FW_IMG);
+    let motor_fr = WheelMotor::new_from_pins(&FRONT_RIGHT_IDLE_BUFFERED_UART, FRONT_RIGHT_IDLE_BUFFERED_UART.get_uart_read_queue(), FRONT_RIGHT_IDLE_BUFFERED_UART.get_uart_write_queue(), motor_fr_boot0_pin, motor_fr_nrst_pin, WHEEL_FW_IMG);
 
     let control_task = ControlTask::new(
         robot_state, command_subscriber, telemetry_publisher, battery_subscriber,
-        gyro_subscriber, accel_subscriber, motor_fl, motor_bl, motor_br, motor_fr, motor_drib);
+        gyro_subscriber, accel_subscriber, motor_fl, motor_bl, motor_br, motor_fr);
 
     control_task_spawner.spawn(control_task_entry(control_task)).unwrap();
 }

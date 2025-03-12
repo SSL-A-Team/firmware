@@ -1,6 +1,6 @@
 
 use ateam_common_packets::{bindings::BasicTelemetry, radio::TelemetryPacket};
-use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_signals, queue_pair_rx_task, queue_pair_tx_task, uart::queue::{UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart, static_idle_buffered_uart_nl, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use credentials::WifiCredential;
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_futures::select::{select, Either};
@@ -22,9 +22,9 @@ macro_rules! create_radio_task {
             $robot_state,
             $radio_command_publisher, $radio_telemetry_subscriber,
             &$wifi_credentials,
-            $p.USART10, $p.PE2, $p.PE3, $p.PG13, $p.PG14,
+            $p.USART2, $p.PD6, $p.PD5, $p.PD3, $p.PD4,
             $p.DMA2_CH1, $p.DMA2_CH0,
-            $p.PC13, $p.PE4).await; 
+            $p.PD7, $p.PA15); 
     };
 }
 
@@ -35,20 +35,8 @@ pub const RADIO_TX_BUF_DEPTH: usize = 4;
 pub const RADIO_MAX_RX_PACKET_SIZE: usize = 256;
 pub const RADIO_RX_BUF_DEPTH: usize = 4;
 
-make_uart_queue_pair!(RADIO,
-    RadioUART, RadioRxDMA, RadioTxDMA,
-    RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH,
-    RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(RADIO, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
 
-// pub type RadioTaskFuture<UartPeripherial: usart::BasicInstance,
-// UartRxDma: usart::RxDma<UartPeripherial>,
-// UartTxDma: usart::TxDma<UartPeripherial>,
-// const RADIO_MAX_TX_PACKET_SIZE: usize,
-// const RADIO_MAX_RX_PACKET_SIZE: usize,
-// const RADIO_TX_BUF_DEPTH: usize,
-// const RADIO_RX_BUF_DEPTH: usize>
-//  = impl Future;
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
 enum RadioConnectionState {
@@ -60,9 +48,6 @@ enum RadioConnectionState {
 }
 
 pub struct RadioTask<
-        UartPeripherial: usart::Instance,
-        UartRxDma: usart::RxDma<UartPeripherial>,
-        UartTxDma: usart::TxDma<UartPeripherial>,
         const RADIO_MAX_TX_PACKET_SIZE: usize,
         const RADIO_MAX_RX_PACKET_SIZE: usize,
         const RADIO_TX_BUF_DEPTH: usize,
@@ -70,7 +55,7 @@ pub struct RadioTask<
     shared_robot_state: &'static SharedRobotState,
     command_publisher: CommandsPublisher,
     telemetry_subscriber: TelemetrySubcriber,
-    radio: RobotRadio<'static, UartPeripherial, UartRxDma, UartTxDma, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH>,
+    radio: RobotRadio<'static, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH>,
     radio_ndet_input: Input<'static>,
 
     connection_state: RadioConnectionState,
@@ -81,15 +66,12 @@ pub struct RadioTask<
 }
 
 impl<
-        UartPeripherial: usart::Instance,
-        UartRxDma: usart::RxDma<UartPeripherial>,
-        UartTxDma: usart::TxDma<UartPeripherial>,
         const RADIO_MAX_TX_PACKET_SIZE: usize,
         const RADIO_MAX_RX_PACKET_SIZE: usize,
         const RADIO_TX_BUF_DEPTH: usize,
         const RADIO_RX_BUF_DEPTH: usize> 
-    RadioTask<UartPeripherial, UartRxDma, UartTxDma, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH> {
-    pub type TaskRobotRadio = RobotRadio<'static, UartPeripherial, UartRxDma, UartTxDma, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH>;
+    RadioTask<RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH> {
+    // pub type TaskRobotRadio = RobotRadio<'static, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH>;
 
     const RETRY_DELAY_MS: u64 = 1000;
     const RESPONSE_FROM_PC_TIMEOUT_MS: u64 = 1000;
@@ -98,7 +80,7 @@ impl<
     pub fn new(robot_state: &'static SharedRobotState,
             command_publisher: CommandsPublisher,
             telemetry_subscriber: TelemetrySubcriber,
-            radio: Self::TaskRobotRadio,
+            radio: RobotRadio<'static, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH>,
             radio_ndet_input: Input<'static>,
             wifi_credentials: &'static [WifiCredential]) -> Self {
         RadioTask {
@@ -133,13 +115,14 @@ impl<
     pub fn new_from_pins(robot_state: &'static SharedRobotState,
             command_publisher: CommandsPublisher,
             telemetry_subscriber: TelemetrySubcriber,
-            radio_rx_uart_queue: &'static UartReadQueue<UartPeripherial, UartRxDma, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH>,
-            radio_tx_uart_queue: &'static UartWriteQueue<UartPeripherial, UartTxDma, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH>,
+            radio_uart: &'static IdleBufferedUart<RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH>,
+            radio_rx_uart_queue: &'static UartReadQueue<RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH>,
+            radio_tx_uart_queue: &'static UartWriteQueue<RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH>,
             radio_reset_pin: impl Pin,
             radio_ndet_pin: impl Pin,
             wifi_credentials: &'static [WifiCredential]) -> Self {
 
-        let radio: Self::TaskRobotRadio = RobotRadio::new(radio_rx_uart_queue, radio_tx_uart_queue, radio_reset_pin);
+        let radio = RobotRadio::new(radio_uart, radio_rx_uart_queue, radio_tx_uart_queue, radio_reset_pin);
 
         let radio_ndet = Input::new(radio_ndet_pin, Pull::None);
 
@@ -419,14 +402,14 @@ pub fn startup_uart_config() -> usart::Config {
 }
 
 #[embassy_executor::task]
-async fn radio_task_entry(mut radio_task: RadioTask<RadioUART, RadioRxDMA, RadioTxDMA, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH>) {
+async fn radio_task_entry(mut radio_task: RadioTask<RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH>) {
     loop {
         radio_task.radio_task_entry().await;
         defmt::error!("radio task returned");
     }
 }
 
-pub async fn start_radio_task(radio_task_spawner: Spawner,
+pub fn start_radio_task(radio_task_spawner: Spawner,
         rx_queue_spawner: SendSpawner,
         tx_queue_spawner: SendSpawner,
         robot_state: &'static SharedRobotState,
@@ -449,12 +432,20 @@ pub async fn start_radio_task(radio_task_spawner: Spawner,
     // let radio_uart = Uart::new_with_rtscts(radio_uart, radio_uart_rx_pin, radio_uart_tx_pin, SystemIrqs, _radio_uart_rts_pin, _radio_uart_cts_pin, radio_uart_tx_dma, radio_uart_rx_dma, radio_uart_config).unwrap();
     let (radio_uart_tx, radio_uart_rx) = Uart::split(radio_uart);
 
-    // queue_pair_register_and_spawn!(queue_spawner, RADIO, radio_uart_rx, radio_uart_tx);
-    queue_pair_register_signals!(RADIO);
-    rx_queue_spawner.spawn(queue_pair_rx_task!(RADIO, radio_uart_rx)).unwrap();
-    tx_queue_spawner.spawn(queue_pair_tx_task!(RADIO, radio_uart_tx)).unwrap();
+    defmt::info!("uart initialized");
+    RADIO_IDLE_BUFFERED_UART.init();
 
-    let radio_task = RadioTask::new_from_pins(robot_state, command_publisher, telemetry_subscriber, &RADIO_RX_UART_QUEUE, &RADIO_TX_UART_QUEUE, radio_reset_pin, radio_ndet_pin, wifi_credentials);
+    defmt::info!("uart queue init");
+
+
+    rx_queue_spawner.spawn(idle_buffered_uart_read_task!(RADIO, radio_uart_rx)).unwrap();
+    defmt::info!("radio uart read task online");
+    tx_queue_spawner.spawn(idle_buffered_uart_write_task!(RADIO, radio_uart_tx)).unwrap();
+    defmt::info!("radio uart write task online");
+
+
+    let radio_task = RadioTask::new_from_pins(robot_state, command_publisher, telemetry_subscriber, &RADIO_IDLE_BUFFERED_UART, RADIO_IDLE_BUFFERED_UART.get_uart_read_queue(), RADIO_IDLE_BUFFERED_UART.get_uart_write_queue(), radio_reset_pin, radio_ndet_pin, wifi_credentials);
 
     radio_task_spawner.spawn(radio_task_entry(radio_task)).unwrap();
+    defmt::info!("radio task online");
 }

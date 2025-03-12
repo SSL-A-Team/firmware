@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 #![feature(type_alias_impl_trait)]
-#![feature(const_mut_refs)]
 #![feature(sync_unsafe_cell)]
 
 use static_cell::StaticCell;
@@ -31,8 +30,7 @@ use ateam_kicker_board::{
     pins::*
 };
 
-use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
-use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
+use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, uart::queue::{UartReadQueue, UartWriteQueue}};
 
 use ateam_common_packets::bindings::{KickerControl, KickerTelemetry, KickRequest};
 
@@ -41,11 +39,7 @@ const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 3;
 
-make_uart_queue_pair!(COMS,
-    ComsUartModule, ComsUartRxDma, ComsUartTxDma,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".bss"]);
+static_idle_buffered_uart!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".static"]);
 
 
 fn get_empty_control_packet() -> KickerControl {
@@ -68,8 +62,8 @@ fn get_empty_telem_packet() -> KickerTelemetry {
 
 #[embassy_executor::task]
 async fn high_pri_kick_task(
-        coms_reader: &'static UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>,
-        coms_writer: &'static UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>,
+        coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>,
+        coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>,
         mut adc: Adc<'static, embassy_stm32::peripherals::ADC1>,
         charge_pin: ChargePin,
         kick_pin: KickPin,
@@ -103,9 +97,9 @@ async fn high_pri_kick_task(
 
     loop {
         let mut vrefint = adc.enable_vrefint();
-        let vrefint_sample = adc.read(&mut vrefint) as f32;
+        let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
 
-        let rail_voltage = adc_200v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32, vrefint_sample));
+        let rail_voltage = adc_200v_to_rail_voltage(adc_raw_to_v(adc.blocking_read(&mut rail_pin) as f32, vrefint_sample));
         // optionally pre-flag errors? 
 
         /////////////////////////////////////
@@ -203,7 +197,7 @@ async fn high_pri_kick_task(
 }
 
 static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
-static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
+static _EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
 #[interrupt]
 unsafe fn TIM2() {
@@ -266,10 +260,11 @@ async fn main(spawner: Spawner) -> ! {
         coms_uart_config,
     ).unwrap();
 
-    let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
-    queue_pair_register_and_spawn!(spawner, COMS, coms_uart_rx, coms_uart_tx);
+    COMS_IDLE_BUFFERED_UART.init();
+    idle_buffered_uart_spawn_tasks!(spawner, COMS, coms_usart);
 
-    hp_spawner.spawn(high_pri_kick_task(&COMS_RX_UART_QUEUE, &COMS_TX_UART_QUEUE, adc, p.PE4, p.PE5, p.PE6, p.PC0, p.PE1, p.PE2, p.PE3)).unwrap();
+
+    hp_spawner.spawn(high_pri_kick_task(COMS_IDLE_BUFFERED_UART.get_uart_read_queue(), COMS_IDLE_BUFFERED_UART.get_uart_write_queue(), adc, p.PE4, p.PE5, p.PE6, p.PC0, p.PE1, p.PE2, p.PE3)).unwrap();
 
 
     loop {

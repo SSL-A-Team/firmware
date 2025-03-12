@@ -188,9 +188,9 @@ L: crate::math::lerp::Lerp<N>
         let first_val = animations[0].get_value();
         CompositeAnimation {
             id,
-            animations: animations,
+            animations,
             active_animation: 0,
-            repeat_mode: repeat_mode,
+            repeat_mode,
             anim_state: AnimState::Disabled,
             repeat_counter: 0,
             last_value: first_val,
@@ -198,13 +198,13 @@ L: crate::math::lerp::Lerp<N>
     }
 }
 
-impl<'a, N, L> AnimInterface<L> for CompositeAnimation<'a, N, L> 
+impl<N, L> AnimInterface<L> for CompositeAnimation<'_, N, L> 
 where N: LerpNumeric,
 f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N>
 {
     fn get_id(&self) -> usize {
-        return self.id;
+        self.id
     }
 
     fn enable(&mut self) {
@@ -261,7 +261,7 @@ L: crate::math::lerp::Lerp<N>
         // check if the current animation is done
         if self.animations[self.active_animation].animation_completed() {
             // advance to the next animation
-            self.active_animation = self.active_animation + 1;
+            self.active_animation += 1;
 
             if self.active_animation >= self.animations.len() {
                 self.active_animation = 0;
@@ -275,7 +275,7 @@ L: crate::math::lerp::Lerp<N>
                         if self.repeat_counter == 0 {
                             self.anim_state = AnimState::Completed;
                         } else {
-                            self.repeat_counter = self.repeat_counter - 1;
+                            self.repeat_counter -= 1;
                         }
                     },
                     AnimRepeatMode::Forever => {
@@ -324,7 +324,7 @@ impl<T: Clone + Copy + Sized> Blink<T> {
             val_two,
             v1_time: v1_time.as_millis(),
             v2_time: v2_time.as_millis(),
-            repeat_style: repeat_style,
+            repeat_style,
 
             anim_state: AnimState::Waiting,
             repeat_counter: 0,
@@ -336,7 +336,7 @@ impl<T: Clone + Copy + Sized> Blink<T> {
 
 impl<T: Clone + Copy + Sized> AnimInterface<T> for Blink<T> {
     fn get_id(&self) -> usize {
-        return self.id;
+        self.id
     }
 
     fn enable(&mut self) {
@@ -405,7 +405,7 @@ impl<T: Clone + Copy + Sized> AnimInterface<T> for Blink<T> {
                     if self.repeat_counter == 0 {
                         self.anim_state = AnimState::Completed;
                     } else {
-                        self.repeat_counter = self.repeat_counter - 1;
+                        self.repeat_counter -= 1;
                         self.start_time = now;
                         self.last_value = self.val_one;
                     }
@@ -451,7 +451,7 @@ L: crate::math::lerp::Lerp<N>
             val_one,
             val_two,
             lerp_duration_ms: lerp_duration_ms.as_millis(),
-            repeat_style: repeat_style,
+            repeat_style,
 
             anim_state: AnimState::Waiting,
             repeat_counter: 0,
@@ -469,7 +469,7 @@ f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N> 
 {
     fn get_id(&self) -> usize {
-        return self.id;
+        self.id
     }
 
     fn enable(&mut self) {
@@ -537,7 +537,7 @@ L: crate::math::lerp::Lerp<N>
                     if self.repeat_counter == 0 {
                         self.anim_state = AnimState::Completed;
                     } else {
-                        self.repeat_counter = self.repeat_counter - 1;
+                        self.repeat_counter -= 1;
                         self.start_time = now;
                         self.last_value = self.val_one;
                     }

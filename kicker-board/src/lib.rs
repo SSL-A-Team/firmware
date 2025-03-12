@@ -1,10 +1,7 @@
 #![no_std]
-#![feature(const_mut_refs)]
-#![feature(const_fn_floating_point_arithmetic)]
 #![feature(type_alias_impl_trait)]
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_uninit_array)]
-#![feature(const_maybe_uninit_uninit_array)]
 #![feature(sync_unsafe_cell)]
 
 pub mod drivers;

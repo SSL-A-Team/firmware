@@ -43,8 +43,8 @@ impl<'buf, const CS_POL_N: bool> AT25DF041B<'buf, CS_POL_N> {
     async fn transfer(&mut self, len: usize) -> Result<(), Error> {
         let len = if len > 256 { 256 } else { len };
 
-        let res = self.spi.transfer(&mut self.rx_buf[0..len], self.tx_buf).await;
-        return res;
+        
+        self.spi.transfer(&mut self.rx_buf[0..len], self.tx_buf).await
     }
 
     pub async fn verify_chip_id(&mut self) -> Result<(), ()> {
@@ -73,6 +73,6 @@ impl<'buf, const CS_POL_N: bool> AT25DF041B<'buf, CS_POL_N> {
             return Err(())
         }
 
-        return Ok(())
+        Ok(())
     }
 }

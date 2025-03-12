@@ -42,14 +42,14 @@ impl<
         let adc_bins = u32::pow(2, res_bits) - 1;
         AdcHelper {
             inst: adc_inst,
-            pin: pin,
-            adc_bins: adc_bins
+            pin,
+            adc_bins
         }
     }
 
     // vref_int_read_mv has to be passed in because the ADC peripheral that
     // it is connected to depends on the chip.
-    pub fn read_volt_raw_f32(&mut self, vref_int_read_mv: f32, vref_int_cal: f32) -> f32 {
+    pub fn read_volt_raw_f32(&mut self, _vref_int_read_mv: f32, _vref_int_cal: f32) -> f32 {
         // Based off of this: http://www.efton.sk/STM32/STM32_VREF.pdf
         // vmeas = vcal * MEAS / MAX * CAL / REFINT (4)
 
@@ -59,6 +59,6 @@ impl<
         // defmt::info!("vref_int_cal: {}", vref_int_cal);
         // defmt::info!("vref_int_read_mv: {}", vref_int_read_mv);
 
-        return V_CAL_V * (self.inst.read(&mut self.pin) as f32) / (self.adc_bins as f32); // * vref_int_cal / vref_int_read_mv;
+        V_CAL_V * (self.inst.blocking_read(&mut self.pin) as f32) / (self.adc_bins as f32)// * vref_int_cal / vref_int_read_mv;
     }
 }

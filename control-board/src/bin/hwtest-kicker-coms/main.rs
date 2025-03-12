@@ -1,14 +1,10 @@
 #![no_std]
 #![no_main]
-#![feature(type_alias_impl_trait)]
-#![feature(const_mut_refs)]
-#![feature(sync_unsafe_cell)]
-
 
 use ateam_control_board::{
-    drivers::kicker::Kicker, get_system_config, include_kicker_bin, pins::{KickerRxDma, KickerTxDma, KickerUart}, stm32_interface::{self, Stm32Interface},
+    drivers::kicker::Kicker, get_system_config, include_kicker_bin, stm32_interface::{self, Stm32Interface},
 };
-use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
+use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
 use defmt::info;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
@@ -24,11 +20,7 @@ const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 20;
 
-make_uart_queue_pair!(KICKER,
-    KickerUart, KickerRxDma, KickerTxDma,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(KICKER, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
 
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
@@ -84,14 +76,15 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     defmt::info!("init uart");
 
-    let (kicker_tx, kicker_rx) = Uart::split(kicker_usart);
-    queue_pair_register_and_spawn!(uart_queue_spawner, KICKER, kicker_rx, kicker_tx);
+    KICKER_IDLE_BUFFERED_UART.init();
+    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, KICKER, kicker_usart);
 
     defmt::info!("start qs");
 
     let kicker_stm32_interface = Stm32Interface::new_from_pins(
-        &KICKER_RX_UART_QUEUE,
-        &KICKER_TX_UART_QUEUE,
+        &KICKER_IDLE_BUFFERED_UART,
+        KICKER_IDLE_BUFFERED_UART.get_uart_read_queue(),
+        KICKER_IDLE_BUFFERED_UART.get_uart_write_queue(),
         p.PA8,
         p.PA9,
         Pull::Up,

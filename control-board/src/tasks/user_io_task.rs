@@ -22,7 +22,6 @@ use crate::drivers::shell_indicator::ShellIndicator;
 use crate::robot_state::SharedRobotState;
 
 use crate::{adc_v_to_battery_voltage, pins::*, stm32_interface, BATTERY_MIN_CRIT_VOLTAGE, BATTERY_MIN_SAFE_VOLTAGE, BATTERY_MAX_VOLTAGE, BATTERY_BUFFER_SIZE};
-use crate::tasks::shutdown_task::HARD_SHUTDOWN_TIME_MS;
 
 // #[link_section = ".sram4"]
 // static DOTSTAR_SPI_BUFFER_CELL: ConstStaticCell<[u8; 16]> = ConstStaticCell::new([0; 16]);
@@ -42,13 +41,12 @@ macro_rules! create_io_task {
         ateam_control_board::tasks::user_io_task::start_io_task(&$spawner,
             $robot_state,
             $battery_volt_publisher,
-            $p.ADC2, $p.PF14,
+            $p.ADC1, $p.PA0,
             $p.ADC3,
-            $p.PD6, $p.PD5, $p.EXTI6, $p.EXTI5,
-            $p.PG7, $p.PG6, $p.PG5, $p.PG4, $p.PG3, $p.PG2, $p.PD15,
-            $p.PG12, $p.PG11, $p.PG10, $p.PG9,
-            $p.PF3, $p.PF2, $p.PF1, $p.PF0,
-            $p.PD0, $p.PD1, $p.PD3, $p.PD4, $p.PD14,
+            $p.PE9, $p.PE8, $p.PE7, $p.PF15, $p.PF14, $p.PF13, $p.PF12, $p.PF11,
+            $p.PD0, $p.PD1, $p.PG10, $p.PG11,
+            $p.PG6, $p.PG5, $p.PG4, $p.PD13,
+            $p.PC0, $p.PC2, $p.PC3, $p.PC1, $p.PF10,
             $p.SPI6, $p.PB3, $p.PB5, $p.BDMA_CH0).await;
     };
 }
@@ -56,12 +54,10 @@ macro_rules! create_io_task {
 #[embassy_executor::task]
 async fn user_io_task_entry(
     robot_state: &'static SharedRobotState,
-    mut _usr_btn0: AdvExtiButton,
-    mut _usr_btn1: AdvExtiButton,
     battery_volt_publisher: BatteryVoltPublisher,
     mut battery_volt_adc: AdcHelper<'static, BatteryAdc, BatteryAdcPin>,
     vref_int_adc: Adc<'static, VrefIntAdc>,
-    dip_switch: DipSwitch<'static, 7>,
+    dip_switch: DipSwitch<'static, 8>,
     robot_id_rotary: RotaryEncoder<'static, 4>,
     mut debug_led0: Output<'static>,
     mut robot_id_indicator: ShellIndicator<'static>,
@@ -126,7 +122,7 @@ async fn user_io_task_entry(
         // FIXME: Vref_int is not returning valid value. Embassy issue. 
         // let vref_int_read_mv = vref_int_adc.read(&mut vref_int_ch);
         let vref_int_read_mv = 1216.0;
-        let batt_res_div_v = battery_volt_adc.read_volt_raw_f32(vref_int_read_mv as f32, vref_int_cal);
+        let batt_res_div_v = battery_volt_adc.read_volt_raw_f32(vref_int_read_mv as f32, vref_int_cal) * 0.9090;
         let battery_voltage_cur = adc_v_to_battery_voltage(batt_res_div_v);
         
         // Add new battery read to cyclical buffer.
@@ -202,9 +198,8 @@ pub async fn start_io_task(spawner: &Spawner,
     battery_volt_publisher: BatteryVoltPublisher,
     battery_adc_peri: BatteryAdc, battery_adc_pin: BatteryAdcPin,
     vref_int_adc_peri: VrefIntAdc,
-    usr_btn0_pin: UsrBtn0Pin, usr_btn1_pin: UsrBtn1Pin, usr_btn0_exti: UsrBtn0Exti, usr_btn1_exti: UsrBtn1Exti,
-    usr_dip7_pin: UsrDip7IsBluePin, usr_dip6_pin: UsrDip6Pin, usr_dip5_pin: UsrDip5Pin, usr_dip4_pin: UsrDip4Pin,
-    usr_dip3_pin: UsrDip3Pin, usr_dip2_pin: UsrDip2Pin, usr_dip1_pin: UsrDip1Pin,
+    usr_dip7_pin: UsrDip7Pin, usr_dip6_pin: UsrDip6Pin, usr_dip5_pin: UsrDip5Pin, usr_dip4_pin: UsrDip4Pin,
+    usr_dip3_pin: UsrDip3Pin, usr_dip2_pin: UsrDip2Pin, usr_dip1_pin: UsrDip1Pin, usr_dip0_pin: UsrDip0Pin,
     robot_id_selector3_pin: RobotIdSelector3Pin, robot_id_selector2_pin: RobotIdSelector2Pin,
     robot_id_selector1_pin: RobotIdSelector1Pin, robot_id_selector0_pin: RobotIdSelector0Pin,
     usr_led0_pin: UsrLed0Pin, _usr_led1_pin: UsrLed1Pin, _usr_led2_pin: UsrLed2Pin, _usr_led3_pin: UsrLed3Pin,
@@ -224,10 +219,7 @@ pub async fn start_io_task(spawner: &Spawner,
     let dotstar_spi_buf: &'static mut [u8; 16] = unsafe { &mut DOTSTAR_SPI_BUFFER_CELL };
     let dotstars = Apa102::<2>::new_from_pins(dotstar_peri, dotstar_sck_pin, dotstar_mosi_pin, dotstar_tx_dma, dotstar_spi_buf.into());
 
-    let adv_usr_btn0: AdvExtiButton = AdvExtiButton::new_from_pins(usr_btn0_pin, usr_btn0_exti, false);
-    let adv_usr_btn1: AdvExtiButton = AdvExtiButton::new_from_pins(usr_btn1_pin, usr_btn1_exti, false);
-
-    let dip_sw_pins: [AnyPin; 7] = [usr_dip7_pin.into(), usr_dip6_pin.into(), usr_dip5_pin.into(), usr_dip4_pin.into(), usr_dip3_pin.into(), usr_dip2_pin.into(), usr_dip1_pin.into()];
+    let dip_sw_pins: [AnyPin; 8] = [usr_dip7_pin.into(), usr_dip6_pin.into(), usr_dip5_pin.into(), usr_dip4_pin.into(), usr_dip3_pin.into(), usr_dip2_pin.into(), usr_dip1_pin.into(), usr_dip0_pin.into()];
     let dip_switch = DipSwitch::new_from_pins(dip_sw_pins, Pull::None, None);
 
     let robot_id_selector_pins: [AnyPin; 4] = [robot_id_selector3_pin.into(), robot_id_selector2_pin.into(), robot_id_selector1_pin.into(), robot_id_selector0_pin.into()];
@@ -243,5 +235,5 @@ pub async fn start_io_task(spawner: &Spawner,
     vref_int_adc.set_resolution(Resolution::BITS12);
     vref_int_adc.set_sample_time(SampleTime::CYCLES32_5);
 
-    spawner.spawn(user_io_task_entry(robot_state, adv_usr_btn0, adv_usr_btn1, battery_volt_publisher, battery_volt_adc, vref_int_adc, dip_switch, robot_id_rotary, debug_led0, robot_id_indicator, dotstars)).unwrap();
+    spawner.spawn(user_io_task_entry(robot_state, battery_volt_publisher, battery_volt_adc, vref_int_adc, dip_switch, robot_id_rotary, debug_led0, robot_id_indicator, dotstars)).unwrap();
 }

@@ -31,8 +31,8 @@ pub struct AdvExtiButton<const SHORT_PRESS_TIME_MS: u64 = 300, const LONG_PRESS_
 impl<const SHORT_PRESS_TIME_MS: u64, const LONG_PRESS_TIME_MS: u64, const HOLD_PRESS_TIME_MS: u64, const PRESS_TO_MS: u64> AdvExtiButton<SHORT_PRESS_TIME_MS, LONG_PRESS_TIME_MS, HOLD_PRESS_TIME_MS, PRESS_TO_MS> {
     pub fn new(input: ExtiInput<'static>, input_inverted: bool) -> Self {
         Self {
-            input: input,
-            input_inverted: input_inverted,
+            input,
+            input_inverted,
             prev_btn_state: BtnState::Released(Instant::now()),
             btn_event_ind: 0,
             btn_event_buf: [AdvButtonEvent::None; 3],
@@ -128,7 +128,7 @@ impl<const SHORT_PRESS_TIME_MS: u64, const LONG_PRESS_TIME_MS: u64, const HOLD_P
             },
         }
 
-        return None;
+        None
     }
 
     pub async fn wait_for_btn_event(&mut self, btn_event: [AdvButtonEvent; 3]) {

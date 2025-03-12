@@ -4,13 +4,12 @@ use defmt_rtt as _;
 use defmt::*;
 
 use embassy_stm32::gpio::{Level, Output, OutputOpenDrain, Pin, Speed, Pull};
-use embassy_stm32::pac;
-use embassy_stm32::usart::{self, Config, Parity, StopBits};
+use embassy_stm32::usart::{self, Config, DataBits, Parity, StopBits};
 use embassy_time::{Duration, Timer};
 use embassy_time::with_timeout;
 
 use ateam_lib_stm32::queue::{DequeueRef, Error};
-use ateam_lib_stm32::uart::queue::{Reader, Writer, UartReadQueue, UartWriteQueue};
+use ateam_lib_stm32::uart::queue::{IdleBufferedUart, Reader, UartReadQueue, UartWriteQueue, Writer};
 
 pub const STM32_BOOTLOADER_MAX_BAUD_RATE: u32 = 115_200;
 pub const STM32_BOOTLOADER_ACK: u8 = 0x79;
@@ -41,18 +40,16 @@ pub fn get_bootloader_uart_config() -> Config {
 
 pub struct Stm32Interface<
         'a,
-        UART: usart::Instance,
-        DmaRx: usart::RxDma<UART>,
-        DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
         const LEN_TX: usize,
         const DEPTH_RX: usize,
         const DEPTH_TX: usize,
 > {
-    reader: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
-    writer: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+    uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
+    reader: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
+    writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
     boot0_pin: Output<'a>,
-    reset_pin: OutputOpenDrain<'a>,
+    reset_pin: Output<'a>,
 
     reset_pin_noninverted: bool,
 
@@ -61,23 +58,22 @@ pub struct Stm32Interface<
 
 impl<
         'a,
-        UART: usart::Instance,
-        DmaRx: usart::RxDma<UART>,
-        DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
         const LEN_TX: usize,
         const DEPTH_RX: usize,
         const DEPTH_TX: usize,
-    > Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
+    > Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
 {
     pub fn new(
-        read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
         boot0_pin: Output<'a>,
-        reset_pin: OutputOpenDrain<'a>,
+        reset_pin: Output<'a>,
         reset_polarity_high: bool,
-    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
+    ) -> Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         Stm32Interface {
+            uart,
             reader: read_queue,
             writer: write_queue,
             boot0_pin,
@@ -88,13 +84,14 @@ impl<
     }
 
     pub fn new_from_pins(
-        read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
         reset_pin_pull: Pull,
         reset_polarity_high: bool,
-    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
+    ) -> Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         let boot0_output = Output::new(boot0_pin, Level::Low, Speed::Medium);
 
         let initial_reset_level = if reset_polarity_high {
@@ -102,9 +99,10 @@ impl<
         } else {
             Level::High
         };
-        let reset_output = OutputOpenDrain::new(reset_pin, initial_reset_level, Speed::Medium, reset_pin_pull);
+        let reset_output = Output::new(reset_pin, initial_reset_level, Speed::Medium);
 
         Stm32Interface {
+            uart,
             reader: read_queue,
             writer: write_queue,
             boot0_pin: boot0_output,
@@ -215,15 +213,12 @@ impl<
     pub async fn update_uart_config(&self, baudrate: u32, parity: Parity) {
         let mut config = usart::Config::default();
         config.baudrate = baudrate;
+        config.data_bits = DataBits::DataBits8;
         config.parity = parity;
 
-        if self.writer.update_uart_config(config).await.is_err() {
+        if self.uart.update_uart_config(config).await.is_err() {
             defmt::panic!("failed to update uart config");
         }
-    }
-
-    pub async fn read_latest_packet(&self) {
-        self.reader.read(|buf| {}).await;
     }
 
     pub fn try_read_data(&self) -> Result<DequeueRef<LEN_RX, DEPTH_RX>, Error> {

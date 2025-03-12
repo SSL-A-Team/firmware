@@ -1,29 +1,29 @@
 use core::{
-    cell::{SyncUnsafeCell, UnsafeCell},
-    future::poll_fn,
-    mem::MaybeUninit,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-    task::{Poll, Waker}
+    cell::{SyncUnsafeCell, UnsafeCell}, future::poll_fn, sync::atomic::{AtomicBool, AtomicUsize, Ordering}, task::{Poll, Waker}
 };
 use critical_section;
 
-// #[macro_export]
-// macro_rules! create_queue_buffer {
-//     () => {
-        
-//     };
-// }
-
 pub struct Buffer<const LENGTH: usize> {
-    pub data: [MaybeUninit<u8>; LENGTH],
-    // pub len: MaybeUninit<usize>,
+    pub data: [u8; LENGTH],
     len: usize,
 }
 
+impl<const LENGTH: usize> Default for Buffer<LENGTH> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const LENGTH: usize> Buffer<LENGTH> {
+    pub const fn new() -> Self {
+        Self {
+            data: [0_u8; LENGTH],
+            len: 0,
+        }
+    }
+
     pub const EMPTY: Buffer<LENGTH> = Buffer {
-        data: MaybeUninit::uninit_array(),
-        // len: MaybeUninit::uninit(),
+        data: [0_u8; LENGTH],
         len: 0
     };
 }
@@ -33,7 +33,7 @@ pub struct DequeueRef<'a, const LENGTH: usize, const DEPTH: usize> {
     data: &'a [u8],
 }
 
-impl<'a, const LENGTH: usize, const DEPTH: usize> DequeueRef<'a, LENGTH, DEPTH> {
+impl<const LENGTH: usize, const DEPTH: usize> DequeueRef<'_, LENGTH, DEPTH> {
     pub fn data(&self) -> &[u8] {
         self.data
     }
@@ -42,7 +42,7 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> DequeueRef<'a, LENGTH, DEPTH> 
     }
 }
 
-impl<'a, const LENGTH: usize, const DEPTH: usize> Drop for DequeueRef<'a, LENGTH, DEPTH> {
+impl<const LENGTH: usize, const DEPTH: usize> Drop for DequeueRef<'_, LENGTH, DEPTH> {
     fn drop(&mut self) {
         self.queue.finish_dequeue();
     }
@@ -54,7 +54,7 @@ pub struct EnqueueRef<'a, const LENGTH: usize, const DEPTH: usize> {
     len: &'a mut usize,
 }
 
-impl<'a, const LENGTH: usize, const DEPTH: usize> EnqueueRef<'a, LENGTH, DEPTH> {
+impl<const LENGTH: usize, const DEPTH: usize> EnqueueRef<'_, LENGTH, DEPTH> {
     pub fn data(&mut self) -> &mut [u8] {
         self.data
     }
@@ -68,7 +68,7 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> EnqueueRef<'a, LENGTH, DEPTH> 
     }
 }
 
-impl<'a, const LENGTH: usize, const DEPTH: usize> Drop for EnqueueRef<'a, LENGTH, DEPTH> {
+impl<const LENGTH: usize, const DEPTH: usize> Drop for EnqueueRef<'_, LENGTH, DEPTH> {
     fn drop(&mut self) {
         self.queue.finish_enqueue();
     }
@@ -91,13 +91,14 @@ pub struct Queue<const LENGTH: usize, const DEPTH: usize> {
     dequeue_waker: UnsafeCell<Option<Waker>>,
 }
 
-unsafe impl<'a, const LENGTH: usize, const DEPTH: usize> Send for Queue<LENGTH, DEPTH> {}
-unsafe impl<'a, const LENGTH: usize, const DEPTH: usize> Sync for Queue<LENGTH, DEPTH> {}
+unsafe impl<const LENGTH: usize, const DEPTH: usize> Send for Queue<LENGTH, DEPTH> {}
+unsafe impl<const LENGTH: usize, const DEPTH: usize> Sync for Queue<LENGTH, DEPTH> {}
 
-impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
+
+impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
     pub const fn new(buffers: &'static [SyncUnsafeCell<Buffer<LENGTH>>; DEPTH]) -> Self {
         Self {
-            buffers: buffers,
+            buffers,
             read_index: AtomicUsize::new(0),
             read_in_progress: AtomicBool::new(false),
             write_index: AtomicUsize::new(0),
@@ -132,7 +133,8 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                  * defined behavior constraints w.r.t data alignment and init values, and therefore referencing
                  * the buffer means the internal data is valid.
                  */
-                let data = unsafe { &MaybeUninit::slice_assume_init_ref(&buf.data)[..buf.len] };
+                let data = &buf.data[..buf.len];
+                // let data = unsafe { &MaybeUninit::slice_assume_init_ref(&buf.data)[..buf.len] };
 
                 Ok(DequeueRef { queue: self, data })
             } else {
@@ -174,7 +176,11 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                 self.read_in_progress.store(false, Ordering::SeqCst);
 
                 self.read_index.store((self.read_index.load(Ordering::SeqCst) + 1) % DEPTH, Ordering::SeqCst);
-                self.size.fetch_sub(1, Ordering::SeqCst);
+
+                // NOTE: this was an atomic fetch_add but that isn't supported on
+                // thumbv6m
+                let cur_size = self.size.load(Ordering::SeqCst);
+                self.size.store(cur_size - 1, Ordering::SeqCst);
             }
 
             /* Safety: this raw pointer write is safe because the underlying memory is statically allocated
@@ -204,7 +210,8 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                  * defined behavior constraints w.r.t data alignment and init values, and therefore referencing
                  * the buffer means the internal data is valid.
                  */
-                let data = unsafe { MaybeUninit::slice_assume_init_mut(&mut buf.data) };
+                // let data = unsafe { MaybeUninit::slice_assume_init_mut(&mut buf.data) };
+                let data = &mut buf.data;
 
                 // TODO CHCEK: https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#method.write-1 this should overwrite the value and
                 // return a mut ref to the new value
@@ -257,7 +264,11 @@ impl<'a, const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                 self.write_in_progress.store(false, Ordering::SeqCst);
 
                 self.write_index.store((self.write_index.load(Ordering::SeqCst) + 1) % DEPTH, Ordering::SeqCst);
-                self.size.fetch_add(1, Ordering::SeqCst);
+
+                // NOTE: this was an atomic fetch_add but that isn't supported on
+                // thumbv6m
+                let cur_size = self.size.load(Ordering::SeqCst);
+                self.size.store(cur_size + 1, Ordering::SeqCst);
             }
 
             /* Safety: this raw pointer write is safe because the underlying memory is statically allocated

@@ -372,7 +372,8 @@ int main() {
 
         if (run_torque_loop || run_vel_loop) {
             // detect if the encoder is not pulling the detect pin down
-            bool encoder_disconnected = (GPIOA->IDR & GPIO_IDR_5) != 0;
+            // bool encoder_disconnected = (GPIOA->IDR & GPIO_IDR_5) != 0;
+            bool encoder_disconnected = false;
 
             // set the motor duty cycle
             if (motion_control_type == OPEN_LOOP) {

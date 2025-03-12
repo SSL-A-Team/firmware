@@ -2,10 +2,10 @@
 target = "thumbv7em-none-eabihf"
 
 [target.thumbv7em-none-eabihf]
-runner = 'probe-rs run --chip STM32H723ZGTx --connect-under-reset'
-# runner = 'probe-rs run --chip STM32H723ZGTx'
+# runner = 'probe-rs run --chip STM32H723ZGTx --connect-under-reset'
+runner = 'probe-rs run --chip STM32H723ZGTx'
 
 
 [env]
 # DEFMT_LOG = "error,ateam-control-board::tasks::control_task=trace"
-DEFMT_LOG="debug"
+DEFMT_LOG="info"
