@@ -377,7 +377,7 @@ int main() {
             // detect if the encoder is not pulling the detect pin down
             bool encoder_disconnected = (GPIOA->IDR & GPIO_IDR_5) != 0;
 
-            pwm6step_set_duty_cycle_f(0.25);
+            pwm6step_set_duty_cycle_f(0.10);
 
             // load system state for transmit
 

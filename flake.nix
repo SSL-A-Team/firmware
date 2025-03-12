@@ -40,6 +40,7 @@
             gcc-arm-embedded-12
 
             # programmers
+            dfu-util
             openocd
             probe-rs
 

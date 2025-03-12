@@ -10,7 +10,6 @@ use crate::{include_external_cpp_bin, motion::{self, params::robot_physical_para
     }, robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, parameter_interface::ParameterInterface, pins::*, robot_state::SharedRobotState, stm32_interface, stspin_motor::WheelMotor, SystemIrqs};
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
-include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
 
 const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 3;
