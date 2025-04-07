@@ -27,7 +27,7 @@ use ateam_kicker_board::{
     kick_manager::{
         KickManager, 
         KickType}, 
-    pins::*
+    pins::*, tasks::{get_system_config, ClkSource}
 };
 
 use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, uart::queue::{UartReadQueue, UartWriteQueue}};
@@ -70,8 +70,7 @@ async fn high_pri_kick_task(
         chip_pin: ChipPin,
         mut rail_pin: PowerRail200vReadPin,
         err_led_pin: RedStatusLedPin,
-        ball_detected_led1_pin: BlueStatusLed1Pin,
-        ball_detected_led2_pin: BlueStatusLed2Pin) -> ! {
+        ball_detected_led_pin: BlueStatusLedPin) -> ! {
 
     // pins/safety management
     let charge_pin = Output::new(charge_pin, Level::Low, Speed::Medium);
@@ -81,8 +80,7 @@ async fn high_pri_kick_task(
 
     // debug LEDs
     let mut err_led = Output::new(err_led_pin, Level::Low, Speed::Low);
-    let mut ball_detected_led1 = Output::new(ball_detected_led1_pin, Level::Low, Speed::Low);
-    let mut ball_detected_led2 = Output::new(ball_detected_led2_pin, Level::Low, Speed::Low);
+    let mut ball_detected_led = Output::new(ball_detected_led_pin, Level::Low, Speed::Low);
 
     // TODO dotstars
 
@@ -157,16 +155,10 @@ async fn high_pri_kick_task(
                     let _res = coms_writer.enqueue_copy(struct_bytes);
                 }
 
-                if ball_detected_led1.is_set_high() {
-                    ball_detected_led1.set_low();
+                if ball_detected_led.is_set_high() {
+                    ball_detected_led.set_low();
                 } else {
-                    ball_detected_led1.set_high();
-                }
-
-                if ball_detected_led2.is_set_high() {
-                    ball_detected_led2.set_low();
-                } else {
-                    ball_detected_led2.set_high();
+                    ball_detected_led.set_high();
                 }
 
                 last_packet_sent_time = cur_time;
@@ -181,12 +173,9 @@ async fn high_pri_kick_task(
         }
 
         if ball_detected {
-            ball_detected_led1.set_high();
-            ball_detected_led2.set_high();
+            ball_detected_led.set_high();
         } else {
-            ball_detected_led1.set_low();
-            ball_detected_led2.set_low();
-
+            ball_detected_led.set_low();
         }
         // TODO Dotstar
 
@@ -210,21 +199,7 @@ bind_interrupts!(struct Irqs {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) -> ! {
-    let mut stm32_config: embassy_stm32::Config = Default::default();
-    stm32_config.rcc.hsi = true;
-    stm32_config.rcc.pll_src = PllSource::HSI; // internal 16Mhz source
-    stm32_config.rcc.pll = Some(Pll {
-        prediv: PllPreDiv::DIV8, // base 2MHz 
-        mul: PllMul::MUL168, // mul up to 336 MHz
-        divp: Some(PllPDiv::DIV2), // div down to 168 MHz, AHB (max)
-        divq: Some(PllQDiv::DIV7), // div down to 48 Mhz for dedicated 48MHz clk (exact)
-        divr: None, // turn off I2S clk
-    });
-    stm32_config.rcc.ahb_pre = AHBPrescaler::DIV1; // AHB 168 MHz (max)
-    stm32_config.rcc.apb1_pre = APBPrescaler::DIV4; // APB1 42 MHz (max)
-    stm32_config.rcc.apb2_pre = APBPrescaler::DIV2; // APB2 84 MHz (max)
-    stm32_config.rcc.sys = Sysclk::PLL1_P; // enable the system
-
+    let stm32_config = get_system_config(ClkSource::InternalOscillator);
     let p = embassy_stm32::init(stm32_config);
 
     info!("kicker startup!");
@@ -233,7 +208,7 @@ async fn main(spawner: Spawner) -> ! {
 
     let mut adc = Adc::new(p.ADC1);
     adc.set_resolution(Resolution::BITS12);
-    adc.set_sample_time(SampleTime::CYCLES480);
+    adc.set_sample_time(SampleTime::CYCLES247_5);
 
     // high priority executor handles kicking system
     // High-priority executor: I2C1, priority level 6
@@ -264,7 +239,13 @@ async fn main(spawner: Spawner) -> ! {
     idle_buffered_uart_spawn_tasks!(spawner, COMS, coms_usart);
 
 
-    hp_spawner.spawn(high_pri_kick_task(COMS_IDLE_BUFFERED_UART.get_uart_read_queue(), COMS_IDLE_BUFFERED_UART.get_uart_write_queue(), adc, p.PE4, p.PE5, p.PE6, p.PC0, p.PE1, p.PE2, p.PE3)).unwrap();
+    hp_spawner.spawn(high_pri_kick_task(
+        COMS_IDLE_BUFFERED_UART.get_uart_read_queue(),
+        COMS_IDLE_BUFFERED_UART.get_uart_write_queue(),
+        adc,
+        p.PB15, p.PD9,
+        p.PD8, p.PC3,
+        p.PE0, p.PE1)).unwrap();
 
 
     loop {

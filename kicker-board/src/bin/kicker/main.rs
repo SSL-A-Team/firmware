@@ -26,11 +26,11 @@ use ateam_kicker_board::{
     adc_raw_to_v, adc_200v_to_rail_voltage,
     kick_manager::{KickManager, KickType},
     pins::{
-        BlueStatusLed1Pin, BlueStatusLed2Pin, ChargePin, ChipPin, PowerRail200vReadPin, KickPin, RedStatusLedPin,
+        BlueStatusLedPin, ChargePin, ChipPin, PowerRail200vReadPin, KickPin, RedStatusLedPin,
     },
 };
 
-use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, static_idle_buffered_uart_nl, uart::queue::{UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl, uart::queue::{UartReadQueue, UartWriteQueue}};
 
 use ateam_common_packets::bindings::{
     KickRequest::{self, KR_ARM, KR_DISABLE},
@@ -91,8 +91,7 @@ async fn high_pri_kick_task(
     mut rail_pin: PowerRail200vReadPin,
     grn_led_pin: GreenStatusLedPin,
     err_led_pin: RedStatusLedPin,
-    ball_detected_led1_pin: BlueStatusLed1Pin,
-    ball_detected_led2_pin: BlueStatusLed2Pin,
+    ball_detected_led1_pin: BlueStatusLedPin,
 ) -> ! {
     // pins/safety management
     let charge_pin = Output::new(charge_pin, Level::Low, Speed::Medium);
@@ -104,7 +103,6 @@ async fn high_pri_kick_task(
     let mut status_led = Output::new(grn_led_pin, Level::Low, Speed::Low);
     let mut err_led = Output::new(err_led_pin, Level::Low, Speed::Low);
     let mut ball_detected_led1 = Output::new(ball_detected_led1_pin, Level::Low, Speed::Low);
-    let mut ball_detected_led2 = Output::new(ball_detected_led2_pin, Level::Low, Speed::Low);
 
     // TODO dotstars
 
@@ -384,11 +382,9 @@ async fn high_pri_kick_task(
 
         if ball_detected {
             ball_detected_led1.set_high();
-            ball_detected_led2.set_high();
 
         } else {
             ball_detected_led1.set_low();
-            ball_detected_led2.set_low();
         }
         // TODO Dotstar
 
@@ -421,7 +417,7 @@ async fn main(spawner: Spawner) -> ! {
 
     let mut adc = Adc::new(p.ADC1);
     adc.set_resolution(embassy_stm32::adc::Resolution::BITS12);
-    adc.set_sample_time(SampleTime::CYCLES480);
+    adc.set_sample_time(SampleTime::CYCLES247_5);
 
     // high priority executor handles kicking system
     // High-priority executor: I2C1, priority level 6
@@ -429,7 +425,14 @@ async fn main(spawner: Spawner) -> ! {
     embassy_stm32::interrupt::TIM2.set_priority(embassy_stm32::interrupt::Priority::P6);
     let hp_spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
 
-    unwrap!(hp_spawner.spawn(high_pri_kick_task(COMS_IDLE_BUFFERED_UART.get_uart_read_queue(), COMS_IDLE_BUFFERED_UART.get_uart_write_queue(), adc, p.PE4, p.PE5, p.PE6, p.PA1, p.PA0, p.PC0, p.PE0, p.PE1, p.PE2, p.PE3)));
+    unwrap!(hp_spawner.spawn(high_pri_kick_task(
+        COMS_IDLE_BUFFERED_UART.get_uart_read_queue(), COMS_IDLE_BUFFERED_UART.get_uart_write_queue(),
+        adc, 
+        p.PB15, p.PD9, p.PD8,
+        p.PC0, p.PC2,
+        p.PC3,
+        p.PB9, p.PE0,
+        p.PE1)));
 
 
     //////////////////////////////////

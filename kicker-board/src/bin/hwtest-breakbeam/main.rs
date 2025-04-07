@@ -4,7 +4,7 @@
 
 use defmt::*;
 
-use ateam_kicker_board::tasks::get_system_config;
+use ateam_kicker_board::tasks::{get_system_config, ClkSource};
 use embassy_stm32::gpio::{Level, Output, Speed};
 use {defmt_rtt as _, panic_probe as _};
 use embassy_executor::Spawner;
@@ -15,8 +15,8 @@ use ateam_kicker_board::drivers::breakbeam::Breakbeam;
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    let sys_cfg = get_system_config(ateam_kicker_board::tasks::ClkSource::InternalOscillator);
-    let p = embassy_stm32::init(sys_cfg);
+    let stm32_config = get_system_config(ClkSource::InternalOscillator);
+    let p = embassy_stm32::init(stm32_config);
 
     let _charge_pin = Output::new(p.PE4, Level::Low, Speed::Medium);
     let _kick_pin = Output::new(p.PE5, Level::Low, Speed::Medium);
