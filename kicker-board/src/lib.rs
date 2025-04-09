@@ -12,6 +12,14 @@ pub mod pins;
 // pub mod queue;
 // pub mod uart_queue;
 
+#[macro_export]
+macro_rules! include_external_cpp_bin {
+    ($var_name:ident, $bin_file:literal) => {
+        pub static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../motor-controller/build/bin/", $bin_file)).len()]
+            = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../motor-controller/build/bin/", $bin_file));
+    }
+}
+
 pub const ADC_VREFINT_NOMINAL: f32 = 1230.0; // mV
 
 pub const fn adc_raw_to_v(adc_raw: f32, vrefint_sample: f32) -> f32 {
@@ -23,21 +31,17 @@ pub const fn adc_v_to_battery_voltage(adc_mv: f32) -> f32 {
 }
 
 pub const fn adc_200v_to_rail_voltage(adc_mv: f32) -> f32 {
-    adc_mv * 200.0
+    adc_mv / 2.0 * 200.0
 }
 
 pub const fn adc_12v_to_rail_voltage(adc_mv: f32) -> f32 {
-    adc_mv * 12.0
-}
-
-pub const fn adc_6v2_to_rail_voltage(adc_mv: f32) -> f32 {
-    adc_mv * 6.2
+    adc_mv / 2.0 * 18.0
 }
 
 pub const fn adc_5v0_to_rail_voltage(adc_mv: f32) -> f32 {
-    adc_mv * 5.0
+    adc_mv  / 2.0 * 5.0
 }
 
 pub const fn adc_3v3_to_rail_voltage(adc_mv: f32) -> f32 {
-    adc_mv / 1.25 * 3.3
+    adc_mv / 2.0 * 3.3
 }

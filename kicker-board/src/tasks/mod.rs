@@ -1,4 +1,4 @@
-use embassy_stm32::{rcc::{AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllMul, PllPDiv, PllPreDiv, PllQDiv, PllRDiv, PllSource, Sysclk}, time::Hertz, Config};
+use embassy_stm32::{rcc::{mux::Adcsel, AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllMul, PllPDiv, PllPreDiv, PllQDiv, PllRDiv, PllSource, Sysclk}, time::Hertz, Config};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ClkSource {
@@ -9,7 +9,7 @@ pub enum ClkSource {
 pub fn get_system_config(clk_src: ClkSource) -> Config {
     let mut config = Config::default();
 
-    let pre_div = if clk_src == ClkSource::External8MHzOscillator {
+    if clk_src == ClkSource::External8MHzOscillator {
         // configure the external clock mode
         config.rcc.hse = Some(Hse {
             freq: Hertz(8_000_000),
@@ -37,6 +37,8 @@ pub fn get_system_config(clk_src: ClkSource) -> Config {
         });
     };
 
+    config.rcc.mux.adc12sel = Adcsel::PLL1_P;
+    config.rcc.mux.adc345sel = Adcsel::PLL1_P;
 
     // configure the busses
     config.rcc.ahb_pre = AHBPrescaler::DIV1;

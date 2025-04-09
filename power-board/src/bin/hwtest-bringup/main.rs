@@ -117,7 +117,7 @@ async fn main(_spawner: Spawner) {
         Timer::after_millis(1000).await;
         
         let _ = tone_player.load_song(&TEST_SONG);
-        tone_player.play_song().await;
+        // tone_player.play_song().await;
 
         info!("low");
         led_red.set_low();
