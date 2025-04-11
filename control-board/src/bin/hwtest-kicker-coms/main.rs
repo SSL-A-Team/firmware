@@ -1,10 +1,13 @@
 #![no_std]
 #![no_main]
+#![feature(sync_unsafe_cell)]
 
 use ateam_control_board::{
-    drivers::kicker::Kicker, get_system_config, include_kicker_bin, stm32_interface::{self, Stm32Interface},
+    drivers::kicker::Kicker, get_system_config, include_kicker_bin,
 };
-use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
+use ateam_lib_stm32::{
+    drivers::boot::stm32_interface::{self, Stm32Interface},
+    idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
 use defmt::info;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{

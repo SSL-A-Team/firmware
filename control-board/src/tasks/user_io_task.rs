@@ -3,16 +3,9 @@ use ateam_lib_stm32::anim::{self, AnimInterface, AnimRepeatMode, Blink, Composit
 use ateam_lib_stm32::drivers::led::apa102::{Apa102, Apa102Anim};
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{AnyPin, Level, Output, Pull, Speed};
-use embassy_stm32::spi::{Config, Spi};
-use embassy_stm32::time::mhz;
-use embassy_time::{Duration, Timer};
+use embassy_time::Timer;
 
 use smart_leds::colors::{BLACK, GREEN, ORANGE, RED, WHITE, YELLOW};
-use smart_leds::RGB8;
-use static_cell::ConstStaticCell;
-
-// use ateam_lib_stm32::drivers::led::apa102::{Apa102, Apa102AnimationRepeat, Apa102AnimationTrait, Apa102Blink};
-use ateam_lib_stm32::drivers::switches::button::AdvExtiButton;
 use ateam_lib_stm32::drivers::switches::dip::DipSwitch;
 use ateam_lib_stm32::drivers::switches::rotary_encoder::RotaryEncoder;
 use ateam_lib_stm32::drivers::other::adc_helper::AdcHelper;
@@ -21,7 +14,7 @@ use embassy_stm32::adc::{Adc, SampleTime, Resolution};
 use crate::drivers::shell_indicator::ShellIndicator;
 use crate::robot_state::SharedRobotState;
 
-use crate::{adc_v_to_battery_voltage, pins::*, stm32_interface, BATTERY_MIN_CRIT_VOLTAGE, BATTERY_MIN_SAFE_VOLTAGE, BATTERY_MAX_VOLTAGE, BATTERY_BUFFER_SIZE};
+use crate::{adc_v_to_battery_voltage, pins::*, BATTERY_MIN_CRIT_VOLTAGE, BATTERY_MIN_SAFE_VOLTAGE, BATTERY_MAX_VOLTAGE, BATTERY_BUFFER_SIZE};
 
 // #[link_section = ".sram4"]
 // static DOTSTAR_SPI_BUFFER_CELL: ConstStaticCell<[u8; 16]> = ConstStaticCell::new([0; 16]);

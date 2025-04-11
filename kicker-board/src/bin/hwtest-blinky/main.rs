@@ -8,8 +8,7 @@ use {defmt_rtt as _, panic_probe as _};
 use embassy_executor::Spawner;
 use embassy_executor::Executor;
 use embassy_stm32::{
-    adc::{Adc, SampleTime}, 
-    exti::ExtiInput,
+    adc::{Adc, SampleTime},
     gpio::{Input, Level, Output, Pull, Speed}, 
     spi::{Config, Spi}, time::mhz,
 };

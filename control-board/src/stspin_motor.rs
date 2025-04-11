@@ -1,6 +1,6 @@
 use core::{mem::MaybeUninit, f32::consts::PI};
 
-use ateam_lib_stm32::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
+use ateam_lib_stm32::{drivers::boot::stm32_interface::Stm32Interface, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use defmt::*;
 use embassy_stm32::{
     gpio::{Pin, Pull},
@@ -18,8 +18,6 @@ use ateam_common_packets::bindings::{
     MotorResponsePacketType::{MRP_MOTION, MRP_PARAMS},
     MotorResponse_Motion_Packet, MotorResponse_Params_Packet,
 };
-
-use crate::stm32_interface::Stm32Interface;
 
 pub struct WheelMotor<
     'a,

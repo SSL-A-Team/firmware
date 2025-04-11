@@ -15,7 +15,6 @@ use embassy_stm32::{
     interrupt,
     interrupt::InterruptExt,
     pac::Interrupt,
-    rcc::{AHBPrescaler, APBPrescaler, Pll, PllMul, PllPDiv, PllPreDiv, PllQDiv, PllSource, Sysclk},
     usart::{Config, Parity, StopBits, Uart}
 };
 use embassy_stm32::{bind_interrupts, peripherals, usart};

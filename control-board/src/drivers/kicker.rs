@@ -1,8 +1,6 @@
-use ateam_lib_stm32::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
+use ateam_lib_stm32::{drivers::boot::stm32_interface::Stm32Interface, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use embassy_stm32::{gpio::{Pin, Pull}, usart::Parity};
 use embassy_time::{Duration, Timer};
-
-use crate::stm32_interface::Stm32Interface;
 
 use ateam_common_packets::bindings::{KickerControl, KickerTelemetry, KickRequest};
 

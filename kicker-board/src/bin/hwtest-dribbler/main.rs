@@ -14,7 +14,7 @@ use embassy_stm32::{
     interrupt, pac::Interrupt
 };
 
-use ateam_lib_stm32::{drivers::boot::stm32_interface::{self, Stm32Interface}, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, uart};
+use ateam_lib_stm32::{drivers::boot::stm32_interface::{self, Stm32Interface}, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
 
 use ateam_kicker_board::{tasks::get_system_config, *};
 
@@ -41,7 +41,7 @@ unsafe fn CORDIC() {
 }
 
 #[embassy_executor::main]
-async fn main(spawner: Spawner) -> ! {
+async fn main(_spawner: Spawner) -> ! {
     let sys_config = get_system_config(tasks::ClkSource::InternalOscillator);
     let p = embassy_stm32::init(sys_config);
 

@@ -1,11 +1,11 @@
 use ateam_common_packets::radio::DataPacket;
-use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use embassy_executor::{SendSpawner, Spawner};
-use embassy_stm32::{gpio::{Level, Output, Pin, Speed}, usart::Uart};
+use embassy_stm32::{gpio::Pin, usart::Uart};
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Ticker, Timer, Instant};
 
-use crate::{drivers::kicker::Kicker, include_kicker_bin, pins::*, robot_state::SharedRobotState, stm32_interface, SystemIrqs};
+use crate::{drivers::kicker::Kicker, include_kicker_bin, pins::*, robot_state::SharedRobotState, SystemIrqs};
 
 include_kicker_bin! {KICKER_FW_IMG, "kicker.bin"}
 
