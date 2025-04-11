@@ -1,1 +1,1 @@
-pub mod power_monitoring_task;
+pub mod power_task;

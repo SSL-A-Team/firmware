@@ -21,6 +21,7 @@ pub mod audio;
 pub mod drivers;
 pub mod math;
 pub mod uart;
+pub mod power;
 
 pub mod queue;
 
