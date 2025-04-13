@@ -1,8 +1,94 @@
+use ateam_lib_stm32::{filter::WindowAvergingFilter, math::range::Range, power::PowerRail};
 use embassy_stm32::{adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime}, peripherals::ADC1};
-use embassy_time::{Duration, Ticker};
+use embassy_time::{Duration, Instant, Ticker};
 
-use crate::pins::*;
+use crate::{adc_raw_to_mv, adc_raw_vrefint_to_mv, limits::{POWER_RAIL_12V0_PARAMETERS, POWER_RAIL_3V3_PARAMETERS, POWER_RAIL_5V0_PARAMETERS, POWER_RAIL_BATTERY_PARAMETERSL}, pins::*};
 
+const BATTERY_CELL_READ_INTERVAL: Duration = Duration::from_millis(1300);
+const POWER_RAIL_FILTER_WINDOW_SIZE: usize = 10;
+
+#[derive(Debug)]
+pub struct PowerRailAdcSamples {
+    pub battery: f32,
+    pub rail_12v0: f32,
+    pub rail_5v0: f32,
+    pub rail_3v3: f32,
+}
+
+impl Default for PowerRailAdcSamples {
+    fn default() -> Self {
+        Self { battery: Default::default(), rail_12v0: Default::default(), rail_5v0: Default::default(), rail_3v3: Default::default() }
+    }
+}
+
+impl PowerRailAdcSamples {
+    pub fn new_from_samples(samples: &[u16]) -> Result<Self, Self> {
+        if samples.len() == 4 {
+            Ok(Self {
+                battery:   adc_raw_to_mv(samples[0]),
+                rail_12v0: adc_raw_to_mv(samples[1]),
+                rail_5v0:  adc_raw_to_mv(samples[2]),
+                rail_3v3:  adc_raw_to_mv(samples[3]),    
+            })    
+        } else if samples.len() == 5 {
+            Ok(Self {
+                battery:   adc_raw_vrefint_to_mv(samples[0], samples[4]),
+                rail_12v0: adc_raw_vrefint_to_mv(samples[0], samples[4]),
+                rail_5v0:  adc_raw_vrefint_to_mv(samples[0], samples[4]),
+                rail_3v3:  adc_raw_vrefint_to_mv(samples[0], samples[4]),
+            })
+        } else {
+            Err(Self::default())
+        }
+    }
+}
+
+
+
+#[derive(Debug)]
+pub struct BatteryAdcSamples {
+    pub cell1: f32,
+    pub cell2: f32,
+    pub cell3: f32,
+    pub cell4: f32,
+    pub cell5: f32,
+    pub cell6: f32,
+    pub vbatt: f32,
+}
+
+impl Default for BatteryAdcSamples {
+    fn default() -> Self {
+        Self { cell1: Default::default(), cell2: Default::default(), cell3: Default::default(), cell4: Default::default(), cell5: Default::default(), cell6: Default::default(), vbatt: Default::default() }
+    }
+}
+
+impl BatteryAdcSamples {
+    pub fn new_from_samples(samples: &[u16]) -> Result<Self, Self> {
+        if samples.len() == 7 {
+            Ok(Self {
+                cell1: adc_raw_to_mv(samples[0]),
+                cell2: adc_raw_to_mv(samples[1]),
+                cell3: adc_raw_to_mv(samples[2]),
+                cell4: adc_raw_to_mv(samples[3]),
+                cell5: adc_raw_to_mv(samples[4]),
+                cell6: adc_raw_to_mv(samples[5]),
+                vbatt: adc_raw_to_mv(samples[6]),
+            })    
+        } else if samples.len() == 8 {
+            Ok(Self {
+                cell1: adc_raw_vrefint_to_mv(samples[0], samples[7]),
+                cell2: adc_raw_vrefint_to_mv(samples[1], samples[7]),
+                cell3: adc_raw_vrefint_to_mv(samples[2], samples[7]),
+                cell4: adc_raw_vrefint_to_mv(samples[3], samples[7]),
+                cell5: adc_raw_vrefint_to_mv(samples[4], samples[7]),
+                cell6: adc_raw_vrefint_to_mv(samples[5], samples[7]),
+                vbatt: adc_raw_vrefint_to_mv(samples[6], samples[7]),
+            })
+        } else {
+            Err(Self::default())
+        }
+    }
+}
 
 #[embassy_executor::task]
 async fn power_task_entry(
@@ -19,8 +105,11 @@ async fn power_task_entry(
     power_rail_3v3_adc_pin: Power3v3VoltageMonitorPin,
     power_rail_vbatt_before_lsw_adc_pin: BatteryPreLoadSwitchVoltageMonitorPin,
     power_rail_vbatt_adc_pin: BatteryVoltageMonitorPin,
-
 ) {
+
+    /////////////////
+    //  ADC Setup  //
+    /////////////////
 
     let mut adc = Adc::new(adc);
     let mut cell1_adc_pin = cell1_adc_pin.degrade_adc();
@@ -36,55 +125,110 @@ async fn power_task_entry(
     let mut power_rail_vbatt_adc_pin = power_rail_vbatt_adc_pin.degrade_adc();
     let mut vrefint_channel: AnyAdcChannel<ADC1> = adc.enable_vrefint().degrade_adc();
 
-    let mut adc_samples: [u16; 12] = [0; 12];
+    let mut power_rail_adc_raw_samples: [u16; 5] = [0; 5];
+    let mut battery_cell_adc_raw_samples: [u16; 8] = [0; 8];
 
     // ADC needs to polled no faster than every 0.793Hz = 1261ms due to the very high impedance inputs
     // and no active amplification. This is to keep powered off current draw on the battery very low.
-    let mut loop_ticker = Ticker::every(Duration::from_millis(1300));
+    let mut loop_ticker = Ticker::every(Duration::from_millis(100));
+    let mut last_battery_cell_read_time = Instant::now();
+
+    ////////////////////////
+    //  Power Rail Setup  //
+    ////////////////////////
+    
+    let mut power_rail_battery = PowerRail::new(POWER_RAIL_BATTERY_PARAMETERSL,
+        WindowAvergingFilter::<POWER_RAIL_FILTER_WINDOW_SIZE, _>::new(),
+        Range::new(0.0, 2062.0),
+        Range::new(0.0, 25.2));
+
+    let mut power_rail_12v0 = PowerRail::new(POWER_RAIL_12V0_PARAMETERS,
+        WindowAvergingFilter::<POWER_RAIL_FILTER_WINDOW_SIZE, _>::new(),
+        Range::new(0.0, 1741.0),
+        Range::new(0.0, 12.0));
+
+    let mut power_rail_5v0 = PowerRail::new(POWER_RAIL_5V0_PARAMETERS,
+        WindowAvergingFilter::<POWER_RAIL_FILTER_WINDOW_SIZE, _>::new(),
+        Range::new(0.0, 1745.0),
+        Range::new(0.0, 5.0));
+
+    let mut power_rail_3v3 = PowerRail::new(POWER_RAIL_3V3_PARAMETERS,
+        WindowAvergingFilter::<POWER_RAIL_FILTER_WINDOW_SIZE, _>::new(),
+        Range::new(0.0, 1750.0),
+        Range::new(0.0, 3.3));
+
+    ///////////////////////////
+    //  Battery Model Setup  //
+    ///////////////////////////
 
     // TOOD setup battery model here
 
     loop {
-        // read raw ADC values
+        ////////////////////////////////////////////
+        //  Read and Convert Power Rail Voltages  //
+        ////////////////////////////////////////////
 
         // could eventually split this into two sequence
         // very high z and high z if the rails need to be samples more often
-        let adc_read_seq = [
-            (&mut cell1_adc_pin, SampleTime::CYCLES160_5),
-            (&mut cell2_adc_pin, SampleTime::CYCLES160_5),
-            (&mut cell3_adc_pin, SampleTime::CYCLES160_5),
-            (&mut cell4_adc_pin, SampleTime::CYCLES160_5),
-            (&mut cell5_adc_pin, SampleTime::CYCLES160_5),
-            (&mut cell6_adc_pin, SampleTime::CYCLES160_5),
+        let power_rail_read_seq = [
+            (&mut power_rail_vbatt_adc_pin, SampleTime::CYCLES160_5),
             (&mut power_rail_12v0_adc_pin, SampleTime::CYCLES160_5),
             (&mut power_rail_5v0_adc_pin, SampleTime::CYCLES160_5),
             (&mut power_rail_3v3_adc_pin, SampleTime::CYCLES160_5),
-            (&mut power_rail_vbatt_before_lsw_adc_pin, SampleTime::CYCLES160_5),
-            (&mut power_rail_vbatt_adc_pin, SampleTime::CYCLES160_5),
             (&mut vrefint_channel, SampleTime::CYCLES160_5),
-    
         ].into_iter();
-        adc.read(&mut adc_dma, adc_read_seq, &mut adc_samples).await;
-
+        adc.read(&mut adc_dma, power_rail_read_seq, &mut power_rail_adc_raw_samples).await;
 
         // covert power rails
+        let power_rail_adc_voltages = PowerRailAdcSamples::new_from_samples(&power_rail_adc_raw_samples).expect("invalid array length on power rail adc sample conversion");
+        power_rail_battery.add_rail_voltage_sample(power_rail_adc_voltages.battery);
+        power_rail_12v0.add_rail_voltage_sample(power_rail_adc_voltages.rail_12v0);
+        power_rail_5v0.add_rail_voltage_sample(power_rail_adc_voltages.rail_5v0);
+        power_rail_3v3.add_rail_voltage_sample(power_rail_adc_voltages.rail_3v3);
 
-        // input to battery model
-
-        // apply data filters
+        ///////////////////////////////
+        //  Check Power Rail Errors  //
+        ///////////////////////////////
 
         // analyze for error conditions
             // Vbatt voltage too low
             // Vbatt voltage too high
-            // Vbatt PMIC differential
+            // 12v0 voltage too low
+            // 12v0 voltage too high
             // 5v0 voltage too low
             // 5v0 voltage too high
             // 3v3 voltage too low
             // 3v3 voltage too high
 
+
+
+        //////////////////////////
+        //  Battery Monitoring  //
+        //////////////////////////
+
+        if last_battery_cell_read_time.elapsed() > BATTERY_CELL_READ_INTERVAL {
+            let battery_cell_read_seq = [
+                (&mut cell1_adc_pin, SampleTime::CYCLES160_5),
+                (&mut cell2_adc_pin, SampleTime::CYCLES160_5),
+                (&mut cell3_adc_pin, SampleTime::CYCLES160_5),
+                (&mut cell4_adc_pin, SampleTime::CYCLES160_5),
+                (&mut cell5_adc_pin, SampleTime::CYCLES160_5),
+                (&mut cell6_adc_pin, SampleTime::CYCLES160_5),
+                (&mut power_rail_vbatt_before_lsw_adc_pin, SampleTime::CYCLES160_5),
+                (&mut vrefint_channel, SampleTime::CYCLES160_5),
+            ].into_iter();
+            adc.read(&mut adc_dma, battery_cell_read_seq, &mut battery_cell_adc_raw_samples).await;
+
+            last_battery_cell_read_time = Instant::now();
+
+            // input to battery model
+
+            // check for battery errors
+            // Vbatt PMIC differential
             // battery balance - any cell too high
             // battery balance - any cell too low
             // battery balance - any cell difference too high
+        }
 
         // sent pubsub message to coms task
 
