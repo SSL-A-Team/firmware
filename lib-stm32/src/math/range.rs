@@ -22,5 +22,13 @@ where
         
         (val - self.min) * scale + new_range.min
     }
+
+    pub fn min(&self) -> T {
+        self.min
+    }
+
+    pub fn max(&self) -> T {
+        self.max
+    }
 }
 

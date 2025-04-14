@@ -1,3 +1,5 @@
+use num_traits::{clamp_max, clamp_min};
+
 use super::{range::Range, Number};
 
 // Take input max and/or min (bounds), output value within new bounds
@@ -22,6 +24,12 @@ where
 
     pub fn map(&self, val: T) -> T {
         self.input_range.map_value_to_range(val, &self.output_range)
+    }
+
+    pub fn map_boudned(&self, val: T) -> T {
+        let val = clamp_min(clamp_max(val, self.input_range.max()), self.input_range.min());
+        
+        self.map(val)
     }
 }
 

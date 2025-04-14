@@ -15,9 +15,8 @@ pub const VBATT_TOO_HIGH_CRITICAL: f32 = 30.0;
 
 // Other regulators have a 1ish voltage margin, putting them worst case around 13V for 12V air drib, which is much less
 // vaguely based on https://www.ufinebattery.com/blog/useful-overview-of-lipo-battery-voltage/
-pub const VBATT_TOO_LOW_WARN: f32 = 21.0;
-pub const VBATT_TOO_LOW_CRITICAL: f32 = 20.0;
-pub const VBATT_TOO_LOW_POWERDOWN: f32 = 19.2;
+pub const VBATT_TOO_LOW_WARN: f32 = 19.5;
+pub const VBATT_TOO_LOW_CRITICAL: f32 = 19.0;
 pub const POWER_RAIL_BATTERY_PARAMETERSL: PowerRailParameters<f32> = PowerRailParameters {
     min_value_crit: VBATT_TOO_LOW_CRITICAL,
     min_value_warn: VBATT_TOO_LOW_WARN,
@@ -69,8 +68,8 @@ pub const POWER_RAIL_3V3_PARAMETERS: PowerRailParameters<f32> = PowerRailParamet
 // battery
 pub const LIPO_CELL_TOO_HIGH_WARN: f32 = 4.3;
 pub const LIPO_CELL_TOO_HIGH_CRITICAL: f32 = 4.4;
-pub const LIPO_CELL_TOO_LOW_WARN: f32 = 3.4;
-pub const LIPO_CELL_TOO_LOW_CRITICAL: f32 = 3.3;
-pub const LIPO_CELL_TOO_LOW_POWERDOWN: f32 = 3.2;
+pub const LIPO_CELL_TOO_LOW_WARN: f32 = 3.5;
+pub const LIPO_CELL_TOO_LOW_CRITICAL: f32 = 3.4;
+pub const LIPO_CELL_TOO_LOW_POWERDOWN: f32 = 3.3;
 pub const LIPO_CELL_MAX_DIFFERENCE_WARN: f32 = 0.2;
 pub const LIPO_CELL_MAX_DIFFERENCE_CRITICAL: f32 = 0.3;

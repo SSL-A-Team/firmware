@@ -1,6 +1,6 @@
 use crate::math::Number;
 
-pub trait Filter<T> {
+pub trait Filter<T>: Default {
     fn add_sample(&mut self, sample: T);
 
     fn update(&mut self);
@@ -25,6 +25,12 @@ impl<const WINDOW_SIZE: usize, T: Number> WindowAvergingFilter<WINDOW_SIZE, T> {
             filtered_value: T::zero(),
             valid: false
         }
+    }
+}
+
+impl<const WINDOW_SIZE: usize, T: Number> Default for WindowAvergingFilter<WINDOW_SIZE, T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

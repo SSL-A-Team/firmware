@@ -2,7 +2,7 @@ use ateam_lib_stm32::{filter::WindowAvergingFilter, math::range::Range, power::P
 use embassy_stm32::{adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime}, peripherals::ADC1};
 use embassy_time::{Duration, Instant, Ticker};
 
-use crate::{adc_raw_to_mv, adc_raw_vrefint_to_mv, limits::{POWER_RAIL_12V0_PARAMETERS, POWER_RAIL_3V3_PARAMETERS, POWER_RAIL_5V0_PARAMETERS, POWER_RAIL_BATTERY_PARAMETERSL}, pins::*};
+use crate::{adc_raw_to_mv, adc_raw_vrefint_to_mv, config::{POWER_RAIL_12V0_PARAMETERS, POWER_RAIL_3V3_PARAMETERS, POWER_RAIL_5V0_PARAMETERS, POWER_RAIL_BATTERY_PARAMETERSL}, pins::*};
 
 const BATTERY_CELL_READ_INTERVAL: Duration = Duration::from_millis(1300);
 const POWER_RAIL_FILTER_WINDOW_SIZE: usize = 10;
@@ -180,7 +180,7 @@ async fn power_task_entry(
         adc.read(&mut adc_dma, power_rail_read_seq, &mut power_rail_adc_raw_samples).await;
 
         // covert power rails
-        let power_rail_adc_voltages = PowerRailAdcSamples::new_from_samples(&power_rail_adc_raw_samples).expect("invalid array length on power rail adc sample conversion");
+        let power_rail_adc_voltages = PowerRailAdcSamples::new_from_samples(&power_rail_adc_raw_samples).expect("invalid slice length on power rail adc sample conversion");
         power_rail_battery.add_rail_voltage_sample(power_rail_adc_voltages.battery);
         power_rail_12v0.add_rail_voltage_sample(power_rail_adc_voltages.rail_12v0);
         power_rail_5v0.add_rail_voltage_sample(power_rail_adc_voltages.rail_5v0);
@@ -221,6 +221,8 @@ async fn power_task_entry(
 
             last_battery_cell_read_time = Instant::now();
 
+            let battery_cell_adc_voltages: BatteryAdcSamples = BatteryAdcSamples::new_from_samples(&battery_cell_adc_raw_samples).expect("invalid slice length on batteyr cell adc conversion");
+            
             // input to battery model
 
             // check for battery errors
