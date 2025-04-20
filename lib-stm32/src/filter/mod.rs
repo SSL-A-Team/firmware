@@ -75,6 +75,7 @@ impl<const WINDOW_SIZE: usize, T: Number> Filter<T> for WindowAvergingFilter<WIN
             self.window[i] = T::zero();
         }
 
+        self.update_ind = 0;
         self.valid = false;
     }
 }

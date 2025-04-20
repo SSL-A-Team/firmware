@@ -10,8 +10,7 @@ use cortex_m_rt::entry;
 
 use embassy_executor::Executor;
 use embassy_stm32::{
-    adc::{Adc, SampleTime},
-    gpio::{Input, Level, Output, Pull, Speed},
+    adc::{Adc, SampleTime}, gpio::{Input, Level, Output, Pull, Speed}, opamp::{OpAmp, OpAmpGain, OpAmpSpeed}, pac::opamp::Opamp
 };
 use embassy_time::{Duration, Timer, Ticker};
 
@@ -28,6 +27,7 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
         status_led_red: RedStatusLedPin,
         status_led_green: GreenStatusLedPin,
         usr_btn_pin: UserBtnPin,
+        // chip_pin: ChipPin,
         kick_pin: KickPin) -> ! {
 
     let mut ticker = Ticker::every(Duration::from_millis(1));
@@ -53,20 +53,20 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
     info!("hv V: {}, 12v reg mv: {}", adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)), adc_12v_to_rail_voltage(adc_raw_to_v(regv, vrefint_sample)));
 
     let start_up_battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(regv, vrefint_sample));
-    if start_up_battery_voltage < 11.5 {
-        status_led_red.set_high();
-        warn!("regulator voltage is below 18.0 ({}), is the battery low or disconnected?", start_up_battery_voltage);
-        warn!("refusing to continue");
-        loop {
-            reg_charge.set_low();
+    // if start_up_battery_voltage < 11.5 {
+    //     status_led_red.set_high();
+    //     warn!("regulator voltage is below 18.0 ({}), is the battery low or disconnected?", start_up_battery_voltage);
+    //     warn!("refusing to continue");
+    //     loop {
+    //         reg_charge.set_low();
 
-            kick.set_high();
-            Timer::after(Duration::from_micros(500)).await;
-            kick.set_low();
+    //         kick.set_high();
+    //         Timer::after(Duration::from_micros(500)).await;
+    //         kick.set_low();
         
-            Timer::after(Duration::from_millis(1000)).await;
-        }
-    }
+    //         Timer::after(Duration::from_millis(1000)).await;
+    //     }
+    // }
 
     'outer: while usr_btn.is_low() {
         while usr_btn.is_high() {
@@ -78,7 +78,7 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
     Timer::after(Duration::from_millis(1000)).await;
 
     reg_charge.set_high();
-    Timer::after(Duration::from_millis(450)).await;
+    Timer::after(Duration::from_millis(1500)).await;
     reg_charge.set_low();
 
     let mut vrefint = adc.enable_vrefint();
@@ -123,10 +123,15 @@ static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
 #[entry]
 fn main() -> ! {
-    let stm32_config = get_system_config(tasks::ClkSource::External8MHzOscillator);
+    let stm32_config = get_system_config(tasks::ClkSource::InternalOscillator);
     let p = embassy_stm32::init(stm32_config);
 
     info!("kicker startup!");
+
+    let _vsw_en = Output::new(p.PE10, Level::High, Speed::Medium);
+
+    let mut hv_opamp_inst = OpAmp::new(p.OPAMP3, OpAmpSpeed::HighSpeed);
+    let _hv_opamp = hv_opamp_inst.buffer_ext(p.PB0, p.PB1, OpAmpGain::Mul2);
 
     let mut adc = Adc::new(p.ADC1);
     adc.set_resolution(embassy_stm32::adc::Resolution::BITS12);

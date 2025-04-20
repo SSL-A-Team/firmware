@@ -1,6 +1,7 @@
 use crate::{filter::Filter, math::{range::Range, Number}};
 
 pub mod battery;
+pub mod model;
 pub struct PowerRailParameters<T: Number> {
     pub min_value_crit: T,
     pub min_value_warn: T,

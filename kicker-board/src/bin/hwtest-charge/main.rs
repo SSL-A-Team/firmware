@@ -67,7 +67,7 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
     }
 
     reg_charge.set_high();
-    Timer::after(Duration::from_millis(50)).await;
+    Timer::after(Duration::from_millis(100)).await;
     reg_charge.set_low();
 
     let mut vrefint = adc.enable_vrefint();

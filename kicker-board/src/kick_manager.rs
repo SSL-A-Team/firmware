@@ -24,7 +24,7 @@
 
 use embassy_stm32::gpio::Output;
 use embassy_time::{Duration, Timer};
-use ateam_lib_stm32::math::linear::LinearMap;
+use ateam_lib_stm32::math::{linear_map::LinearMap, range::Range};
 
 const MIN_KICK_DURATION_US: f32 = 500.0;
 const MAX_KICK_DURATION_US: f32 = 4500.0;  // 10ms (10k us) max power kick
@@ -91,9 +91,9 @@ impl<'a> KickManager<'a> {
         }
 
         // set charge duration via mapping from kick speed
-        let kick_speed_map = LinearMap::new(0f32, 5.5f32); // Max kick speed is approx 5.5m/s
-        let kick_duration_map = LinearMap::new(MIN_KICK_DURATION_US, MAX_KICK_DURATION_US);
-        let charge_duration_us: f32 = kick_speed_map.linear_map_to_new_bounds(kick_speed, kick_duration_map);
+        let kick_speed_map = Range::new(0f32, 5.5f32); // Max kick speed is approx 5.5m/s
+        let kick_duration_map = Range::new(MIN_KICK_DURATION_US, MAX_KICK_DURATION_US);
+        let charge_duration_us: f32 = kick_speed_map.map_value_to_range(kick_speed, &kick_duration_map);
 
         // handle charge, kick, and chip
         match kick_type {

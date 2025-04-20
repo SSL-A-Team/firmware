@@ -39,7 +39,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ateam-lib-stm32-test"
+name = "ateam-power-board"
 version = "0.1.0"
 dependencies = [
  "ateam-lib-stm32",

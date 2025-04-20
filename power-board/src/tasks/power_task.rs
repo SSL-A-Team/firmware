@@ -1,4 +1,7 @@
+use core::fmt;
+
 use ateam_lib_stm32::{filter::WindowAvergingFilter, math::range::Range, power::PowerRail};
+use embassy_executor::Spawner;
 use embassy_stm32::{adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime}, peripherals::ADC1};
 use embassy_time::{Duration, Instant, Ticker};
 
@@ -9,10 +12,10 @@ const POWER_RAIL_FILTER_WINDOW_SIZE: usize = 10;
 
 #[derive(Debug)]
 pub struct PowerRailAdcSamples {
-    pub battery: f32,
-    pub rail_12v0: f32,
-    pub rail_5v0: f32,
     pub rail_3v3: f32,
+    pub rail_5v0: f32,
+    pub rail_12v0: f32,
+    pub battery: f32,
 }
 
 impl Default for PowerRailAdcSamples {
@@ -25,17 +28,17 @@ impl PowerRailAdcSamples {
     pub fn new_from_samples(samples: &[u16]) -> Result<Self, Self> {
         if samples.len() == 4 {
             Ok(Self {
-                battery:   adc_raw_to_mv(samples[0]),
-                rail_12v0: adc_raw_to_mv(samples[1]),
-                rail_5v0:  adc_raw_to_mv(samples[2]),
-                rail_3v3:  adc_raw_to_mv(samples[3]),    
+                rail_3v3:  adc_raw_to_mv(samples[0]),    
+                rail_5v0:  adc_raw_to_mv(samples[1]),
+                rail_12v0: adc_raw_to_mv(samples[2]),
+                battery:   adc_raw_to_mv(samples[3]),
             })    
         } else if samples.len() == 5 {
             Ok(Self {
-                battery:   adc_raw_vrefint_to_mv(samples[0], samples[4]),
-                rail_12v0: adc_raw_vrefint_to_mv(samples[0], samples[4]),
-                rail_5v0:  adc_raw_vrefint_to_mv(samples[0], samples[4]),
                 rail_3v3:  adc_raw_vrefint_to_mv(samples[0], samples[4]),
+                rail_5v0:  adc_raw_vrefint_to_mv(samples[1], samples[4]),
+                rail_12v0: adc_raw_vrefint_to_mv(samples[2], samples[4]),
+                battery:   adc_raw_vrefint_to_mv(samples[3], samples[4]),
             })
         } else {
             Err(Self::default())
@@ -45,7 +48,6 @@ impl PowerRailAdcSamples {
 
 
 
-#[derive(Debug)]
 pub struct BatteryAdcSamples {
     pub cell1: f32,
     pub cell2: f32,
@@ -54,6 +56,12 @@ pub struct BatteryAdcSamples {
     pub cell5: f32,
     pub cell6: f32,
     pub vbatt: f32,
+}
+
+impl fmt::Debug for BatteryAdcSamples {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BatteryAdcSamples").field("cell1", &self.cell1).field("cell2", &self.cell2).field("cell3", &self.cell3).field("cell4", &self.cell4).field("cell5", &self.cell5).field("cell6", &self.cell6).field("vbatt", &self.vbatt).finish()
+    }
 }
 
 impl Default for BatteryAdcSamples {
@@ -88,6 +96,16 @@ impl BatteryAdcSamples {
             Err(Self::default())
         }
     }
+}
+
+#[macro_export]
+macro_rules! create_power_task {
+    ($spawner:ident, $p:ident) => {
+        ateam_power_board::tasks::power_task::start_power_task(&$spawner,
+            $p.ADC1, $p.DMA1_CH1,
+            $p.PA0, $p.PA1, $p.PA2, $p.PA3, $p.PA4, $p.PA5,
+            $p.PB1, $p.PA7, $p.PA6, $p.PB10, $p.PB2).await;
+    };
 }
 
 #[embassy_executor::task]
@@ -186,6 +204,8 @@ async fn power_task_entry(
         power_rail_5v0.add_rail_voltage_sample(power_rail_adc_voltages.rail_5v0);
         power_rail_3v3.add_rail_voltage_sample(power_rail_adc_voltages.rail_3v3);
 
+        defmt::info!("power rail voltages: Battery {}, 12v0 {}, 5v0 {}, 3v3 {}", power_rail_battery.get_rail_voltage(), power_rail_12v0.get_rail_voltage(), power_rail_5v0.get_rail_voltage(), power_rail_3v3.get_rail_voltage());
+
         ///////////////////////////////
         //  Check Power Rail Errors  //
         ///////////////////////////////
@@ -218,10 +238,13 @@ async fn power_task_entry(
                 (&mut vrefint_channel, SampleTime::CYCLES160_5),
             ].into_iter();
             adc.read(&mut adc_dma, battery_cell_read_seq, &mut battery_cell_adc_raw_samples).await;
+            // defmt::info!("vrefint channel {}", battery_cell_adc_raw_samples[7]);
+            // defmt::info!("battery cell raw samples {} {}", battery_cell_adc_raw_samples[0], adc_raw_vrefint_to_mv(battery_cell_adc_raw_samples[0], battery_cell_adc_raw_samples[7]));
 
             last_battery_cell_read_time = Instant::now();
 
-            let battery_cell_adc_voltages: BatteryAdcSamples = BatteryAdcSamples::new_from_samples(&battery_cell_adc_raw_samples).expect("invalid slice length on batteyr cell adc conversion");
+            let battery_cell_adc_voltages: BatteryAdcSamples = BatteryAdcSamples::new_from_samples(&battery_cell_adc_raw_samples).expect("invalid slice length on battery cell adc conversion");
+            defmt::info!("battery cell adc voltages {}", battery_cell_adc_voltages.vbatt);
             
             // input to battery model
 
@@ -238,6 +261,24 @@ async fn power_task_entry(
     }
 }
 
-pub async fn start_power_task() {
-    
+pub async fn start_power_task(spawner: &Spawner,
+    adc: PowerAdc,
+    adc_dma: PowerAdcDma,
+    cell1_adc_pin: BatteryCell1VoltageMonitorPin,
+    cell2_adc_pin: BatteryCell2VoltageMonitorPin,
+    cell3_adc_pin: BatteryCell3VoltageMonitorPin,
+    cell4_adc_pin: BatteryCell4VoltageMonitorPin,
+    cell5_adc_pin: BatteryCell5VoltageMonitorPin,
+    cell6_adc_pin: BatteryCell6VoltageMonitorPin,
+    power_rail_12v0_adc_pin: Power12v0VoltageMonitorPin,
+    power_rail_5v0_adc_pin: Power5v0VoltageMonitorPin,
+    power_rail_3v3_adc_pin: Power3v3VoltageMonitorPin,
+    power_rail_vbatt_before_lsw_adc_pin: BatteryPreLoadSwitchVoltageMonitorPin,
+    power_rail_vbatt_adc_pin: BatteryVoltageMonitorPin,
+    ) {
+    spawner.spawn(power_task_entry(
+        adc, adc_dma,
+        cell1_adc_pin, cell2_adc_pin, cell3_adc_pin, cell4_adc_pin, cell5_adc_pin, cell6_adc_pin,
+        power_rail_12v0_adc_pin, power_rail_5v0_adc_pin, power_rail_3v3_adc_pin, power_rail_vbatt_before_lsw_adc_pin, power_rail_vbatt_adc_pin
+    )).expect("failed to spawn power task");
 }

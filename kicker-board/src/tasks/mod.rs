@@ -13,7 +13,7 @@ pub fn get_system_config(clk_src: ClkSource) -> Config {
         // configure the external clock mode
         config.rcc.hse = Some(Hse {
             freq: Hertz(8_000_000),
-            mode: HseMode::Bypass,
+            mode: HseMode::Oscillator,
         });
 
         // configure the main PLL

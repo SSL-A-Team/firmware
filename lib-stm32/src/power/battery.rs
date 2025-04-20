@@ -1,7 +1,7 @@
 
-use core::{cell, iter::zip};
+use core::iter::zip;
 
-use crate::{filter::Filter, math::{linear_map::LinearMap, range::Range, Number}};
+use crate::{filter::Filter, math::{linear_map::LinearMap, Number}};
 
 
 pub struct BatteryConfig<N: Number> {
@@ -28,6 +28,7 @@ pub struct LipoModel<'a, const NUM_CELLS: usize, N: Number, F: Filter<N>> {
     cell_voltage_compute_mode: CellVoltageComputeMode,
     cell_votlage_filters: [F; NUM_CELLS],
     cell_voltages: [N; NUM_CELLS],
+    cell_percentages: [u8; NUM_CELLS],
 }
 
 impl<'a, const NUM_CELLS: usize, N: Number, F: Filter<N>> LipoModel<'a, NUM_CELLS, N, F> {
@@ -37,7 +38,8 @@ impl<'a, const NUM_CELLS: usize, N: Number, F: Filter<N>> LipoModel<'a, NUM_CELL
             cell_range_maps,
             cell_voltage_compute_mode,
             cell_votlage_filters: core::array::from_fn(|_| F::default()),
-            cell_voltages: [N::zero(); NUM_CELLS]
+            cell_voltages: [N::zero(); NUM_CELLS],
+            cell_percentages: [0; NUM_CELLS],
         }
     }
 
@@ -61,7 +63,7 @@ impl<'a, const NUM_CELLS: usize, N: Number, F: Filter<N>> LipoModel<'a, NUM_CELL
         } else {
             self.cell_voltages[0] = raw_cell_voltages[0];
             for i in 1..NUM_CELLS {
-                self.cell_voltages[i] = raw_cell_voltages[i] - self.cell_voltages[i - 1];
+                self.cell_voltages[i] = raw_cell_voltages[i] - raw_cell_voltages[i - 1];
             }
         }
     }
