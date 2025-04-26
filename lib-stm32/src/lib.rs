@@ -22,6 +22,7 @@ pub mod drivers;
 pub mod filter;
 pub mod math;
 pub mod uart;
+pub mod units;
 pub mod power;
 
 pub mod queue;

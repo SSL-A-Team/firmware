@@ -15,7 +15,7 @@ impl<T> LinearMap<T>
 where
     T: Number 
 {
-    pub fn new(input_range: Range<T>, output_range: Range<T>) -> Self {
+    pub const fn new(input_range: Range<T>, output_range: Range<T>) -> Self {
         Self {
             input_range,
             output_range

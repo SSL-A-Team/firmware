@@ -1,5 +1,5 @@
 
-use core::iter::zip;
+use core::{cell, iter::zip};
 
 use crate::{filter::Filter, math::{linear_map::LinearMap, Number}};
 
@@ -43,29 +43,32 @@ impl<'a, const NUM_CELLS: usize, N: Number, F: Filter<N>> LipoModel<'a, NUM_CELL
         }
     }
 
-    pub fn add_cell_voltage_samples(&mut self, cell_adc_voltage_samples: &[N; NUM_CELLS]) {
-        let mut raw_cell_voltages = [N::zero(); NUM_CELLS];
+    pub fn add_cell_voltage_samples(&mut self, cell_adc_voltage_samples: &[N]) {
 
-        // this is just a condensed way of mapping an array of adc samples in mv
-        // through a filter to cell voltages 
-        for ((cell_voltage, cell_voltage_filter), (sample_map, sample)) in 
-                zip(raw_cell_voltages.iter_mut().zip(self.cell_votlage_filters.iter_mut()),
-                    self.cell_range_maps.into_iter().zip(cell_adc_voltage_samples)) {
-            cell_voltage_filter.add_sample(sample_map.map(*sample));
-            cell_voltage_filter.update();
-            if let Some(filtered_value) = cell_voltage_filter.filtered_value() {
-                *cell_voltage = filtered_value;
-            }
+        // place raw samples into cell_voltage buffer and use it as scratch space
+        self.cell_voltages.copy_from_slice(cell_adc_voltage_samples);
+
+        // inplace convert raw voltage samples to cell range
+        for (cv, cv_map) in self.cell_voltages.iter_mut().zip(self.cell_range_maps) {
+            *cv = cv_map.map(*cv);
         }
 
-        if self.cell_voltage_compute_mode == CellVoltageComputeMode::Standalone {
-            self.cell_voltages.copy_from_slice(&raw_cell_voltages);
-        } else {
-            self.cell_voltages[0] = raw_cell_voltages[0];
-            for i in 1..NUM_CELLS {
-                self.cell_voltages[i] = raw_cell_voltages[i] - raw_cell_voltages[i - 1];
+        // update filters and inplace update value with filtered value
+        for (cv, cv_filt) in self.cell_voltages.iter_mut().zip(self.cell_votlage_filters.iter_mut()) {
+            cv_filt.add_sample(*cv);
+            cv_filt.update();
+            *cv = cv_filt.filtered_value().unwrap_or(N::zero());
+        }
+
+        if self.cell_voltage_compute_mode == CellVoltageComputeMode::Chained {
+            for i in (1..NUM_CELLS).rev() {
+                self.cell_voltages[i] = self.cell_voltages[i] - self.cell_voltages[i - 1];
             }
         }
+    }
+
+    pub fn get_cell_voltages(&self) -> &[N; NUM_CELLS] {
+        &self.cell_voltages
     }
 
     pub fn battery_warn(&self) -> bool {

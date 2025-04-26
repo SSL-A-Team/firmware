@@ -1,3 +1,5 @@
+pub const LIPO_CELL_MAX_VOLTAGE: f32 = 4.2;
+
 pub const LIPO_1S_VOLTAGE_PERCENT: [(f32, f32); 21] =  [
     (4.20, 100.0),
     (4.15,  95.0),

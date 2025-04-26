@@ -3,7 +3,7 @@
 // criticals are reported to software and force halt high current operations (driving, dribbling, kick/chip charging)
 // powerdowns result in an automatic initiation software shutdown
 
-use ateam_lib_stm32::power::PowerRailParameters;
+use ateam_lib_stm32::{math::{linear_map::LinearMap, range::Range}, power::{battery::{BatteryConfig, LipoModel}, model::lipo_model::LIPO_CELL_MAX_VOLTAGE, PowerRailParameters}};
 
 // power regulators on-board can take a max of 40, and 60 volts respectively. 
 // stspins can take 45V
@@ -65,11 +65,39 @@ pub const POWER_RAIL_3V3_PARAMETERS: PowerRailParameters<f32> = PowerRailParamet
     max_value_crit: POWER_RAIL_3V3_TOO_HIGH_CRITICAL,
 };
 
+const DUAL_RTOL_1PCT_CIEL: f32 = 1.02;
+const DUAL_RTOL_1PCT_FLOOR: f32 = 0.98;
+
+
 // battery
-pub const LIPO_CELL_TOO_HIGH_WARN: f32 = 4.3;
-pub const LIPO_CELL_TOO_HIGH_CRITICAL: f32 = 4.4;
-pub const LIPO_CELL_TOO_LOW_WARN: f32 = 3.5;
-pub const LIPO_CELL_TOO_LOW_CRITICAL: f32 = 3.4;
-pub const LIPO_CELL_TOO_LOW_POWERDOWN: f32 = 3.3;
-pub const LIPO_CELL_MAX_DIFFERENCE_WARN: f32 = 0.2;
-pub const LIPO_CELL_MAX_DIFFERENCE_CRITICAL: f32 = 0.3;
+pub const LIPO_CELL_TOO_HIGH_WARN: f32 = 4.25 * DUAL_RTOL_1PCT_CIEL;
+pub const LIPO_CELL_TOO_HIGH_CRITICAL: f32 = 4.35 * DUAL_RTOL_1PCT_CIEL;
+pub const LIPO_CELL_TOO_HIGH_POWERDOWN: f32 = 4.4 * DUAL_RTOL_1PCT_CIEL;
+pub const LIPO_CELL_TOO_LOW_WARN: f32 = 3.5 * DUAL_RTOL_1PCT_FLOOR;
+pub const LIPO_CELL_TOO_LOW_CRITICAL: f32 = 3.4 * DUAL_RTOL_1PCT_FLOOR;
+pub const LIPO_CELL_TOO_LOW_POWERDOWN: f32 = 3.3 * DUAL_RTOL_1PCT_FLOOR;
+pub const LIPO_CELL_MAX_DIFFERENCE_WARN: f32 = 0.2 * DUAL_RTOL_1PCT_CIEL;
+pub const LIPO_CELL_MAX_DIFFERENCE_CRITICAL: f32 = 0.3 * DUAL_RTOL_1PCT_CIEL;
+pub const LIPO_CELL_MAX_DIFFERENCE_POWERDOWN: f32 = 0.4 * DUAL_RTOL_1PCT_CIEL;
+
+pub const LIPO_BATTERY_CONFIG_6S: BatteryConfig<f32> = BatteryConfig {
+    cell_voltage_low_warn: LIPO_CELL_TOO_LOW_WARN,
+    cell_voltage_low_crit: LIPO_CELL_TOO_LOW_CRITICAL,
+    cell_voltage_low_power_off: LIPO_CELL_TOO_LOW_POWERDOWN,
+    cell_voltage_high_warn: LIPO_CELL_TOO_HIGH_WARN,
+    cell_voltage_high_crit: LIPO_CELL_TOO_HIGH_CRITICAL,
+    cell_voltage_high_power_off: LIPO_CELL_TOO_HIGH_POWERDOWN,
+    cell_voltage_difference_warn: LIPO_CELL_MAX_DIFFERENCE_WARN,
+    cell_voltage_difference_crit: LIPO_CELL_MAX_DIFFERENCE_CRITICAL,
+    cell_votlage_difference_off: LIPO_CELL_MAX_DIFFERENCE_POWERDOWN,
+};
+
+// LHS ranges from resistor dividers in power/power_mon sch page
+pub const LIPO6S_BALANCE_RAW_SAMPLES_TO_VOLTAGES: [LinearMap<f32>; 6] = [
+    LinearMap::new(Range::new(0.0, 2.000), Range::new(0.0, LIPO_CELL_MAX_VOLTAGE)),
+    LinearMap::new(Range::new(0.0, 1.997), Range::new(0.0, LIPO_CELL_MAX_VOLTAGE * 2.0)),
+    LinearMap::new(Range::new(0.0, 1.984), Range::new(0.0, LIPO_CELL_MAX_VOLTAGE * 3.0)),
+    LinearMap::new(Range::new(0.0, 2.045), Range::new(0.0, LIPO_CELL_MAX_VOLTAGE * 4.0)),
+    LinearMap::new(Range::new(0.0, 1.996), Range::new(0.0, LIPO_CELL_MAX_VOLTAGE * 5.0)),
+    LinearMap::new(Range::new(0.0, 2.062), Range::new(0.0, LIPO_CELL_MAX_VOLTAGE * 6.0)),
+];

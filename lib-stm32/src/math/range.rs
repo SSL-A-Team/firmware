@@ -13,7 +13,7 @@ impl<T> Range<T>
 where
     T: Number
 {
-    pub fn new(min: T, max: T) -> Self {
+    pub const fn new(min: T, max: T) -> Self {
         Range { min, max }
     }
 
