@@ -30,6 +30,7 @@
 #include "system.h"
 #include "time.h"
 #include "uart.h"
+#include "image_hash.h"
 
 static int slipped_control_frame_count = 0;
 
@@ -476,6 +477,7 @@ int main() {
                 response_packet.data.params.torque_i_max = torque_pid_constants.kI_max;
                 response_packet.data.params.cur_clamp = (uint16_t) cur_limit;
 
+                memcpy(response_packet.data.params.wheel_img_hash, get_wheel_img_hash(), sizeof(response_packet.data.params.wheel_img_hash));
 #ifdef UART_ENABLED
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
                 // Capture the status for the response packet / LED.
