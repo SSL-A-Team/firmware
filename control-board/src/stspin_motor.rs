@@ -188,7 +188,7 @@ impl<
 
                 // copy receieved uart bytes into packet
                 let state = &mut mrp as *mut _ as *mut u8;
-                for i in 0..core::mem::size_of::<MotorResponse_Motion_Packet>() {
+                for i in 0..core::mem::size_of::<MotorResponsePacket>() {
                     *state.offset(i as isize) = buf[i];
                 }
 
