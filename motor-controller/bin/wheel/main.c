@@ -462,8 +462,8 @@ int main() {
                 response_packet.type = MRP_PARAMS;
 
                 response_packet.data.params.version_major = VERSION_MAJOR;
-                response_packet.data.params.version_major = VERSION_MINOR;
-                response_packet.data.params.version_major = VERSION_PATCH;
+                response_packet.data.params.version_minor = VERSION_MINOR;
+                response_packet.data.params.version_patch = VERSION_PATCH;
                 response_packet.data.params.timestamp = time_local_epoch_s();
 
                 response_packet.data.params.vel_p = vel_pid_constants.kP;
