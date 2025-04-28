@@ -6,18 +6,20 @@ use embassy_stm32::{
     gpio::{Pin, Pull},
     usart::{self, Parity},
 };
-use embassy_time::{Duration, Timer};
+use embassy_time::{with_timeout, Duration, Timer};
 use nalgebra::Vector3;
 
 use ateam_common_packets::bindings::{
     MotorCommandPacket,
     MotorCommandPacketType::MCP_MOTION,
+    MotorCommandPacketType::MCP_PARAMS,
     MotorCommand_MotionType,
     MotorCommand_MotionType::OPEN_LOOP,
     MotorResponsePacket,
     MotorResponsePacketType::{MRP_MOTION, MRP_PARAMS},
     MotorResponse_Motion_Packet, MotorResponse_Params_Packet,
 };
+use crate::image_hash;
 
 pub struct WheelMotor<
     'a,
@@ -152,11 +154,63 @@ impl<
         self.stm32_uart_interface.leave_reset().await;
     }
 
+    pub async fn check_wheel_needs_flash(&mut self) -> bool {
+        let mut wheel_needs_flash = true;
+        let wheel_img_hash_ctrl: [u8; 16] = image_hash::get_wheel_img_hash();
+        defmt::debug!("Wheel Image Hash from Control Board - {:x}", wheel_img_hash_ctrl);
+
+        defmt::trace!("Drive Motor - Update UART config 2 MHz");
+        self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
+        Timer::after(Duration::from_millis(1)).await;
+
+        let wheel_img_hash_future = async {
+            loop {
+                defmt::trace!("Drive Motor - sending parameter command packet");
+                self.send_params_command();
+
+                Timer::after(Duration::from_millis(100)).await;
+
+                defmt::trace!("Drive Motor - Checking for parameter response");
+                // Parse incoming packets
+                self.process_packets();
+                // Check if curret_params_state has updated
+                if self.current_params_state.wheel_img_hash != [0; 4] {
+                    let wheel_img_hash_motr = self.current_params_state.wheel_img_hash;
+                    defmt::debug!("Drive Motor - Received parameter response");
+                    defmt::debug!("Wheel Image Hash from Motor - {:x}", wheel_img_hash_motr);
+                    return wheel_img_hash_motr
+                };
+            }
+        };
+        let wheel_response_timeout = Duration::from_millis(1000);
+    
+        defmt::trace!("Drive Motor - waiting for parameter response packet");
+        match with_timeout(wheel_response_timeout, wheel_img_hash_future).await {
+            Ok(wheel_img_hash_motr) => {
+                if wheel_img_hash_motr == wheel_img_hash_ctrl[..4] {
+                    wheel_needs_flash = false;
+                }
+            },
+            Err(_) => {
+                defmt::trace!("Drive Motor - No parameter response, motor controller needs flashing");
+                wheel_needs_flash = true;
+            },
+        }
+        return wheel_needs_flash;
+    }
+
     pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
-        let res = self
-            .stm32_uart_interface
-            .load_firmware_image(fw_image_bytes)
-            .await;
+        let controller_needs_flash: bool = self.check_wheel_needs_flash().await;
+        defmt::debug!("Motor Controller Needs Flash - {:?}", controller_needs_flash);
+
+        let res;
+        if controller_needs_flash {
+            defmt::trace!("UART config updated");
+            res = self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await;
+        } else {
+            defmt::info!("Wheel image is up to date, skipping flash");
+            res = Ok(());
+        }
 
         // this is safe because load firmware image call will reset the target device
         // it will begin issueing telemetry updates
@@ -188,7 +242,7 @@ impl<
 
                 // copy receieved uart bytes into packet
                 let state = &mut mrp as *mut _ as *mut u8;
-                for i in 0..core::mem::size_of::<MotorResponse_Motion_Packet>() {
+                for i in 0..core::mem::size_of::<MotorResponsePacket>() {
                     *state.offset(i as isize) = buf[i];
                 }
 
@@ -223,6 +277,8 @@ impl<
                     // info!("reset_low_power {:?}", mrp.data.motion.reset_low_power());
                     // info!("reset_software {:?}", mrp.data.motion.reset_software());
                 } else if mrp.type_ == MRP_PARAMS {
+                    trace!("Received parameter response packet");
+                    debug!("Parameter response data: {:?}", buf);
                     self.current_params_state = mrp.data.params;
                 }
             }
@@ -244,6 +300,27 @@ impl<
         }
         if self.current_state.reset_pin() != 0 {
             defmt::warn!("Drive Motor {} Reset: Pin", motor_id);
+        }
+    }
+
+    pub fn send_params_command(&mut self) {
+        unsafe {
+            let mut cmd: MotorCommandPacket = { MaybeUninit::zeroed().assume_init() };
+
+            cmd.type_ = MCP_PARAMS;
+            cmd.crc32 = 0;
+
+            // TODO figure out what to set here
+            // Update a param like this
+            // cmd.data.params.set_update_timestamp(1);
+            // cmd.data.params.timestamp = 0x0;
+
+            let struct_bytes = core::slice::from_raw_parts(
+                (&cmd as *const MotorCommandPacket) as *const u8,
+                core::mem::size_of::<MotorCommandPacket>(),
+            );
+
+            self.stm32_uart_interface.send_or_discard_data(struct_bytes);
         }
     }
 
