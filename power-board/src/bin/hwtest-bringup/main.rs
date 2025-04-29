@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
 use defmt::*;

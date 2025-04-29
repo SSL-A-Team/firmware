@@ -22,6 +22,11 @@ where
         }
     }
 
+    pub fn map_ranges_bounded<N: Number>(val: N, input_range: Range<N>, output_range: Range<N>) -> N {
+        let clamped_val = clamp_min(clamp_max(val, input_range.max()), input_range.min());
+        input_range.map_value_to_range(clamped_val, &output_range)
+    }
+
     pub fn map(&self, val: T) -> T {
         self.input_range.map_value_to_range(val, &self.output_range)
     }

@@ -10,6 +10,7 @@ pub enum AudioError {
     UnplayablePitch
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum AudioCommand {
     PlaySong(SongId),
     Stop,

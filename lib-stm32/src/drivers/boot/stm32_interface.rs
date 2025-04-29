@@ -88,7 +88,7 @@ impl<
         write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
-        reset_pin_pull: Pull,
+        _reset_pin_pull: Pull,
         reset_polarity_high: bool,
     ) -> Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         let boot0_output = Output::new(boot0_pin, Level::Low, Speed::Medium);

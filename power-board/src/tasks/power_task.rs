@@ -1,11 +1,9 @@
-use core::fmt;
-
 use ateam_lib_stm32::{drivers::adc::AdcConverter, filter::WindowAvergingFilter, math::range::Range, power::{battery::LipoModel, PowerRail}};
 use embassy_executor::Spawner;
 use embassy_stm32::{adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime}, peripherals::ADC1};
 use embassy_time::{Duration, Instant, Ticker};
 
-use crate::{adc_raw_to_mv, adc_raw_vrefint_to_mv, config::{LIPO6S_BALANCE_RAW_SAMPLES_TO_VOLTAGES, LIPO_BATTERY_CONFIG_6S, POWER_RAIL_12V0_PARAMETERS, POWER_RAIL_3V3_PARAMETERS, POWER_RAIL_5V0_PARAMETERS, POWER_RAIL_BATTERY_PARAMETERSL}, pins::*};
+use crate::{config::{LIPO6S_BALANCE_RAW_SAMPLES_TO_VOLTAGES, LIPO_BATTERY_CONFIG_6S, POWER_RAIL_12V0_PARAMETERS, POWER_RAIL_3V3_PARAMETERS, POWER_RAIL_5V0_PARAMETERS, POWER_RAIL_BATTERY_PARAMETERSL}, pins::*};
 
 const BATTERY_CELL_READ_INTERVAL: Duration = Duration::from_millis(1300);
 const POWER_RAIL_FILTER_WINDOW_SIZE: usize = 10;
@@ -98,7 +96,7 @@ async fn power_task_entry(
     //  Battery Model Setup  //
     ///////////////////////////
 
-    let mut lipo6s_battery_model: LipoModel<'_, 6, f32, WindowAvergingFilter<15, true, f32>> = 
+    let mut lipo6s_battery_model: LipoModel<'_, 6, WindowAvergingFilter<15, true, f32>> = 
             LipoModel::new(
                 LIPO_BATTERY_CONFIG_6S,
                 &LIPO6S_BALANCE_RAW_SAMPLES_TO_VOLTAGES,
@@ -170,13 +168,13 @@ async fn power_task_entry(
             adc_converter.update_vrefint(*battery_cell_adc_raw_samples.last().unwrap_or(&0));
             adc_converter.raw_samples_to_v(&battery_cell_adc_raw_samples, &mut battery_cell_voltage_samples);
 
-            defmt::info!("battery cell adc voltages {}", battery_cell_voltage_samples);
-
             lipo6s_battery_model.add_cell_voltage_samples(&battery_cell_voltage_samples[0..6]);
 
             defmt::info!("battery cell voltages {}", lipo6s_battery_model.get_cell_voltages());
+            defmt::info!("battery cell percentages {}", lipo6s_battery_model.get_cell_percentages());
+            defmt::info!("battery worst cell imblanace {}", lipo6s_battery_model.get_worst_cell_imbalance());
 
-            if battery_cell_voltage_samples.into_iter().all(|v| v < 1.0) {
+            if lipo6s_battery_model.get_cell_percentages().into_iter().all(|v| *v == 0) {
                 defmt::info!("battery balance connector is unplugged");
             }
             

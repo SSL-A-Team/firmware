@@ -6,7 +6,6 @@ pub struct AdcConverter {
     vref_ext_mv: u16,
     vref_int_mv: u16,
     last_vrefint: u16,
-    last_temp: u16,
 }
 
 impl AdcConverter {
@@ -17,16 +16,11 @@ impl AdcConverter {
             vref_ext_mv, 
             vref_int_mv, 
             last_vrefint: 0,
-            last_temp: 0
         }
     }
 
     pub fn update_vrefint(&mut self, vrefint_sample: u16) {
         self.last_vrefint = vrefint_sample
-    }
-
-    pub fn update_temp(&mut self, _temp_sample: u16) {
-        unimplemented!()
     }
 
     fn raw_sample_to_mv_no_comp(&self, sample: u16) -> u16 {

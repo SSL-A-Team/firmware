@@ -162,8 +162,8 @@ pub fn start_imu_task(
     defmt::debug!("starting imu task...");
 
     // let imu_buf = IMU_BUFFER_CELL.take();
-
-    let imu_buf: &'static mut [u8; 14] = unsafe { &mut IMU_BUFFER_CELL };
+    // let imu_buf: &'static mut [u8; 14] = unsafe { & mut IMU_BUFFER_CELL };
+    let imu_buf: & mut [u8; bmi323::SPI_MIN_BUF_LEN] = unsafe { &mut (*(&raw mut IMU_BUFFER_CELL)) };
 
     let imu = Bmi323::new_from_pins(peri, sck, mosi, miso, txdma, rxdma, bmi323_nss, imu_buf);
 

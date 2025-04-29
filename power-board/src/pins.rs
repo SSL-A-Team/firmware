@@ -1,4 +1,6 @@
+use ateam_lib_stm32::audio::AudioCommand;
 use embassy_stm32::peripherals::*;
+use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, pubsub::{PubSubChannel, Publisher, Subscriber}};
 
 /////////////////////
 //  power control  //
@@ -66,3 +68,14 @@ pub type ComsSpiMiso = PB14;
 pub type ComsSpiNss = PB12;
 pub type ComsDmaTx = DMA1_CH4;
 pub type ComsDmaRx = DMA1_CH5;
+
+//////////////////////////////
+//  Communication Channels  //
+//////////////////////////////
+
+const AUDIO_CHANNEL_DEPTH: usize = 3;
+const AUDIO_CHANNEL_NUM_SUBS: usize = 1;
+const AUDIO_CHANNEL_NUM_PUBS: usize = 2;
+pub type AudioPubSub = PubSubChannel<ThreadModeRawMutex, AudioCommand, AUDIO_CHANNEL_DEPTH, AUDIO_CHANNEL_NUM_SUBS, AUDIO_CHANNEL_NUM_PUBS>;
+pub type AudioPublisher = Publisher<'static, ThreadModeRawMutex, AudioCommand, AUDIO_CHANNEL_DEPTH, AUDIO_CHANNEL_NUM_SUBS, AUDIO_CHANNEL_NUM_PUBS>;
+pub type AudioSubscriber = Subscriber<'static, ThreadModeRawMutex, AudioCommand, AUDIO_CHANNEL_DEPTH, AUDIO_CHANNEL_NUM_SUBS, AUDIO_CHANNEL_NUM_PUBS>;

@@ -3,7 +3,7 @@
 // criticals are reported to software and force halt high current operations (driving, dribbling, kick/chip charging)
 // powerdowns result in an automatic initiation software shutdown
 
-use ateam_lib_stm32::{math::{linear_map::LinearMap, range::Range}, power::{battery::{BatteryConfig, LipoModel}, model::lipo_model::LIPO_CELL_MAX_VOLTAGE, PowerRailParameters}};
+use ateam_lib_stm32::{math::{linear_map::LinearMap, range::Range}, power::{battery::BatteryConfig, model::lipo_model::LIPO_CELL_MAX_VOLTAGE, PowerRailParameters}};
 
 // power regulators on-board can take a max of 40, and 60 volts respectively. 
 // stspins can take 45V
