@@ -4,16 +4,16 @@
  * @brief core code for 6step commutation of the bldc
  * @version 0.1
  * @date 2022-05-22
- * 
+ *
  * @copyright Copyright (c) 2022
- * 
+ *
  * The most readable file ever! Jk. Its not too bad but you'll definitely
  * need stm32f031c6 and rm0091 in hand (or memorized LOL) before continuing.
- * 
+ *
  * Documents you will need:
  *  Understading of 6step PWM commutation:
  *      https://www.youtube.com/user/jtlee1108
- *  Motor Phase/Hall Relationship: 
+ *  Motor Phase/Hall Relationship:
  *      https://us.nanotec.com/fileadmin/files/Datenblaetter/BLDC/DF45/DF45M024053-A2.pdf
  *  Schematic relating header to the pins:
  *      STEVAL-SPIN3204 Data Brief
@@ -102,7 +102,7 @@ static int hall_transition_error_count = 0;
 #endif
 
 #ifdef BRAKE_ON_HALL_ERROR
-    #define HALL_ERROR_COMMUTATION BRAKE_COMMUTATION 
+    #define HALL_ERROR_COMMUTATION BRAKE_COMMUTATION
 #else
     #define HALL_ERROR_COMMUTATION COAST_COMMUTATION
 #endif
@@ -113,21 +113,21 @@ static const int COAST_COMMUTATION_INDEX = 9;
 
 /**
  * @brief clockwise transition table
- * 
+ *
  * Hall sensors should produce a gray-coded 3-bit value, meaning
  * 0 (0'b000) and 7 (0'b111) are invalid. The signal wires have
  * pull up resistors so 7 probably means one or more wires is unplugged,
  * and 0 probably means there's a power issue.
- * 
+ *
  * Clockwise (human readable order)
- * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H 
+ * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H
  * 1  0  0  1     V  H  G      0   1   0   0   1   0
  * 3  0  1  1     H  V  G      0   0   0   1   1   0
  * 2  0  1  0     G  V  H      1   0   0   1   0   0
  * 6  1  1  0     G  H  V      1   0   0   0   0   1
  * 4  1  0  0     H  G  V      0   0   1   0   0   1
  * 5  1  0  1     V  G  H      0   1   1   0   0   0
- * 
+ *
  * Clockwise (direct hall index order)
  * 1  0  0  1     V  H  G      0   1   0   0   1   0
  * 2  0  1  0     G  V  H      1   0   0   1   0   0
@@ -135,10 +135,10 @@ static const int COAST_COMMUTATION_INDEX = 9;
  * 4  1  0  0     H  G  V      0   0   1   0   0   1
  * 5  1  0  1     V  G  H      0   1   1   0   0   0
  * 6  1  1  0     G  H  V      1   0   0   0   0   1
- * 
+ *
  */
 static bool cw_commutation_table[10][6] = {
-    HALL_ERROR_COMMUTATION,    
+    HALL_ERROR_COMMUTATION,
     {false, true,  false, false, true,  false},
     {true,  false, false, true,  false, false},
     {false, false, false, true,  true,  false},
@@ -163,12 +163,12 @@ static uint8_t cw_expected_hall_transition_table[8] = {
 
 /**
  * @brief counter clockwise transition table
- * 
+ *
  * Hall sensors should produce a gray-coded 3-bit value, meaning
  * 0 (0'b000) and 7 (0'b111) are invalid. The signal wires have
  * pull up resistors so 7 probably means one or more wires is unplugged,
  * and 0 probably means there's a power issue.
- * 
+ *
  * Counter Clockwise (human readable order)
  * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H
  * 1   0  0  1    V  H  G      1   0   0   0   0   1
@@ -177,7 +177,7 @@ static uint8_t cw_expected_hall_transition_table[8] = {
  * 6   1  1  0    G  H  V      0   1   0   0   1   0
  * 2   0  1  0    G  V  H      0   1   1   0   0   0
  * 3   0  1  1    H  V  G      0   0   1   0   0   1
- * 
+ *
  * Counter Clockwise (direct hall index order)
  * 1   0  0  1    V  H  G      1   0   0   0   0   1
  * 2   0  1  0    G  V  H      0   1   1   0   0   0
@@ -229,7 +229,7 @@ static void pwm6step_set_direct(uint16_t, MotorDirection_t);
 
 /**
  * @brief sets up the hall sensor timer
- * 
+ *
  * The hall sensor timer is TIM2. The hall timer can be used to
  * trigger a TIM1 COM event which will call back it's interrupt handler
  */
@@ -254,7 +254,7 @@ static void pwm6step_setup_hall_timer() {
     ///////////////////////
 
     // htim2.Init.Prescaler = LF_TIMX_PSC; // 11
-    TIM2->PSC = 11; //div by 11 - 1 = 10, 4.8MHz. Period 208ns 
+    TIM2->PSC = 11; //div by 11 - 1 = 10, 4.8MHz. Period 208ns
     // htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
     TIM2->CR1 &= ~(TIM_CR1_DIR);
     // htim2.Init.Period = LF_TIMX_ARR; // 24000
@@ -285,7 +285,7 @@ static void pwm6step_setup_hall_timer() {
     // this allows us to delay COM until the hall edge detection interrupt finishes
     TIM2->CR2 &= ~TIM_CR2_MMS;
     TIM2->CR2 |= (TIM_CR2_MMS_0 | TIM_CR2_MMS_2); // 0b101 OC2REF for TRGO
-    // enable master slave mode 
+    // enable master slave mode
     TIM2->SMCR &= ~TIM_SMCR_MSM;
     TIM2->SMCR |= (TIM_SMCR_MSM);
 
@@ -385,20 +385,20 @@ static void pwm6step_setup_hall_timer() {
 #define CCER_TIM4_ADC_TRIG (TIM_CCER_CC4E)
 
 /**
- * @brief 
- * 
- * @param pwm_freq_hz 
+ * @brief
+ *
+ * @param pwm_freq_hz
  */
 static void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
-    ////////////////////////////
-    //  TIM1 Setup IO         //
-    //      - PA8  TIM1_CH1   //
-    //      - PA9  TIM1_CH2   //
-    //      - PA10 TIM1_CH3   //
-    //      - PB13 TIM1_CH1N  //
-    //      - PB14 TIM1_CH2N  //
-    //      - PB15 TIM1-CH3N  //
-    ////////////////////////////
+    ////////////////////////////////
+    //  TIM1 Setup IO             //
+    //      - PA8  TIM1_CH1  HS1  //
+    //      - PA9  TIM1_CH2  HS2  //
+    //      - PA10 TIM1_CH3  HS3  //
+    //      - PB13 TIM1_CH1N LS1  //
+    //      - PB14 TIM1_CH2N LS2  //
+    //      - PB15 TIM1-CH3N LS3  //
+    ////////////////////////////////
 
     // set OC_SEL = 0, OC signal visible only to MCU, no action on gate driver
     GPIOA->MODER |= (GPIO_MODER_MODER11_0); // output (def push pull)
@@ -414,6 +414,7 @@ static void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
     GPIOA->MODER |= (GPIO_MODER_MODER8_1 | GPIO_MODER_MODER9_1 | GPIO_MODER_MODER10_1);
     GPIOB->MODER |= (GPIO_MODER_MODER13_1 | GPIO_MODER_MODER14_1 | GPIO_MODER_MODER15_1);
 
+    // Pull downs for all pins.
     GPIOA->PUPDR |= (GPIO_PUPDR_PUPDR8_1 | GPIO_PUPDR_PUPDR9_1 | GPIO_PUPDR_PUPDR10_1);
     GPIOB->PUPDR |= (GPIO_PUPDR_PUPDR13_1 | GPIO_PUPDR_PUPDR14_1 | GPIO_PUPDR_PUPDR15_1);
 
@@ -436,13 +437,19 @@ static void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
     uint16_t arr_pwm_dc_value = (uint16_t) (F_SYS_CLK_HZ / ((uint32_t) pwm_freq_hz * (PWM_TIM_PRESCALER + 1)) - 1);
     TIM1->ARR = arr_pwm_dc_value;
 
+    // Set the Repetition Counter to 0
+    TIM1->RCR = 0;
+    // Preload ARR, Center-aligned mode 3 (up/down counting and output compare both up and down).
     TIM1->CR1 = (TIM_CR1_ARPE | TIM_CR1_CMS);
+    // CCxE, CCxNE and OCxM bits are preloaded, after having been written, they are updated
+    // only when a communication event (COM) occurs
     TIM1->CR2 = (TIM_CR2_CCPC);
 
     TIM1->CCMR1 = CCMR1_PHASE1_OFF | CCMR1_PHASE2_OFF;
     TIM1->CCMR2 = CCMR2_PHASE3_OFF;
 
-    // ADC trigger delay
+    // ADC trigger delay (TIM1->CCR4) will be set on each commutation to happen
+    // at the same period as the PWM.
     TIM1->CCR4 = 20;
     // set channel 4 PWM mode 1, affects OC4REF as input to ADC
     // should be co triggered with ch1-3 commutation
@@ -453,6 +460,7 @@ static void pwm6step_setup_commutation_timer(uint16_t pwm_freq_hz) {
     // generate an update event to reload the PSC
     TIM1->EGR |= (TIM_EGR_UG | TIM_EGR_COMG);
 
+    // Counter Enable
     TIM1->CR1 |= TIM_CR1_CEN;
     TIM1->BDTR |= TIM_BDTR_MOE;
 
@@ -499,18 +507,18 @@ void TIM16_IRQHandler() {
 }
 
 /**
- * @brief 
- * 
+ * @brief
+ *
  * keep this interrupt short so we can minimize the delay between the CC1
  * transition event and delayed required on CC2 to fire the COM event automatically
- * 
+ *
  * handle most functionality on the interrupt callback for CC2 which fires *after*
  * the COM event
- * 
+ *
  * force apply O0 as we'll need to count the instructions here + ctxswitch to make
  * sure this function completes before the other interrupt fires. Maybe that happens
  * anyway since read of CCR1 clear the IF
- * 
+ *
  */
 __attribute__((optimize("O0")))
 static void TIM2_IRQHandler_HallTransition() {
@@ -531,8 +539,8 @@ static void TIM2_IRQHandler_HallTransition() {
 }
 
 /**
- * @brief 
- * 
+ * @brief
+ *
  */
 static void perform_commutation_cycle() {
     // mask off Hall lines PA0-PA2 (already the LSBs)
@@ -618,16 +626,16 @@ static void perform_commutation_cycle() {
         trigger_commutation();
 
         return;
-    } 
-    
+    }
+
     set_commutation_for_hall(hall_recorded_state_on_transition, false);
     trigger_commutation();
 }
 
 /**
  * @brief reads the hall value from the pins
- * 
- * @return uint8_t 
+ *
+ * @return uint8_t
  */
 static uint8_t read_hall() {
     uint8_t hall_value = (GPIOA->IDR & (GPIO_IDR_2 | GPIO_IDR_1 | GPIO_IDR_0));
@@ -644,7 +652,7 @@ static uint8_t read_hall() {
 
 /**
  * @brief stages com values for estop
- * 
+ *
  */
 static void set_commutation_estop() {
     set_commutation_for_hall(0, true);
@@ -652,8 +660,8 @@ static void set_commutation_estop() {
 
 /**
  * @brief sets channel duty cycles, and stages enables for COM event
- * 
- * @param hall_state 
+ *
+ * @param hall_state
  */
 static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     bool *commutation_values;
@@ -679,15 +687,16 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     bool phase3_low  = commutation_values[4];
     bool phase3_high = commutation_values[5];
 
-    uint16_t arr_pwm_dc_value = (uint16_t) (F_SYS_CLK_HZ / ((uint32_t) 48000 * (PWM_TIM_PRESCALER + 1)) - 1);
-    TIM1->CCR4 = arr_pwm_dc_value;
-
     // uint16_t ccer = 0;
     uint16_t ccer = CCER_TIM4_ADC_TRIG;
     uint16_t ccmr1 = 0;
     // uint16_t ccmr2 = 0;
     uint16_t ccmr2 = CCMR2_TIM4_ADC_TRIG;
+    // Set the ADC trigger value to the same as the PWM duty cycle
+    // so it's right TODO determine what it is right after.
     TIM1->CCR4 = (current_duty_cycle == NUM_RAW_DC_STEPS) ? NUM_RAW_DC_STEPS - MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW : current_duty_cycle;
+
+    // Set the duty cycle and capture control configuration for each phase
     if (phase1_low) {
         if (command_brake) {
             TIM1->CCR1 = current_duty_cycle;
@@ -712,7 +721,7 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
         if (command_brake) {
             TIM1->CCR2 = current_duty_cycle;
             ccmr1 |= CCMR1_PHASE2_PWM_BRAKE;
-            ccer |= CCER_PHASE2_PWM_BRAKE;            
+            ccer |= CCER_PHASE2_PWM_BRAKE;
         } else {
             TIM1->CCR2 = 0;
             ccmr1 |= CCMR1_PHASE2_LOW;
@@ -755,7 +764,7 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
 
 /**
  * @brief trigger a hardware commutation in TIM1
- * 
+ *
  */
 static void trigger_commutation() {
     TIM1->EGR |= TIM_EGR_COMG;
@@ -771,14 +780,14 @@ void TIM1_CC_IRQHandler() {
 }
 
 /**
- * @brief 
- * 
- * @param duty_cycle 
- * @param motor_direction 
+ * @brief
+ *
+ * @param duty_cycle
+ * @param motor_direction
  */
 static void pwm6step_set_direct(uint16_t duty_cycle, MotorDirection_t motor_direction) {
     uint16_t scaled_dc = MAP_UINT16_TO_RAW_DC(duty_cycle);
-    if (scaled_dc >= MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW 
+    if (scaled_dc >= MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW
             && motor_direction != commanded_motor_direction) {
         direction_change_commanded = true;
     }
@@ -797,8 +806,8 @@ static void pwm6step_set_direct(uint16_t duty_cycle, MotorDirection_t motor_dire
 ////////////////////////
 
 /**
- * @brief sets up the pins and timer peripherials associated with the pins 
- * 
+ * @brief sets up the pins and timer peripherials associated with the pins
+ *
  */
 void pwm6step_setup() {
 
@@ -808,9 +817,9 @@ void pwm6step_setup() {
 }
 
 /**
- * @brief 
- * 
- * @param duty_cycle 
+ * @brief
+ *
+ * @param duty_cycle
  */
 void pwm6step_set_duty_cycle(int32_t duty_cycle) {
     MotorDirection_t motor_direction;
@@ -849,7 +858,7 @@ void pwm6step_brake(uint16_t braking_force) {
 }
 
 void pwm6step_brake_f(float braking_force_pct) {
-    pwm6step_brake((uint16_t) (braking_force_pct * (float) UINT16_MAX));   
+    pwm6step_brake((uint16_t) (braking_force_pct * (float) UINT16_MAX));
 }
 
 void pwm6step_stop() {
@@ -871,7 +880,7 @@ bool pwm6step_is_direction_inverted() {
 
 const MotorErrors_t pwm6step_get_motor_errors() {
     return motor_errors;
-} 
+}
 
 bool pwm6step_hall_rps_estimate_valid() {
 
@@ -880,5 +889,3 @@ bool pwm6step_hall_rps_estimate_valid() {
 int pwm6step_hall_get_rps_estimate() {
 
 }
-
-

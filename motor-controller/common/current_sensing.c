@@ -135,8 +135,8 @@ CS_Status_t currsen_setup(CS_Mode_t mode, uint8_t motor_adc_ch)
         DMA1_Channel1->CPAR = (uint32_t) (&(ADC1->DR));
         // Set DMA Channel 1 Memory Address to the result struct.
         DMA1_Channel1->CMAR = (uint32_t) (&m_adc_result);
-        // Set DMA Channel 1 Number of Data to Transfer to the number of channels.
-        // Temperature and motor so 2.
+        // Set DMA Channel 1 Number of Data to Transfer to the number of transfers.
+        // Motor and Vbus, so 2 transfers.
         // Since in circular mode, this will reset.
         DMA1_Channel1->CNDTR = 2;
         // Enable DMA1 Channel 1.
@@ -146,6 +146,11 @@ CS_Status_t currsen_setup(CS_Mode_t mode, uint8_t motor_adc_ch)
 
     // Disable ADC before configuration.
     status = currsen_adc_dis();
+    if (status != CS_OK)
+        return status;
+
+    // Calibration (should happen before DMAEN in CFGR1)
+    status = currsen_adc_cal();
     if (status != CS_OK)
         return status;
 
@@ -208,6 +213,11 @@ CS_Status_t currsen_setup(CS_Mode_t mode, uint8_t motor_adc_ch)
         | ADC_REG_DMA_TRANSFER_UNLIMITED
         | ADC_REG_OVR_DATA_OVERWRITTEN);
 
+    /*
+    FUTURE: If doing temperature, need sampling of ADC_SMPR_SMP_2 | ADC_SMPR_SMP_1.
+    Motors need 0, so need to switch sampling duration on the fly so would require
+    DMA + ADC trigger.
+
     // Temperature sensor values
     // Table 53. STM32F031x6.pdf
     // ts_temp minimum ADC sampling time -> 4 us
@@ -225,23 +235,25 @@ CS_Status_t currsen_setup(CS_Mode_t mode, uint8_t motor_adc_ch)
     // Total first conversion -> (t_LATENCY + t_SMPL + t_SAR + W_LATENCY)
     // All following conversions -> (t_SMPL + t_SAR + W_LATENCY)
     // t_SMPL -> based on SMP[2:0] bits. Min is 1.5 and max is 239.5 ADC clock cycles (13.11.6 in RM0091).
-    // Will go with SMP = 110 (71.5 ADC clock cycles) for now as motor should be low pass filtered.
+    // SMP = 110 (71.5 ADC clock cycles) seems to be the minimum for temperature sensor.
     // Total first conversion -> (2.625 + 71.5 + 12.5 + 8.5) = 95.125 ADC clock cycles.
     // first conversion * (1 / 12 MHz ADC Clock) = 7.92708 us for 1 channel.
     // All following conversions -> (71.5 + 12.5 + 8.5) = 92.5 ADC clock cycles.
     // following conversions * (1 / 12 MHz ADC Clock) = 7.7083 us for each additional.
     // So if we do one motor and temp sensor, we are at 7.92708 + 7.7083 = 15.63538 us.
-
+    // FUTURE ^ This is not enough time I think so got to do the on the fly sampling.
     ADC1->SMPR = ADC_SMPR_SMP_2 | ADC_SMPR_SMP_1;
 
     // Set ADC channel selection
     // Channel 16 is the temperature sensor.
     ADC1->CHSELR = motor_adc_ch | ADC_CHSELR_CHSEL16;
+    */
 
-    // Calibration
-    status = currsen_adc_cal();
-    if (status != CS_OK)
-        return status;
+    // For now, 1.5 ADC clock cycles (0.125 us) is the minimum sampling time.
+    ADC1->SMPR = 0;
+
+    // Set ADC channel selection. Ch9 is the Vbus.
+    ADC1->CHSELR = motor_adc_ch | ADC_CHSELR_CHSEL9;
 
     // Enable
     status = currsen_adc_en();
@@ -258,10 +270,10 @@ CS_Status_t currsen_setup(CS_Mode_t mode, uint8_t motor_adc_ch)
     return status;
 }
 
-void ADC1_IRQHandler() {
-    GPIOB->BSRR |= GPIO_BSRR_BR_9;
-    ADC1->ISR |= (ADC_ISR_EOSEQ);
-}
+//void ADC1_IRQHandler() {
+//    GPIOB->BSRR |= GPIO_BSRR_BR_9;
+//    ADC1->ISR |= (ADC_ISR_EOSEQ);
+//}
 
 /**
  * @brief calibrate the ADC
@@ -415,12 +427,21 @@ CS_Status_t currsen_adc_dis()
  */
 float currsen_get_motor_current()
 {
-    // TODO need more for motor current scaling
-    // return ((float) m_adc_result.Motor_current_raw);
-    return V_ADC_SCALE * ((float) m_adc_result.Motor_current_raw);
+    return I_MOTOR_SCALE * ((float) m_adc_result.Motor_current_raw);
 }
 
-/**Motor_current_raw
+/**
+ * @brief gets the Vbus voltage. Translate from raw ADC value to
+ *       to Vbus voltage in volts.
+ *
+ * @return float Vbus voltage
+ */
+float currsen_get_vbus_voltage()
+{
+    return VBUS_SCALE * ((float) m_adc_result.Vbus_raw);
+}
+
+/**
  * @brief gets the temperature. Translate from raw ADC value to
  *       to scaled raw ADC value to temperature.
  *
@@ -430,10 +451,10 @@ float currsen_get_motor_current()
 int32_t currsen_get_temperature()
 {
     // From A.7.16 of RM0091
-    int32_t temperature; /* will contain the temperature in degrees Celsius */
+    int32_t temperature;
     // Scale the raw ADC value to the VDD_CALIB value and center based on the
     // temperature calibration points.
-    temperature = (((int32_t) m_adc_result.Spin_temperature_raw * VDD_APPLI / VDD_CALIB) - (int32_t) *TEMP30_CAL_ADDR);
+    temperature = (((int32_t) m_adc_result.Spin_temperature_raw * VDD_APPLI / VDD_CALIB) - (int32_t)(*TEMP30_CAL_ADDR));
     // Scale by the difference between the two calibration points.
     temperature = temperature * (int32_t)(110 - 30);
     temperature = temperature / (int32_t)(*TEMP110_CAL_ADDR - *TEMP30_CAL_ADDR);

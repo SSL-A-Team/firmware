@@ -190,7 +190,7 @@ impl<
 
                 // copy receieved uart bytes into packet
                 let state = &mut mrp as *mut _ as *mut u8;
-                for i in 0..core::mem::size_of::<MotorResponse_Motion_Packet>() {
+                for i in 0..core::mem::size_of::<MotorResponsePacket>() {
                     *state.offset(i as isize) = buf[i];
                 }
 
@@ -322,6 +322,22 @@ impl<
 
     pub fn read_vel_computed_setpoint(&self) -> f32 {
         return self.current_state.vel_computed_setpoint;
+    }
+
+    pub fn read_torque_computed_error(&self) -> f32 {
+        return self.current_state.torque_computed_error;
+    }
+
+    pub fn read_torque_computed_setpoint(&self) -> f32 {
+        return self.current_state.torque_computed_setpoint;
+    }
+
+    pub fn read_torque_estimate(&self) -> f32 {
+        return self.current_state.torque_estimate;
+    }
+
+    pub fn read_vbus_voltage(&self) -> f32 {
+        return self.current_state.vbus_voltage;
     }
 }
 

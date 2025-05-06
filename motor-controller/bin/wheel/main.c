@@ -331,7 +331,7 @@ int main() {
             response_packet.data.motion.torque_estimate = measured_torque_Nm;
             response_packet.data.motion.torque_computed_error = torque_pid.prev_err;
             response_packet.data.motion.torque_computed_setpoint = torque_setpoint_Nm;
-            //response_packet.data.motion.temperature = currsen_get_temperature();
+            response_packet.data.motion.vbus_voltage = currsen_get_vbus_voltage();
         }
 
         // run velocity loop if applicable
