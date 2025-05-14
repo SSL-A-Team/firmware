@@ -1,4 +1,5 @@
 use core::fmt::Write;
+use defmt::Format;
 use embassy_futures::select::select;
 use embassy_stm32::usart;
 use embassy_time::Timer;
@@ -10,7 +11,7 @@ use crate::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
 use super::at_protocol::{ATEvent, ATResponse, WifiLinkDisconnectedReason};
 use super::edm_protocol::{EdmPacket, EdmPacketError};
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug, Format)]
 pub enum OdinRadioError {
     CommandConstructionFailed,
     EdmPacketError(EdmPacketError),

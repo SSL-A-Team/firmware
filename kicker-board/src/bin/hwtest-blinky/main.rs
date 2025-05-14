@@ -137,7 +137,7 @@ static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) -> ! {
-    let sys_config = get_system_config(tasks::ClkSource::InternalOscillator);
+    let sys_config = get_system_config(tasks::ClkSource::External8MHzOscillator);
     let p = embassy_stm32::init(sys_config);
 
     info!("kicker startup!");

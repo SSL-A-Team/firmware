@@ -22,8 +22,16 @@ use credentials::public_credentials::wifi::wifi_credentials;
 
 use embassy_time::Timer;
 // provide embedded panic probe
-use panic_probe as _;
+// use panic_probe as _;
 use static_cell::ConstStaticCell;
+
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    defmt::error!("{}", defmt::Display2Format(info));
+    // Delay to give it a change to print
+    cortex_m::asm::delay(100_000_000);
+    cortex_m::peripheral::SCB::sys_reset();
+}
 
 static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
 

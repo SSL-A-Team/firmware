@@ -43,26 +43,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
     interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CEC, embassy_stm32::interrupt::Priority::P5);
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(Interrupt::CEC);
 
-    // let kicker_det = Input::new(p.PG8, Pull::Up);
-    // if kicker_det.is_high() {
-    //     defmt::warn!("kicker appears unplugged!");
-    // }
-
-    let mut kicker_pwr_pin = Output::new(p.PG8, Level::Low, Speed::Medium);
-
-    kicker_pwr_pin.set_high();
-    defmt::info!("force power off kicker");
-    Timer::after_millis(2000).await;
-    kicker_pwr_pin.set_low();
-    defmt::info!("kicker force power off done");
-
-    defmt::info!("attempting to power on kicker.");
-    Timer::after_millis(1000).await;
-    kicker_pwr_pin.set_high();
-    Timer::after_millis(200).await;
-    kicker_pwr_pin.set_low();
-    defmt::info!("power on attempt done");
-
     // loop {
     //     Timer::after_millis(1000).await;
     // }

@@ -200,17 +200,19 @@ impl<
     }
 
     pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
-        let controller_needs_flash: bool = self.check_wheel_needs_flash().await;
-        defmt::debug!("Motor Controller Needs Flash - {:?}", controller_needs_flash);
+        // let controller_needs_flash: bool = self.check_wheel_needs_flash().await;
+        // defmt::debug!("Motor Controller Needs Flash - {:?}", controller_needs_flash);
 
-        let res;
-        if controller_needs_flash {
-            defmt::trace!("UART config updated");
-            res = self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await;
-        } else {
-            defmt::info!("Wheel image is up to date, skipping flash");
-            res = Ok(());
-        }
+        // let res;
+        // if controller_needs_flash {
+        //     defmt::trace!("UART config updated");
+        //     res = self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await;
+        // } else {
+        //     defmt::info!("Wheel image is up to date, skipping flash");
+        //     res = Ok(());
+        // }
+
+        let res = self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await;
 
         // this is safe because load firmware image call will reset the target device
         // it will begin issueing telemetry updates

@@ -1,6 +1,6 @@
+use defmt::Format;
 
-
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug, Format)]
 pub enum AtPacketError {
     Utf8DecodeFailed,
     FramingDecodeFailed,
@@ -10,11 +10,7 @@ pub enum AtPacketError {
     EventUnknown,
 }
 
-// impl From<PeerConnectedProfile as TryFrom<u8>>::Error for AtPacketError {
-
-// }
-
-#[derive(defmt::Format)]
+#[derive(Format)]
 pub enum WifiLinkDisconnectedReason {
     Unknown = 0,
     RemoteClose = 1,

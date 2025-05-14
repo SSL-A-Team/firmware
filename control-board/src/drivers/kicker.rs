@@ -62,7 +62,7 @@ impl<
         reset_pin: impl Pin,
         firmware_image: &'a [u8]) -> Self {
 
-        let stm32_interface = Stm32Interface::new_from_pins(uart, read_queue, write_queue, boot0_pin, reset_pin, Pull::Up, true);
+        let stm32_interface = Stm32Interface::new_from_pins(uart, read_queue, write_queue, boot0_pin, reset_pin, Pull::None, true);
 
         Self::new(stm32_interface, firmware_image)
     }

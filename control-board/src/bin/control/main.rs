@@ -10,7 +10,7 @@ use embassy_sync::pubsub::PubSubChannel;
 use defmt_rtt as _; 
 
 use ateam_control_board::{
-    create_audio_task, create_control_task, create_imu_task, create_io_task, create_kicker_task, create_radio_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::{control_task::start_control_task, kicker_task::start_kicker_task}};
+    create_control_task, create_imu_task, create_io_task, create_radio_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
 
 // load credentials from correct crate
 #[cfg(not(feature = "no-private-credentials"))]

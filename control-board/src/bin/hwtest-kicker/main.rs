@@ -13,14 +13,14 @@ use ateam_lib_stm32::{
 use defmt::info;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
-    gpio::{Level, Output, Speed, Pull}, interrupt, pac::Interrupt, usart::Uart
+    gpio::Pull, interrupt, pac::Interrupt, usart::Uart
 };
 use embassy_time::{Duration, Ticker, Timer};
 use panic_probe as _;
 
-include_kicker_bin! {KICKER_FW_IMG, "hwtest-kick.bin"}
+include_kicker_bin! {KICKER_FW_IMG, "hwtest-coms.bin"}
 
-const MAX_TX_PACKET_SIZE: usize = 16;
+const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 20;
@@ -45,37 +45,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
     interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CEC, embassy_stm32::interrupt::Priority::P5);
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(Interrupt::CEC);
 
-    // let kicker_det = Input::new(p.PG8, Pull::Up);
-    // if kicker_det.is_high() {
-    //     defmt::warn!("kicker appears unplugged!");
-    // }
-
-    let mut kicker_pwr_pin = Output::new(p.PG8, Level::Low, Speed::Medium);
-
-    kicker_pwr_pin.set_high();
-    defmt::info!("force power off kicker");
-    Timer::after_millis(2000).await;
-    kicker_pwr_pin.set_low();
-    defmt::info!("kicker force power off done");
-
-    defmt::info!("attempting to power on kicker.");
-    Timer::after_millis(1000).await;
-    kicker_pwr_pin.set_high();
-    Timer::after_millis(200).await;
-    kicker_pwr_pin.set_low();
-    defmt::info!("power on attempt done");
-
-    // loop {
-    //     Timer::after_millis(1000).await;
-    // }
-
     let kicker_usart = Uart::new(
-        p.USART6,
-        p.PC7,
-        p.PC6,
+        p.UART8,
+        p.PE0,
+        p.PE1,
         ateam_control_board::SystemIrqs,
-        p.DMA2_CH4,
-        p.DMA2_CH5,
+        p.DMA2_CH2,
+        p.DMA2_CH3,
         stm32_interface::get_bootloader_uart_config(),
     ).unwrap();
 
@@ -90,8 +66,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
         &KICKER_IDLE_BUFFERED_UART,
         KICKER_IDLE_BUFFERED_UART.get_uart_read_queue(),
         KICKER_IDLE_BUFFERED_UART.get_uart_write_queue(),
-        p.PA8,
-        p.PA9,
+        p.PG2,
+        p.PG3,
         Pull::Up,
         true
     );

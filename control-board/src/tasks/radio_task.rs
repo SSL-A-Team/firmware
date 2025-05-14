@@ -246,7 +246,9 @@ impl<
                     // reboot the robot (unless we had a shutdown request).
                     let cur_time = Instant::now();
                     if !cur_robot_state.shutdown_requested && 
-                        Instant::checked_duration_since(&cur_time, self.last_software_packet).unwrap().as_millis() > Self::RESPONSE_FROM_PC_TIMEOUT_MS {                        
+                        Instant::checked_duration_since(&cur_time, self.last_software_packet).unwrap().as_millis() > Self::RESPONSE_FROM_PC_TIMEOUT_MS {       
+                        defmt::warn!("software timeout - rebooting...");               
+                        Timer::after_millis(100).await;  
                         cortex_m::peripheral::SCB::sys_reset();
                     }
                 },
@@ -330,11 +332,16 @@ impl<
                     "recieved hello resp to: {}.{}.{}.{}:{}",
                     hello.ipv4[0], hello.ipv4[1], hello.ipv4[2], hello.ipv4[3], hello.port
                 );
-                self.radio.close_peer().await.unwrap();
-                defmt::info!("multicast peer closed");
 
+                let start_time = Instant::now();
+                self.radio.close_peer().await.unwrap();
+                
                 self.radio.open_unicast(hello.ipv4, hello.port).await.unwrap();
                 defmt::info!("unicast open");
+
+                let end_time = Instant::now();
+                defmt::info!("multicast peer closed (took {} ms)", (end_time - start_time).as_millis());
+
 
                 return Ok(true);
             }
@@ -358,9 +365,7 @@ impl<
             } else {
                 defmt::warn!("RadioTask - error reading data packet");
             }
-        }
 
-        loop {
             if let Some(telemetry) = self.telemetry_subscriber.try_next_message_pure() {
                 match telemetry {
                     TelemetryPacket::Basic(basic) => {
@@ -383,8 +388,8 @@ impl<
         }
 
         // always send the latest telemetry
-        if self.radio.send_telemetry(self.last_basic_telemetry).await.is_err() {
-            defmt::warn!("RadioTask - failed to send basic telem packet");
+        if let Err(e) = self.radio.send_telemetry(self.last_basic_telemetry).await {
+            defmt::warn!("RadioTask - failed to send basic telem packet {:?}", e);
         }
 
         return Ok(())

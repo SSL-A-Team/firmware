@@ -309,6 +309,8 @@ impl <
                 self.motor_fr.set_setpoint(wheel_vels[3]);
 
                 // defmt::info!("wheel vels: {} {} {} {}", self.motor_fl.read_rads(), self.motor_bl.read_rads(), self.motor_br.read_rads(), self.motor_fr.read_rads());
+                // defmt::info!("wheel curr: {} {} {} {}", self.motor_fl.read_current(), self.motor_bl.read_current(), self.motor_br.read_current(), self.motor_fr.read_current());
+
 
                 self.send_motor_commands_and_telemetry(
                     &mut robot_controller, self.last_battery_v);
