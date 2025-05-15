@@ -10,7 +10,7 @@ use embassy_sync::pubsub::PubSubChannel;
 use defmt_rtt as _; 
 
 use ateam_control_board::{
-    create_control_task, create_imu_task, create_io_task, create_radio_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
+    create_control_task, create_imu_task, create_io_task, create_kicker_task, create_radio_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
 
 // load credentials from correct crate
 #[cfg(not(feature = "no-private-credentials"))]
@@ -130,11 +130,11 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         control_gyro_data_subscriber, control_accel_data_subscriber,
         p);
 
-    // create_kicker_task!(
-    //     main_spawner, uart_queue_spawner,
-    //     robot_state,
-    //     kicker_command_subscriber,
-    //     p);
+    create_kicker_task!(
+        main_spawner, uart_queue_spawner,
+        robot_state,
+        kicker_command_subscriber,
+        p);
 
     loop {
         Timer::after_millis(10).await;

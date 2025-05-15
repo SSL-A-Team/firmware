@@ -116,6 +116,10 @@ impl<
         self.command_state.kick_speed = kick_str;
     }
 
+    pub fn set_drib_vel(&mut self, drib_vel: f32) {
+        self.command_state.drib_speed = drib_vel;
+    }
+
     pub fn ball_detected(&self) -> bool {
         self.telemetry_state.ball_detected() != 0
     }
@@ -196,6 +200,7 @@ fn get_empty_control_packet() -> KickerControl {
         _bitfield_1: KickerControl::new_bitfield_1(0, 0, 0),
         kick_request: KickRequest::KR_DISABLE,
         kick_speed: 0.0,
+        drib_speed: 0.0,
     }
 }
 

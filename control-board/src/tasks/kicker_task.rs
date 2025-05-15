@@ -9,9 +9,9 @@ use crate::{drivers::kicker::Kicker, include_kicker_bin, pins::*, robot_state::S
 
 include_kicker_bin! {KICKER_FW_IMG, "kicker.bin"}
 
-const MAX_TX_PACKET_SIZE: usize = 16;
+const MAX_TX_PACKET_SIZE: usize = 20;
 const TX_BUF_DEPTH: usize = 3;
-const MAX_RX_PACKET_SIZE: usize = 16;
+const MAX_RX_PACKET_SIZE: usize = 20;
 const RX_BUF_DEPTH: usize = 20;
 const TELEMETRY_TIMEOUT_MS: u64 = 2000;
 
@@ -194,6 +194,7 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
                         DataPacket::BasicControl(bc_pkt) => {
                             self.kicker_driver.set_kick_strength(bc_pkt.kick_vel);
                             self.kicker_driver.request_kick(bc_pkt.kick_request);
+                            self.kicker_driver.set_drib_vel(bc_pkt.dribbler_speed);
                         },
                         DataPacket::ParameterCommand(_) => {
                             // we currently don't have any kicker parameters
