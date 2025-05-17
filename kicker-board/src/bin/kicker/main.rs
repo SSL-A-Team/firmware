@@ -6,7 +6,7 @@
 use ateam_kicker_board::{drivers::{breakbeam::Breakbeam, DribblerMotor}, include_external_cpp_bin, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin, GreenStatusLedPin}, tasks::{get_system_config, ClkSource}};
 
 use defmt::*;
-use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, pubsub::{PubSubChannel, Publisher, Subscriber}};
+use embassy_sync::{blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex}, pubsub::{PubSubChannel, Publisher, Subscriber}};
 use {defmt_rtt as _, panic_probe as _};
 
 use libm::{fmaxf, fminf};
@@ -61,7 +61,7 @@ const DRIB_MAX_RX_PACKET_SIZE: usize = 64;
 const DRIB_RX_BUF_DEPTH: usize = 20;
 static_idle_buffered_uart_nl!(DRIB, DRIB_MAX_RX_PACKET_SIZE, DRIB_RX_BUF_DEPTH, DRIB_MAX_TX_PACKET_SIZE, DRIB_TX_BUF_DEPTH);
 
-static DRIB_VEL_PUBSUB: PubSubChannel<ThreadModeRawMutex, f32, 1, 1, 1> = PubSubChannel::new();
+static DRIB_VEL_PUBSUB: PubSubChannel<CriticalSectionRawMutex, f32, 1, 1, 1> = PubSubChannel::new();
 
 fn get_empty_control_packet() -> KickerControl {
     KickerControl {
@@ -102,7 +102,7 @@ async fn high_pri_kick_task(
     grn_led_pin: GreenStatusLedPin,
     err_led_pin: RedStatusLedPin,
     ball_detected_led1_pin: BlueStatusLedPin,
-    drib_vel_pub: Publisher<'static, ThreadModeRawMutex, f32, 1, 1, 1>,
+    drib_vel_pub: Publisher<'static, CriticalSectionRawMutex, f32, 1, 1, 1>,
 ) -> ! {
     // pins/safety management
     let charge_pin = Output::new(charge_pin, Level::Low, Speed::Medium);
@@ -409,7 +409,7 @@ async fn high_pri_kick_task(
 #[embassy_executor::task]
 async fn low_pri_dribble_task(
         drib_motor_interface: Stm32Interface<'static, DRIB_MAX_RX_PACKET_SIZE, DRIB_MAX_TX_PACKET_SIZE, DRIB_RX_BUF_DEPTH, DRIB_TX_BUF_DEPTH>,
-        mut drib_vel_sub: Subscriber<'static, ThreadModeRawMutex, f32, 1, 1, 1>) -> ! {
+        mut drib_vel_sub: Subscriber<'static, CriticalSectionRawMutex, f32, 1, 1, 1>) -> ! {
     let mut drib_motor = DribblerMotor::new(drib_motor_interface, DRIB_FW_IMG, 1.0);
 
     defmt::info!("flashing dribbler motor firmware...");
@@ -453,11 +453,18 @@ async fn low_pri_dribble_task(
 }
 
 static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
+static EXECUTOR_MID: InterruptExecutor = InterruptExecutor::new();
 
 #[allow(non_snake_case)]
 #[embassy_stm32::interrupt]
-unsafe fn TIM2() {
+unsafe fn SPI2() {
     EXECUTOR_HIGH.on_interrupt();
+}
+
+#[allow(non_snake_case)]
+#[embassy_stm32::interrupt]
+unsafe fn SPI3() {
+    EXECUTOR_MID.on_interrupt();
 }
 
 bind_interrupts!(struct Irqs {
@@ -488,8 +495,11 @@ async fn main(spawner: Spawner) -> ! {
     // high priority executor handles kicking system
     // High-priority executor: I2C1, priority level 6
     // TODO CHECK THIS IS THE HIGHEST PRIORITY
-    embassy_stm32::interrupt::TIM2.set_priority(embassy_stm32::interrupt::Priority::P6);
-    let hp_spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
+    embassy_stm32::interrupt::SPI2.set_priority(embassy_stm32::interrupt::Priority::P6);
+    let hp_spawner = EXECUTOR_HIGH.start(Interrupt::SPI2);
+
+    embassy_stm32::interrupt::SPI3.set_priority(embassy_stm32::interrupt::Priority::P7);
+    let mp_spawner = EXECUTOR_MID.start(Interrupt::SPI3);
 
     // spawn the task at the highest prio
     unwrap!(hp_spawner.spawn(high_pri_kick_task(
@@ -524,7 +534,7 @@ async fn main(spawner: Spawner) -> ! {
     ).unwrap();
 
     COMS_IDLE_BUFFERED_UART.init();
-    idle_buffered_uart_spawn_tasks!(spawner, COMS, coms_usart);
+    idle_buffered_uart_spawn_tasks!(mp_spawner, COMS, coms_usart);
 
     ////////////////////////////
     //  Dribbler Motor Setup  //
@@ -540,7 +550,7 @@ async fn main(spawner: Spawner) -> ! {
     ).unwrap();
 
     DRIB_IDLE_BUFFERED_UART.init();
-    idle_buffered_uart_spawn_tasks!(spawner, DRIB, drib_uart);
+    idle_buffered_uart_spawn_tasks!(mp_spawner, DRIB, drib_uart);
 
     let drib_motor_interface = Stm32Interface::new_from_pins(
         &DRIB_IDLE_BUFFERED_UART,
