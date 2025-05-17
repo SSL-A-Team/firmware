@@ -71,12 +71,20 @@ async fn main(spawner: Spawner) {
     // idle_buffered_uart_spawn_tasks!(uart_queue_spawner, COMS, )
     
 
-    let mut main_loop_ticker = Ticker::every(Duration::from_secs(1));
+    let mut main_loop_ticker = Ticker::every(Duration::from_millis(10));
     loop {
         // read packets
         // read channels
 
         // read pwr button
+        // shortest possible interrupt form pwr btn controller is 32ms
+        if _pwr_btn.get_level() == Level::Low {
+            _shutdown_ind.set_low();
+
+            // TODO: request and await power off OK from control board
+
+            _kill_sig.set_low();
+        }
 
         // send packets
 
