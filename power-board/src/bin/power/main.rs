@@ -48,11 +48,11 @@ async fn main(spawner: Spawner) {
     let mut _shutdown_ind = Output::new(p.PA15, Level::High, Speed::Low);
     let mut _kill_sig = OutputOpenDrain::new(p.PA8, Level::High, Speed::Low);
 
-    let en_12v0 = Output::new(p.PB6, Level::Low, Speed::Low);
-    let en_3v3 = Output::new(p.PB7, Level::Low, Speed::Low);
-    let en_5v0 = Output::new(p.PB8, Level::Low, Speed::Low);
+    let mut en_12v0 = Output::new(p.PB6, Level::Low, Speed::Low);
+    let mut en_3v3 = Output::new(p.PB7, Level::Low, Speed::Low);
+    let mut en_5v0 = Output::new(p.PB8, Level::Low, Speed::Low);
 
-    sequence_power_on(en_3v3, en_5v0, en_12v0).await;
+    sequence_power_on(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
 
     interrupt::USART2.set_priority(Priority::P6);
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(interrupt::USART2);
@@ -83,6 +83,7 @@ async fn main(spawner: Spawner) {
 
             // TODO: request and await power off OK from control board
 
+            sequence_power_off(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
             _kill_sig.set_low();
         }
 
@@ -92,7 +93,7 @@ async fn main(spawner: Spawner) {
     }
 }
 
-async fn sequence_power_on(mut en_3v3: Output<'static>, mut en_5v0: Output<'static>, mut en_12v0: Output<'static>) {
+async fn sequence_power_on(en_3v3: &mut Output<'static>, en_5v0: &mut Output<'static>, en_12v0: &mut Output<'static>) {
     Timer::after_millis(20).await;
     en_3v3.set_high();
 
@@ -103,7 +104,7 @@ async fn sequence_power_on(mut en_3v3: Output<'static>, mut en_5v0: Output<'stat
     en_12v0.set_high();
 }
 
-async fn sequence_power_off(mut en_3v3: Output<'static>, mut en_5v0: Output<'static>, mut en_12v0: Output<'static>) {
+async fn sequence_power_off(en_3v3: &mut Output<'static>, en_5v0: &mut Output<'static>, en_12v0: &mut Output<'static>) {
     en_12v0.set_low();
     Timer::after_millis(100).await;
 
