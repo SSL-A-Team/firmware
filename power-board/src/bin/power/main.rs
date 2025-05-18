@@ -4,7 +4,7 @@
 #![feature(generic_const_exprs)]
 #![feature(sync_unsafe_cell)]
 
-use ateam_power_board::{create_power_task, pins::AudioPubSub};
+use ateam_power_board::{create_power_task, create_coms_task, pins::AudioPubSub};
 use defmt::*;
 use embassy_executor::{InterruptExecutor, Spawner};
 use embassy_stm32::interrupt;
@@ -23,12 +23,6 @@ pub const TEST_SONG: [Beat; 2] = [
 
 static AUDIO_PUBSUB: AudioPubSub = PubSubChannel::new();
 
-const MAX_RX_PACKET_SIZE: usize = core::mem::size_of::<ateam_common_packets::bindings::PowerCommandPacket>();
-const MAX_TX_PACKET_SIZE: usize = core::mem::size_of::<ateam_common_packets::bindings::PowerStatusPacket>();
-const RX_BUF_DEPTH: usize = 3;
-const TX_BUF_DEPTH: usize = 2;
-static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH);
-
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
 #[interrupt]
@@ -36,7 +30,6 @@ static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 unsafe fn USART2() {
     UART_QUEUE_EXECUTOR.on_interrupt();
 }
-
 
 
 #[embassy_executor::main]
@@ -54,28 +47,20 @@ async fn main(spawner: Spawner) {
 
     sequence_power_on(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
 
-    interrupt::USART2.set_priority(Priority::P6);
-    let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(interrupt::USART2);
+    interrupt::USART1.set_priority(Priority::P6);
+    let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(interrupt::USART1);
     
     create_power_task!(spawner, p);
+
+    // create_coms_task!(spawner, uart_queue_spawner, p);
 
     // TODO: start audio task
 
     // TODO: start LED animation task
 
-    // TODO: start communications queues
-
-    // let coms_uart = Uart::new(motor_fl_uart, motor_fl_rx_pin, motor_fl_tx_pin, SystemIrqs, motor_fl_tx_dma, motor_fl_rx_dma, initial_motor_controller_uart_conifg).unwrap();
-
-    COMS_IDLE_BUFFERED_UART.init();
-    // idle_buffered_uart_spawn_tasks!(uart_queue_spawner, COMS, )
-    
 
     let mut main_loop_ticker = Ticker::every(Duration::from_millis(10));
     loop {
-        // read packets
-        // read channels
-
         // read pwr button
         // shortest possible interrupt form pwr btn controller is 32ms
         if _pwr_btn.get_level() == Level::Low {
@@ -86,8 +71,6 @@ async fn main(spawner: Spawner) {
             sequence_power_off(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
             _kill_sig.set_low();
         }
-
-        // send packets
 
         main_loop_ticker.next().await;
     }
