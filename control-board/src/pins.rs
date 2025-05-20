@@ -120,8 +120,8 @@ pub type PowerUartRxPin = PG0;
 pub type PowerUartTxPin = PG1;
 // pub type PowerUartCtsPin = None;
 // pub type PowerUartRtsPin = None;
-pub type PowerRxDma = NoDma;
-pub type PowerTxDma = NoDma;
+pub type PowerRxDma = DMA2_CH4;
+pub type PowerTxDma = DMA2_CH5;
 
 
 ////////////////////
@@ -133,8 +133,8 @@ pub type OpticalFlowUartRxPin = PB8;
 pub type OpticalFlowUartTxPin = PB9;
 pub type OpticalFlowUartCtsPin = PB15;
 pub type OpticalFlowUartRtsPin = PB14;
-pub type OpticalFlowDmaRx = DMA2_CH4;
-pub type OpticalFlowDmaTx = DMA2_CH5;
+pub type OpticalFlowDmaRx = NoDma;
+pub type OpticalFlowDmaTx = NoDma;
 pub type OpticalFlowBootPin = PB7;
 pub type OpticalFlowResetPin = PB6;
 
