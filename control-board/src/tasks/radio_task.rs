@@ -365,7 +365,10 @@ impl<
             } else {
                 defmt::warn!("RadioTask - error reading data packet");
             }
+        }
 
+        // write outbound packets
+        loop {
             if let Some(telemetry) = self.telemetry_subscriber.try_next_message_pure() {
                 match telemetry {
                     TelemetryPacket::Basic(basic) => {
