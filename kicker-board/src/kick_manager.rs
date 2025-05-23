@@ -24,7 +24,7 @@
 
 use embassy_stm32::gpio::Output;
 use embassy_time::{Duration, Timer};
-use ateam_lib_stm32::math::{linear_map::LinearMap, range::Range};
+use ateam_lib_stm32::math::range::Range;
 
 const MIN_KICK_DURATION_US: f32 = 500.0;
 const MAX_KICK_DURATION_US: f32 = 4500.0;  // 10ms (10k us) max power kick

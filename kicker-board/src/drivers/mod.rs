@@ -4,9 +4,7 @@ use ateam_common_packets::bindings::{MotorCommandPacket, MotorCommandPacketType:
 use ateam_lib_stm32::{drivers::boot::stm32_interface::Stm32Interface, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use embassy_stm32::{gpio::{Pin, Pull}, usart::Parity};
 use embassy_time::{Duration, Timer};
-use nalgebra::Vector3;
 
-// pub mod breakbeam_pwm;
 pub mod breakbeam;
 
 pub struct DribblerMotor<
@@ -27,15 +25,6 @@ pub struct DribblerMotor<
 
     current_state: MotorResponse_Motion_Packet,
     current_params_state: MotorResponse_Params_Packet,
-
-    version_major: u8,
-    version_minor: u8,
-    version_patch: u16,
-    vel_pid_constants: Vector3<f32>,
-    vel_pid_i_max: f32,
-    torque_pid_constants: Vector3<f32>,
-    torque_pid_i_max: f32,
-    torque_limit: f32,
 
     setpoint: f32,
     motion_type: MotorCommand_MotionType::Type,
@@ -75,16 +64,8 @@ impl<
             stm32_uart_interface: stm32_interface,
             firmware_image,
 
-            version_major: 0,
-            version_minor: 0,
-            version_patch: 0,
             current_state: start_state,
             current_params_state: start_params_state,
-            vel_pid_constants: Vector3::new(0.0, 0.0, 0.0),
-            vel_pid_i_max: 0.0,
-            torque_pid_constants: Vector3::new(0.0, 0.0, 0.0),
-            torque_pid_i_max: 0.0,
-            torque_limit: 0.0,
 
             setpoint: 0.0,
             motion_type: OPEN_LOOP,
@@ -118,16 +99,8 @@ impl<
             stm32_uart_interface: stm32_interface,
             firmware_image,
 
-            version_major: 0,
-            version_minor: 0,
-            version_patch: 0,
             current_state: start_state,
             current_params_state: start_params_state,
-            vel_pid_constants: Vector3::new(0.0, 0.0, 0.0),
-            vel_pid_i_max: 0.0,
-            torque_pid_constants: Vector3::new(0.0, 0.0, 0.0),
-            torque_pid_i_max: 0.0,
-            torque_limit: 0.0,
 
             setpoint: 0.0,
             motion_type: OPEN_LOOP,
