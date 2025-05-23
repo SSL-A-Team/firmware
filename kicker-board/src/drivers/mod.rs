@@ -72,7 +72,7 @@ impl<
             reset_flagged: false,
             telemetry_enabled: false,
 
-            ball_detected_thresh: ball_detected_thresh,
+            ball_detected_thresh,
         }
     }
 
@@ -107,7 +107,7 @@ impl<
             reset_flagged: false,
             telemetry_enabled: false,
 
-            ball_detected_thresh: ball_detected_thresh,
+            ball_detected_thresh,
         }
     }
 
@@ -139,7 +139,7 @@ impl<
         // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
         self.stm32_uart_interface.leave_reset().await;
 
-        return res;
+        res
     }
 
     pub async fn load_default_firmware_image(&mut self) -> Result<(), ()> {
@@ -163,7 +163,7 @@ impl<
                 // copy receieved uart bytes into packet
                 let state = &mut mrp as *mut _ as *mut u8;
                 for i in 0..core::mem::size_of::<MotorResponse_Motion_Packet>() {
-                    *state.offset(i as isize) = buf[i];
+                    *state.add(i) = buf[i];
                 }
 
                 // TODO probably do some checksum stuff eventually
@@ -268,18 +268,18 @@ impl<
     }
 
     pub fn read_is_error(&self) -> bool {
-        return self.current_state.master_error() != 0;
+        self.current_state.master_error() != 0
     }
 
     pub fn check_hall_error(&self) -> bool {
-        return self.current_state.hall_power_error() != 0 || self.current_state.hall_disconnected_error() != 0 || self.current_state.hall_enc_vel_disagreement_error() != 0;
+        self.current_state.hall_power_error() != 0 || self.current_state.hall_disconnected_error() != 0 || self.current_state.hall_enc_vel_disagreement_error() != 0
     }
 
     pub fn read_current(&self) -> f32 {
-        return self.current_state.current_estimate;
+        self.current_state.current_estimate
     }
 
     pub fn ball_detected(&self) -> bool {
-        return self.current_state.current_estimate > self.ball_detected_thresh;
+        self.current_state.current_estimate > self.ball_detected_thresh
     }
 }
