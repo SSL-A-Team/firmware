@@ -6,6 +6,8 @@ use embassy_sync::{
     blocking_mutex::raw::ThreadModeRawMutex,
     pubsub::{PubSubChannel, Publisher, Subscriber}};
 
+use crate::tasks::dotstar_task::ControlBoardLedCommand;
+
 /////////////////////
 //  Pub Sub Types  //
 /////////////////////
@@ -34,6 +36,11 @@ pub type AccelDataSubscriber = Subscriber<'static, ThreadModeRawMutex, nalgebra:
 pub type BatteryVoltPubSub = PubSubChannel<ThreadModeRawMutex, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
 pub type BatteryVoltPublisher = Publisher<'static, ThreadModeRawMutex, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
 pub type BatteryVoltSubscriber = Subscriber<'static, ThreadModeRawMutex, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
+
+const LED_COMMAND_PUBSUB_DEPTH: usize = 5;
+pub type LedCommandPubSub = PubSubChannel<ThreadModeRawMutex, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, 1, 1>;
+pub type LedCommandPublisher = Publisher<'static, ThreadModeRawMutex, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, 1, 1>;
+pub type LedCommandSubscriber = Subscriber<'static, ThreadModeRawMutex, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, 1, 1>;
 
 /////////////
 //  Radio  //

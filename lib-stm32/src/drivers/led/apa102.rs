@@ -13,6 +13,9 @@ const COLOR_FRAME_SIZE: usize = 4;
 const END_FRAME_SIZE: usize = 4;
 const HEADER_FRAME_SIZE: usize = START_FRAME_SIZE + END_FRAME_SIZE;
 
+pub const fn apa102_buf_len(num_leds: usize) -> usize {
+    8 + (num_leds * 4)
+}
 
 pub struct Apa102<'a, 'buf, const NUM_LEDS: usize>
 where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
