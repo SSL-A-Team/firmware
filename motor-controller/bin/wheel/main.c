@@ -140,8 +140,8 @@ int main() {
     Pid_t vel_pid;
     pid_initialize(&vel_pid, &vel_pid_constants);
 
-    vel_pid_constants.kP = 2.0f;
-    vel_pid_constants.kI = 0.0f;
+    vel_pid_constants.kP = 5.5f;
+    vel_pid_constants.kI = 10.0f;
     vel_pid_constants.kD = 0.0f;
     vel_pid_constants.kI_max = 20.0;
     vel_pid_constants.kI_min = -20.0;
@@ -360,12 +360,16 @@ int main() {
             control_setpoint_vel_rads_prev = control_setpoint_vel_rads;
 
             // back convert rads to duty cycle
-            control_setpoint_vel_duty = mm_rads_to_dc(&df45_model, control_setpoint_vel_rads);
+            if(r_motor_board == 0.0f) {
+                control_setpoint_vel_duty = 0.0f;
+            } else {
+                control_setpoint_vel_duty = mm_rads_to_dc(&df45_model, control_setpoint_vel_rads);
+            }
 
             // velocity control data
             response_packet.data.motion.vel_setpoint = r_motor_board;
             response_packet.data.motion.vel_setpoint_clamped = control_setpoint_vel_rads;
-            response_packet.data.motion.encoder_delta = enc_delta;
+            response_packet.data.motion.encoder_delta = enc_vel_rads;
             response_packet.data.motion.vel_enc_estimate = enc_rad_s_filt;
             response_packet.data.motion.vel_computed_error = vel_pid.prev_err;
             response_packet.data.motion.vel_computed_setpoint = control_setpoint_vel_duty;

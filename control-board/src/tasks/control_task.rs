@@ -214,10 +214,10 @@ impl <
             self.motor_br.set_telemetry_enabled(true);
             self.motor_fr.set_telemetry_enabled(true);
 
-            self.motor_fl.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
-            self.motor_bl.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
-            self.motor_br.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
-            self.motor_fr.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+            self.motor_fl.set_motion_type(MotorCommand_MotionType::VELOCITY);
+            self.motor_bl.set_motion_type(MotorCommand_MotionType::VELOCITY);
+            self.motor_br.set_motion_type(MotorCommand_MotionType::VELOCITY);
+            self.motor_fr.set_motion_type(MotorCommand_MotionType::VELOCITY);
 
 
             Timer::after_millis(10).await;
@@ -291,7 +291,7 @@ impl <
                     self.last_accel_y_ms = accel_ms[1];
                 }
                 
-                let controls_enabled = true;
+                let controls_enabled = false;
 
                 // let kill_vel = self.shared_robot_state.get_battery_low() || self.shared_robot_state.get_battery_crit() || self.shared_robot_state.shutdown_requested();
                 let kill_vel = false;
@@ -308,7 +308,7 @@ impl <
                 self.motor_br.set_setpoint(wheel_vels[2]);
                 self.motor_fr.set_setpoint(wheel_vels[3]);
 
-                // defmt::info!("wheel vels: {} {} {} {}", self.motor_fl.read_rads(), self.motor_bl.read_rads(), self.motor_br.read_rads(), self.motor_fr.read_rads());
+                // defmt::info!("wheel vels: {} {} {} {}", self.motor_fl.read_encoder_delta(), self.motor_bl.read_encoder_delta(), self.motor_br.read_encoder_delta(), self.motor_fr.read_encoder_delta());
                 // defmt::info!("wheel curr: {} {} {} {}", self.motor_fl.read_current(), self.motor_bl.read_current(), self.motor_br.read_current(), self.motor_fr.read_current());
 
 
