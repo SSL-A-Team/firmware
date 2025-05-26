@@ -101,6 +101,7 @@ impl<
     async fn process_packets(&mut self) {
         // read any packets
         while let Ok(res) = self.power_rx_uart_queue.try_dequeue() {
+            defmt::trace!("Received Power Telemetry Packet");
             let buf = res.data();
 
             if buf.len() != core::mem::size_of::<PowerStatusPacket>() {
@@ -136,7 +137,7 @@ impl<
     }
 }
 
-pub fn startup_uart_config() -> usart::Config {
+pub fn power_uart_config() -> usart::Config {
     let mut power_uart_config = usart::Config::default();
     power_uart_config.baudrate = 115_200;
     power_uart_config.data_bits = DataBits::DataBits8;
@@ -167,7 +168,7 @@ pub fn start_power_task(power_task_spawner: Spawner,
         ) {
 
 
-    let uart_config = startup_uart_config();
+    let uart_config = power_uart_config();
     let power_uart = Uart::new(power_uart, power_uart_rx_pin, power_uart_tx_pin, SystemIrqs, power_uart_tx_dma, power_uart_rx_dma, uart_config).unwrap();
 
     defmt::trace!("Power UART initialized");
@@ -178,18 +179,13 @@ pub fn start_power_task(power_task_spawner: Spawner,
 
     idle_buffered_uart_spawn_tasks!(uart_queue_spawner, POWER, power_uart);
 
-    let init_status_packet: PowerStatusPacket;
-    unsafe {
-        init_status_packet = MaybeUninit::zeroed().assume_init();
-    }
-
     let power_task = PowerTask {
         shared_robot_state: robot_state,
         power_uart: &POWER_IDLE_BUFFERED_UART,
         power_rx_uart_queue: POWER_IDLE_BUFFERED_UART.get_uart_read_queue(),
         power_tx_uart_queue: POWER_IDLE_BUFFERED_UART.get_uart_write_queue(),
         last_power_status_time: None,
-        last_power_status: init_status_packet,
+        last_power_status: unsafe { MaybeUninit::zeroed().assume_init() },
     };
 
     power_task_spawner.spawn(power_task_entry(power_task)).unwrap();

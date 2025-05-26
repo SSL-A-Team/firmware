@@ -4,6 +4,8 @@
 #![feature(generic_const_exprs)]
 #![feature(sync_unsafe_cell)]
 
+use ateam_power_board::pins::TelemetryPubSub;
+use ateam_power_board::power_state::SharedPowerState;
 use ateam_power_board::{create_power_task, create_coms_task, pins::AudioPubSub};
 use defmt::*;
 use embassy_executor::{InterruptExecutor, Spawner};
@@ -21,7 +23,10 @@ pub const TEST_SONG: [Beat; 2] = [
     Beat::Note { tone: 587, duration: 250_000 },
 ];
 
+static POWER_STATE: SharedPowerState = SharedPowerState::new();
+
 static AUDIO_PUBSUB: AudioPubSub = PubSubChannel::new();
+static TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
@@ -45,14 +50,26 @@ async fn main(spawner: Spawner) {
     let mut en_3v3 = Output::new(p.PB7, Level::Low, Speed::Low);
     let mut en_5v0 = Output::new(p.PB8, Level::Low, Speed::Low);
 
+    let power_state = &POWER_STATE;
+
     sequence_power_on(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
 
     interrupt::USART1.set_priority(Priority::P6);
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(interrupt::USART1);
-    
-    create_power_task!(spawner, p);
 
-    // create_coms_task!(spawner, uart_queue_spawner, p);
+    //////////////////////////////////////
+    //  setup inter-task coms channels  //
+    //////////////////////////////////////
+
+    // commands channel
+    let power_telemetry_publisher = TELEMETRY_CHANNEL.publisher().unwrap();
+    let coms_telemetry_subscriber = TELEMETRY_CHANNEL.subscriber().unwrap();
+    
+    // start power task
+    create_power_task!(spawner, power_state, power_telemetry_publisher, p);
+
+    // start coms task
+    create_coms_task!(spawner, uart_queue_spawner, power_state, coms_telemetry_subscriber, p);
 
     // TODO: start audio task
 

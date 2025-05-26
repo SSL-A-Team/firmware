@@ -1,17 +1,20 @@
+use core::mem::MaybeUninit;
+
+use ateam_common_packets::bindings::PowerStatusPacket;
 use ateam_lib_stm32::{drivers::adc::AdcConverter, filter::WindowAvergingFilter, math::range::Range, power::{battery::LipoModel, PowerRail}};
 use embassy_executor::Spawner;
 use embassy_stm32::{adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime}, peripherals::ADC1};
 use embassy_time::{Duration, Instant, Ticker};
 
-use crate::{config::{LIPO6S_BALANCE_RAW_SAMPLES_TO_VOLTAGES, LIPO_BATTERY_CONFIG_6S, POWER_RAIL_12V0_PARAMETERS, POWER_RAIL_3V3_PARAMETERS, POWER_RAIL_5V0_PARAMETERS, POWER_RAIL_BATTERY_PARAMETERSL}, pins::*};
+use crate::{config::{LIPO6S_BALANCE_RAW_SAMPLES_TO_VOLTAGES, LIPO_BATTERY_CONFIG_6S, POWER_RAIL_12V0_PARAMETERS, POWER_RAIL_3V3_PARAMETERS, POWER_RAIL_5V0_PARAMETERS, POWER_RAIL_BATTERY_PARAMETERSL}, pins::*, power_state::SharedPowerState};
 
 const BATTERY_CELL_READ_INTERVAL: Duration = Duration::from_millis(1300);
 const POWER_RAIL_FILTER_WINDOW_SIZE: usize = 10;
 
 #[macro_export]
 macro_rules! create_power_task {
-    ($spawner:ident, $p:ident) => {
-        ateam_power_board::tasks::power_task::start_power_task(&$spawner,
+    ($spawner:ident, $shared_power_state:ident, $telemetry_publisher:ident, $p:ident) => {
+        ateam_power_board::tasks::power_task::start_power_task(&$spawner, $shared_power_state, $telemetry_publisher,
             $p.ADC1, $p.DMA1_CH1,
             $p.PA0, $p.PA1, $p.PA2, $p.PA3, $p.PA4, $p.PA5,
             $p.PB1, $p.PA7, $p.PA6, $p.PB10, $p.PB2).await;
@@ -20,6 +23,8 @@ macro_rules! create_power_task {
 
 #[embassy_executor::task]
 async fn power_task_entry(
+    shared_power_state: &'static SharedPowerState,
+    telemetry_publisher: TelemetryPublisher,
     adc: PowerAdc,
     mut adc_dma: PowerAdcDma,
     cell1_adc_pin: BatteryCell1VoltageMonitorPin,
@@ -102,6 +107,9 @@ async fn power_task_entry(
                 &LIPO6S_BALANCE_RAW_SAMPLES_TO_VOLTAGES,
                 ateam_lib_stm32::power::battery::CellVoltageComputeMode::Chained);
 
+    // Create empty telemetry packet
+    let mut telem_packet: PowerStatusPacket = unsafe { MaybeUninit::zeroed().assume_init() };
+
     loop {
         ////////////////////////////////////////////
         //  Read and Convert Power Rail Voltages  //
@@ -144,6 +152,11 @@ async fn power_task_entry(
             // 3v3 voltage too low
             // 3v3 voltage too high
 
+        telem_packet.set_power_ok(1);
+        telem_packet.set_power_rail_12v0_ok(1);
+        telem_packet.set_power_rail_5v0_ok(1);
+        telem_packet.set_power_rail_3v3_ok(1);
+        telem_packet.set_high_current_operations_allowed(1);
 
 
         //////////////////////////
@@ -176,6 +189,9 @@ async fn power_task_entry(
 
             if lipo6s_battery_model.get_cell_percentages().into_iter().all(|v| *v == 0) {
                 defmt::info!("battery balance connector is unplugged");
+                shared_power_state.set_balance_connected(false);
+            } else {
+                shared_power_state.set_balance_connected(true);
             }
             
             // input to battery model
@@ -185,15 +201,25 @@ async fn power_task_entry(
             // battery balance - any cell too high
             // battery balance - any cell too low
             // battery balance - any cell difference too high
+
+            telem_packet.battery_info.set_battery_balance_connected(0);
+            telem_packet.battery_info.set_battery_cell_critical(0);
+            telem_packet.battery_info.set_battery_cell_imbalance_warn(0);
+            telem_packet.battery_info.set_battery_cell_low(0);
+            telem_packet.battery_info.set_battery_critical(0);
+            telem_packet.battery_info.set_battery_low(0);
+            telem_packet.battery_info.set_battery_ok(0);
+            // telem_packet.battery_info.battery_mv = lipo6s_battery_model.get_cell_voltages();
         }
 
         // sent pubsub message to coms task
+        telemetry_publisher.publish_immediate(telem_packet);
 
         loop_ticker.next().await;
     }
 }
 
-pub async fn start_power_task(spawner: &Spawner,
+pub async fn start_power_task(spawner: &Spawner, shared_power_state: &'static SharedPowerState, telemetry_publisher: TelemetryPublisher,
     adc: PowerAdc,
     adc_dma: PowerAdcDma,
     cell1_adc_pin: BatteryCell1VoltageMonitorPin,
@@ -209,6 +235,8 @@ pub async fn start_power_task(spawner: &Spawner,
     power_rail_vbatt_adc_pin: BatteryVoltageMonitorPin,
     ) {
     spawner.spawn(power_task_entry(
+        shared_power_state,
+        telemetry_publisher,
         adc, adc_dma,
         cell1_adc_pin, cell2_adc_pin, cell3_adc_pin, cell4_adc_pin, cell5_adc_pin, cell6_adc_pin,
         power_rail_12v0_adc_pin, power_rail_5v0_adc_pin, power_rail_3v3_adc_pin, power_rail_vbatt_before_lsw_adc_pin, power_rail_vbatt_adc_pin

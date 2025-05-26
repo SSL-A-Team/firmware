@@ -1,6 +1,7 @@
 use ateam_lib_stm32::audio::AudioCommand;
 use embassy_stm32::peripherals::*;
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, pubsub::{PubSubChannel, Publisher, Subscriber}};
+use ateam_common_packets::bindings::PowerStatusPacket;
 
 /////////////////////
 //  power control  //
@@ -76,6 +77,12 @@ pub type ComsDmaRx = DMA1_CH5;
 const AUDIO_CHANNEL_DEPTH: usize = 3;
 const AUDIO_CHANNEL_NUM_SUBS: usize = 1;
 const AUDIO_CHANNEL_NUM_PUBS: usize = 2;
+const TELEMETRY_CHANNEL_DEPTH: usize = 3;
+const TELEMETRY_CHANNEL_NUM_SUBS: usize = 1;
+const TELEMETRY_CHANNEL_NUM_PUBS: usize = 1;
 pub type AudioPubSub = PubSubChannel<ThreadModeRawMutex, AudioCommand, AUDIO_CHANNEL_DEPTH, AUDIO_CHANNEL_NUM_SUBS, AUDIO_CHANNEL_NUM_PUBS>;
 pub type AudioPublisher = Publisher<'static, ThreadModeRawMutex, AudioCommand, AUDIO_CHANNEL_DEPTH, AUDIO_CHANNEL_NUM_SUBS, AUDIO_CHANNEL_NUM_PUBS>;
 pub type AudioSubscriber = Subscriber<'static, ThreadModeRawMutex, AudioCommand, AUDIO_CHANNEL_DEPTH, AUDIO_CHANNEL_NUM_SUBS, AUDIO_CHANNEL_NUM_PUBS>;
+pub type TelemetryPubSub = PubSubChannel<ThreadModeRawMutex, PowerStatusPacket, TELEMETRY_CHANNEL_DEPTH, TELEMETRY_CHANNEL_NUM_SUBS, TELEMETRY_CHANNEL_NUM_PUBS>;
+pub type TelemetryPublisher = Publisher<'static, ThreadModeRawMutex, PowerStatusPacket, TELEMETRY_CHANNEL_DEPTH, TELEMETRY_CHANNEL_NUM_SUBS, TELEMETRY_CHANNEL_NUM_PUBS>;
+pub type TelemetrySubscriber = Subscriber<'static, ThreadModeRawMutex, PowerStatusPacket, TELEMETRY_CHANNEL_DEPTH, TELEMETRY_CHANNEL_NUM_SUBS, TELEMETRY_CHANNEL_NUM_PUBS>;
