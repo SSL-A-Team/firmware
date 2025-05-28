@@ -141,8 +141,8 @@ int main() {
     pid_initialize(&vel_pid, &vel_pid_constants);
 
     vel_pid_constants.kP = 5.5f;
-    vel_pid_constants.kI = 10.0f;
-    vel_pid_constants.kD = 0.0f;
+    vel_pid_constants.kI = 8.0f;
+    vel_pid_constants.kD = 0.1f;
     vel_pid_constants.kI_max = 20.0;
     vel_pid_constants.kI_min = -20.0;
 

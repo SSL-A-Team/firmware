@@ -42,7 +42,7 @@ float pid_calculate(Pid_t *pid, float r, float y, float dt) {
     }
     float termI = pid->eI * pid->pid_constants->kI;
 
-    float termD = (err - pid->prev_err) * pid->pid_constants->kD; // flip err and prev_err???
+    float termD = ((err - pid->prev_err) / dt) * pid->pid_constants->kD; // flip err and prev_err???
     pid->prev_err = err;
 
     float u = r + (termP + termI + termD);
