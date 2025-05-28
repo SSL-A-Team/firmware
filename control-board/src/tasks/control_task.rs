@@ -310,10 +310,10 @@ impl <
                 self.motor_fr.set_setpoint(wheel_vels[3]);
 
                 defmt::info!("CURRENT: {} {} {} {}, SP: {} {} {} {}, VBUS: {} {} {} {}",
-                    self.motor_fl.read_current() as u32,
-                    self.motor_bl.read_current() as u32,
-                    self.motor_br.read_current() as u32,
-                    self.motor_fr.read_current() as u32,
+                    (self.motor_fl.read_current() * 100.0) as u32,
+                    (self.motor_bl.read_current() * 100.0) as u32,
+                    (self.motor_br.read_current() * 100.0) as u32,
+                    (self.motor_fr.read_current() * 100.0) as u32,
                     self.motor_fl.read_vel_computed_setpoint() as u32,
                     self.motor_bl.read_vel_computed_setpoint() as u32,
                     self.motor_br.read_vel_computed_setpoint() as u32,

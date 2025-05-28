@@ -285,11 +285,8 @@ int main() {
 
         // run the torque loop if applicable
         if (run_torque_loop) {
-            // recover torque using the shunt voltage drop, amplification network model and motor model
-            // pct of voltage range 0-3.3V
-            float current_sense_shunt_v = currsen_get_motor_current();
-            // map voltage given by the amp network to current
-            float current_sense_I = mm_voltage_to_current(&df45_model, current_sense_shunt_v);
+            // Get the current in amps from the current sense ADC.
+            float current_sense_I = currsen_get_motor_current();
             // map current to torque using the motor model
             float measured_torque_Nm = mm_current_to_torque(&df45_model, current_sense_I);
             // filter torque
