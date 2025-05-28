@@ -73,7 +73,7 @@ async fn dotstar_task_entry(
     dotstars.set_color_all(BLACK);
     dotstars.update().await;
 
-    let dotstar_animation_update_rate_ticker = Ticker::every(DOTSTAR_ANIMATION_RATE);
+    let mut dotstar_animation_update_rate_ticker = Ticker::every(DOTSTAR_ANIMATION_RATE);
 
     loop {
         if let Some(led_command) = led_command_subscriber.try_next_message_pure() {
@@ -95,11 +95,25 @@ async fn dotstar_task_entry(
                 },
             }
         }
+
+        dotstar_animation_update_rate_ticker.next().await;
     }
 }
 
 const NUM_LEDS: usize = 11;
 pub type Apa102Buf = [u8; apa102_buf_len(NUM_LEDS)];
+
+const MOTOR_FL_DOTSTAR_INDEX: usize = 1;
+const MOTOR_BL_DOTSTAR_INDEX: usize = 0;
+const MOTOR_BR_DOTSTAR_INDEX: usize = 3;
+const MOTOR_FR_DOTSTAR_INDEX: usize = 2;
+const USR2_DOTSTAR_INDEX: usize = 4;
+const USR1_DOTSTAR_INDEX: usize = 5;
+const PWR_DOTSTAR_INDEX: usize = 6;
+const KICKER_DOTSTAR_INDEX: usize = 7;
+const IMU_DOTSTAR_INDEX: usize = 8;
+const IMU_OPTICAL_INDEX: usize = 9;
+const RADIO_DOTSTAR_INDEX: usize = 10;
 
 #[link_section = ".sram4"]
 static mut DOTSTAR_SPI_BUFFER_CELL: Apa102Buf = [0; apa102_buf_len(NUM_LEDS)];
