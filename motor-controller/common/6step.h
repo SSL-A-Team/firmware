@@ -1,12 +1,12 @@
 /**
  * @file 6step.h
  * @author Will Stuckey
- * @brief 
+ * @brief
  * @version 0.1
  * @date 2022-05-22
- * 
+ *
  * @copyright Copyright (c) 2022
- * 
+ *
  */
 
 #pragma once
@@ -37,6 +37,11 @@
 #define HALL_POWER_ERROR_THRESHOLD 50
 
 #define HALL_TRANSITION_ERROR_THRESHOLD 3
+
+typedef enum MotorDirection {
+    CLOCKWISE,
+    COUNTER_CLOCKWISE
+} MotorDirection_t;
 
 typedef struct MotorErrors {
     bool hall_power;
@@ -79,3 +84,4 @@ bool pwm6step_is_direction_inverted();
 const MotorErrors_t pwm6step_get_motor_errors();
 bool pwm6step_hall_rps_estimate_valid();
 int pwm6step_hall_get_rps_estimate();
+MotorDirection_t pwm6step_get_motor_direction();

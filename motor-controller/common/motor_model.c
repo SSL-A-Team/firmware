@@ -17,6 +17,7 @@ void mm_initialize(MotorModel_t *mm) {
     mm->current_to_torque_linear_model_b = 0.0f;
     mm->rads_to_dc_linear_map_m = 0.0f;
     mm->rads_to_dc_linear_map_b = 0.0f;
+    mm->line_resistance = 0.0f;
 }
 
 float mm_rads_to_dc(MotorModel_t *mm, float avel_rads) {
@@ -56,6 +57,14 @@ float mm_torque_to_current(MotorModel_t *mm, float torque) {
     return fmax(mm->torque_to_current_linear_model_m * torque + mm->torque_to_current_linear_model_b, 0.0f);
 }
 
-float mm_pos_current_to_pos_dc(MotorModel_t *mm, float current) {
-    return fmax(fmin(current / mm->rated_current, 1.0f), 0.0f);
+float mm_pos_current_to_pos_dc(MotorModel_t *mm, float current, float vbus_voltage) {
+    // I_motor = V_motor / R_motor
+    // V_motor = duty_cycle * V_bus
+    // duty_cycle = I_motor * (R_motor / V_bus)
+    if (vbus_voltage == 0.0f) {
+        return 0.0f; // avoid division by zero
+    }
+
+    // bound DC [0, 1]
+    return fmax(fmin(current * (mm->line_resistance / vbus_voltage), 1.0f), 0.0f);
 }

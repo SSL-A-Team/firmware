@@ -32,11 +32,6 @@
 #include "system.h"
 #include "time.h"
 
-typedef enum MotorDirection {
-    CLOCKWISE,
-    COUNTER_CLOCKWISE
-} MotorDirection_t;
-
 typedef enum CommutationValuesType {
     NORMAL,
     MOMENTUM_DETECTED,
@@ -787,8 +782,8 @@ void TIM1_CC_IRQHandler() {
  */
 static void pwm6step_set_direct(uint16_t duty_cycle, MotorDirection_t motor_direction) {
     uint16_t scaled_dc = MAP_UINT16_TO_RAW_DC(duty_cycle);
-    if (scaled_dc >= MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW
-            && motor_direction != commanded_motor_direction) {
+    if (scaled_dc >= MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW &&
+        motor_direction != commanded_motor_direction) {
         direction_change_commanded = true;
     }
 
@@ -888,4 +883,8 @@ bool pwm6step_hall_rps_estimate_valid() {
 
 int pwm6step_hall_get_rps_estimate() {
 
+}
+
+MotorDirection_t pwm6step_get_motor_direction() {
+    return commanded_motor_direction;
 }

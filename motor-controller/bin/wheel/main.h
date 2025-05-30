@@ -46,11 +46,12 @@
 #define DF45_CURRENT_TO_TORQUE_LINEAR_B 0.00242f
 #define DF45_RADS_TO_DC_LINEAR_M 0.00144873f
 #define DF45_RADS_TO_DC_LINEAR_B 0.0057431f
+#define DF45_LINE_RESISTANCE 0.4f // 0.8 ohm is line to line resistance, so 0.4 ohm is line to neutral
 
 ////////////////////////
 //  FILTERING/TUNING  //
 ////////////////////////
 
 #define ENCODER_IIR_TF_MS 0.20f
-#define TORQUE_IIR_TF_MS 0.40f
+#define TORQUE_IIR_TF_MS 40.0f
 // #define DC_IIR_TF_MS 0.20f

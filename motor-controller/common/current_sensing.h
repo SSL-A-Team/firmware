@@ -47,7 +47,6 @@
 // I_MOTOR_SCALE = V_ADC_SCALE / (G_real * Rs)
 // I_motor = V_adc_raw * I_MOTOR_SCALE
 #define I_MOTOR_SCALE 0.00296599486f // A/V
-// TODO Add timing offset to the ADC for settling time.
 
 // VBUS voltage scaling
 // 11.5k / 1k resistor divider -> 12.5 scaling

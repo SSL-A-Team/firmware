@@ -107,7 +107,7 @@ int main() {
 
     // define the control points the loops use to interact
     float r_motor_board = 0.0f;
-    float control_setpoint_vel_duty = 0.0f;
+    float vel_computed_duty = 0.0f;
     float control_setpoint_vel_rads = 0.0f;
     float control_setpoint_vel_rads_prev = 0.0f;
     float u_torque_loop = 0.0f;
@@ -131,6 +131,7 @@ int main() {
     df45_model.current_to_torque_linear_model_b = DF45_CURRENT_TO_TORQUE_LINEAR_B;
     df45_model.rads_to_dc_linear_map_m = DF45_RADS_TO_DC_LINEAR_M;
     df45_model.rads_to_dc_linear_map_b = DF45_RADS_TO_DC_LINEAR_B;
+    df45_model.line_resistance = DF45_LINE_RESISTANCE;
 
     // setup the velocity PID
     PidConstants_t vel_pid_constants;
@@ -287,17 +288,16 @@ int main() {
         if (run_torque_loop) {
             // Get the current in amps from the current sense ADC.
             float current_sense_I = currsen_get_motor_current();
+            float vbus_voltage = currsen_get_vbus_voltage();
             // map current to torque using the motor model
             float measured_torque_Nm = mm_current_to_torque(&df45_model, current_sense_I);
             // filter torque
             measured_torque_Nm = iir_filter_update(&torque_filter, measured_torque_Nm);
 
-            // TODO: add filter?
-
-            // correct torque sign from recovered velocity
-            // TODO: this should probably be acceleration based not velocity
-            // e.g. F = ma
-            if (enc_vel_rads < 0.0f) {
+            // Correct torque sign based on duty cycle direction
+            MotorDirection_t current_motor_direction = pwm6step_get_motor_direction();
+            if (current_motor_direction == COUNTER_CLOCKWISE) {
+                // if the motor is spinning counter-clockwise, then the torque is negative
                 measured_torque_Nm = -fabs(measured_torque_Nm);
             }
 
@@ -306,7 +306,7 @@ int main() {
             if (motion_control_type == TORQUE) {
                 r_Nm = r_motor_board;
             } else {
-                r_Nm = control_setpoint_vel_duty;
+                r_Nm = vel_computed_duty;
             }
 
             // calculate PID on the torque in Nm
@@ -315,20 +315,21 @@ int main() {
             // convert desired torque to desired current
             float current_setpoint = mm_torque_to_current(&df45_model, fabs(torque_setpoint_Nm));
             // convert desired current to desired duty cycle
-            u_torque_loop = mm_pos_current_to_pos_dc(&df45_model, current_setpoint);
+            u_torque_loop = mm_pos_current_to_pos_dc(&df45_model, current_setpoint, vbus_voltage);
 
-            if (torque_setpoint_Nm < 0.0f) {
+            if (torque_setpoint_Nm > 0.0f) {
                 u_torque_loop = -fabs(u_torque_loop);
             }
 
             // load data frame
             // torque control data
             response_packet.data.motion.torque_setpoint = r_Nm;
+            response_packet.data.motion.vbus_voltage = vbus_voltage;
             response_packet.data.motion.current_estimate = current_sense_I;
             response_packet.data.motion.torque_estimate = measured_torque_Nm;
             response_packet.data.motion.torque_computed_error = torque_pid.prev_err;
-            response_packet.data.motion.torque_computed_setpoint = torque_setpoint_Nm;
-            response_packet.data.motion.vbus_voltage = currsen_get_vbus_voltage();
+            response_packet.data.motion.torque_computed_nm = torque_setpoint_Nm;
+            response_packet.data.motion.torque_computed_duty = u_torque_loop;
         }
 
         // run velocity loop if applicable
@@ -356,15 +357,15 @@ int main() {
             control_setpoint_vel_rads_prev = control_setpoint_vel_rads;
 
             // back convert rads to duty cycle
-            control_setpoint_vel_duty = mm_rads_to_dc(&df45_model, control_setpoint_vel_rads);
+            vel_computed_duty = mm_rads_to_dc(&df45_model, control_setpoint_vel_rads);
 
             // velocity control data
             response_packet.data.motion.vel_setpoint = r_motor_board;
-            response_packet.data.motion.vel_setpoint_clamped = control_setpoint_vel_rads;
             response_packet.data.motion.encoder_delta = enc_delta;
             response_packet.data.motion.vel_enc_estimate = enc_rad_s_filt;
             response_packet.data.motion.vel_computed_error = vel_pid.prev_err;
-            response_packet.data.motion.vel_computed_setpoint = control_setpoint_vel_duty;
+            response_packet.data.motion.vel_computed_rads = control_setpoint_vel_rads;
+            response_packet.data.motion.vel_computed_duty = vel_computed_duty;
         }
 
         if (run_torque_loop || run_vel_loop) {
@@ -376,10 +377,10 @@ int main() {
             if (motion_control_type == OPEN_LOOP) {
                 float r_motor = mm_rads_to_dc(&df45_model, r_motor_board);
                 response_packet.data.motion.vel_setpoint = r_motor_board;
-                response_packet.data.motion.vel_computed_setpoint = r_motor;
+                response_packet.data.motion.vel_computed_duty = r_motor;
                 pwm6step_set_duty_cycle_f(r_motor);
             } else if (motion_control_type == VELOCITY) {
-                pwm6step_set_duty_cycle_f(control_setpoint_vel_duty);
+                pwm6step_set_duty_cycle_f(vel_computed_duty);
             } else {
                 pwm6step_set_duty_cycle_f(u_torque_loop);
             }

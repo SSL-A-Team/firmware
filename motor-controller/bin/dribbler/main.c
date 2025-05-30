@@ -218,7 +218,7 @@ int main() {
             response_packet.data.motion.torque_setpoint = r;
             response_packet.data.motion.torque_estimate = cur_measurement;
             response_packet.data.motion.torque_computed_error = torque_pid.prev_err;
-            response_packet.data.motion.torque_computed_setpoint = torque_setpoint;
+            response_packet.data.motion.torque_computed_nm = torque_setpoint;
         }
 
         if (run_torque_loop) {

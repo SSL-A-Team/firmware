@@ -13,6 +13,7 @@ typedef struct MotorModel {
     float current_to_torque_linear_model_b;
     float rads_to_dc_linear_map_m;
     float rads_to_dc_linear_map_b;
+    float line_resistance; // ohms
 } MotorModel_t;
 
 void mm_initialize(MotorModel_t *mm);
@@ -22,4 +23,4 @@ float mm_enc_ticks_to_rad(MotorModel_t *mm, float enc_ticks);
 float mm_voltage_to_current(MotorModel_t *mm, float voltage);
 float mm_current_to_torque(MotorModel_t *mm, float current);
 float mm_torque_to_current(MotorModel_t *mm, float torque);
-float mm_pos_current_to_pos_dc(MotorModel_t *mm, float current);
+float mm_pos_current_to_pos_dc(MotorModel_t *mm, float current, float vbus_voltage);
