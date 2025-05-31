@@ -1,6 +1,6 @@
 use core::mem::MaybeUninit;
 
-use ateam_common_packets::bindings::PowerStatusPacket;
+use ateam_common_packets::bindings::BatteryInfoPacket;
 use ateam_lib_stm32::{drivers::adc::AdcConverter, filter::WindowAvergingFilter, math::range::Range, power::{battery::LipoModel, PowerRail}};
 use embassy_executor::Spawner;
 use embassy_stm32::{adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime}, peripherals::ADC1};
@@ -108,7 +108,7 @@ async fn power_task_entry(
                 ateam_lib_stm32::power::battery::CellVoltageComputeMode::Chained);
 
     // Create empty telemetry packet
-    let mut telem_packet: PowerStatusPacket = unsafe { MaybeUninit::zeroed().assume_init() };
+    let mut battery_telem_packet: BatteryInfoPacket = unsafe { MaybeUninit::zeroed().assume_init() };
 
     loop {
         ////////////////////////////////////////////
@@ -152,12 +152,11 @@ async fn power_task_entry(
             // 3v3 voltage too low
             // 3v3 voltage too high
 
-        telem_packet.set_power_ok(1);
-        telem_packet.set_power_rail_12v0_ok(1);
-        telem_packet.set_power_rail_5v0_ok(1);
-        telem_packet.set_power_rail_3v3_ok(1);
-        telem_packet.set_high_current_operations_allowed(1);
-
+        shared_power_state.set_power_ok(true).await;
+        shared_power_state.set_power_rail_12v0_ok(true).await;
+        shared_power_state.set_power_rail_5v0_ok(true).await;
+        shared_power_state.set_power_rail_3v3_ok(true).await;
+        shared_power_state.set_high_current_operations_allowed(true).await;
 
         //////////////////////////
         //  Battery Monitoring  //
@@ -189,9 +188,9 @@ async fn power_task_entry(
 
             if lipo6s_battery_model.get_cell_percentages().into_iter().all(|v| *v == 0) {
                 defmt::info!("battery balance connector is unplugged");
-                shared_power_state.set_balance_connected(false);
+                shared_power_state.set_balance_connected(false).await;
             } else {
-                shared_power_state.set_balance_connected(true);
+                shared_power_state.set_balance_connected(true).await;
             }
             
             // input to battery model
@@ -202,18 +201,11 @@ async fn power_task_entry(
             // battery balance - any cell too low
             // battery balance - any cell difference too high
 
-            telem_packet.battery_info.set_battery_balance_connected(0);
-            telem_packet.battery_info.set_battery_cell_critical(0);
-            telem_packet.battery_info.set_battery_cell_imbalance_warn(0);
-            telem_packet.battery_info.set_battery_cell_low(0);
-            telem_packet.battery_info.set_battery_critical(0);
-            telem_packet.battery_info.set_battery_low(0);
-            telem_packet.battery_info.set_battery_ok(0);
-            // telem_packet.battery_info.battery_mv = lipo6s_battery_model.get_cell_voltages();
+            // battery_telem_packet.battery_mv = lipo6s_battery_model.get_cell_voltages();
         }
 
-        // sent pubsub message to coms task
-        telemetry_publisher.publish_immediate(telem_packet);
+        // send pubsub message to coms task
+        telemetry_publisher.publish_immediate(battery_telem_packet);
 
         loop_ticker.next().await;
     }

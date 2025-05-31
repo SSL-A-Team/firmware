@@ -3,7 +3,7 @@ use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::{self, DataBits, Parity, StopBits, Uart};
 
 use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
-use ateam_common_packets::bindings::{PowerCommandPacket, PowerStatusPacket};
+use ateam_common_packets::bindings::{BatteryInfoPacket, PowerCommandPacket, PowerStatusPacket};
 use embassy_time::{Duration, Instant, Ticker};
 use crate::{pins::*, power_state::SharedPowerState, SystemIrqs};
 
@@ -33,7 +33,7 @@ async fn coms_task_entry(
     mut telemetry_subscriber: TelemetrySubscriber,
 ) {
     let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));
-    let mut latest_telem_packet: Option<PowerStatusPacket> = None;
+    let mut last_battery_telem_packet: Option<BatteryInfoPacket> = None;
     let mut last_sent_packet_time = Instant::now();
 
     loop {
@@ -42,56 +42,72 @@ async fn coms_task_entry(
             let buf = res.data();
 
             if buf.len() != core::mem::size_of::<PowerCommandPacket>() {
-                defmt::warn!("Got invalid packet of len {:?} (expected {:?}) data: {:?}", buf.len(), core::mem::size_of::<PowerCommandPacket>(), buf);
+                defmt::warn!("COMS TASK - Got invalid packet of len {:?} (expected {:?}) data: {:?}", buf.len(), core::mem::size_of::<PowerCommandPacket>(), buf);
                 continue;
             }
-                        // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
+
+            defmt::trace!("COMS TASK - received valid command packet from control board");
+
+            // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
+            let mut command_packet: PowerCommandPacket;
             unsafe {
-                let mut command_packet: PowerCommandPacket = { MaybeUninit::zeroed().assume_init() };
+                command_packet = { MaybeUninit::zeroed().assume_init() };
 
                 // copy receieved uart bytes into packet
                 let state = &mut command_packet as *mut _ as *mut u8;
                 for i in 0..core::mem::size_of::<PowerCommandPacket>() {
                     *state.offset(i as isize) = buf[i];
                 }
+            }
 
-                // Update power state from PowerCommandPacket
-                if command_packet.force_shutdown() != 0 {
-                    shared_power_state.set_shutdown_force(true);
-                }
-
-                if command_packet.ready_shutdown() != 0 {
-                    shared_power_state.set_shutdown_ready(true);
-                }
-
-                if command_packet.request_shutdown() != 0 {
-                    shared_power_state.set_shutdown_requested(true);
-                }
-
-                if command_packet.cancel_shutdown() != 0 {
-                    shared_power_state.set_shutdown_ready(false);
-                    shared_power_state.set_shutdown_requested(false);
-                }
+            // Update power state from command packet
+            // Latch state for force shutdown, ready shutdown, request shutdown
+            // Cancel shutdown will clear ready shutdown and request shutdown state
+            if command_packet.force_shutdown() != 0 {
+                defmt::info!("COMS TASK - force shutdown received form control board");
+                shared_power_state.set_shutdown_force(true).await;
+            }
+            if command_packet.ready_shutdown() != 0 {
+                defmt::info!("COMS TASK - ready shutdown received form control board");
+                shared_power_state.set_shutdown_ready(true).await;
+            }
+            if command_packet.request_shutdown() != 0 {
+                defmt::info!("COMS TASK - request shutdown received form control board");
+                shared_power_state.set_shutdown_requested(true).await;
+            }
+            if command_packet.cancel_shutdown() != 0 {
+                defmt::info!("COMS TASK - cancel shutdown received form control board");
+                shared_power_state.set_shutdown_ready(false).await;
+                shared_power_state.set_shutdown_requested(false).await;
             }
         }
 
-        // read channel
+        // Read from telemetry channel, only keep latest telemetry
         loop {
             if let Some(telemetry_packet) = telemetry_subscriber.try_next_message_pure() {
-                latest_telem_packet = Some(telemetry_packet);
+                defmt::trace!("COMS TASK - New battery telemetry packet received from power task");
+                last_battery_telem_packet = Some(telemetry_packet);
             } else {
                 break
             }
         }
 
-        // send telemetry to control board
-        if latest_telem_packet.is_some() && 
+        // Send telemetry to control board
+        if last_battery_telem_packet.is_some() && 
            (Instant::now() - last_sent_packet_time >= Duration::from_millis(POWER_TELEM_PERIOD_MS)) {
 
-            let mut telem_packet = latest_telem_packet.unwrap();
+            // build telemetry packet from latest battery telemetry and power status
+            let mut telem_packet: PowerStatusPacket = unsafe { MaybeUninit::zeroed().assume_init() };
 
-            // update fields from current power state
-            telem_packet.set_shutdown_requested(0);
+            let power_status = shared_power_state.get_state().await;
+
+            telem_packet.set_power_ok(power_status.power_ok as u32);
+            telem_packet.set_power_rail_3v3_ok(power_status.power_rail_3v3_ok as u32);
+            telem_packet.set_power_rail_5v0_ok(power_status.power_rail_5v0_ok as u32);
+            telem_packet.set_power_rail_12v0_ok(power_status.power_rail_12v0_ok as u32);
+            telem_packet.set_high_current_operations_allowed(power_status.high_current_operations_allowed as u32);
+            telem_packet.set_shutdown_requested(power_status.shutdown_requested as u32);
+            telem_packet.battery_info.clone_from(&last_battery_telem_packet.unwrap());
 
             let struct_bytes;
             unsafe {
@@ -100,9 +116,9 @@ async fn coms_task_entry(
                     core::mem::size_of::<PowerStatusPacket>(),
                 );
             }
-            write_queue.enqueue_copy(struct_bytes);
+            let _ = write_queue.enqueue_copy(struct_bytes);
             last_sent_packet_time = Instant::now();
-            defmt::trace!("Sent telemetry packet")
+            defmt::trace!("COMS TAKS - Sent telemetry packet")
         }
 
         loop_rate_ticker.next().await;

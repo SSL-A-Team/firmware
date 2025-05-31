@@ -54,8 +54,8 @@ async fn main(spawner: Spawner) {
 
     sequence_power_on(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
 
-    interrupt::USART1.set_priority(Priority::P6);
-    let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(interrupt::USART1);
+    interrupt::USART2.set_priority(Priority::P6);
+    let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(interrupt::USART2);
 
     //////////////////////////////////////
     //  setup inter-task coms channels  //
