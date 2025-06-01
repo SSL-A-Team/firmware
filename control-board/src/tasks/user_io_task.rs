@@ -61,7 +61,7 @@ async fn user_io_task_entry(
     let mut io_task_loop_rate_ticker = Ticker::every(IO_TASK_LOOP_RATE_DURATION);
 
     let mut lifelight_high = true;
-    let mut lifelight_ticker = SyncTicker::every(Duration::from_millis(500));
+    let mut lifelight_ticker = SyncTicker::every(Duration::from_millis(100));
     debug_led0.set_high();
 
     ///////////////////////
@@ -81,7 +81,7 @@ async fn user_io_task_entry(
 
         // read switches
         let robot_network_index = dip_switch.read_block(7..4);
-        let hw_debug_mode = debug_mode_dip_switch.read_pin(1);
+        let hw_debug_mode = debug_mode_dip_switch.read_pin(0);
         let robot_team_isblue = robot_color_dip_switch.read_pin(1);
         let robot_id = robot_id_rotary.read_value();
 
@@ -181,7 +181,7 @@ pub async fn start_io_task(spawner: &Spawner,
     let dip_switch = DipSwitch::new_from_pins(dip_sw_pins, Pull::None, None);
 
     let debug_mode_pins: [AnyPin; 1] = [debug_mode_pin.into()];
-    let debug_mode_dip = DipSwitch::new_from_pins(debug_mode_pins, Pull::None, None);
+    let debug_mode_dip = DipSwitch::new_from_pins(debug_mode_pins, Pull::None, Some([true]));
     
     let team_color_pins: [AnyPin; 2] = [robot_id_team_is_blue_pin.into(), robot_id_src_select_pin.into()];
     let team_color_dip = DipSwitch::new_from_pins(team_color_pins, Pull::None, None);

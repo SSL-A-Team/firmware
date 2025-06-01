@@ -42,7 +42,7 @@ async fn main(spawner: Spawner) {
     let p = embassy_stm32::init(Default::default());
     info!("power board startup.");
 
-    let _pwr_btn = Input::new(p.PB15, Pull::None);
+    let pwr_btn = Input::new(p.PB15, Pull::None);
     let mut shutdown_ind = Output::new(p.PA15, Level::High, Speed::Low);
     let mut kill_sig = OutputOpenDrain::new(p.PA8, Level::High, Speed::Low);
 
@@ -80,7 +80,7 @@ async fn main(spawner: Spawner) {
     loop {
         // read pwr button
         // shortest possible interrupt from pwr btn controller is 32ms
-        if _pwr_btn.get_level() == Level::Low {
+        if pwr_btn.get_level() == Level::Low {
             shutdown_ind.set_low();  // indicate shutdown request
             let shutdown_requested_time = Instant::now();
             SHARED_POWER_STATE.set_shutdown_requested(true).await;  // update power board state
