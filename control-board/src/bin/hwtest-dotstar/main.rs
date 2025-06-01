@@ -6,7 +6,7 @@ use embassy_stm32::interrupt;
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{create_audio_task, create_io_task, get_system_config, pins::{BatteryVoltPubSub, LedCommandPubSub}, robot_state::SharedRobotState};
+use ateam_control_board::{create_audio_task, create_dotstar_task, create_io_task, get_system_config, pins::{BatteryVoltPubSub, LedCommandPubSub}, robot_state::SharedRobotState};
 
 
 use embassy_sync::pubsub::PubSubChannel;
@@ -48,6 +48,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
 
     let mut battery_volt_subscriber = BATTERY_VOLT_CHANNEL.subscriber().unwrap();
+    let mut led_command_subscriber = LED_COMMAND_CHANNEL.subscriber().unwrap();
 
     ///////////////////
     //  start tasks  //
@@ -55,10 +56,11 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     create_io_task!(main_spawner, robot_state, battery_volt_publisher, p);
 
+    create_dotstar_task!(main_spawner, led_command_subscriber, p);
+
     // create_audio_task!(main_spawner, robot_state, p);
 
     loop {
-        defmt::info!("Battery Voltage: {}", battery_volt_subscriber.next_message_pure().await);
         Timer::after_millis(1000).await;
     }
 }

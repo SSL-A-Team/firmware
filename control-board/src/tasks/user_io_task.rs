@@ -1,5 +1,5 @@
 
-use ateam_lib_stm32::anim::{self, AnimInterface, AnimRepeatMode, Blink, CompositeAnimation, Lerp};
+use ateam_lib_stm32::anim::{self, AnimInterface, AnimRepeatMode, BlinkAnimation, CompositeAnimation, LerpAnimation};
 use ateam_lib_stm32::drivers::led::apa102::{Apa102, Apa102Anim};
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{AnyPin, Level, Output, Pull, Speed};

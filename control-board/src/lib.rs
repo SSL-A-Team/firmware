@@ -14,6 +14,7 @@
 )]
 #![feature(ptr_metadata)]
 #![feature(sync_unsafe_cell)]
+#![feature(variant_count)]
 
 
 use embassy_stm32::{

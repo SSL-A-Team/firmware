@@ -261,5 +261,29 @@ where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
     pub fn disable_animation(&mut self, led_index: usize, anim_id: usize) -> Result<(), LedChainError>  {
         self.set_animation_enabled(led_index, anim_id, false)
     }
+
+    pub fn set_drv_str(&mut self, strength: u8, led_index: usize) {
+        self.apa102_driver.set_drv_str(strength, led_index);
+    }
+
+    pub fn set_drv_str_range(&mut self, str: u8, led_index_range: Range<usize>) {
+        self.apa102_driver.set_drv_str_range(str, led_index_range);
+    }
+
+    pub fn set_drv_str_all(&mut self, str: u8) {
+        self.apa102_driver.set_drv_str_all(str);
+    }
+
+    pub fn set_color(&mut self, color: RGB8, led_index: usize) {
+        self.apa102_driver.set_color(color, led_index);
+    }
+
+    pub fn set_color_range(&mut self, color: RGB8, led_index_range: Range<usize>) {
+        self.apa102_driver.set_color_range(color, led_index_range);
+    }
+
+    pub fn set_color_all(&mut self, color: RGB8) {
+        self.apa102_driver.set_color_all(color);
+    }
 }
 
