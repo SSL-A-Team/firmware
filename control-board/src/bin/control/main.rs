@@ -118,9 +118,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         wifi_credentials,
         p);
 
-    // create_power_task!(main_spawner, uart_queue_spawner,
-    //     robot_state,
-    //     p);
+    create_power_task!(main_spawner, uart_queue_spawner,
+        robot_state,
+        p);
 
     create_imu_task!(main_spawner,
         robot_state,

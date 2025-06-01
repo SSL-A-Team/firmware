@@ -64,19 +64,19 @@ async fn coms_task_entry(
             // Latch state for force shutdown, ready shutdown, request shutdown
             // Cancel shutdown will clear ready shutdown and request shutdown state
             if command_packet.force_shutdown() != 0 {
-                defmt::info!("COMS TASK - force shutdown received form control board");
+                defmt::info!("COMS TASK - force shutdown received from control board");
                 shared_power_state.set_shutdown_force(true).await;
             }
             if command_packet.ready_shutdown() != 0 {
-                defmt::info!("COMS TASK - ready shutdown received form control board");
+                defmt::info!("COMS TASK - ready shutdown received from control board");
                 shared_power_state.set_shutdown_ready(true).await;
             }
             if command_packet.request_shutdown() != 0 {
-                defmt::info!("COMS TASK - request shutdown received form control board");
+                defmt::info!("COMS TASK - request shutdown received from control board");
                 shared_power_state.set_shutdown_requested(true).await;
             }
             if command_packet.cancel_shutdown() != 0 {
-                defmt::info!("COMS TASK - cancel shutdown received form control board");
+                defmt::info!("COMS TASK - cancel shutdown received from control board");
                 shared_power_state.set_shutdown_ready(false).await;
                 shared_power_state.set_shutdown_requested(false).await;
             }

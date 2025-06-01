@@ -23,7 +23,7 @@ pub const TEST_SONG: [Beat; 2] = [
     Beat::Note { tone: 587, duration: 250_000 },
 ];
 
-static POWER_STATE: SharedPowerState = SharedPowerState::new();
+static SHARED_POWER_STATE: SharedPowerState = SharedPowerState::new();
 
 static AUDIO_PUBSUB: AudioPubSub = PubSubChannel::new();
 static TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
@@ -50,7 +50,7 @@ async fn main(spawner: Spawner) {
     let mut en_3v3 = Output::new(p.PB7, Level::Low, Speed::Low);
     let mut en_5v0 = Output::new(p.PB8, Level::Low, Speed::Low);
 
-    let power_state = &POWER_STATE;
+    let shared_power_state = &SHARED_POWER_STATE;
 
     sequence_power_on(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
 
@@ -66,10 +66,10 @@ async fn main(spawner: Spawner) {
     let coms_telemetry_subscriber = TELEMETRY_CHANNEL.subscriber().unwrap();
     
     // start power task
-    create_power_task!(spawner, power_state, power_telemetry_publisher, p);
+    create_power_task!(spawner, shared_power_state, power_telemetry_publisher, p);
 
     // start coms task
-    create_coms_task!(spawner, uart_queue_spawner, power_state, coms_telemetry_subscriber, p);
+    create_coms_task!(spawner, uart_queue_spawner, shared_power_state, coms_telemetry_subscriber, p);
 
     // TODO: start audio task
 
@@ -79,14 +79,24 @@ async fn main(spawner: Spawner) {
     let mut main_loop_ticker = Ticker::every(Duration::from_millis(10));
     loop {
         // read pwr button
-        // shortest possible interrupt form pwr btn controller is 32ms
+        // shortest possible interrupt from pwr btn controller is 32ms
         if _pwr_btn.get_level() == Level::Low {
-            _shutdown_ind.set_low();
-
-            // TODO: request and await power off OK from control board
-
-            sequence_power_off(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
-            _kill_sig.set_low();
+            _shutdown_ind.set_low();  // indicate shutdown request
+            SHARED_POWER_STATE.set_shutdown_requested(true).await;  // update power board state
+            loop {
+                if !SHARED_POWER_STATE.get_shutdown_requested().await {
+                    defmt::info!("MAIN TASK: Shutdown cancelled");
+                    _shutdown_ind.set_high();
+                    break
+                }
+                if SHARED_POWER_STATE.get_shutdown_ready().await {
+                    defmt::info!("MAIN TASK: Shutdown acknowledged, turning off power");
+                    sequence_power_off(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
+                    _kill_sig.set_low();
+                    break
+                }
+                Timer::after_millis(10).await;
+            }
         }
 
         main_loop_ticker.next().await;
