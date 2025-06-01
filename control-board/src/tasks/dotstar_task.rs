@@ -1,12 +1,9 @@
 use ateam_lib_stm32::drivers::led::apa102::{apa102_buf_len, Apa102};
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Ticker};
 
 use smart_leds::colors::{BLACK, BLUE, CYAN, DARK_CYAN, GREEN, ORANGE, PURPLE, RED, YELLOW};
 
 use crate::{pins::*, MotorIndex};
-
-const DOTSTAR_ANIMATION_RATE: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, Copy, defmt::Format)]
 pub enum MotorStatusLedCommand {
@@ -61,7 +58,7 @@ pub enum ControlBoardLedCommand {
 #[macro_export]
 macro_rules! create_dotstar_task {
     ($spawner:ident, $led_command_subscriber:ident, $p:ident) => {
-        ateam_control_board::tasks::dotstar::start_dotstar_task(&$spawner,
+        ateam_control_board::tasks::dotstar_task::start_dotstar_task(&$spawner,
             $led_command_subscriber,
             $p.SPI6, $p.PB3, $p.PB5, $p.BDMA_CH0).await;
     };
@@ -79,64 +76,61 @@ async fn dotstar_task_entry(
     dotstars.set_color_all(BLACK);
     dotstars.update().await;
     
-    let mut dotstar_animation_update_rate_ticker = Ticker::every(DOTSTAR_ANIMATION_RATE);
-
     loop {
-        if let Some(led_command) = led_command_subscriber.try_next_message_pure() {
-            match led_command {
-                ControlBoardLedCommand::Motor((motor, status)) => {
-                    let led_index = match motor {
-                        MotorIndex::FrontLeft => ControlDotstarIndex::MotorFrontLeft,
-                        MotorIndex::BackLeft => ControlDotstarIndex::MotorBackLeft,
-                        MotorIndex::BackRight => ControlDotstarIndex::MotorBackRight,
-                        MotorIndex::FrontRight => ControlDotstarIndex::MotorFrontRight,
-                    };
+        let led_command = led_command_subscriber.next_message_pure().await;
+        match led_command {
+            ControlBoardLedCommand::Motor((motor, status)) => {
+                let led_index = match motor {
+                    MotorIndex::FrontLeft => ControlDotstarIndex::MotorFrontLeft,
+                    MotorIndex::BackLeft => ControlDotstarIndex::MotorBackLeft,
+                    MotorIndex::BackRight => ControlDotstarIndex::MotorBackRight,
+                    MotorIndex::FrontRight => ControlDotstarIndex::MotorFrontRight,
+                };
 
-                    let led_color = match status {
-                        MotorStatusLedCommand::Off => BLACK,
-                        MotorStatusLedCommand::Configuring => PURPLE,
-                        MotorStatusLedCommand::Ok => GREEN,
-                        MotorStatusLedCommand::Warn => YELLOW,
-                        MotorStatusLedCommand::Error => RED,
-                    };
+                let led_color = match status {
+                    MotorStatusLedCommand::Off => BLACK,
+                    MotorStatusLedCommand::Configuring => PURPLE,
+                    MotorStatusLedCommand::Ok => GREEN,
+                    MotorStatusLedCommand::Warn => YELLOW,
+                    MotorStatusLedCommand::Error => RED,
+                };
 
-                    dotstars.set_color(led_color, led_index as usize);
-                },
-                ControlBoardLedCommand::Imu(imu_status_led_command) => {
-                    match imu_status_led_command {
-                        ImuStatusLedCommand::Ok=> dotstars.set_color(GREEN, ControlDotstarIndex::Imu.into()),
-                        ImuStatusLedCommand::Error => dotstars.set_color(RED, ControlDotstarIndex::Imu.into()), 
-                    }
-                },
-                ControlBoardLedCommand::Radio(radio_status_led_command) => {
-                    match radio_status_led_command {
-                        RadioStatusLedCommand::Off => dotstars.set_color(BLACK, ControlDotstarIndex::Radio.into()),
-                        RadioStatusLedCommand::ConnectingUart => dotstars.set_color(CYAN, ControlDotstarIndex::Radio.into()),
-                        RadioStatusLedCommand::ConnectingWifi => dotstars.set_color(DARK_CYAN, ControlDotstarIndex::Radio.into()),
-                        RadioStatusLedCommand::ConnectingSoftware => dotstars.set_color(PURPLE, ControlDotstarIndex::Radio.into()),
-                        RadioStatusLedCommand::Ok=> dotstars.set_color(GREEN, ControlDotstarIndex::Radio.into()),
-                        RadioStatusLedCommand::Error => dotstars.set_color(RED, ControlDotstarIndex::Radio.into())
-                    }
-                },
-                ControlBoardLedCommand::Kicker(kicker_status_led_command) => {
-                    match kicker_status_led_command {
-                        KickerStatusLedCommand::Ok => dotstars.set_color(GREEN, ControlDotstarIndex::Kicker.into()),
-                        KickerStatusLedCommand::Error => dotstars.set_color(RED, ControlDotstarIndex::Kicker.into()), }
-                },
-                ControlBoardLedCommand::General(control_general_led_command) => {
-                    match control_general_led_command {
-                        ControlGeneralLedCommand::ShutdownRequested => dotstars.set_color(ORANGE, ControlDotstarIndex::User2.into()),
-                        ControlGeneralLedCommand::BallDetected => dotstars.set_color(BLUE, ControlDotstarIndex::User2.into()),
-                        ControlGeneralLedCommand::BallNotDetected => dotstars.set_color(BLACK, ControlDotstarIndex::User2.into()),
-                        ControlGeneralLedCommand::Ok => dotstars.set_color(GREEN, ControlDotstarIndex::User1.into()),
-                        ControlGeneralLedCommand::Warn => dotstars.set_color(YELLOW, ControlDotstarIndex::User1.into()),
-                        ControlGeneralLedCommand::Error => dotstars.set_color(RED, ControlDotstarIndex::User1.into()),
-                    }
-                },
-            }
+                dotstars.set_color(led_color, led_index as usize);
+            },
+            ControlBoardLedCommand::Imu(imu_status_led_command) => {
+                match imu_status_led_command {
+                    ImuStatusLedCommand::Ok=> dotstars.set_color(GREEN, ControlDotstarIndex::Imu.into()),
+                    ImuStatusLedCommand::Error => dotstars.set_color(RED, ControlDotstarIndex::Imu.into()), 
+                }
+            },
+            ControlBoardLedCommand::Radio(radio_status_led_command) => {
+                match radio_status_led_command {
+                    RadioStatusLedCommand::Off => dotstars.set_color(BLACK, ControlDotstarIndex::Radio.into()),
+                    RadioStatusLedCommand::ConnectingUart => dotstars.set_color(CYAN, ControlDotstarIndex::Radio.into()),
+                    RadioStatusLedCommand::ConnectingWifi => dotstars.set_color(DARK_CYAN, ControlDotstarIndex::Radio.into()),
+                    RadioStatusLedCommand::ConnectingSoftware => dotstars.set_color(PURPLE, ControlDotstarIndex::Radio.into()),
+                    RadioStatusLedCommand::Ok=> dotstars.set_color(GREEN, ControlDotstarIndex::Radio.into()),
+                    RadioStatusLedCommand::Error => dotstars.set_color(RED, ControlDotstarIndex::Radio.into())
+                }
+            },
+            ControlBoardLedCommand::Kicker(kicker_status_led_command) => {
+                match kicker_status_led_command {
+                    KickerStatusLedCommand::Ok => dotstars.set_color(GREEN, ControlDotstarIndex::Kicker.into()),
+                    KickerStatusLedCommand::Error => dotstars.set_color(RED, ControlDotstarIndex::Kicker.into()), }
+            },
+            ControlBoardLedCommand::General(control_general_led_command) => {
+                match control_general_led_command {
+                    ControlGeneralLedCommand::ShutdownRequested => dotstars.set_color(ORANGE, ControlDotstarIndex::User2.into()),
+                    ControlGeneralLedCommand::BallDetected => dotstars.set_color(BLUE, ControlDotstarIndex::User2.into()),
+                    ControlGeneralLedCommand::BallNotDetected => dotstars.set_color(BLACK, ControlDotstarIndex::User2.into()),
+                    ControlGeneralLedCommand::Ok => dotstars.set_color(GREEN, ControlDotstarIndex::User1.into()),
+                    ControlGeneralLedCommand::Warn => dotstars.set_color(YELLOW, ControlDotstarIndex::User1.into()),
+                    ControlGeneralLedCommand::Error => dotstars.set_color(RED, ControlDotstarIndex::User1.into()),
+                }
+            },
         }
 
-        dotstar_animation_update_rate_ticker.next().await;
+        dotstars.update().await;
     }
 }
 

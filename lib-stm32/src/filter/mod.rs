@@ -10,6 +10,51 @@ pub trait Filter<T>: Default {
     fn reset(&mut self);
 }
 
+pub struct IirFilter {
+    alpha: f32,
+    filtered_value: f32
+}
+
+impl IirFilter {
+    pub fn new(alpha: f32) -> Self {
+        Self {
+            alpha,
+            filtered_value: 0.0
+        }
+    }
+
+    pub fn set_alpha(&mut self, alpha: f32) {
+        self.alpha = alpha
+    }
+
+    pub fn get_alpha(&self) -> f32 {
+        self.alpha
+    }
+}
+
+impl Default for IirFilter {
+    fn default() -> Self {
+        Self::new(0.5)
+    }
+}
+
+impl Filter<f32> for IirFilter {
+    fn add_sample(&mut self, sample: f32) {
+        // self.filtered_value = (self.alpha * sample) + ((1.0 - self.alpha) * self.filtered_value);
+        self.filtered_value = self.filtered_value + self.alpha * (sample - self.filtered_value);
+    }
+
+    fn update(&mut self) {}
+
+    fn filtered_value(&self) -> Option<f32> {
+        Some(self.filtered_value)
+    }
+
+    fn reset(&mut self) {
+        self.filtered_value = 0.0    
+    }
+}
+
 pub struct WindowAvergingFilter<const WINDOW_SIZE: usize, const SOFT_INIT: bool, T: Number> {
     window: [T; WINDOW_SIZE],
     update_ind: usize,
