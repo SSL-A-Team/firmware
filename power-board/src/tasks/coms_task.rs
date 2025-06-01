@@ -2,7 +2,7 @@ use core::{mem::MaybeUninit};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::{self, DataBits, Parity, StopBits, Uart};
 
-use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, power, static_idle_buffered_uart_nl, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use ateam_common_packets::bindings::{BatteryInfoPacket, PowerCommandPacket, PowerStatusPacket};
 use embassy_time::{Duration, Instant, Ticker};
 use crate::{pins::*, power_state::SharedPowerState, SystemIrqs};
@@ -14,6 +14,8 @@ const TX_BUF_DEPTH: usize = 2;
 static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH);
 
 const POWER_TELEM_PERIOD_MS: u64 = 1000;
+
+const COMS_RX_TIMEOUT: Duration = Duration::from_millis(1000);
 
 #[macro_export]
 macro_rules! create_coms_task {
@@ -35,8 +37,11 @@ async fn coms_task_entry(
     let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));
     let mut last_battery_telem_packet: Option<BatteryInfoPacket> = None;
     let mut last_sent_packet_time = Instant::now();
+    let mut last_received_packet_time = Instant::MAX - Duration::from_secs(60);
 
     loop {
+        let cur_power_state = shared_power_state.get_state().await;
+
         // read incoming packets
         while let Ok(res) = read_queue.try_dequeue() {
             let buf = res.data();
@@ -48,10 +53,15 @@ async fn coms_task_entry(
 
             defmt::trace!("COMS TASK - received valid command packet from control board");
 
+            last_received_packet_time = Instant::now();
+            if !cur_power_state.coms_established {
+                shared_power_state.set_coms_established(true).await;
+            }
+
             // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
             let mut command_packet: PowerCommandPacket;
             unsafe {
-                command_packet = { MaybeUninit::zeroed().assume_init() };
+                command_packet = MaybeUninit::zeroed().assume_init();
 
                 // copy receieved uart bytes into packet
                 let state = &mut command_packet as *mut _ as *mut u8;
@@ -92,6 +102,11 @@ async fn coms_task_entry(
             }
         }
 
+        // if we've timed out coms, set it in the state
+        if cur_power_state.coms_established && Instant::now() > last_received_packet_time + COMS_RX_TIMEOUT {
+            shared_power_state.set_coms_established(false).await;
+        }
+
         // Send telemetry to control board
         if last_battery_telem_packet.is_some() && 
            (Instant::now() - last_sent_packet_time >= Duration::from_millis(POWER_TELEM_PERIOD_MS)) {
@@ -99,14 +114,12 @@ async fn coms_task_entry(
             // build telemetry packet from latest battery telemetry and power status
             let mut telem_packet: PowerStatusPacket = unsafe { MaybeUninit::zeroed().assume_init() };
 
-            let power_status = shared_power_state.get_state().await;
-
-            telem_packet.set_power_ok(power_status.power_ok as u32);
-            telem_packet.set_power_rail_3v3_ok(power_status.power_rail_3v3_ok as u32);
-            telem_packet.set_power_rail_5v0_ok(power_status.power_rail_5v0_ok as u32);
-            telem_packet.set_power_rail_12v0_ok(power_status.power_rail_12v0_ok as u32);
-            telem_packet.set_high_current_operations_allowed(power_status.high_current_operations_allowed as u32);
-            telem_packet.set_shutdown_requested(power_status.shutdown_requested as u32);
+            telem_packet.set_power_ok(cur_power_state.power_ok as u32);
+            telem_packet.set_power_rail_3v3_ok(cur_power_state.power_rail_3v3_ok as u32);
+            telem_packet.set_power_rail_5v0_ok(cur_power_state.power_rail_5v0_ok as u32);
+            telem_packet.set_power_rail_12v0_ok(cur_power_state.power_rail_12v0_ok as u32);
+            telem_packet.set_high_current_operations_allowed(cur_power_state.high_current_operations_allowed as u32);
+            telem_packet.set_shutdown_requested(cur_power_state.shutdown_requested as u32);
             telem_packet.battery_info.clone_from(&last_battery_telem_packet.unwrap());
 
             let struct_bytes;

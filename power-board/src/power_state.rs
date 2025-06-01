@@ -15,6 +15,7 @@ pub struct PowerState {
     pub shutdown_force: bool,
     pub shutdown_ready: bool,
     pub balance_connected: bool,
+    pub coms_established: bool,
 }
 
 pub struct SharedPowerState {
@@ -35,6 +36,7 @@ impl SharedPowerState {
                     shutdown_force: false,
                     shutdown_ready: false,
                     balance_connected: false,
+                    coms_established: false,
                 }
             )
         }
@@ -52,6 +54,7 @@ impl SharedPowerState {
             shutdown_force: guard.shutdown_force,
             shutdown_ready: guard.shutdown_ready,
             balance_connected: guard.balance_connected,
+            coms_established: guard.coms_established,
         }
     }
 
@@ -143,5 +146,15 @@ impl SharedPowerState {
     pub async fn set_balance_connected(&self, new_val: bool) {
         let mut guard = self.inner.lock().await;
         guard.balance_connected = new_val;
+    }
+
+    pub async fn get_coms_established(&self) -> bool {
+        let guard = self.inner.lock().await;
+        guard.coms_established
+    }
+
+    pub async fn set_coms_established(&self, new_val: bool) {
+        let mut guard = self.inner.lock().await;
+        guard.coms_established = new_val;
     }
 }

@@ -13,7 +13,7 @@ use embassy_stm32::interrupt;
 use embassy_stm32::interrupt::{InterruptExt, Priority};
 use embassy_stm32::gpio::{Input, Level, Output, OutputOpenDrain, Pull, Speed};
 use embassy_sync::pubsub::PubSubChannel;
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Duration, Instant, Ticker, Timer};
 use {defmt_rtt as _, panic_probe as _};
 
 use ateam_lib_stm32::{audio::note::Beat, static_idle_buffered_uart_nl};
@@ -43,8 +43,8 @@ async fn main(spawner: Spawner) {
     info!("power board startup.");
 
     let _pwr_btn = Input::new(p.PB15, Pull::None);
-    let mut _shutdown_ind = Output::new(p.PA15, Level::High, Speed::Low);
-    let mut _kill_sig = OutputOpenDrain::new(p.PA8, Level::High, Speed::Low);
+    let mut shutdown_ind = Output::new(p.PA15, Level::High, Speed::Low);
+    let mut kill_sig = OutputOpenDrain::new(p.PA8, Level::High, Speed::Low);
 
     let mut en_12v0 = Output::new(p.PB6, Level::Low, Speed::Low);
     let mut en_3v3 = Output::new(p.PB7, Level::Low, Speed::Low);
@@ -81,18 +81,25 @@ async fn main(spawner: Spawner) {
         // read pwr button
         // shortest possible interrupt from pwr btn controller is 32ms
         if _pwr_btn.get_level() == Level::Low {
-            _shutdown_ind.set_low();  // indicate shutdown request
+            shutdown_ind.set_low();  // indicate shutdown request
+            let shutdown_requested_time = Instant::now();
             SHARED_POWER_STATE.set_shutdown_requested(true).await;  // update power board state
             loop {
+                let cur_robot_state = shared_power_state.get_state().await;
+
                 if !SHARED_POWER_STATE.get_shutdown_requested().await {
                     defmt::info!("MAIN TASK: Shutdown cancelled");
-                    _shutdown_ind.set_high();
+                    shutdown_ind.set_high();
                     break
                 }
-                if SHARED_POWER_STATE.get_shutdown_ready().await {
+
+                if SHARED_POWER_STATE.get_shutdown_ready().await 
+                    || Instant::now() > shutdown_requested_time + Duration::from_secs(30) 
+                    || !cur_robot_state.coms_established {
                     defmt::info!("MAIN TASK: Shutdown acknowledged, turning off power");
+                    Timer::after_millis(500).await;
                     sequence_power_off(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
-                    _kill_sig.set_low();
+                    kill_sig.set_low();
                     break
                 }
                 Timer::after_millis(10).await;
