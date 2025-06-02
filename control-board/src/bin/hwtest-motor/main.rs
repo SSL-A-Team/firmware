@@ -10,7 +10,7 @@ use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _;
 
-use ateam_control_board::{create_control_task, create_imu_task, create_io_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::control_task::start_control_task};
+use ateam_control_board::{create_control_task, create_imu_task, create_io_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, LedCommandPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::control_task::start_control_task};
 
 use embassy_time::Timer;
 // provide embedded panic probe
@@ -24,6 +24,7 @@ static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
 static GYRO_DATA_CHANNEL: GyroDataPubSub = PubSubChannel::new();
 static ACCEL_DATA_CHANNEL: AccelDataPubSub = PubSubChannel::new();
 static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
+static LED_COMMAND_PUBSUB: LedCommandPubSub = PubSubChannel::new();
 
 static RADIO_UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
@@ -75,6 +76,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     // TODO imu channel
     let imu_gyro_data_publisher = GYRO_DATA_CHANNEL.publisher().unwrap();
     let control_gyro_data_subscriber = GYRO_DATA_CHANNEL.subscriber().unwrap();
+    let imu_led_cmd_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
 
     let imu_accel_data_publisher = ACCEL_DATA_CHANNEL.publisher().unwrap();
     let control_accel_data_subscriber = ACCEL_DATA_CHANNEL.subscriber().unwrap();
@@ -90,7 +92,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     create_imu_task!(main_spawner,
         robot_state,
-        imu_gyro_data_publisher, imu_accel_data_publisher,
+        imu_gyro_data_publisher, imu_accel_data_publisher, imu_led_cmd_publisher,
         p);
 
     create_control_task!(main_spawner, uart_queue_spawner, 

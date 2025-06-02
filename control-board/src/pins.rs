@@ -38,9 +38,11 @@ pub type BatteryVoltPublisher = Publisher<'static, ThreadModeRawMutex, f32, BATT
 pub type BatteryVoltSubscriber = Subscriber<'static, ThreadModeRawMutex, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
 
 const LED_COMMAND_PUBSUB_DEPTH: usize = 5;
-pub type LedCommandPubSub = PubSubChannel<ThreadModeRawMutex, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, 1, 1>;
-pub type LedCommandPublisher = Publisher<'static, ThreadModeRawMutex, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, 1, 1>;
-pub type LedCommandSubscriber = Subscriber<'static, ThreadModeRawMutex, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, 1, 1>;
+const LED_COMMAND_PUBSUB_NUM_PUBS: usize = 2;
+const LED_COMMAND_PUBSUB_NUM_SUBS: usize = 1;
+pub type LedCommandPubSub = PubSubChannel<ThreadModeRawMutex, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, LED_COMMAND_PUBSUB_NUM_SUBS, LED_COMMAND_PUBSUB_NUM_PUBS>;
+pub type LedCommandPublisher = Publisher<'static, ThreadModeRawMutex, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, LED_COMMAND_PUBSUB_NUM_SUBS, LED_COMMAND_PUBSUB_NUM_PUBS>;
+pub type LedCommandSubscriber = Subscriber<'static, ThreadModeRawMutex, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, LED_COMMAND_PUBSUB_NUM_SUBS, LED_COMMAND_PUBSUB_NUM_PUBS>;
 
 /////////////
 //  Radio  //

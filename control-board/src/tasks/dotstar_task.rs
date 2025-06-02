@@ -1,7 +1,7 @@
 use ateam_lib_stm32::drivers::led::apa102::{apa102_buf_len, Apa102};
 use embassy_executor::Spawner;
 
-use smart_leds::colors::{BLACK, BLUE, CYAN, DARK_CYAN, GREEN, ORANGE, PURPLE, RED, YELLOW};
+use smart_leds::colors::{BLACK, BLUE, BLUE_VIOLET, CYAN, DARK_CYAN, GREEN, ORANGE_RED, PURPLE, RED, VIOLET, YELLOW};
 
 use crate::{pins::*, MotorIndex};
 
@@ -16,6 +16,7 @@ pub enum MotorStatusLedCommand {
 
 #[derive(Debug, Clone, Copy, defmt::Format)]
 pub enum ImuStatusLedCommand {
+    Configuring,
     Ok,
     Error,
 }
@@ -23,9 +24,10 @@ pub enum ImuStatusLedCommand {
 #[derive(Debug, Clone, Copy, defmt::Format)]
 pub enum RadioStatusLedCommand {
     Off,
-    ConnectingUart,
-    ConnectingWifi,
-    ConnectingSoftware,
+    ConnectedPhys,
+    ConnectedUart,
+    ConnectedNetwork,
+    ConnectedSoftware,
     Ok,
     Error,
 } 
@@ -99,6 +101,7 @@ async fn dotstar_task_entry(
             },
             ControlBoardLedCommand::Imu(imu_status_led_command) => {
                 match imu_status_led_command {
+                    ImuStatusLedCommand::Configuring => dotstars.set_color(PURPLE, ControlDotstarIndex::Imu.into()),
                     ImuStatusLedCommand::Ok=> dotstars.set_color(GREEN, ControlDotstarIndex::Imu.into()),
                     ImuStatusLedCommand::Error => dotstars.set_color(RED, ControlDotstarIndex::Imu.into()), 
                 }
@@ -106,9 +109,10 @@ async fn dotstar_task_entry(
             ControlBoardLedCommand::Radio(radio_status_led_command) => {
                 match radio_status_led_command {
                     RadioStatusLedCommand::Off => dotstars.set_color(BLACK, ControlDotstarIndex::Radio.into()),
-                    RadioStatusLedCommand::ConnectingUart => dotstars.set_color(CYAN, ControlDotstarIndex::Radio.into()),
-                    RadioStatusLedCommand::ConnectingWifi => dotstars.set_color(DARK_CYAN, ControlDotstarIndex::Radio.into()),
-                    RadioStatusLedCommand::ConnectingSoftware => dotstars.set_color(PURPLE, ControlDotstarIndex::Radio.into()),
+                    RadioStatusLedCommand::ConnectedPhys => dotstars.set_color(CYAN, ControlDotstarIndex::Radio.into()),
+                    RadioStatusLedCommand::ConnectedUart => dotstars.set_color(BLUE, ControlDotstarIndex::Radio.into()),
+                    RadioStatusLedCommand::ConnectedNetwork => dotstars.set_color(VIOLET, ControlDotstarIndex::Radio.into()),
+                    RadioStatusLedCommand::ConnectedSoftware => dotstars.set_color(GREEN, ControlDotstarIndex::Radio.into()),
                     RadioStatusLedCommand::Ok=> dotstars.set_color(GREEN, ControlDotstarIndex::Radio.into()),
                     RadioStatusLedCommand::Error => dotstars.set_color(RED, ControlDotstarIndex::Radio.into())
                 }
@@ -120,7 +124,7 @@ async fn dotstar_task_entry(
             },
             ControlBoardLedCommand::General(control_general_led_command) => {
                 match control_general_led_command {
-                    ControlGeneralLedCommand::ShutdownRequested => dotstars.set_color(ORANGE, ControlDotstarIndex::User2.into()),
+                    ControlGeneralLedCommand::ShutdownRequested => dotstars.set_color(ORANGE_RED, ControlDotstarIndex::User2.into()),
                     ControlGeneralLedCommand::BallDetected => dotstars.set_color(BLUE, ControlDotstarIndex::User2.into()),
                     ControlGeneralLedCommand::BallNotDetected => dotstars.set_color(BLACK, ControlDotstarIndex::User2.into()),
                     ControlGeneralLedCommand::Ok => dotstars.set_color(GREEN, ControlDotstarIndex::User1.into()),
@@ -158,6 +162,7 @@ impl From<ControlDotstarIndex> for usize {
 }
 
 pub type Apa102Buf = [u8; LED_BUF_LEN];
+#[link_section = ".sram4"]
 static mut DOTSTAR_SPI_BUFFER_CELL: Apa102Buf = [0; LED_BUF_LEN];
 
 pub async fn start_dotstar_task(spawner: &Spawner,

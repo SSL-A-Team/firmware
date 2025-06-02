@@ -8,7 +8,7 @@ use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{create_audio_task, create_imu_task, create_io_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, GyroDataPubSub}, robot_state::SharedRobotState};
+use ateam_control_board::{create_audio_task, create_dotstar_task, create_imu_task, create_io_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, GyroDataPubSub, LedCommandPubSub}, robot_state::SharedRobotState};
 
 use embassy_time::Timer;
 // provide embedded panic probe
@@ -20,6 +20,7 @@ static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(Sha
 static GYRO_DATA_CHANNEL: GyroDataPubSub = PubSubChannel::new();
 static ACCEL_DATA_CHANNEL: AccelDataPubSub = PubSubChannel::new();
 static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
+static LED_COMMAND_PUBSUB: LedCommandPubSub = PubSubChannel::new();
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
@@ -46,11 +47,14 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //////////////////////////////////////
     //  setup inter-task coms channels  //
     //////////////////////////////////////
+    
+    let led_command_subscriber = LED_COMMAND_PUBSUB.subscriber().unwrap();
 
     let imu_gyro_data_publisher = GYRO_DATA_CHANNEL.publisher().unwrap();
     let mut imu_gyro_data_subscriber = GYRO_DATA_CHANNEL.subscriber().unwrap();
     let imu_accel_data_publisher = ACCEL_DATA_CHANNEL.publisher().unwrap();
     let mut imu_accel_data_subscriber = ACCEL_DATA_CHANNEL.subscriber().unwrap();
+    let imu_led_cmd_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
 
     let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
     
@@ -59,13 +63,20 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  start tasks  //
     ///////////////////
 
-    create_io_task!(main_spawner, robot_state, battery_volt_publisher, p);
+    create_io_task!(main_spawner, 
+        robot_state,
+        battery_volt_publisher,
+        p);
+
+    create_dotstar_task!(main_spawner,
+        led_command_subscriber,
+        p);
 
     // create_audio_task!(main_spawner, robot_state, p);
 
     create_imu_task!(main_spawner,
         robot_state,
-        imu_gyro_data_publisher, imu_accel_data_publisher,
+        imu_gyro_data_publisher, imu_accel_data_publisher, imu_led_cmd_publisher,
         p);
 
     loop {
