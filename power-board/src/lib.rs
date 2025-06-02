@@ -10,6 +10,7 @@ pub mod config;
 pub mod pins;
 pub mod tasks;
 pub mod power_state;
+pub mod songs;
 
 bind_interrupts!(pub struct SystemIrqs {
     USART1 => usart::InterruptHandler<peripherals::USART1>;
