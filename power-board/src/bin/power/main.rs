@@ -64,12 +64,16 @@ async fn main(spawner: Spawner) {
     // commands channel
     let power_telemetry_publisher = TELEMETRY_CHANNEL.publisher().unwrap();
     let coms_telemetry_subscriber = TELEMETRY_CHANNEL.subscriber().unwrap();
-    
+
+    // audio channel
+    let comms_audio_publisher = AUDIO_PUBSUB.publisher().unwrap();
+    let power_audio_subscriber = AUDIO_PUBSUB.subscriber().unwrap();
+
     // start power task
     create_power_task!(spawner, shared_power_state, power_telemetry_publisher, p);
 
     // start coms task
-    create_coms_task!(spawner, uart_queue_spawner, shared_power_state, coms_telemetry_subscriber, p);
+    create_coms_task!(spawner, uart_queue_spawner, shared_power_state, coms_telemetry_subscriber, comms_audio_publisher, p);
 
     // TODO: start audio task
 

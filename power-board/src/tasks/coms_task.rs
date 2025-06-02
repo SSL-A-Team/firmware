@@ -2,7 +2,7 @@ use core::{mem::MaybeUninit};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::{self, DataBits, Parity, StopBits, Uart};
 
-use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, power, static_idle_buffered_uart_nl, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{audio, idle_buffered_uart_spawn_tasks, power, static_idle_buffered_uart_nl, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use ateam_common_packets::bindings::{BatteryInfoPacket, PowerCommandPacket, PowerStatusPacket};
 use embassy_time::{Duration, Instant, Ticker};
 use crate::{pins::*, power_state::SharedPowerState, SystemIrqs};
@@ -19,8 +19,8 @@ const COMS_RX_TIMEOUT: Duration = Duration::from_millis(1000);
 
 #[macro_export]
 macro_rules! create_coms_task {
-    ($main_spawner:ident, $uart_queue_spawner:ident, $shared_power_state:ident, $coms_telemetry_subscriber:ident, $p:ident) => {
-        ateam_power_board::tasks::coms_task::start_coms_task($main_spawner, $uart_queue_spawner, $shared_power_state, $coms_telemetry_subscriber,
+    ($main_spawner:ident, $uart_queue_spawner:ident, $shared_power_state:ident, $coms_telemetry_subscriber:ident, $comms_audio_publisher:ident, $p:ident) => {
+        ateam_power_board::tasks::coms_task::start_coms_task($main_spawner, $uart_queue_spawner, $shared_power_state, $coms_telemetry_subscriber, $comms_audio_publisher,
             $p.USART1, $p.PA10, $p.PA9, $p.DMA1_CH5, $p.DMA1_CH4,
         ).await;
     };
@@ -33,6 +33,7 @@ async fn coms_task_entry(
     write_queue: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>,
     shared_power_state: &'static SharedPowerState,
     mut telemetry_subscriber: TelemetrySubscriber,
+    audio_publisher: AudioPublisher
 ) {
     let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));
     let mut last_battery_telem_packet: Option<BatteryInfoPacket> = None;
@@ -149,13 +150,13 @@ pub fn power_uart_config() -> usart::Config {
 }
 
 pub async fn start_coms_task(spawner: Spawner, uart_queue_spawner: SendSpawner, shared_power_state: &'static SharedPowerState, telemetry_subscriber: TelemetrySubscriber,
-    uart: ComsUart, uart_rx_pin: ComsUartRxPin, uart_tx_pin: ComsUartTxPin, uart_rx_dma: ComsDmaRx, uart_tx_dma: ComsDmaTx
+    audio_publisher: AudioPublisher, uart: ComsUart, uart_rx_pin: ComsUartRxPin, uart_tx_pin: ComsUartTxPin, uart_rx_dma: ComsDmaRx, uart_tx_dma: ComsDmaTx
     ) {
     let uart_config = power_uart_config();
     let coms_uart = Uart::new(uart, uart_rx_pin, uart_tx_pin, SystemIrqs, uart_tx_dma, uart_rx_dma, uart_config).unwrap();
     COMS_IDLE_BUFFERED_UART.init();
     idle_buffered_uart_spawn_tasks!(uart_queue_spawner, COMS, coms_uart);
     spawner.spawn(coms_task_entry(
-        &COMS_IDLE_BUFFERED_UART, &COMS_IDLE_BUFFERED_UART.get_uart_read_queue(), &COMS_IDLE_BUFFERED_UART.get_uart_write_queue(), shared_power_state, telemetry_subscriber, 
+        &COMS_IDLE_BUFFERED_UART, &COMS_IDLE_BUFFERED_UART.get_uart_read_queue(), &COMS_IDLE_BUFFERED_UART.get_uart_write_queue(), shared_power_state, telemetry_subscriber, audio_publisher
     )).expect("failed to spawn coms task");
 }
