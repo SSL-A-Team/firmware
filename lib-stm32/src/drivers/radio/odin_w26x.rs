@@ -503,7 +503,11 @@ impl<
                 // we read something
 
             },
-            Err(queue::Error::QueueFullEmpty) => {
+            Err(queue::Error::QueueFull) => {
+                // nothing to read
+                return Err(OdinRadioError::ReadLowLevelBufferEmpty);
+            }
+            Err(queue::Error::QueueEmpty) => {
                 // nothing to read
                 Err(OdinRadioError::ReadLowLevelBufferEmpty)
             }
@@ -527,7 +531,7 @@ impl<
                     // queue was full
                     return Err(OdinRadioError::SendCommandLowLevelBufferFull)
                 }
-                
+
                 Ok(())
             }
             RadioMode::ExtendedDataMode => {
@@ -614,7 +618,7 @@ impl<
             if brk {
                 break;
             }
-            
+
         }
 
         res
