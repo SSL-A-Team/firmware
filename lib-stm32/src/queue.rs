@@ -112,6 +112,10 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
         }
     }
 
+    pub fn is_full(&self) -> bool {
+        self.size.load(Ordering::SeqCst) >= DEPTH
+    }
+
     pub fn can_dequeue(&self) -> bool {
         !self.read_in_progress.load(Ordering::Relaxed) && self.size.load(Ordering::Relaxed) > 0
     }
@@ -250,7 +254,7 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
             // if the queue is currently full, we need to evict the tail entry
             let mut write_index = self.write_index.load(Ordering::SeqCst);
             let cur_size = self.size.load(Ordering::SeqCst);
-            if cur_size < DEPTH {
+            if cur_size >= DEPTH {
                 // queue is full, free the back entry
                 if write_index == 0 {
                     write_index = DEPTH - 1;

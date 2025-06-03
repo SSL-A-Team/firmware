@@ -470,6 +470,10 @@ impl<
 
                 // get enqueue ref to pass to the DMA layer
                 // let mut buf = self.queue_rx.enqueue().await.unwrap();
+                // if self.queue_rx.is_full() {
+                //     defmt::warn!("a queue is discarding data");
+                // }
+
                 let mut buf = self.queue_rx.try_enqueue_override().expect("multiple threads concurrently attempted to bind an internal queue buffer to dma");
                 match select(rx.read_until_idle(buf.data()), uart_config_command_subscriber.next_message()).await {
                     Either::First(len) => {
