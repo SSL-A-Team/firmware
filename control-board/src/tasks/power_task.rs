@@ -81,7 +81,8 @@ impl<
         loop {
             self.process_packets();
             if self.last_power_status_time.is_some() && self.last_power_status.shutdown_requested() == 1 {
-                self.try_shutdown();
+                defmt::info!("Received shutdown request from power board");
+                self.try_shutdown().await;
             }
             power_loop_rate_ticker.next().await;
         }
@@ -95,10 +96,11 @@ impl<
             cmd = MaybeUninit::zeroed().assume_init();
         }
         cmd.set_ready_shutdown(1);
+        defmt::info!("Sending shutdown ready acknowldgement to power board");
         self.send_command(cmd).await;
     }
 
-    async fn process_packets(&mut self) {
+    fn process_packets(&mut self) {
         // read any packets
         while let Ok(res) = self.power_rx_uart_queue.try_dequeue() {
             defmt::trace!("Received Power Telemetry Packet");

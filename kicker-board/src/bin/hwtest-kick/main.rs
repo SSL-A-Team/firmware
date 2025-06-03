@@ -10,7 +10,7 @@ use cortex_m_rt::entry;
 
 use embassy_executor::Executor;
 use embassy_stm32::{
-    adc::{Adc, SampleTime}, gpio::{Input, Level, Output, Pull, Speed}, opamp::{OpAmp, OpAmpGain, OpAmpSpeed}, pac::opamp::Opamp
+    adc::{Adc, SampleTime}, gpio::{Input, Level, Output, Pull, Speed}, opamp::{OpAmp, OpAmpGain, OpAmpSpeed}
 };
 use embassy_time::{Duration, Timer, Ticker};
 
@@ -36,7 +36,7 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
 
     let mut reg_charge = Output::new(reg_charge, Level::Low, Speed::Medium);
     let mut status_led_green = Output::new(status_led_green, Level::Low, Speed::Medium);
-    let mut status_led_red = Output::new(status_led_red, Level::Low, Speed::Medium);
+    let _status_led_red = Output::new(status_led_red, Level::Low, Speed::Medium);
 
     let usr_btn = Input::new(usr_btn_pin, Pull::None);
 
@@ -52,7 +52,7 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
     let mut regv = adc.blocking_read(&mut rail_12v0_pin) as f32;
     info!("hv V: {}, 12v reg mv: {}", adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)), adc_12v_to_rail_voltage(adc_raw_to_v(regv, vrefint_sample)));
 
-    let start_up_battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(regv, vrefint_sample));
+    let _start_up_battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(regv, vrefint_sample));
     // if start_up_battery_voltage < 11.5 {
     //     status_led_red.set_high();
     //     warn!("regulator voltage is below 18.0 ({}), is the battery low or disconnected?", start_up_battery_voltage);

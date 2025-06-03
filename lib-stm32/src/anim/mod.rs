@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 
 use embassy_time::{Duration, Instant};
 
-use crate::math::lerp::LerpNumeric;
+use crate::math::lerp::{Lerp, LerpNumeric};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum AnimState {
@@ -43,8 +43,8 @@ where N: LerpNumeric,
 f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N> 
 {
-    Blink(Blink<L>),
-    Lerp(Lerp<N, L>),
+    Blink(BlinkAnimation<L>),
+    Lerp(LerpAnimation<N, L>),
 }
 
 impl<N, L> AnimInterface<L> for Animation<N, L>
@@ -300,7 +300,7 @@ L: crate::math::lerp::Lerp<N>
 //////////////////
 
 #[derive(Clone, Copy, Debug)]
-pub struct Blink<T> {
+pub struct BlinkAnimation<T> {
     id: usize,
 
     val_one: T,
@@ -315,9 +315,9 @@ pub struct Blink<T> {
     last_value: T,
 }
 
-impl<T: Clone + Copy + Sized> Blink<T> {
+impl<T: Clone + Copy + Sized> BlinkAnimation<T> {
     pub fn new(id: usize, val_one: T, val_two: T, v1_time: Duration, v2_time: Duration, repeat_style: AnimRepeatMode) -> Self {
-        Blink { 
+        BlinkAnimation { 
             id,
 
             val_one,
@@ -334,7 +334,7 @@ impl<T: Clone + Copy + Sized> Blink<T> {
     }
 }
 
-impl<T: Clone + Copy + Sized> AnimInterface<T> for Blink<T> {
+impl<T: Clone + Copy + Sized> AnimInterface<T> for BlinkAnimation<T> {
     fn get_id(&self) -> usize {
         self.id
     }
@@ -420,7 +420,7 @@ impl<T: Clone + Copy + Sized> AnimInterface<T> for Blink<T> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct Lerp<N, L> 
+pub struct LerpAnimation<N, L> 
 where N: LerpNumeric,
 f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N> {
@@ -439,13 +439,13 @@ L: crate::math::lerp::Lerp<N> {
     pd: PhantomData<N>,
 }
 
-impl<N, L> Lerp<N, L> 
+impl<N, L> LerpAnimation<N, L> 
 where N: LerpNumeric,
 f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N> 
 {
     pub fn new(id: usize, val_one: L, val_two: L, lerp_duration_ms: Duration, repeat_style: AnimRepeatMode) -> Self {
-        Lerp { 
+        LerpAnimation { 
             id,
 
             val_one,
@@ -463,7 +463,7 @@ L: crate::math::lerp::Lerp<N>
     }
 }
 
-impl<N, L> AnimInterface<L> for Lerp<N, L> 
+impl<N, L> AnimInterface<L> for LerpAnimation<N, L> 
 where N: LerpNumeric,
 f32: core::convert::From<N>,
 L: crate::math::lerp::Lerp<N> 
@@ -522,7 +522,7 @@ L: crate::math::lerp::Lerp<N>
         let elapsed_time = (now - self.start_time).as_millis();
         let elapsed_time_frac: f32 = elapsed_time as f32 / self.lerp_duration_ms as f32;
 
-        self.last_value = L::lerp_f(self.val_one, self.val_two, elapsed_time_frac);
+        self.last_value = Lerp::<N>::lerp_f(self.val_one, self.val_two, elapsed_time_frac);
 
         if elapsed_time_frac > 1.0 {
             match self.repeat_style {

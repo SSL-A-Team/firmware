@@ -601,7 +601,7 @@ impl<
                 }
             },
             Err(err_res) => {
-                defmt::debug!("radio in invalid state");
+                defmt::debug!("radio in invalid state {:?}", err_res);
                 // read_data_nonblocking failed because the radio was in an invalid state
                 return Err(())
             },

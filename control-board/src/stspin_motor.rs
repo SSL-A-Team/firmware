@@ -168,21 +168,21 @@ impl<
                 defmt::trace!("Drive Motor - sending parameter command packet");
                 self.send_params_command();
 
-                Timer::after(Duration::from_millis(100)).await;
+                Timer::after(Duration::from_millis(10)).await;
 
-                defmt::trace!("Drive Motor - Checking for parameter response");
+                defmt::debug!("Drive Motor - Checking for parameter response");
                 // Parse incoming packets
                 self.process_packets();
                 // Check if curret_params_state has updated
                 if self.current_params_state.wheel_img_hash != [0; 4] {
                     let wheel_img_hash_motr = self.current_params_state.wheel_img_hash;
                     defmt::debug!("Drive Motor - Received parameter response");
-                    defmt::debug!("Wheel Image Hash from Motor - {:x}", wheel_img_hash_motr);
+                    defmt::trace!("Wheel Image Hash from Motor - {:x}", wheel_img_hash_motr);
                     return wheel_img_hash_motr
                 };
             }
         };
-        let wheel_response_timeout = Duration::from_millis(1000);
+        let wheel_response_timeout = Duration::from_millis(100);
     
         defmt::trace!("Drive Motor - waiting for parameter response packet");
         match with_timeout(wheel_response_timeout, wheel_img_hash_future).await {
@@ -192,7 +192,7 @@ impl<
                 }
             },
             Err(_) => {
-                defmt::trace!("Drive Motor - No parameter response, motor controller needs flashing");
+                defmt::debug!("Drive Motor - No parameter response, motor controller needs flashing");
                 wheel_needs_flash = true;
             },
         }
@@ -200,19 +200,19 @@ impl<
     }
 
     pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
-        // let controller_needs_flash: bool = self.check_wheel_needs_flash().await;
-        // defmt::debug!("Motor Controller Needs Flash - {:?}", controller_needs_flash);
+        let controller_needs_flash: bool = self.check_wheel_needs_flash().await;
+        defmt::debug!("Motor Controller Needs Flash - {:?}", controller_needs_flash);
 
-        // let res;
-        // if controller_needs_flash {
-        //     defmt::trace!("UART config updated");
-        //     res = self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await;
-        // } else {
-        //     defmt::info!("Wheel image is up to date, skipping flash");
-        //     res = Ok(());
-        // }
+        let res;
+        if controller_needs_flash {
+            defmt::trace!("UART config updated");
+            res = self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await;
+        } else {
+            defmt::info!("Wheel image is up to date, skipping flash");
+            res = Ok(());
+        }
 
-        let res = self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await;
+        // let res = self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await;
 
         // this is safe because load firmware image call will reset the target device
         // it will begin issueing telemetry updates

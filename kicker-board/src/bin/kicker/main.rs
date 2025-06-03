@@ -6,7 +6,7 @@
 use ateam_kicker_board::{drivers::{breakbeam::Breakbeam, DribblerMotor}, include_external_cpp_bin, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin, GreenStatusLedPin}, tasks::{get_system_config, ClkSource}};
 
 use defmt::*;
-use embassy_sync::{blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex}, pubsub::{PubSubChannel, Publisher, Subscriber}};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, pubsub::{PubSubChannel, Publisher, Subscriber}};
 use {defmt_rtt as _, panic_probe as _};
 
 use libm::{fmaxf, fminf};

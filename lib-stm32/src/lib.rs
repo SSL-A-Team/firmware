@@ -24,6 +24,7 @@ pub mod math;
 pub mod uart;
 pub mod units;
 pub mod power;
+pub mod time;
 
 pub mod queue;
 

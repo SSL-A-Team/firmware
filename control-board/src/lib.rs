@@ -14,6 +14,7 @@
 )]
 #![feature(ptr_metadata)]
 #![feature(sync_unsafe_cell)]
+#![feature(variant_count)]
 
 
 use embassy_stm32::{
@@ -49,6 +50,14 @@ bind_interrupts!(pub struct SystemIrqs {
     UART4 => usart::InterruptHandler<peripherals::UART4>;
     USART1 => usart::InterruptHandler<peripherals::USART1>;
 });
+
+#[derive(Debug, Clone, Copy, defmt::Format)]
+pub enum MotorIndex {
+    FrontLeft = 0,
+    BackLeft = 1,
+    BackRight = 2,
+    FrontRight = 3,
+}
 
 pub mod colors {
     use smart_leds::RGB8;

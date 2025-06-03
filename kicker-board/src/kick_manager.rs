@@ -24,7 +24,7 @@
 
 use embassy_stm32::gpio::Output;
 use embassy_time::{Duration, Timer};
-use ateam_lib_stm32::math::{linear_map::LinearMap, range::Range};
+use ateam_lib_stm32::math::range::Range;
 
 const MIN_KICK_DURATION_US: f32 = 500.0;
 const MAX_KICK_DURATION_US: f32 = 4500.0;  // 10ms (10k us) max power kick
@@ -72,7 +72,7 @@ impl<'a> KickManager<'a> {
 
     pub async fn command(&mut self, battery_voltage: f32, rail_voltage:f32, charge: bool, kick_type: KickType, kick_speed: f32) -> Result<(), ()> {
         // latch an error for invalid battery voltage
-        if battery_voltage > VBATT_OVERVOLTAGE_LOCKOUT || battery_voltage < VBATT_UNDERVOLTAGE_LOCKOUT {
+        if !(VBATT_UNDERVOLTAGE_LOCKOUT..=VBATT_OVERVOLTAGE_LOCKOUT).contains(&battery_voltage) {
             self.error_latched = true;
         }
 
@@ -161,7 +161,7 @@ impl<'a> KickManager<'a> {
             }            
         }
 
-        return Ok(());
+        Ok(())
     }
 
     pub fn clear_error(&mut self) {

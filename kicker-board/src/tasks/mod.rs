@@ -48,5 +48,5 @@ pub fn get_system_config(clk_src: ClkSource) -> Config {
     // all configs should be good now, switch the system root clock from the raw HSI (16 MHz) to the PLL (168 MHz)
     config.rcc.sys = Sysclk::PLL1_R;
 
-    return config;
+    config
 }
