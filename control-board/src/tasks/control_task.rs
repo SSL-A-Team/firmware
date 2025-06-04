@@ -7,7 +7,7 @@ use nalgebra::{Vector3, Vector4};
 
 use crate::{include_external_cpp_bin, motion::{self, params::robot_physical_params::{
         WHEEL_ANGLES_DEG, WHEEL_DISTANCE_TO_ROBOT_CENTER_M, WHEEL_RADIUS_M
-    }, robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, parameter_interface::ParameterInterface, pins::*, robot_state::SharedRobotState, stspin_motor::WheelMotor, SystemIrqs};
+    }, robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, parameter_interface::ParameterInterface, pins::*, robot_state::{RobotState, SharedRobotState}, stspin_motor::WheelMotor, SystemIrqs};
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 
@@ -140,6 +140,7 @@ impl <
 
         fn send_motor_commands_and_telemetry(&mut self,
                                             robot_controller: &mut BodyVelocityController,
+                                            cur_state: RobotState,
                                             battery_voltage: f32) 
         {
             self.motor_fl.send_motion_command();
@@ -174,7 +175,10 @@ impl <
                 motor_4_temperature: 0.,
                 kicker_charge_level: 0.,
             });
-            self.telemetry_publisher.publish_immediate(basic_telem);
+
+            if cur_state.radio_bridge_ok {
+                self.telemetry_publisher.publish_immediate(basic_telem);
+            }
 
             let mut control_debug_telem = robot_controller.get_control_debug_telem();
 
@@ -187,7 +191,9 @@ impl <
             control_debug_telem.imu_accel[1] = self.last_accel_y_ms;
 
             let control_debug_telem = TelemetryPacket::Control(control_debug_telem);
-            self.telemetry_publisher.publish_immediate(control_debug_telem);
+            if cur_state.radio_bridge_ok {
+                self.telemetry_publisher.publish_immediate(control_debug_telem);
+            }
         }
     
         async fn control_task_entry(&mut self) {
@@ -235,6 +241,8 @@ impl <
                 self.motor_bl.process_packets();
                 self.motor_br.process_packets();
                 self.motor_fr.process_packets();
+
+                let cur_state = self.shared_robot_state.get_state();
 
                 // self.motor_fl.log_reset("FL");
                 // self.motor_bl.log_reset("BL");
@@ -313,7 +321,7 @@ impl <
 
 
                 self.send_motor_commands_and_telemetry(
-                    &mut robot_controller, self.last_battery_v);
+                    &mut robot_controller, cur_state, self.last_battery_v);
 
                 loop_rate_ticker.next().await;
             }

@@ -446,7 +446,7 @@ impl<
         Ok(())
     }
 
-    pub async fn send_data(&self, channel_id: u8, data: &[u8]) -> Result<(), OdinRadioError> {
+    pub fn send_data(&self, channel_id: u8, data: &[u8]) -> Result<(), OdinRadioError> {
         let res = self.writer.enqueue(|buf| {
                 EdmPacket::DataCommand {
                     channel: channel_id,

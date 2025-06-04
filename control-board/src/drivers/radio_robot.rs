@@ -321,9 +321,9 @@ impl<
         }
     }
 
-    pub async fn send_data(&self, data: &[u8]) -> Result<(), RobotRadioError> {
+    pub fn send_data(&self, data: &[u8]) -> Result<(), RobotRadioError> {
         if let Some(peer) = &self.peer {
-            self.odin_driver.send_data(peer.channel_id, data).await?;
+            self.odin_driver.send_data(peer.channel_id, data)?;
             Ok(())
         } else {
             Err(RobotRadioError::PeerMissing)
@@ -385,7 +385,7 @@ impl<
                 size_of::<RadioPacket>() - size_of::<RadioPacket_Data>(),
             )
         };
-        self.send_data(packet_bytes).await?;
+        self.send_data(packet_bytes)?;
 
         Ok(())
     }
@@ -433,12 +433,12 @@ impl<
                     + size_of::<HelloRequest>(),
             )
         };
-        self.send_data(packet_bytes).await?;
+        self.send_data(packet_bytes)?;
 
         Ok(())
     }
 
-    pub async fn send_telemetry(&self, telemetry: BasicTelemetry) -> Result<(), RobotRadioError> {
+    pub fn send_telemetry(&self, telemetry: BasicTelemetry) -> Result<(), RobotRadioError> {
         let packet = RadioPacket {
             crc32: 0,
             major_version: bindings::kProtocolVersionMajor,
@@ -456,7 +456,7 @@ impl<
                     + size_of::<BasicTelemetry>(),
             )
         };
-        self.send_data(packet_bytes).await?;
+        self.send_data(packet_bytes)?;
 
         Ok(())
     }
@@ -479,7 +479,7 @@ impl<
                     + size_of::<ControlDebugTelemetry>(),
             )
         };
-        self.send_data(packet_bytes).await?;
+        self.send_data(packet_bytes)?;
 
         Ok(())
     }
@@ -502,7 +502,7 @@ impl<
                     + size_of::<ParameterCommand>(),
             )
         };
-        self.send_data(packet_bytes).await?;
+        self.send_data(packet_bytes)?;
 
         Ok(())
     }

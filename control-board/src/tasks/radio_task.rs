@@ -237,6 +237,7 @@ impl<
                             // Refresh last software packet on first connect.
                             self.last_software_packet = Instant::now();
                             self.connection_state = RadioConnectionState::Connected;
+                            radio_loop_rate_ticker.reset();
                             self.led_command_pub.publish(ControlBoardLedCommand::Radio(RadioStatusLedCommand::ConnectedSoftware)).await;
                         } else {
                             // Software didn't respond to our hello, it may not be started yet.
@@ -404,7 +405,7 @@ impl<
         }
 
         // always send the latest telemetry
-        if let Err(e) = self.radio.send_telemetry(self.last_basic_telemetry).await {
+        if let Err(e) = self.radio.send_telemetry(self.last_basic_telemetry) {
             defmt::warn!("RadioTask - failed to send basic telem packet {:?}", e);
         }
 
