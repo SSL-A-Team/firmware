@@ -103,6 +103,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let control_gyro_data_subscriber = GYRO_DATA_CHANNEL.subscriber().unwrap();
     let control_accel_data_subscriber = ACCEL_DATA_CHANNEL.subscriber().unwrap();
 
+    // power board
+    let power_led_cmd_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
+
     ///////////////////
     //  start tasks  //
     ///////////////////
@@ -128,7 +131,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p);
 
     create_power_task!(main_spawner, uart_queue_spawner,
-        robot_state,
+        robot_state, power_led_cmd_publisher,
         p);
 
     create_imu_task!(main_spawner,

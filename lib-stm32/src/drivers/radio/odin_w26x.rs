@@ -114,7 +114,7 @@ impl<
 
         self.reader
             .dequeue(|buf| {
-                defmt::info!("dequeueing {}", buf);
+                // defmt::trace!("radio dequeueing {}", buf);
                 if let EdmPacket::ATResponse(ATResponse::Other("+STARTUP")) = self.to_packet(buf)? {
                     Ok(())
                 } else {

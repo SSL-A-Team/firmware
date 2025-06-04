@@ -11,14 +11,14 @@ use embassy_stm32::{
 };
 use embassy_time::{Duration, Instant, Ticker, Timer};
 
-use crate::{pins::*, robot_state::SharedRobotState, SystemIrqs};
+use crate::{pins::*, robot_state::SharedRobotState, tasks::dotstar_task::{ControlBoardLedCommand, ControlGeneralLedCommand}, SystemIrqs};
 
 #[macro_export]
 macro_rules! create_power_task {
-    ($main_spawner:ident, $uart_queue_spawner:ident, $robot_state:ident, $p:ident) => {
+    ($main_spawner:ident, $uart_queue_spawner:ident, $robot_state:ident, $led_cmd_pub:ident, $p:ident) => {
         ateam_control_board::tasks::power_task::start_power_task(
             $main_spawner, $uart_queue_spawner,
-            $robot_state,
+            $robot_state, $led_cmd_pub,
             $p.UART9, $p.PG0, $p.PG1, $p.DMA2_CH4, $p.DMA2_CH5);
     };
 }
@@ -39,6 +39,7 @@ pub struct PowerTask<
         const POWER_TX_BUF_DEPTH: usize,
         const POWER_RX_BUF_DEPTH: usize> {
     shared_robot_state: &'static SharedRobotState,
+    led_cmd_publisher: LedCommandPublisher,
     // command_publisher: CommandsPublisher,
     // telemetry_subscriber: TelemetrySubcriber,
     power_uart: &'static IdleBufferedUart<POWER_MAX_RX_PACKET_SIZE, POWER_RX_BUF_DEPTH, POWER_MAX_TX_PACKET_SIZE, POWER_TX_BUF_DEPTH>,
@@ -54,21 +55,6 @@ impl<
         const POWER_TX_BUF_DEPTH: usize,
         const POWER_RX_BUF_DEPTH: usize> 
     PowerTask<POWER_MAX_TX_PACKET_SIZE, POWER_MAX_RX_PACKET_SIZE, POWER_TX_BUF_DEPTH, POWER_RX_BUF_DEPTH> {
-    // pub type TaskRobotRadio = RobotRadio<'static, POWER_MAX_TX_PACKET_SIZE, POWER_MAX_RX_PACKET_SIZE, POWER_TX_BUF_DEPTH, POWER_RX_BUF_DEPTH>;
-
-    // pub fn new(robot_state: &'static SharedRobotState,
-    //         // command_publisher: CommandsPublisher,
-    //         // telemetry_subscriber: TelemetrySubcriber,
-    //         power_uart: &'static IdleBufferedUart<POWER_MAX_RX_PACKET_SIZE, POWER_RX_BUF_DEPTH, POWER_MAX_TX_PACKET_SIZE, POWER_TX_BUF_DEPTH>,
-    //         power_rx_uart_queue: &'static UartReadQueue<POWER_MAX_RX_PACKET_SIZE, POWER_RX_BUF_DEPTH>,
-    //         power_tx_uart_queue: &'static UartWriteQueue<POWER_MAX_TX_PACKET_SIZE, POWER_TX_BUF_DEPTH>) {
-    //     PowerTask {
-    //         robot_state,
-    //         power_uart,
-    //         power_rx_uart_queue,
-    //         power_tx_uart_queue,
-    //     }
-    // }
 
     async fn power_task_entry(&mut self) {
         defmt::info!("power task startup");
@@ -81,23 +67,58 @@ impl<
         loop {
             self.process_packets();
             if self.last_power_status_time.is_some() && self.last_power_status.shutdown_requested() == 1 {
-                defmt::info!("Received shutdown request from power board");
                 self.try_shutdown().await;
             }
+
+            let cmd: PowerCommandPacket;
+            unsafe {
+                cmd = MaybeUninit::zeroed().assume_init();
+            }
+            // load any items into command
+            self.send_command(cmd).await;
+
             power_loop_rate_ticker.next().await;
         }
     }
 
     async fn try_shutdown(&mut self) {
-        // do something with robot state to ensure everything is shutdown
-        Timer::after_secs(1).await;
-        let mut cmd: PowerCommandPacket;
-        unsafe {
-            cmd = MaybeUninit::zeroed().assume_init();
+        defmt::warn!("shutdown initiated via power board! syncing...");
+
+        self.shared_robot_state.flag_shutdown_requested();
+
+        self.led_cmd_publisher.publish(ControlBoardLedCommand::General(ControlGeneralLedCommand::ShutdownRequested)).await;
+
+    
+        // wait for tasks to flag shutdown complete, power board will
+        // hard temrinate after hard after 30s shutdown time
+        loop {
+            let cmd: PowerCommandPacket;
+            unsafe {
+                cmd = MaybeUninit::zeroed().assume_init();
+            }
+            // load any items into command
+            self.send_command(cmd).await;
+
+            defmt::info!("waiting for kicker board to complete discharge");
+            if self.shared_robot_state.kicker_shutdown_complete() || self.shared_robot_state.get_kicker_inop() {
+                break;
+            }
+
+            Timer::after_millis(100).await;
         }
-        cmd.set_ready_shutdown(1);
-        defmt::info!("Sending shutdown ready acknowldgement to power board");
-        self.send_command(cmd).await;
+    
+        Timer::after_millis(100).await;
+
+        loop {
+            let mut cmd: PowerCommandPacket;
+            unsafe {
+                cmd = MaybeUninit::zeroed().assume_init();
+            }
+            cmd.set_ready_shutdown(1);
+            defmt::info!("Sending shutdown ready acknowldgement to power board");
+            Timer::after_millis(100).await;
+            self.send_command(cmd).await;
+        }
     }
 
     fn process_packets(&mut self) {
@@ -160,6 +181,7 @@ async fn power_task_entry(mut power_task: PowerTask<POWER_MAX_TX_PACKET_SIZE, PO
 pub fn start_power_task(power_task_spawner: Spawner,
         uart_queue_spawner: SendSpawner,
         robot_state: &'static SharedRobotState,
+        led_command_publisher: LedCommandPublisher,
         // command_publisher: CommandsPublisher,
         // telemetry_subscriber: TelemetrySubcriber,
         power_uart: PowerUart,
@@ -183,6 +205,7 @@ pub fn start_power_task(power_task_spawner: Spawner,
 
     let power_task = PowerTask {
         shared_robot_state: robot_state,
+        led_cmd_publisher: led_command_publisher,
         power_uart: &POWER_IDLE_BUFFERED_UART,
         power_rx_uart_queue: POWER_IDLE_BUFFERED_UART.get_uart_read_queue(),
         power_tx_uart_queue: POWER_IDLE_BUFFERED_UART.get_uart_write_queue(),

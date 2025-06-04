@@ -6,19 +6,14 @@
 use ateam_kicker_board::{drivers::{breakbeam::Breakbeam, DribblerMotor}, include_external_cpp_bin, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin, GreenStatusLedPin}, tasks::{get_system_config, ClkSource}};
 
 use defmt::*;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, pubsub::{PubSubChannel, Publisher, Subscriber}};
+use embassy_sync::{blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex}, pubsub::{PubSubChannel, Publisher, Subscriber}};
 use {defmt_rtt as _, panic_probe as _};
 
 use libm::{fmaxf, fminf};
 
 use embassy_executor::{InterruptExecutor, Spawner};
 use embassy_stm32::{
-    adc::{Adc, SampleTime},
-    bind_interrupts,
-    gpio::{Level, Output, Pull, Speed},
-    interrupt::{self, InterruptExt},
-    pac::Interrupt,peripherals,
-    usart::{self, Config, Parity, StopBits, Uart}
+    adc::{Adc, SampleTime}, bind_interrupts, gpio::{Level, Output, Pull, Speed}, interrupt::{self, InterruptExt}, opamp::{OpAmp, OpAmpGain, OpAmpSpeed}, pac::Interrupt, peripherals, usart::{self, Config, Parity, StopBits, Uart}
 };
 use embassy_time::{Duration, Instant, Ticker, Timer};
 
@@ -38,7 +33,7 @@ use ateam_common_packets::bindings::{
 };
 
 const MAX_KICK_SPEED: f32 = 5.5;
-const SHUTDOWN_KICK_SPEED: f32 = 0.15;
+const SHUTDOWN_KICK_SPEED: f32 = 0.20;
 
 pub const CHARGE_TARGET_VOLTAGE: f32 = 182.0;
 pub const CHARGE_OVERVOLT_THRESH_VOLTAGE: f32 = 195.0;
@@ -482,6 +477,10 @@ async fn main(spawner: Spawner) -> ! {
 
     // turn IGBT gate drive supply on
     let _vsw_en = Output::new(p.PE10, Level::High, Speed::Medium);
+
+    // enable opamp for hv measurement
+    let mut hv_opamp_inst = OpAmp::new(p.OPAMP3, OpAmpSpeed::HighSpeed);
+    let _hv_opamp = hv_opamp_inst.buffer_ext(p.PB0, p.PB1, OpAmpGain::Mul2);
 
     // config ADC
     let mut adc = Adc::new(p.ADC1);

@@ -136,6 +136,7 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
                         defmt::error!("kicker firmware load failed, try power cycle");
                     } else {
                         self.kicker_task_state = KickerTaskState::Connected;
+                        main_loop_ticker.reset();
 
                         defmt::info!("kicker connected!");
                     }
@@ -187,7 +188,9 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         if let Some(pkt) = self.commands_subscriber.try_next_message() {
             match pkt {
                 WaitResult::Lagged(amnt) => {
-                    defmt::warn!("kicker task lagged processing commands by {} msgs", amnt);
+                    if amnt > 3 {
+                        defmt::warn!("kicker task lagged processing commands by {} msgs", amnt);
+                    }
                 },
                 WaitResult::Message(cmd) => {
                     match cmd {
