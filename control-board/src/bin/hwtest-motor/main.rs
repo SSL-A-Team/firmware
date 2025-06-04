@@ -93,8 +93,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         imu_gyro_data_publisher, imu_accel_data_publisher,
         p);
 
-    create_control_task!(main_spawner, uart_queue_spawner, 
-        robot_state, 
+    create_control_task!(main_spawner, uart_queue_spawner,
+        robot_state,
         control_command_subscriber, control_telemetry_publisher,
         battery_volt_subscriber,
         control_gyro_data_subscriber, control_accel_data_subscriber,
@@ -105,9 +105,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         Timer::after_millis(10).await;
 
         test_command_publisher.publish(DataPacket::BasicControl(BasicControl {
-            vel_x_linear: 1.0,
+            vel_x_linear: 0.0,
             vel_y_linear: 0.0,
-            vel_z_angular: 0.0,
+            vel_z_angular: 5.0,
             kick_vel: 0.0,
             dribbler_speed: 10.0,
             kick_request: KickRequest::KR_DISABLE,

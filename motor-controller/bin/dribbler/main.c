@@ -52,7 +52,7 @@ int main() {
     bool telemetry_enabled = false;
 
     // initialize current sensing setup
-    CS_Status_t cs_status = currsen_setup(ADC_MODE, ADC_CH_MASK);
+    CS_Status_t cs_status = currsen_setup(ADC_CH_MASK);
 
     // initialize motor driver
     pwm6step_setup();

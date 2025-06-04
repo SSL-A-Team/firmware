@@ -49,6 +49,8 @@
 #define DF45_RADS_TO_DC_LINEAR_M 0.00144873f
 #define DF45_RADS_TO_DC_LINEAR_B 0.0057431f
 #define DF45_LINE_RESISTANCE 0.4f // 0.8 ohm is line to line resistance, so 0.4 ohm is line to neutral
+#define DF45_BACK_EMF_CONSTANT 0.0335f // V*s/rad, based on https://www.nanotec.com/us/en/products/1789-df45m024053-a2
+#define DF45_MAX_CURRENT 4.0f // A. This is around the middle of rated current and peak current for the motor.
 
 ////////////////////////
 //  FILTERING/TUNING  //

@@ -18,6 +18,7 @@ void mm_initialize(MotorModel_t *mm) {
     mm->rads_to_dc_linear_map_m = 0.0f;
     mm->rads_to_dc_linear_map_b = 0.0f;
     mm->line_resistance = 0.0f;
+    mm->back_emf_constant = 0.0f;
 }
 
 float mm_rads_to_dc(MotorModel_t *mm, float avel_rads) {
@@ -50,21 +51,33 @@ float mm_voltage_to_current(MotorModel_t *mm, float voltage) {
 }
 
 float mm_current_to_torque(MotorModel_t *mm, float current) {
+    if (fabs(current) < fabs(mm->current_to_torque_linear_model_b)) {
+        // Prevent sign flipping at very low values.
+        return 0.0f;
+    }
+
     return fmax(mm->current_to_torque_linear_model_m * current + mm->current_to_torque_linear_model_b, 0.0f);
 }
 
 float mm_torque_to_current(MotorModel_t *mm, float torque) {
+    if (fabs(torque) < fabs(mm->torque_to_current_linear_model_b)) {
+        // Prevent sign flipping at very low values.
+        return 0.0f;
+    }
+
     return fmax(mm->torque_to_current_linear_model_m * torque + mm->torque_to_current_linear_model_b, 0.0f);
 }
 
-float mm_pos_current_to_pos_dc(MotorModel_t *mm, float current, float vbus_voltage) {
-    // I_motor = V_motor / R_motor
-    // V_motor = duty_cycle * V_bus
-    // duty_cycle = I_motor * (R_motor / V_bus)
+float mm_pos_current_to_pos_dc(MotorModel_t *mm, float current, float vbus_voltage, float vel_rads) {
+    // V_required = I_motor * R_motor + L * dI/dt + V_bemf
+    // We think L * dI/dt is negligible for our purposes, so we can ignore it (something something steady state current).
+    // V_bemf = K_e * vel_rads
+    float v_required = (current * mm->line_resistance) + (mm->back_emf_constant * vel_rads);
     if (vbus_voltage == 0.0f) {
         return 0.0f; // avoid division by zero
     }
 
     // bound DC [0, 1]
-    return fmax(fmin(current * (mm->line_resistance / vbus_voltage), 1.0f), 0.0f);
+    // duty_cycle = V_required / V_bus
+    return fmax(fmin(v_required / vbus_voltage, 1.0f), 0.0f);
 }

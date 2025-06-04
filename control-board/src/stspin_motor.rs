@@ -324,6 +324,10 @@ impl<
         return self.current_state.current_estimate;
     }
 
+    pub fn read_torque_setpoint(&self) -> f32 {
+        return self.current_state.torque_setpoint;
+    }
+
     pub fn read_torque_estimate(&self) -> f32 {
         return self.current_state.torque_estimate;
     }

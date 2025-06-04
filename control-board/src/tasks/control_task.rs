@@ -309,19 +309,21 @@ impl <
                 self.motor_br.set_setpoint(wheel_vels[2]);
                 self.motor_fr.set_setpoint(wheel_vels[3]);
 
-                defmt::info!("TORQUE: {} {} {} {}, TORQUE_DC: {} {} {} {}, VEL_DC: {} {} {} {}",
-                    (self.motor_fl.read_torque_estimate() * 1000.0) as i32,
-                    (self.motor_bl.read_torque_estimate() * 1000.0) as i32,
-                    (self.motor_br.read_torque_estimate() * 1000.0) as i32,
-                    (self.motor_fr.read_torque_estimate() * 1000.0) as i32,
-                    (self.motor_fl.read_torque_computed_duty() * 1000.0) as i32,
-                    (self.motor_bl.read_torque_computed_duty() * 1000.0) as i32,
-                    (self.motor_br.read_torque_computed_duty() * 1000.0) as i32,
-                    (self.motor_fr.read_torque_computed_duty() * 1000.0) as i32,
-                    (self.motor_fl.read_vel_computed_duty() * 1000.0) as i32,
-                    (self.motor_bl.read_vel_computed_duty() * 1000.0) as i32,
-                    (self.motor_br.read_vel_computed_duty() * 1000.0) as i32,
-                    (self.motor_fr.read_vel_computed_duty() * 1000.0) as i32);
+                defmt::info!("MEASURED_CUR: FL: {}, BL: {}, BR: {}, FR: {}",
+                    (self.motor_fl.read_current() * 1000.0) as i32,
+                    (self.motor_bl.read_current() * 1000.0) as i32,
+                    (self.motor_br.read_current() * 1000.0) as i32,
+                    (self.motor_fr.read_current() * 1000.0) as i32);
+
+                //defmt::info!("TARGET_VEL: {}, MEASURED_VEL: {}, MEASURED_CUR: {}, TARGET_TOR: {}, MEASURED_TOR: {}, COMP_TOR: {}, DC_TOR: {}, DC_VEL: {}",
+                //    (self.motor_br.read_vel_setpoint() * 1000.0) as i32,
+                //    (self.motor_br.read_rads() * 1000.0) as i32,
+                //    (self.motor_br.read_current() * 1000.0) as i32,
+                //    (self.motor_br.read_torque_setpoint() * 1000.0) as i32,
+                //    (self.motor_br.read_torque_estimate() * 1000.0) as i32,
+                //    (self.motor_br.read_torque_computed_nm() * 1000.0) as i32,
+                //    (self.motor_br.read_torque_computed_duty() * 1000.0) as i32,
+                //    (self.motor_br.read_vel_computed_duty() * 1000.0) as i32);
 
                 //defmt::info!("stspin temp: {} {} {} {}", self.motor_fl.read_mcu_temperature(), self.motor_bl.read_mcu_temperature(), self.motor_br.read_mcu_temperature(), self.motor_fr.read_mcu_temperature());
                 self.send_motor_commands_and_telemetry(

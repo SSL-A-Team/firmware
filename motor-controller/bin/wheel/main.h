@@ -40,18 +40,21 @@
 #define DF45_MAX_MOTOR_ROT_PER_S ((float) DF45_MAX_MOTOR_ROT_PER_M / 60.0f)
 #define DF45_MAX_MOTOR_RAD_PER_S (DF45_MAX_MOTOR_ROT_PER_S * 2.0f * (float) M_PI)
 #define DF45_RATED_CURRENT 2.36f
+// These are based on https://www.nanotec.com/us/en/products/1789-df45m024053-a2
 #define DF45_TORQUE_TO_CURRENT_LINEAR_M 28.690f
 #define DF45_TORQUE_TO_CURRENT_LINEAR_B (-0.0558f)
 #define DF45_CURRENT_TO_TORQUE_LINEAR_M 0.03477f
 #define DF45_CURRENT_TO_TORQUE_LINEAR_B 0.00242f
 #define DF45_RADS_TO_DC_LINEAR_M 0.00144873f
 #define DF45_RADS_TO_DC_LINEAR_B 0.0057431f
-#define DF45_LINE_RESISTANCE 0.4f // 0.8 ohm is line to line resistance, so 0.4 ohm is line to neutral
+#define DF45_LINE_RESISTANCE 0.8f // 0.8 ohm is line to line resistance
+#define DF45_BACK_EMF_CONSTANT 0.0335f // V*s/rad, based on https://www.nanotec.com/us/en/products/1789-df45m024053-a2
+#define DF45_MAX_CURRENT 4.0f // A. This is around the middle of rated current and peak current for the motor.
 
 ////////////////////////
 //  FILTERING/TUNING  //
 ////////////////////////
 
-#define ENCODER_IIR_TF_MS 0.20f
+#define ENCODER_IIR_TF_MS 40.0f
 #define TORQUE_IIR_TF_MS 40.0f
 // #define DC_IIR_TF_MS 0.20f

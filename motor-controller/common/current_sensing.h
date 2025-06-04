@@ -11,10 +11,13 @@
 
 #pragma once
 
-#define V_DDA_MV 3000.0f // mV
-#define V_DDA_V 3.0f // V
-#define V_ADC_SCALE_MV (V_DDA_MV / 4095.0f) // mV
-#define V_ADC_SCALE_V (V_DDA_V / 4095.0f) // V
+#include <math.h>
+#include <stdbool.h>
+
+static const float V_DDA_MV = 3000.0f; // mV
+static const float V_DDA_V = 3.0f; // V
+static const float V_ADC_SCALE_MV = (V_DDA_MV / 4095.0f); // mV
+static const float V_ADC_SCALE_V = (V_DDA_V / 4095.0f); // V
 
 // From A.7.16 of RM0091
 #define TEMP110_CAL_ADDR ((uint16_t*) ((uint32_t) 0x1FFFF7C2))
@@ -26,48 +29,44 @@
 // Motor Current scaling
 // In v1.0 motor-controller board, schematic based off of AN5397.
 // Rs = 2x 0.1 ohm in parallel -> 0.05 ohm
-// Rb = 2.37k
-// Ra = 140k
-// R1 = 10.0k
-// R2 = 40.2k
+static const float MOTOR_OPAMP_RESISTOR_A = 140E3f; // ohm
+static const float MOTOR_OPAMP_RESISTOR_B = 2.370E3f; // ohm
+static const float MOTOR_OPAMP_RESISTOR_1 = 10E3f; // ohm
+static const float MOTOR_OPAMP_RESISTOR_2 = 40.2E3f; // ohm
+static const float MOTOR_OPAMP_RESISTOR_SENSE = 0.05f; // ohm
 // V_dyn_range = VDD - (0.2 * 2) = 2.6V
 // NOTE: 0.2V is the safety margin for the op-amp from STSPIN32 datasheet.
 // SR = 10V/us op-amp slew rate
 // Gmax = V_dyn_range / (Imax * Rs) = 2.6 / (10.0 * 0.05) = 5.2
 // NOTE: Using Imax * Rs instead of 2 * Imax * Rs since not measuring negative current.
 // G_real = (Ra/(Ra + Rb)) * (1 + R2/R1) = (140k/(140k + 2.37k)) * (1 + 40.2k/10.0k) = 0.983 * 5.02 = 4.94
+static const float MOTOR_OPAMP_GAIN_REAL = ((MOTOR_OPAMP_RESISTOR_A / (MOTOR_OPAMP_RESISTOR_A + MOTOR_OPAMP_RESISTOR_B)) * (1.0f + (MOTOR_OPAMP_RESISTOR_2 / MOTOR_OPAMP_RESISTOR_1)));
 // BW = GBP/(1 + R2/R1) = 18MHz / (1 + 40.2k/10k) = 18MHz / 5.02 = 3.58MHz
 // Closed Loop Gain = 1 + R2/R1 = 1 + 40.2k/10k = 5.02 > Closed Loop Gain Min of STSPIN = 4
 // T_settling > ((Imax * Rs * G_real) / SR) = ((10.0 * 0.05 * 4.94) / 10V/us) = 0.247us
 
-// 1. I_motor = Vs / Rs
-// 2. Vs * G_real = V_adc
-// 3. V_adc = V_adc_raw * V_ADC_SCALE
-// I_motor = ((V_adc_raw * V_ADC_SCALE) / G_real) / Rs
-// I_MOTOR_SCALE = V_ADC_SCALE / (G_real * Rs)
-// I_motor = V_adc_raw * I_MOTOR_SCALE
-#define I_MOTOR_SCALE 0.00296599486f // A/V
+// Op-amp is configured so 0A motor current = 0.2V
+static const float V_MIN_OP_AMP = 0.2f; // V
 
 // VBUS voltage scaling
 // 11.5k / 1k resistor divider -> 12.5 scaling
 // 12.5 * V_ADC_SCALE = VBUS_SCALE
 // V_ADC_SCALE_V = 3.0V / 4095.0f ADC resolution
 // NOTE: Compute ahead of time to reduce floating point math.
-// Vbus = V_adc_raw * VBUS_SCALE
-#define VBUS_SCALE 0.0091575f
+// V_bus = V_adc_raw * VBUS_SCALE
+static const float VBUS_SCALE = 0.0091575f;
 
 typedef enum {
-  CS_MODE_POLLING,
-  CS_MODE_DMA,
-  CS_MODE_TIMER_DMA
+    CS_MODE_PWM_DMA,
+    CS_MODE_SOFTWARE
 } CS_Mode_t;
 
 typedef enum
 {
-  CS_OK       = 0x00U,
-  CS_ERROR    = 0x01U,
-  CS_BUSY     = 0x02U,
-  CS_TIMEOUT  = 0x03U
+    CS_OK       = 0x00U,
+    CS_ERROR    = 0x01U,
+    CS_BUSY     = 0x02U,
+    CS_TIMEOUT  = 0x03U
 } CS_Status_t;
 
 #define SET_BIT(REG, BIT)     ((REG) |= (BIT))
@@ -127,6 +126,10 @@ typedef enum
 // TODO tune timing
 #define ADC_STP_TIMEOUT 5 //ms
 
+#define ADC_SOFTWARE_CONVERSION_TIMEOUT 2 // ms
+#define ADC_MOTOR_CURRENT_ZERO_SAMPLE_NUM 4
+#define UINT_12_BIT_MAX 4095 // 2^12 - 1, max value for 12 bit ADC
+
 // this struct is used as a DMA target.
 // ADC->DR reads are two bytes, DMA will do half word transfers
 // rm0091 tells us the 16->32 bit port mapping packing scheme
@@ -143,12 +146,14 @@ __attribute__((__packed__)) ADC_Result {
 
 void currsen_enable_ht();
 void currsen_read_dma();
-void currsen_read(ADC_Result_t *res);
-CS_Status_t currsen_setup(CS_Mode_t mode, uint8_t motor_adc_ch);
+CS_Status_t currsen_setup(uint8_t motor_adc_ch);
 CS_Status_t currsen_adc_cal();
 CS_Status_t currsen_adc_en();
 CS_Status_t currsen_adc_dis();
+CS_Status_t calculate_motor_zero_current_setpoint();
 
 float currsen_get_motor_current();
+float currsen_get_motor_current_raw();
 float currsen_get_vbus_voltage();
 int32_t currsen_get_temperature();
+uint16_t currsen_get_motor_current_zero_adc_raw();

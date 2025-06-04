@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 
 #include "ateam-common-packets/include/stspin.h"
 
@@ -43,14 +44,34 @@ int main() {
     turn_off_yellow_led();
     turn_off_green_led();
 
-    // turn on Red/Yellow LED
-    turn_on_red_led();
+    // turn on Yellow LED
     turn_on_yellow_led();
 
     // Setups clocks
     setup();
 
-    // start watchdog
+    // setup the loop rate regulators
+    SyncTimer_t vel_loop_timer;
+    time_sync_init(&vel_loop_timer, VELOCITY_LOOP_RATE_MS);
+    SyncTimer_t torque_loop_timer;
+    time_sync_init(&torque_loop_timer, TORQUE_LOOP_RATE_MS);
+    SyncTimer_t telemetry_timer;
+    time_sync_init(&telemetry_timer, TELEMETRY_LOOP_RATE_MS);
+
+    uint32_t ticks_since_last_command_packet = 0;
+    bool telemetry_enabled = false;
+
+    // Setup encoder.
+    quadenc_setup();
+    quadenc_reset_encoder_delta();
+    // Initialize current sensing setup.
+    CS_Status_t cs_status = currsen_setup(ADC_CH_MASK);
+    if (cs_status != CS_OK) {
+        // turn on red LED to indicate error
+        turn_on_red_led();
+    }
+
+    // Start watchdog before 6step set up.
     IWDG->KR = 0x0000CCCC; // enable the module
     IWDG->KR = 0x00005555; // enable register writes
     IWDG->PR = 0x4; // set prescaler to 64, 40kHz -> 625Hz, 1.6ms per tick
@@ -58,22 +79,12 @@ int main() {
     while (IWDG->SR) {} // wait for value to take
     IWDG->KR = 0x0000AAAA; // feed the watchdog
 
-    uint32_t ticks_since_last_command_packet = 0;
-    bool telemetry_enabled = false;
-
-    // initialize current sensing setup
-    CS_Status_t cs_status = currsen_setup(ADC_MODE, ADC_CH_MASK);
-
     // initialize motor driver
     pwm6step_setup();
     pwm6step_set_duty_cycle_f(0.0f);
 
     // enable ADC hardware trigger (tied to 6step timer)
     currsen_enable_ht();
-
-    // setup encoder
-    quadenc_setup();
-    quadenc_reset_encoder_delta();
 
     // Initialized response_packet here to capture the reset method.
     MotorResponsePacket response_packet;
@@ -86,14 +97,6 @@ int main() {
     response_packet.data.motion.reset_pin = (rcc_csr & RCC_CSR_PINRSTF) != 0;
 
     bool params_return_packet_requested = false;
-
-    // setup the loop rate regulators
-    SyncTimer_t vel_loop_timer;
-    time_sync_init(&vel_loop_timer, VELOCITY_LOOP_RATE_MS);
-    SyncTimer_t torque_loop_timer;
-    time_sync_init(&torque_loop_timer, TORQUE_LOOP_RATE_MS);
-    SyncTimer_t telemetry_timer;
-    time_sync_init(&telemetry_timer, TELEMETRY_LOOP_RATE_MS);
 
     // setup the velocity filter
     IIRFilter_t encoder_filter;
@@ -115,7 +118,9 @@ int main() {
 
     // recovered velocities (helps torque recover direction)
     float enc_vel_rads = 0.0f;
-    float enc_rad_s_filt = 0.0f;
+    float enc_vel_rads_filt = 0.0f;
+    // The velocity loop target acceleration based off of commanded speed and measured encoder in rad/s^2
+    float vel_target_accel_rads2 = 0.0f;
 
     // initialize the motor model for the Nanotec DF45 50W (this is our drive motor)
     MotorModel_t df45_model;
@@ -132,6 +137,7 @@ int main() {
     df45_model.rads_to_dc_linear_map_m = DF45_RADS_TO_DC_LINEAR_M;
     df45_model.rads_to_dc_linear_map_b = DF45_RADS_TO_DC_LINEAR_B;
     df45_model.line_resistance = DF45_LINE_RESISTANCE;
+    df45_model.back_emf_constant = DF45_BACK_EMF_CONSTANT;
 
     // setup the velocity PID
     PidConstants_t vel_pid_constants;
@@ -152,6 +158,10 @@ int main() {
     pid_initialize(&torque_pid, &torque_pid_constants);
 
     torque_pid_constants.kP = 1.0f;
+    torque_pid_constants.kI = 0.0f;
+    torque_pid_constants.kD = 0.0f;
+    torque_pid_constants.kI_max = DF45_MAX_CURRENT;
+    torque_pid_constants.kI_min = -DF45_MAX_CURRENT;
 
     // Turn off Red/Yellow LED after booting.
     turn_off_red_led();
@@ -287,38 +297,55 @@ int main() {
         // run the torque loop if applicable
         if (run_torque_loop) {
             // Get the current in amps from the current sense ADC.
+            // Should always be positive with the current electrical architecture.
             float current_sense_I = currsen_get_motor_current();
             float vbus_voltage = currsen_get_vbus_voltage();
-            // map current to torque using the motor model
+            // Map current to torque using the motor model
             float measured_torque_Nm = mm_current_to_torque(&df45_model, current_sense_I);
-            // filter torque
+            // Filter torque
             measured_torque_Nm = iir_filter_update(&torque_filter, measured_torque_Nm);
 
-            // Correct torque sign based on duty cycle direction
+            // Correct torque sign based on previous duty cycle direction.
             MotorDirection_t current_motor_direction = pwm6step_get_motor_direction();
             if (current_motor_direction == COUNTER_CLOCKWISE) {
-                // if the motor is spinning counter-clockwise, then the torque is negative
-                measured_torque_Nm = -fabs(measured_torque_Nm);
+                // if the motor is spinning counter-clockwise, then the torque is negative.
+                measured_torque_Nm = -measured_torque_Nm;
             }
 
             // choose setpoint
-            float r_Nm;
+            float r_Nm = 0.0f;
             if (motion_control_type == TORQUE) {
                 r_Nm = r_motor_board;
-            } else {
-                r_Nm = vel_computed_duty;
+            }
+            else if (motion_control_type == OPEN_LOOP ||
+                motion_control_type == VELOCITY_W_TORQUE ||
+                motion_control_type == VELOCITY) {
+                // Input from motor board is in rad/s
+                // This assumes that the controller will keep
+                // velocity at the setpoint if we hit acceleration = 0.
+                // Inspired by SKUBA https://arxiv.org/pdf/1708.02271
+                r_Nm = vel_target_accel_rads2;
             }
 
-            // calculate PID on the torque in Nm
-            float torque_setpoint_Nm = pid_calculate(&torque_pid, r_Nm, measured_torque_Nm, TORQUE_LOOP_RATE_S);
+            // Calculate the torque setpoint in Nm
+            float torque_setpoint_Nm = 0.0f;
 
-            // convert desired torque to desired current
-            float current_setpoint = mm_torque_to_current(&df45_model, fabs(torque_setpoint_Nm));
-            // convert desired current to desired duty cycle
-            u_torque_loop = mm_pos_current_to_pos_dc(&df45_model, current_setpoint, vbus_voltage);
+            // TODO remove OPEN_LOOP case after testing
+            if (motion_control_type == OPEN_LOOP ||
+                motion_control_type == TORQUE ||
+                motion_control_type == VELOCITY_W_TORQUE) {
 
-            if (torque_setpoint_Nm > 0.0f) {
-                u_torque_loop = -fabs(u_torque_loop);
+                torque_setpoint_Nm = pid_calculate(&torque_pid, r_Nm, measured_torque_Nm, TORQUE_LOOP_RATE_S);
+
+                // Convert desired torque to desired current
+                float current_setpoint = mm_torque_to_current(&df45_model, fabs(torque_setpoint_Nm));
+                // Clamp the current setpoint to zero and the maximum current.
+                current_setpoint = fmax(fmin(current_setpoint, 0.0f), DF45_MAX_CURRENT);
+
+                // Convert desired current to desired duty cycle.
+                u_torque_loop = mm_pos_current_to_pos_dc(&df45_model, current_setpoint, vbus_voltage, enc_vel_rads_filt);
+                // Match the sign of the torque setpoint to the duty cycle.
+                u_torque_loop = copysignf(u_torque_loop, torque_setpoint_Nm);
             }
 
             // load data frame
@@ -336,14 +363,16 @@ int main() {
         if (run_vel_loop) {
             int32_t enc_delta = quadenc_get_encoder_delta();
             float rads_delta = mm_enc_ticks_to_rad(&df45_model, enc_delta);
-            // float enc_vel_rad_s = quadenc_delta_to_w(enc_delta, VELOCITY_LOOP_RATE_S);
             enc_vel_rads = discrete_time_derivative(rads_delta, VELOCITY_LOOP_RATE_S);
 
             // filter the recovered velocity
-            enc_rad_s_filt = iir_filter_update(&encoder_filter, enc_vel_rads);
+            enc_vel_rads_filt = iir_filter_update(&encoder_filter, enc_vel_rads);
+
+            // Vel_desired - Vel_measured
+            vel_target_accel_rads2 = (r_motor_board - enc_vel_rads_filt) / VELOCITY_LOOP_RATE_S;
 
             // compute the velocity PID
-            control_setpoint_vel_rads = pid_calculate(&vel_pid, r_motor_board, enc_rad_s_filt, VELOCITY_LOOP_RATE_S);
+            control_setpoint_vel_rads = pid_calculate(&vel_pid, r_motor_board, enc_vel_rads_filt, VELOCITY_LOOP_RATE_S);
 
             // Clamp setpoint acceleration
             float setpoint_accel_rads_2 = (control_setpoint_vel_rads - control_setpoint_vel_rads_prev)/VELOCITY_LOOP_RATE_S;
@@ -362,7 +391,7 @@ int main() {
             // velocity control data
             response_packet.data.motion.vel_setpoint = r_motor_board;
             response_packet.data.motion.encoder_delta = enc_delta;
-            response_packet.data.motion.vel_enc_estimate = enc_rad_s_filt;
+            response_packet.data.motion.vel_enc_estimate = enc_vel_rads_filt;
             response_packet.data.motion.vel_computed_error = vel_pid.prev_err;
             response_packet.data.motion.vel_computed_rads = control_setpoint_vel_rads;
             response_packet.data.motion.vel_computed_duty = vel_computed_duty;

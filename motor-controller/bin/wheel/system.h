@@ -25,7 +25,6 @@
 //  ADC Config  //
 //////////////////
 
-#define ADC_MODE CS_MODE_DMA
 // ADC Motor Current Unfiltered (Ch 3), Motor Current Filtered (Ch 4)
 #define ADC_CH_MASK (ADC_CHSELR_CHSEL3)
 
