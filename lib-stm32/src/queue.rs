@@ -1,5 +1,5 @@
 use core::{
-    cell::{SyncUnsafeCell, UnsafeCell}, future::poll_fn, mem::MaybeUninit, sync::atomic::{AtomicBool, AtomicUsize, Ordering}, task::{Poll, Waker}
+    cell::{SyncUnsafeCell, UnsafeCell}, future::poll_fn, sync::atomic::{AtomicBool, AtomicUsize, Ordering}, task::{Poll, Waker}
 };
 use critical_section;
 

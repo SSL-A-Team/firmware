@@ -1,7 +1,7 @@
 use ateam_lib_stm32::drivers::led::apa102::{apa102_buf_len, Apa102};
 use embassy_executor::Spawner;
 
-use smart_leds::colors::{BLACK, BLUE, BLUE_VIOLET, CYAN, DARK_CYAN, GREEN, ORANGE_RED, PURPLE, RED, VIOLET, YELLOW};
+use smart_leds::colors::{BLACK, BLUE, CYAN, GREEN, ORANGE_RED, PURPLE, RED, VIOLET, YELLOW};
 
 use crate::{pins::*, MotorIndex};
 

@@ -3,7 +3,7 @@ use ateam_lib_stm32::{drivers::boot::stm32_interface, idle_buffered_uart_spawn_t
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::{gpio::Pin, usart::Uart};
 use embassy_sync::pubsub::WaitResult;
-use embassy_time::{Duration, Ticker, Timer, Instant};
+use embassy_time::{Duration, Ticker, Instant};
 
 use crate::{drivers::kicker::Kicker, include_kicker_bin, pins::*, robot_state::SharedRobotState, SystemIrqs};
 
@@ -93,16 +93,12 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
                 last_packet_sent_time = Instant::now();
             }
 
-            // let cur_time = Instant::now();
-            // if self.kicker_task_state == KickerTaskState::Connected && Instant::checked_duration_since(&cur_time, last_packet_sent_time).unwrap().as_millis() > TELEMETRY_TIMEOUT_MS {
-            //     defmt::error!("Kicker telemetry timed out! Will reset.");
-            //     self.kicker_driver.reset().await;
-            //     // Have a small delay for bring up to prevent boot looping.
-            //     Timer::after_millis(1000).await;
-            //     // Capture packet time to just in case UART is getting set up.
-            //     // TODO Remove this and actually get timing on bring up tuned in.
-            //     last_packet_sent_time = Instant::now();
-            // }
+            let cur_time = Instant::now();
+            if self.kicker_task_state == KickerTaskState::Connected && Instant::checked_duration_since(&cur_time, last_packet_sent_time).unwrap().as_millis() > TELEMETRY_TIMEOUT_MS {
+                defmt::error!("Kicker telemetry timed out! Will reset.");
+                self.kicker_driver.reset().await;
+                last_packet_sent_time = Instant::now();
+            }
 
             // TODO global state overrides of kicker state
             // e.g. external shutdown requsts, battery votlage, etc

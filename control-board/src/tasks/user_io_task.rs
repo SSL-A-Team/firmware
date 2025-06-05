@@ -10,7 +10,7 @@ use ateam_lib_stm32::drivers::other::adc_helper::AdcHelper;
 use embassy_stm32::adc::{Adc, SampleTime, Resolution};
 
 use crate::drivers::shell_indicator::ShellIndicator;
-use crate::robot_state::{SharedRobotState};
+use crate::robot_state::SharedRobotState;
 
 use crate::{adc_v_to_battery_voltage, pins::*, BATTERY_MIN_CRIT_VOLTAGE, BATTERY_MIN_SAFE_VOLTAGE, BATTERY_MAX_VOLTAGE};
 
@@ -70,7 +70,7 @@ async fn user_io_task_entry(
     
     // Get the Vref_int calibration values.
     let vref_int_cal = get_vref_int_cal() as f32;
-    let mut vref_int_ch = vref_int_adc.enable_vrefint();
+    let mut _vref_int_ch = vref_int_adc.enable_vrefint();
 
     // Create the running buffers for averaging
     const BATTERY_VOLTAGE_FILTER_ALPHA: f32 = IO_TASK_LOOP_RATE_DURATION.as_millis() as f32 / BATTERY_FILTER_WINDOW.as_millis() as f32;
@@ -128,12 +128,7 @@ async fn user_io_task_entry(
 
         // update indicators
         robot_id_indicator.set(robot_id, robot_team_isblue);
-
-        if hw_debug_mode {
-            debug_led3.set_high();
-        } else {
-            debug_led3.set_low();
-        }
+        robot_id_src_disagree.set_low();
 
         if !robot_state.hw_init_state_valid() {
             defmt::info!("loaded robot state: robot id: {}, team: {}", robot_id, robot_team_isblue);
@@ -153,6 +148,15 @@ async fn user_io_task_entry(
             }
         } else {
             debug_led0.set_high();
+        }
+
+        debug_led1.set_low();
+        debug_led2.set_low();
+
+        if hw_debug_mode {
+            debug_led3.set_high();
+        } else {
+            debug_led3.set_low();
         }
 
         io_task_loop_rate_ticker.next().await;

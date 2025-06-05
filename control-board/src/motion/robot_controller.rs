@@ -129,7 +129,7 @@ impl<'a> BodyVelocityController<'a> {
         }
     }
 
-    pub fn control_update(&mut self, body_vel_setpoint: &Vector3<f32>, wheel_velocities: &Vector4<f32>, wheel_torques: &Vector4<f32>, gyro_theta: f32, controls_enabled: bool) {
+    pub fn control_update(&mut self, body_vel_setpoint: &Vector3<f32>, wheel_velocities: &Vector4<f32>, _wheel_torques: &Vector4<f32>, gyro_theta: f32, controls_enabled: bool) {
         // Assign telemetry data
         // TODO pass all of the gyro data up, not just theta
         self.debug_telemetry.imu_gyro[2] = gyro_theta;

@@ -4,11 +4,7 @@ use ateam_common_packets::bindings::{PowerCommandPacket, PowerStatusPacket};
 use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, power, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_futures::select::{select, Either};
-use embassy_stm32::{
-    gpio::{Input, Pin, Pull},
-    usart::{self, DataBits, Parity, StopBits, Uart},
-    dma::{NoDma},
-};
+use embassy_stm32::usart::{self, DataBits, Parity, StopBits, Uart};
 use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{pins::*, robot_state::SharedRobotState, tasks::dotstar_task::{ControlBoardLedCommand, ControlGeneralLedCommand}, SystemIrqs};
@@ -40,9 +36,7 @@ pub struct PowerTask<
         const POWER_RX_BUF_DEPTH: usize> {
     shared_robot_state: &'static SharedRobotState,
     led_cmd_publisher: LedCommandPublisher,
-    // command_publisher: CommandsPublisher,
-    // telemetry_subscriber: TelemetrySubcriber,
-    power_uart: &'static IdleBufferedUart<POWER_MAX_RX_PACKET_SIZE, POWER_RX_BUF_DEPTH, POWER_MAX_TX_PACKET_SIZE, POWER_TX_BUF_DEPTH>,
+    _power_uart: &'static IdleBufferedUart<POWER_MAX_RX_PACKET_SIZE, POWER_RX_BUF_DEPTH, POWER_MAX_TX_PACKET_SIZE, POWER_TX_BUF_DEPTH>,
     power_rx_uart_queue: &'static UartReadQueue<POWER_MAX_RX_PACKET_SIZE, POWER_RX_BUF_DEPTH>,
     power_tx_uart_queue: &'static UartWriteQueue<POWER_MAX_TX_PACKET_SIZE, POWER_TX_BUF_DEPTH>,
     last_power_status_time: Option<Instant>,
@@ -182,8 +176,6 @@ pub fn start_power_task(power_task_spawner: Spawner,
         uart_queue_spawner: SendSpawner,
         robot_state: &'static SharedRobotState,
         led_command_publisher: LedCommandPublisher,
-        // command_publisher: CommandsPublisher,
-        // telemetry_subscriber: TelemetrySubcriber,
         power_uart: PowerUart,
         power_uart_rx_pin: PowerUartRxPin,
         power_uart_tx_pin: PowerUartTxPin,
@@ -206,7 +198,7 @@ pub fn start_power_task(power_task_spawner: Spawner,
     let power_task = PowerTask {
         shared_robot_state: robot_state,
         led_cmd_publisher: led_command_publisher,
-        power_uart: &POWER_IDLE_BUFFERED_UART,
+        _power_uart: &POWER_IDLE_BUFFERED_UART,
         power_rx_uart_queue: POWER_IDLE_BUFFERED_UART.get_uart_read_queue(),
         power_tx_uart_queue: POWER_IDLE_BUFFERED_UART.get_uart_write_queue(),
         last_power_status_time: None,
