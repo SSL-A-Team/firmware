@@ -210,7 +210,7 @@ async fn power_task_entry(
 
             let mut high_current_ops_allowed = true;
 
-            if lipo6s_battery_model.battery_warn() {
+            if power_rail_battery.warning_flagged() || (cur_power_state.balance_connected && lipo6s_battery_model.battery_warn()) {
                 if !cur_power_state.battery_low_warn {
                     // we've entered low power state for the first time
                     // set led
@@ -220,7 +220,7 @@ async fn power_task_entry(
                 shared_power_state.set_battery_low_warn(true).await;
             }
 
-            if lipo6s_battery_model.battery_crit() {
+            if power_rail_battery.critical_warning_flagged() || (cur_power_state.balance_connected && lipo6s_battery_model.battery_crit()) {
                 if !cur_power_state.battery_low_crit {
                     // we've entered low critical power state for the first time
                     // set led
@@ -231,7 +231,7 @@ async fn power_task_entry(
                 high_current_ops_allowed = false;
             }
 
-            if lipo6s_battery_model.battery_power_off() {
+            if cur_power_state.balance_connected && lipo6s_battery_model.battery_power_off() {
                 shared_power_state.set_shutdown_requested(true).await;
                 high_current_ops_allowed = false;
             }
