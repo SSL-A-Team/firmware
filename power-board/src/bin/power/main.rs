@@ -84,7 +84,7 @@ async fn main(spawner: Spawner) {
     loop {
         // read pwr button
         // shortest possible interrupt from pwr btn controller is 32ms
-        if pwr_btn.get_level() == Level::Low {
+        if pwr_btn.get_level() == Level::Low || SHARED_POWER_STATE.get_shutdown_requested().await {
             shutdown_ind.set_low();  // indicate shutdown request
             let shutdown_requested_time = Instant::now();
             SHARED_POWER_STATE.set_shutdown_requested(true).await;  // update power board state

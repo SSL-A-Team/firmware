@@ -111,6 +111,8 @@ async fn power_task_entry(
     let battery_telem_packet: BatteryInfoPacket = unsafe { MaybeUninit::zeroed().assume_init() };
 
     loop {
+        let cur_power_state = shared_power_state.get_state().await;
+
         ////////////////////////////////////////////
         //  Read and Convert Power Rail Voltages  //
         ////////////////////////////////////////////
@@ -183,9 +185,21 @@ async fn power_task_entry(
             defmt::info!("battery worst cell imblanace {}", lipo6s_battery_model.get_worst_cell_imbalance());
 
             if lipo6s_battery_model.get_cell_percentages().into_iter().all(|v| *v <= 0) {
+                if cur_power_state.balance_connected {
+                    // the balance connection is lost
+                    // set LED
+                    // play song
+                }
+
                 defmt::info!("battery balance connector is unplugged");
                 shared_power_state.set_balance_connected(false).await;
             } else {
+                if !cur_power_state.balance_connected {
+                    // the balance connection is made for the first time
+                    // set LED
+                    // play song
+                }
+
                 shared_power_state.set_balance_connected(true).await;
             }
             
@@ -197,10 +211,22 @@ async fn power_task_entry(
             let mut high_current_ops_allowed = true;
 
             if lipo6s_battery_model.battery_warn() {
+                if !cur_power_state.battery_low_warn {
+                    // we've entered low power state for the first time
+                    // set led
+                    // play song
+                }
+
                 shared_power_state.set_battery_low_warn(true).await;
             }
 
             if lipo6s_battery_model.battery_crit() {
+                if !cur_power_state.battery_low_crit {
+                    // we've entered low critical power state for the first time
+                    // set led
+                    // play song
+                }
+
                 shared_power_state.set_battery_low_crit(true).await;
                 high_current_ops_allowed = false;
             }
