@@ -8,6 +8,8 @@ pub struct PowerState {
     pub power_rail_3v3_ok: bool,
     pub power_rail_5v0_ok: bool,
     pub power_rail_12v0_ok: bool,
+    pub battery_low_warn: bool,
+    pub battery_low_crit: bool,
     pub high_current_operations_allowed: bool,
     pub shutdown_requested: bool,
 
@@ -31,7 +33,9 @@ impl SharedPowerState {
                     power_rail_3v3_ok: false,
                     power_rail_5v0_ok: false,
                     power_rail_12v0_ok: false,
-                    high_current_operations_allowed: false,
+                    battery_low_warn: false,
+                    battery_low_crit: false,
+                    high_current_operations_allowed: true,
                     shutdown_requested: false,
                     shutdown_force: false,
                     shutdown_ready: false,
@@ -49,6 +53,8 @@ impl SharedPowerState {
             power_rail_3v3_ok: guard.power_rail_3v3_ok,
             power_rail_5v0_ok: guard.power_rail_5v0_ok,
             power_rail_12v0_ok: guard.power_rail_12v0_ok,
+            battery_low_warn: guard.battery_low_warn,
+            battery_low_crit: guard.battery_low_crit,
             high_current_operations_allowed: guard.high_current_operations_allowed,
             shutdown_requested: guard.shutdown_requested,
             shutdown_force: guard.shutdown_force,
@@ -96,6 +102,26 @@ impl SharedPowerState {
     pub async fn set_power_rail_12v0_ok(&self, new_val: bool) {
         let mut guard = self.inner.lock().await;
         guard.power_rail_12v0_ok = new_val;
+    }
+
+    pub async fn get_battery_low_warn(&self) -> bool {
+        let guard = self.inner.lock().await;
+        guard.battery_low_warn
+    }
+
+    pub async fn set_battery_low_warn(&self, new_val: bool) {
+        let mut guard = self.inner.lock().await;
+        guard.battery_low_warn = new_val
+    }
+
+    pub async fn get_battery_low_crit(&self) -> bool {
+        let guard = self.inner.lock().await;
+        guard.battery_low_crit
+    }
+
+    pub async fn set_battery_low_crit(&self, new_val: bool) {
+        let mut guard = self.inner.lock().await;
+        guard.battery_low_crit = new_val
     }
 
     pub async fn get_high_current_operations_allowed(&self) -> bool {

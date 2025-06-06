@@ -6,7 +6,7 @@ use embassy_executor::Spawner;
 use embassy_stm32::{adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime}, peripherals::ADC1};
 use embassy_time::{Duration, Instant, Ticker};
 
-use crate::{config::{LIPO6S_BALANCE_RAW_SAMPLES_TO_VOLTAGES, LIPO_BATTERY_CONFIG_6S, POWER_RAIL_12V0_PARAMETERS, POWER_RAIL_3V3_PARAMETERS, POWER_RAIL_5V0_PARAMETERS, POWER_RAIL_BATTERY_PARAMETERSL}, pins::*, power_state::SharedPowerState};
+use crate::{config::{LIPO6S_BALANCE_RAW_SAMPLES_TO_VOLTAGES, LIPO_BATTERY_CONFIG_6S, POWER_RAIL_12V0_PARAMETERS, POWER_RAIL_3V3_PARAMETERS, POWER_RAIL_5V0_PARAMETERS, POWER_RAIL_BATTERY_PARAMETERS}, pins::*, power_state::SharedPowerState};
 
 const BATTERY_CELL_READ_INTERVAL: Duration = Duration::from_millis(1300);
 const POWER_RAIL_FILTER_WINDOW_SIZE: usize = 10;
@@ -77,7 +77,7 @@ async fn power_task_entry(
     //  Power Rail Setup  //
     ////////////////////////
     
-    let mut power_rail_battery = PowerRail::new(POWER_RAIL_BATTERY_PARAMETERSL,
+    let mut power_rail_battery = PowerRail::new(POWER_RAIL_BATTERY_PARAMETERS,
         WindowAvergingFilter::<POWER_RAIL_FILTER_WINDOW_SIZE, true, _>::new(),
         Range::new(0.0, 2062.0),
         Range::new(0.0, 25.2));
@@ -108,7 +108,7 @@ async fn power_task_entry(
                 ateam_lib_stm32::power::battery::CellVoltageComputeMode::Chained);
 
     // Create empty telemetry packet
-    let mut battery_telem_packet: BatteryInfoPacket = unsafe { MaybeUninit::zeroed().assume_init() };
+    let battery_telem_packet: BatteryInfoPacket = unsafe { MaybeUninit::zeroed().assume_init() };
 
     loop {
         ////////////////////////////////////////////
@@ -142,21 +142,17 @@ async fn power_task_entry(
         //  Check Power Rail Errors  //
         ///////////////////////////////
 
-        // analyze for error conditions
-            // Vbatt voltage too low
-            // Vbatt voltage too high
-            // 12v0 voltage too low
-            // 12v0 voltage too high
-            // 5v0 voltage too low
-            // 5v0 voltage too high
-            // 3v3 voltage too low
-            // 3v3 voltage too high
 
-        shared_power_state.set_power_ok(true).await;
-        shared_power_state.set_power_rail_12v0_ok(true).await;
-        shared_power_state.set_power_rail_5v0_ok(true).await;
-        shared_power_state.set_power_rail_3v3_ok(true).await;
-        shared_power_state.set_high_current_operations_allowed(true).await;
+        shared_power_state.set_power_rail_3v3_ok(power_rail_3v3.power_ok()).await;
+        shared_power_state.set_power_rail_5v0_ok(power_rail_5v0.power_ok()).await;
+        shared_power_state.set_power_rail_12v0_ok(power_rail_12v0.power_ok()).await;
+        shared_power_state.set_power_ok(
+            power_rail_3v3.power_ok() &&
+            power_rail_5v0.power_ok() &&
+            power_rail_12v0.power_ok() &&
+            power_rail_battery.power_ok()
+        ).await;
+
 
         //////////////////////////
         //  Battery Monitoring  //
@@ -186,22 +182,35 @@ async fn power_task_entry(
             defmt::info!("battery cell percentages {}", lipo6s_battery_model.get_cell_percentages());
             defmt::info!("battery worst cell imblanace {}", lipo6s_battery_model.get_worst_cell_imbalance());
 
-            if lipo6s_battery_model.get_cell_percentages().into_iter().all(|v| *v == 0) {
+            if lipo6s_battery_model.get_cell_percentages().into_iter().all(|v| *v <= 0) {
                 defmt::info!("battery balance connector is unplugged");
                 shared_power_state.set_balance_connected(false).await;
             } else {
                 shared_power_state.set_balance_connected(true).await;
             }
             
-            // input to battery model
-
-            // check for battery errors
             // Vbatt PMIC differential
-            // battery balance - any cell too high
-            // battery balance - any cell too low
-            // battery balance - any cell difference too high
+            if f32::abs(battery_cell_voltage_samples[7] - power_rail_voltage_samples[3] as f32 / 1000.0) > 1.0 {
+                defmt::error!("adc measuring substantial voltage drop across the load switch");
+            }
 
-            // battery_telem_packet.battery_mv = lipo6s_battery_model.get_cell_voltages();
+            let mut high_current_ops_allowed = true;
+
+            if lipo6s_battery_model.battery_warn() {
+                shared_power_state.set_battery_low_warn(true).await;
+            }
+
+            if lipo6s_battery_model.battery_crit() {
+                shared_power_state.set_battery_low_crit(true).await;
+                high_current_ops_allowed = false;
+            }
+
+            if lipo6s_battery_model.battery_power_off() {
+                shared_power_state.set_shutdown_requested(true).await;
+                high_current_ops_allowed = false;
+            }
+
+            shared_power_state.set_high_current_operations_allowed(high_current_ops_allowed).await;
         }
 
         // send pubsub message to coms task

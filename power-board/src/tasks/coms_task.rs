@@ -1,8 +1,8 @@
-use core::{mem::MaybeUninit};
+use core::mem::MaybeUninit;
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::{self, DataBits, Parity, StopBits, Uart};
 
-use ateam_lib_stm32::{audio, idle_buffered_uart_spawn_tasks, power, static_idle_buffered_uart_nl, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use ateam_common_packets::bindings::{BatteryInfoPacket, PowerCommandPacket, PowerStatusPacket};
 use embassy_time::{Duration, Instant, Ticker};
 use crate::{pins::*, power_state::SharedPowerState, SystemIrqs};
@@ -28,12 +28,12 @@ macro_rules! create_coms_task {
 
 #[embassy_executor::task]
 async fn coms_task_entry(
-    uart: &'static IdleBufferedUart<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>,
+    _uart: &'static IdleBufferedUart<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>,
     read_queue: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>,
     write_queue: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>,
     shared_power_state: &'static SharedPowerState,
     mut telemetry_subscriber: TelemetrySubscriber,
-    audio_publisher: AudioPublisher
+    _audio_publisher: AudioPublisher
 ) {
     let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));
     let mut last_battery_telem_packet: Option<BatteryInfoPacket> = None;
@@ -78,14 +78,17 @@ async fn coms_task_entry(
                 defmt::info!("COMS TASK - force shutdown received from control board");
                 shared_power_state.set_shutdown_force(true).await;
             }
+            
             if command_packet.ready_shutdown() != 0 {
                 defmt::info!("COMS TASK - ready shutdown received from control board");
                 shared_power_state.set_shutdown_ready(true).await;
             }
+
             if command_packet.request_shutdown() != 0 {
                 defmt::info!("COMS TASK - request shutdown received from control board");
                 shared_power_state.set_shutdown_requested(true).await;
             }
+
             if command_packet.cancel_shutdown() != 0 {
                 defmt::info!("COMS TASK - cancel shutdown received from control board");
                 shared_power_state.set_shutdown_ready(false).await;

@@ -16,7 +16,7 @@ use embassy_sync::pubsub::PubSubChannel;
 use embassy_time::{Duration, Instant, Ticker, Timer};
 use {defmt_rtt as _, panic_probe as _};
 
-use ateam_lib_stm32::{audio::note::Beat, static_idle_buffered_uart_nl};
+use ateam_lib_stm32::audio::note::Beat;
 
 pub const TEST_SONG: [Beat; 2] = [
     Beat::Note { tone: 440, duration: 250_000 },
@@ -67,7 +67,7 @@ async fn main(spawner: Spawner) {
 
     // audio channel
     let comms_audio_publisher = AUDIO_PUBSUB.publisher().unwrap();
-    let power_audio_subscriber = AUDIO_PUBSUB.subscriber().unwrap();
+    let _power_audio_subscriber = AUDIO_PUBSUB.subscriber().unwrap();
 
     // start power task
     create_power_task!(spawner, shared_power_state, power_telemetry_publisher, p);
@@ -106,6 +106,7 @@ async fn main(spawner: Spawner) {
                     kill_sig.set_low();
                     break
                 }
+
                 Timer::after_millis(10).await;
             }
         }
