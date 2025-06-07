@@ -4,9 +4,9 @@
 #![feature(generic_const_exprs)]
 #![feature(sync_unsafe_cell)]
 
-use ateam_power_board::pins::TelemetryPubSub;
+use ateam_power_board::pins::{TelemetryPubSub, AudioPubSub};
 use ateam_power_board::power_state::SharedPowerState;
-use ateam_power_board::{create_power_task, create_coms_task, pins::AudioPubSub};
+use ateam_power_board::{create_power_task, create_coms_task, create_audio_task};
 use defmt::*;
 use embassy_executor::{InterruptExecutor, Spawner};
 use embassy_stm32::interrupt;
@@ -15,13 +15,6 @@ use embassy_stm32::gpio::{Input, Level, Output, OutputOpenDrain, Pull, Speed};
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_time::{Duration, Instant, Ticker, Timer};
 use {defmt_rtt as _, panic_probe as _};
-
-use ateam_lib_stm32::audio::note::Beat;
-
-pub const TEST_SONG: [Beat; 2] = [
-    Beat::Note { tone: 440, duration: 250_000 },
-    Beat::Note { tone: 587, duration: 250_000 },
-];
 
 static SHARED_POWER_STATE: SharedPowerState = SharedPowerState::new();
 
@@ -66,16 +59,17 @@ async fn main(spawner: Spawner) {
     let coms_telemetry_subscriber = TELEMETRY_CHANNEL.subscriber().unwrap();
 
     // audio channel
-    let comms_audio_publisher = AUDIO_PUBSUB.publisher().unwrap();
-    let _power_audio_subscriber = AUDIO_PUBSUB.subscriber().unwrap();
+    let power_audio_publisher = AUDIO_PUBSUB.publisher().unwrap();
+    let power_audio_subscriber = AUDIO_PUBSUB.subscriber().unwrap();
 
     // start power task
-    create_power_task!(spawner, shared_power_state, power_telemetry_publisher, p);
+    create_power_task!(spawner, shared_power_state, power_telemetry_publisher, power_audio_publisher, p);
 
     // start coms task
-    create_coms_task!(spawner, uart_queue_spawner, shared_power_state, coms_telemetry_subscriber, comms_audio_publisher, p);
+    create_coms_task!(spawner, uart_queue_spawner, shared_power_state, coms_telemetry_subscriber, p);
 
     // TODO: start audio task
+    create_audio_task!(spawner, power_audio_subscriber, p);
 
     // TODO: start LED animation task
 

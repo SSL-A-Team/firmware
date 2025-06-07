@@ -29,6 +29,16 @@ pub const POWER_ON_SONG: [Beat; 2] = [
     Beat::Rest(250_000),
 ];
 
+pub const BALANCE_CONNECTED_SONG: [Beat; 2] = [
+    Beat::Rest(250_000),
+    Beat::Rest(250_000),
+];
+
+pub const BALANCE_DISCONNECTED_SONG: [Beat; 2] = [
+    Beat::Rest(250_000),
+    Beat::Rest(250_000),
+];
+
 pub const POWER_OFF_SONG: [Beat; 2] = [
     Beat::Rest(250_000),
     Beat::Rest(250_000),

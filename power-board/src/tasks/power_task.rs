@@ -1,7 +1,7 @@
 use core::mem::MaybeUninit;
 
 use ateam_common_packets::bindings::BatteryInfoPacket;
-use ateam_lib_stm32::{drivers::adc::AdcConverter, filter::WindowAvergingFilter, math::range::Range, power::{battery::LipoModel, PowerRail}};
+use ateam_lib_stm32::{audio::{songs::SongId, AudioCommand}, drivers::adc::AdcConverter, filter::WindowAvergingFilter, math::range::Range, power::{battery::LipoModel, PowerRail}};
 use embassy_executor::Spawner;
 use embassy_stm32::{adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime}, peripherals::ADC1};
 use embassy_time::{Duration, Instant, Ticker};
@@ -13,8 +13,9 @@ const POWER_RAIL_FILTER_WINDOW_SIZE: usize = 10;
 
 #[macro_export]
 macro_rules! create_power_task {
-    ($spawner:ident, $shared_power_state:ident, $telemetry_publisher:ident, $p:ident) => {
-        ateam_power_board::tasks::power_task::start_power_task(&$spawner, $shared_power_state, $telemetry_publisher,
+    ($spawner:ident, $shared_power_state:ident, $telemetry_publisher:ident, $audio_publisher:ident, $p:ident) => {
+        ateam_power_board::tasks::power_task::start_power_task(
+            &$spawner, $shared_power_state, $telemetry_publisher, $audio_publisher,
             $p.ADC1, $p.DMA1_CH1,
             $p.PA0, $p.PA1, $p.PA2, $p.PA3, $p.PA4, $p.PA5,
             $p.PB1, $p.PA7, $p.PA6, $p.PB10, $p.PB2).await;
@@ -25,6 +26,7 @@ macro_rules! create_power_task {
 async fn power_task_entry(
     shared_power_state: &'static SharedPowerState,
     telemetry_publisher: TelemetryPublisher,
+    audio_publisher: AudioPublisher,
     adc: PowerAdc,
     mut adc_dma: PowerAdcDma,
     cell1_adc_pin: BatteryCell1VoltageMonitorPin,
@@ -189,6 +191,7 @@ async fn power_task_entry(
                     // the balance connection is lost
                     // set LED
                     // play song
+                    audio_publisher.publish(AudioCommand::PlaySong(SongId::BalanceDisconnected)).await;
                 }
 
                 defmt::info!("battery balance connector is unplugged");
@@ -198,6 +201,7 @@ async fn power_task_entry(
                     // the balance connection is made for the first time
                     // set LED
                     // play song
+                    audio_publisher.publish(AudioCommand::PlaySong(SongId::BalanceConnected)).await;
                 }
 
                 shared_power_state.set_balance_connected(true).await;
@@ -215,6 +219,7 @@ async fn power_task_entry(
                     // we've entered low power state for the first time
                     // set led
                     // play song
+                    audio_publisher.publish(AudioCommand::PlaySong(SongId::BatteryLow)).await;
                 }
 
                 shared_power_state.set_battery_low_warn(true).await;
@@ -225,6 +230,7 @@ async fn power_task_entry(
                     // we've entered low critical power state for the first time
                     // set led
                     // play song
+                    audio_publisher.publish(AudioCommand::PlaySong(SongId::BatteryCritical)).await;
                 }
 
                 shared_power_state.set_battery_low_crit(true).await;
@@ -246,7 +252,10 @@ async fn power_task_entry(
     }
 }
 
-pub async fn start_power_task(spawner: &Spawner, shared_power_state: &'static SharedPowerState, telemetry_publisher: TelemetryPublisher,
+pub async fn start_power_task(spawner: &Spawner, 
+    shared_power_state: &'static SharedPowerState,
+    telemetry_publisher: TelemetryPublisher,
+    audio_publisher: AudioPublisher,
     adc: PowerAdc,
     adc_dma: PowerAdcDma,
     cell1_adc_pin: BatteryCell1VoltageMonitorPin,
@@ -264,6 +273,7 @@ pub async fn start_power_task(spawner: &Spawner, shared_power_state: &'static Sh
     spawner.spawn(power_task_entry(
         shared_power_state,
         telemetry_publisher,
+        audio_publisher,
         adc, adc_dma,
         cell1_adc_pin, cell2_adc_pin, cell3_adc_pin, cell4_adc_pin, cell5_adc_pin, cell6_adc_pin,
         power_rail_12v0_adc_pin, power_rail_5v0_adc_pin, power_rail_3v3_adc_pin, power_rail_vbatt_before_lsw_adc_pin, power_rail_vbatt_adc_pin
