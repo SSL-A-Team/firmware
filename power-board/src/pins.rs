@@ -76,7 +76,7 @@ pub type ComsDmaRx = DMA1_CH5;
 
 const AUDIO_CHANNEL_DEPTH: usize = 3;
 const AUDIO_CHANNEL_NUM_SUBS: usize = 1;
-const AUDIO_CHANNEL_NUM_PUBS: usize = 2;
+const AUDIO_CHANNEL_NUM_PUBS: usize = 3;
 const TELEMETRY_CHANNEL_DEPTH: usize = 3;
 const TELEMETRY_CHANNEL_NUM_SUBS: usize = 1;
 const TELEMETRY_CHANNEL_NUM_PUBS: usize = 1;

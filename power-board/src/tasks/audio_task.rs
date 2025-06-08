@@ -83,7 +83,7 @@ async fn audio_task_entry(
     }
 }
 
-pub async fn start_audio_task(
+pub fn start_audio_task(
         spawner: &Spawner, 
         audio_subscriber: AudioSubscriber,
         buzzer_pin: BuzzerPwmPin,

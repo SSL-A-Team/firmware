@@ -4,7 +4,9 @@
 #![feature(generic_const_exprs)]
 #![feature(sync_unsafe_cell)]
 
-use ateam_power_board::pins::{TelemetryPubSub, AudioPubSub};
+use ateam_lib_stm32::audio::songs::SongId;
+use ateam_lib_stm32::audio::AudioCommand;
+use ateam_power_board::pins::{AudioPubSub, TelemetryPubSub};
 use ateam_power_board::power_state::SharedPowerState;
 use ateam_power_board::{create_power_task, create_coms_task, create_audio_task};
 use defmt::*;
@@ -44,8 +46,10 @@ async fn main(spawner: Spawner) {
     let mut en_5v0 = Output::new(p.PB8, Level::Low, Speed::Low);
 
     let shared_power_state = &SHARED_POWER_STATE;
+    let main_audio_publisher = AUDIO_PUBSUB.publisher().unwrap();
 
     sequence_power_on(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
+    main_audio_publisher.publish(AudioCommand::PlaySong(SongId::PowerOn)).await;
 
     interrupt::USART2.set_priority(Priority::P6);
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(interrupt::USART2);
@@ -60,13 +64,14 @@ async fn main(spawner: Spawner) {
 
     // audio channel
     let power_audio_publisher = AUDIO_PUBSUB.publisher().unwrap();
+    let coms_audio_publisher = AUDIO_PUBSUB.publisher().unwrap();
     let power_audio_subscriber = AUDIO_PUBSUB.subscriber().unwrap();
 
     // start power task
     create_power_task!(spawner, shared_power_state, power_telemetry_publisher, power_audio_publisher, p);
 
     // start coms task
-    create_coms_task!(spawner, uart_queue_spawner, shared_power_state, coms_telemetry_subscriber, p);
+    create_coms_task!(spawner, uart_queue_spawner, shared_power_state, coms_telemetry_subscriber, coms_audio_publisher, p);
 
     // TODO: start audio task
     create_audio_task!(spawner, power_audio_subscriber, p);
@@ -95,6 +100,7 @@ async fn main(spawner: Spawner) {
                     || Instant::now() > shutdown_requested_time + Duration::from_secs(30) 
                     || !cur_robot_state.coms_established {
                     defmt::info!("MAIN TASK: Shutdown acknowledged, turning off power");
+                    main_audio_publisher.publish(AudioCommand::PlaySong(SongId::PowerOff)).await;
                     Timer::after_millis(500).await;
                     sequence_power_off(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
                     kill_sig.set_low();
