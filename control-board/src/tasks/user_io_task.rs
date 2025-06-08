@@ -10,7 +10,7 @@ use ateam_lib_stm32::drivers::other::adc_helper::AdcHelper;
 use embassy_stm32::adc::{Adc, SampleTime, Resolution};
 
 use crate::drivers::shell_indicator::ShellIndicator;
-use crate::robot_state::{SharedRobotState};
+use crate::robot_state::SharedRobotState;
 
 use crate::{adc_v_to_battery_voltage, pins::*, BATTERY_MIN_CRIT_VOLTAGE, BATTERY_MIN_SAFE_VOLTAGE, BATTERY_MAX_VOLTAGE};
 
@@ -35,7 +35,7 @@ macro_rules! create_io_task {
             $p.PD0, $p.PD1, $p.PG10, $p.PG11,
             $p.PG6, $p.PG5, $p.PG4, $p.PD13,
             $p.PD10,
-            $p.PC0, $p.PC2, $p.PC3, $p.PC1, $p.PF10).await;
+            $p.PC3, $p.PC1, $p.PC0, $p.PC2, $p.PF10).await;
     };
 }
 
@@ -183,8 +183,8 @@ pub async fn start_io_task(spawner: &Spawner,
     let debug_mode_pins: [AnyPin; 1] = [debug_mode_pin.into()];
     let debug_mode_dip = DipSwitch::new_from_pins(debug_mode_pins, Pull::None, Some([true]));
     
-    let team_color_pins: [AnyPin; 2] = [robot_id_team_is_blue_pin.into(), robot_id_src_select_pin.into()];
-    let team_color_dip = DipSwitch::new_from_pins(team_color_pins, Pull::None, None);
+    let team_color_pins: [AnyPin; 2] = [robot_id_src_select_pin.into(), robot_id_team_is_blue_pin.into()];
+    let team_color_dip = DipSwitch::new_from_pins(team_color_pins, Pull::None, Some([false, true]));
 
     let robot_id_selector_pins: [AnyPin; 4] = [robot_id_selector3_pin.into(), robot_id_selector2_pin.into(), robot_id_selector1_pin.into(), robot_id_selector0_pin.into()];
     let robot_id_rotary = RotaryEncoder::new_from_pins(robot_id_selector_pins, Pull::None, None);
