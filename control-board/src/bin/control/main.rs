@@ -43,11 +43,13 @@ static LED_COMMAND_PUBSUB: LedCommandPubSub = PubSubChannel::new();
 static RADIO_UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
+#[allow(non_snake_case)]
 #[interrupt]
 unsafe fn CEC() {
     UART_QUEUE_EXECUTOR.on_interrupt();
 }
 
+#[allow(non_snake_case)]
 #[interrupt]
 unsafe fn CORDIC() {
     RADIO_UART_QUEUE_EXECUTOR.on_interrupt();

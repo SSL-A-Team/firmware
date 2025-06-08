@@ -17,7 +17,7 @@ pub const VBATT_TOO_HIGH_CRITICAL: f32 = 30.0;
 // vaguely based on https://www.ufinebattery.com/blog/useful-overview-of-lipo-battery-voltage/
 pub const VBATT_TOO_LOW_WARN: f32 = 19.5;
 pub const VBATT_TOO_LOW_CRITICAL: f32 = 19.0;
-pub const POWER_RAIL_BATTERY_PARAMETERSL: PowerRailParameters<f32> = PowerRailParameters {
+pub const POWER_RAIL_BATTERY_PARAMETERS: PowerRailParameters<f32> = PowerRailParameters {
     min_value_crit: VBATT_TOO_LOW_CRITICAL,
     min_value_warn: VBATT_TOO_LOW_WARN,
     max_value_warn: VBATT_TOO_HIGH_WARN,
@@ -70,6 +70,8 @@ const DUAL_RTOL_1PCT_FLOOR: f32 = 0.98;
 
 
 // battery
+pub const LIPO_BALANCE_UNCONNECTED_THRESH: f32 = 0.150;
+
 pub const LIPO_CELL_TOO_HIGH_WARN: f32 = 4.25 * DUAL_RTOL_1PCT_CIEL;
 pub const LIPO_CELL_TOO_HIGH_CRITICAL: f32 = 4.35 * DUAL_RTOL_1PCT_CIEL;
 pub const LIPO_CELL_TOO_HIGH_POWERDOWN: f32 = 4.4 * DUAL_RTOL_1PCT_CIEL;

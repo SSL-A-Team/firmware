@@ -10,7 +10,7 @@ use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _;
 
-use ateam_control_board::{create_control_task, create_imu_task, create_io_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, LedCommandPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::control_task::start_control_task};
+use ateam_control_board::{create_control_task, create_imu_task, create_io_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, LedCommandPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
 
 use embassy_time::Timer;
 // provide embedded panic probe
@@ -29,11 +29,13 @@ static LED_COMMAND_PUBSUB: LedCommandPubSub = PubSubChannel::new();
 static RADIO_UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
+#[allow(non_snake_case)]
 #[interrupt]
 unsafe fn CEC() {
     UART_QUEUE_EXECUTOR.on_interrupt();
 }
 
+#[allow(non_snake_case)]
 #[interrupt]
 unsafe fn CORDIC() {
     RADIO_UART_QUEUE_EXECUTOR.on_interrupt();

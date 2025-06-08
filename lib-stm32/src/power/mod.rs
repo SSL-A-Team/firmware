@@ -36,6 +36,10 @@ impl<T: Number, F: Filter<T>> PowerRail<T, F> {
         self.filter.filtered_value()
     }
 
+    pub fn power_ok(&self) -> bool {
+        !(self.warning_flagged() || self.critical_warning_flagged())
+    }
+
     pub fn warning_flagged(&self) -> bool {
         if self.critical_warning_flagged() {
             return true;

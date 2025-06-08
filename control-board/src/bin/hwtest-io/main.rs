@@ -6,7 +6,7 @@ use embassy_stm32::interrupt;
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{create_audio_task, create_io_task, get_system_config, pins::BatteryVoltPubSub, robot_state::SharedRobotState};
+use ateam_control_board::{create_io_task, get_system_config, pins::BatteryVoltPubSub, robot_state::SharedRobotState};
 
 
 use embassy_sync::pubsub::PubSubChannel;
@@ -21,6 +21,7 @@ static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
+#[allow(non_snake_case)]
 #[interrupt]
 unsafe fn CEC() {
     UART_QUEUE_EXECUTOR.on_interrupt();

@@ -94,14 +94,17 @@ impl<'a, const NUM_CELLS: usize, F: Filter<f32>> LipoModel<'a, NUM_CELLS, F> {
     }
 
     pub fn battery_warn(&self) -> bool {
-        false
+        self.get_worst_cell_imbalance() > self.config.cell_voltage_difference_warn ||
+            self.get_cell_voltages().into_iter().any(|cell_voltage| *cell_voltage > self.config.cell_voltage_high_warn || *cell_voltage < self.config.cell_voltage_low_warn)
     }
 
     pub fn battery_crit(&self) -> bool {
-        false
+        self.get_worst_cell_imbalance() > self.config.cell_voltage_difference_crit ||
+            self.get_cell_voltages().into_iter().any(|cell_voltage| *cell_voltage > self.config.cell_voltage_high_crit || *cell_voltage < self.config.cell_voltage_low_crit)
     }
 
     pub fn battery_power_off(&self) -> bool {
-        false
+        self.get_worst_cell_imbalance() > self.config.cell_votlage_difference_off ||
+            self.get_cell_voltages().into_iter().any(|cell_voltage| *cell_voltage > self.config.cell_voltage_high_power_off || *cell_voltage < self.config.cell_voltage_low_power_off)
     }
 }

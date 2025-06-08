@@ -1,8 +1,8 @@
-use core::{mem::MaybeUninit};
+use core::mem::MaybeUninit;
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::{self, DataBits, Parity, StopBits, Uart};
 
-use ateam_lib_stm32::{audio, idle_buffered_uart_spawn_tasks, power, static_idle_buffered_uart_nl, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{audio::{songs::SongId, AudioCommand}, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use ateam_common_packets::bindings::{BatteryInfoPacket, PowerCommandPacket, PowerStatusPacket};
 use embassy_time::{Duration, Instant, Ticker};
 use crate::{pins::*, power_state::SharedPowerState, SystemIrqs};
@@ -19,8 +19,9 @@ const COMS_RX_TIMEOUT: Duration = Duration::from_millis(1000);
 
 #[macro_export]
 macro_rules! create_coms_task {
-    ($main_spawner:ident, $uart_queue_spawner:ident, $shared_power_state:ident, $coms_telemetry_subscriber:ident, $comms_audio_publisher:ident, $p:ident) => {
-        ateam_power_board::tasks::coms_task::start_coms_task($main_spawner, $uart_queue_spawner, $shared_power_state, $coms_telemetry_subscriber, $comms_audio_publisher,
+    ($main_spawner:ident, $uart_queue_spawner:ident, $shared_power_state:ident, $coms_telemetry_subscriber:ident, $coms_audio_publisher: ident, $p:ident) => {
+        ateam_power_board::tasks::coms_task::start_coms_task(
+            $main_spawner, $uart_queue_spawner, $shared_power_state, $coms_telemetry_subscriber, $coms_audio_publisher,
             $p.USART1, $p.PA10, $p.PA9, $p.DMA1_CH5, $p.DMA1_CH4,
         ).await;
     };
@@ -28,7 +29,7 @@ macro_rules! create_coms_task {
 
 #[embassy_executor::task]
 async fn coms_task_entry(
-    uart: &'static IdleBufferedUart<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>,
+    _uart: &'static IdleBufferedUart<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>,
     read_queue: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>,
     write_queue: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>,
     shared_power_state: &'static SharedPowerState,
@@ -78,14 +79,18 @@ async fn coms_task_entry(
                 defmt::info!("COMS TASK - force shutdown received from control board");
                 shared_power_state.set_shutdown_force(true).await;
             }
+            
             if command_packet.ready_shutdown() != 0 {
                 defmt::info!("COMS TASK - ready shutdown received from control board");
                 shared_power_state.set_shutdown_ready(true).await;
             }
+
             if command_packet.request_shutdown() != 0 {
                 defmt::info!("COMS TASK - request shutdown received from control board");
+                audio_publisher.publish(AudioCommand::PlaySong(SongId::ShutdownRequested)).await;
                 shared_power_state.set_shutdown_requested(true).await;
             }
+
             if command_packet.cancel_shutdown() != 0 {
                 defmt::info!("COMS TASK - cancel shutdown received from control board");
                 shared_power_state.set_shutdown_ready(false).await;
@@ -149,9 +154,18 @@ pub fn power_uart_config() -> usart::Config {
     power_uart_config
 }
 
-pub async fn start_coms_task(spawner: Spawner, uart_queue_spawner: SendSpawner, shared_power_state: &'static SharedPowerState, telemetry_subscriber: TelemetrySubscriber,
-    audio_publisher: AudioPublisher, uart: ComsUart, uart_rx_pin: ComsUartRxPin, uart_tx_pin: ComsUartTxPin, uart_rx_dma: ComsDmaRx, uart_tx_dma: ComsDmaTx
-    ) {
+pub async fn start_coms_task(
+    spawner: Spawner, 
+    uart_queue_spawner: SendSpawner,
+    shared_power_state: &'static SharedPowerState,
+    telemetry_subscriber: TelemetrySubscriber,
+    audio_publisher: AudioPublisher,
+    uart: ComsUart,
+    uart_rx_pin: ComsUartRxPin,
+    uart_tx_pin: ComsUartTxPin,
+    uart_rx_dma: ComsDmaRx,
+    uart_tx_dma: ComsDmaTx
+) {
     let uart_config = power_uart_config();
     let coms_uart = Uart::new(uart, uart_rx_pin, uart_tx_pin, SystemIrqs, uart_tx_dma, uart_rx_dma, uart_config).unwrap();
     COMS_IDLE_BUFFERED_UART.init();

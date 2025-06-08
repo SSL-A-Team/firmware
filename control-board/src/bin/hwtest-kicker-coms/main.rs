@@ -11,9 +11,9 @@ use ateam_lib_stm32::{
 use defmt::info;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
-    gpio::{Level, Output, Speed, Pull}, interrupt, pac::Interrupt, usart::Uart
+    gpio::Pull, interrupt, pac::Interrupt, usart::Uart
 };
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Duration, Ticker};
 use panic_probe as _;
 
 include_kicker_bin! {KICKER_FW_IMG, "hwtest-coms.bin"}
@@ -28,6 +28,7 @@ static_idle_buffered_uart!(KICKER, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACK
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
+#[allow(non_snake_case)]
 #[interrupt]
 unsafe fn CEC() {
     UART_QUEUE_EXECUTOR.on_interrupt();
