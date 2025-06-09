@@ -64,7 +64,7 @@ async fn power_task_entry(
     let mut power_rail_voltage_samples: [u16; 4] = [0; 4];
 
     let mut battery_cell_adc_raw_samples: [u16; 8] = [0; 8];
-    let mut battery_cell_voltage_samples: [f32; 7] = [0.0; 7];
+    let mut battery_cell_voltage_samples: [f32; 8] = [0.0; 8];
 
     // From https://www.st.com/resource/en/datasheet/stm32g031g8.pdf
     // 6.3.3 Embedded internal reference voltage

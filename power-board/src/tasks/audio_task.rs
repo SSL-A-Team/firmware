@@ -4,6 +4,7 @@ use embassy_stm32::{timer::{simple_pwm::{PwmPin, SimplePwm}, Channel},
                     gpio::OutputType, time::hz};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Ticker};
+use defmt::*;
 
 use crate::{pins::*, songs::{BALANCE_CONNECTED_SONG, BALANCE_DISCONNECTED_SONG, BATTERY_CRITICAL_SONG, BATTERY_LOW_SONG, BATTERY_UH_OH_SONG, POWER_OFF_SONG, POWER_ON_SONG, SHUTDOWN_REQUESTED_SONG, TEST_SONG}};
 
@@ -21,9 +22,10 @@ async fn audio_task_entry(
     mut tone_player: TonePlayer<'static, Buzzer<'static, BuzzerTimer>>,
     mut audio_subscriber: AudioSubscriber,
 ) {
-    let mut loop_rate_ticker = Ticker::every(Duration::from_millis(100));
+    let mut loop_rate_ticker = Ticker::every(Duration::from_millis(200));
 
     loop {
+        info!("entering audio task");
         // async await AudioCommand from a Subscriber
         if let Some(audio_command) = audio_subscriber.try_next_message_pure() {
             // play song
@@ -75,8 +77,6 @@ async fn audio_task_entry(
                     tone_player.play_song().await;
                 },
             }
-        } else {
-            break
         }
 
         loop_rate_ticker.next().await;

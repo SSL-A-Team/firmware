@@ -49,7 +49,6 @@ async fn main(spawner: Spawner) {
     let main_audio_publisher = AUDIO_PUBSUB.publisher().unwrap();
 
     sequence_power_on(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
-    main_audio_publisher.publish(AudioCommand::PlaySong(SongId::PowerOn)).await;
 
     interrupt::USART2.set_priority(Priority::P6);
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(interrupt::USART2);
@@ -73,8 +72,9 @@ async fn main(spawner: Spawner) {
     // start coms task
     create_coms_task!(spawner, uart_queue_spawner, shared_power_state, coms_telemetry_subscriber, coms_audio_publisher, p);
 
-    // TODO: start audio task
+    // start audio task
     create_audio_task!(spawner, power_audio_subscriber, p);
+    main_audio_publisher.publish(AudioCommand::PlaySong(SongId::PowerOn)).await;
 
     // TODO: start LED animation task
 
@@ -84,12 +84,14 @@ async fn main(spawner: Spawner) {
         // read pwr button
         // shortest possible interrupt from pwr btn controller is 32ms
         if pwr_btn.get_level() == Level::Low || SHARED_POWER_STATE.get_shutdown_requested().await {
+            main_audio_publisher.publish(AudioCommand::PlaySong(SongId::ShutdownRequested)).await;
+            Timer::after_millis(250).await;
             shutdown_ind.set_low();  // indicate shutdown request
             let shutdown_requested_time = Instant::now();
             SHARED_POWER_STATE.set_shutdown_requested(true).await;  // update power board state
             loop {
                 let cur_robot_state = shared_power_state.get_state().await;
-
+                
                 if !SHARED_POWER_STATE.get_shutdown_requested().await {
                     defmt::info!("MAIN TASK: Shutdown cancelled");
                     shutdown_ind.set_high();
@@ -99,8 +101,10 @@ async fn main(spawner: Spawner) {
                 if SHARED_POWER_STATE.get_shutdown_ready().await 
                     || Instant::now() > shutdown_requested_time + Duration::from_secs(30) 
                     || !cur_robot_state.coms_established {
-                    defmt::info!("MAIN TASK: Shutdown acknowledged, turning off power");
                     main_audio_publisher.publish(AudioCommand::PlaySong(SongId::PowerOff)).await;
+                    // Wait long enough for the song to play :)
+                    Timer::after_millis(500).await;
+                    defmt::info!("MAIN TASK: Shutdown acknowledged, turning off power");
                     Timer::after_millis(500).await;
                     sequence_power_off(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
                     kill_sig.set_low();
