@@ -166,7 +166,7 @@ impl <
                 battery_temperature: 0.,
                 _bitfield_align_1: [],
                 _bitfield_1: BasicTelemetry::new_bitfield_1(
-                    0, 0, 0, self.shared_robot_state.ball_detected() as u32, 0, 0, 0, 0, err_fl, hall_err_fl, err_bl, hall_err_bl, err_br, hall_err_br, err_fr, hall_err_fr, 0, 0, 0, 0, 0,
+                    0, 0, 0, self.shared_robot_state.ball_detected() as u32, 0, 0, 0, 0, err_fl, hall_err_fl, err_bl, hall_err_bl, err_br, hall_err_br, err_fr, hall_err_fr, 0, 0, 0, !self.shared_robot_state.get_kicker_inop() as u32, 0,
                 ),
                 motor_0_temperature: 0.,
                 motor_1_temperature: 0.,

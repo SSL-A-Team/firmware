@@ -254,10 +254,10 @@ pub type UsrLed2Pin = PG4;
 pub type UsrLed3Pin = PD13;
 
 pub type RobotIdSrcDisagree = PD10;
-pub type RobotIdIndicator0FlPin = PC0;
-pub type RobotIdIndicator1BlPin = PC2;
-pub type RobotIdIndicator2BrPin = PC3;
-pub type RobotIdIndicator3FrPin = PC1;
+pub type RobotIdIndicator0FlPin = PC3;
+pub type RobotIdIndicator1BlPin = PC1;
+pub type RobotIdIndicator2BrPin = PC0;
+pub type RobotIdIndicator3FrPin = PC2;
 pub type RobotIdIndicator4TeamIsBluePin = PF10;
 
 pub type DotstarSpi = SPI6;
