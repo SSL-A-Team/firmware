@@ -25,7 +25,6 @@ async fn audio_task_entry(
     let mut loop_rate_ticker = Ticker::every(Duration::from_millis(200));
 
     loop {
-        info!("entering audio task");
         // async await AudioCommand from a Subscriber
         if let Some(audio_command) = audio_subscriber.try_next_message_pure() {
             // play song
