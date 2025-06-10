@@ -76,11 +76,26 @@ async fn main(spawner: Spawner) {
     create_audio_task!(spawner, power_audio_subscriber, p);
     main_audio_publisher.publish(AudioCommand::PlaySong(SongId::PowerOn)).await;
 
-    // TODO: start LED animation task
 
+    let song_list : [AudioCommand; 9] = [
+        AudioCommand::PlaySong(SongId::Test),
+        AudioCommand::PlaySong(SongId::PowerOn),
+        AudioCommand::PlaySong(SongId::BalanceConnected),
+        AudioCommand::PlaySong(SongId::BalanceDisconnected),
+        AudioCommand::PlaySong(SongId::PowerOff),
+        AudioCommand::PlaySong(SongId::ShutdownRequested),
+        AudioCommand::PlaySong(SongId::BatteryLow),
+        AudioCommand::PlaySong(SongId::BatteryCritical),
+        AudioCommand::PlaySong(SongId::BatteryUhOh)
+    ];
+    let mut song_num: usize = 0;
 
     let mut main_loop_ticker = Ticker::every(Duration::from_millis(10));
     loop {
+        if song_num < 9 {
+            main_audio_publisher.publish(song_list[song_num]).await;
+            song_num += 1;
+        }
         // read pwr button
         // shortest possible interrupt from pwr btn controller is 32ms
         if pwr_btn.get_level() == Level::Low || SHARED_POWER_STATE.get_shutdown_requested().await {

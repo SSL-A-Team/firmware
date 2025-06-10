@@ -45,10 +45,10 @@ pub const POWER_OFF_SONG: [Beat; 3] = [
 ];
 
 pub const SHUTDOWN_REQUESTED_SONG: [Beat; 4] = [
-    Beat::Note { tone: 330, duration: 125_000},
-    Beat::Rest(12500),
-    Beat::Note { tone: 330, duration: 125_000},
-    Beat::Rest(12500)
+    Beat::Note { tone: 330, duration: 500_000},
+    Beat::Rest(125_000),
+    Beat::Note { tone: 330, duration: 500_000},
+    Beat::Rest(125_000)
 ];
 
 pub const BATTERY_LOW_SONG: [Beat; 4] = [
