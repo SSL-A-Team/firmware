@@ -299,7 +299,7 @@ impl <
                     self.last_accel_y_ms = accel_ms[1];
                 }
                 
-                let controls_enabled = false;
+                let controls_enabled = true;
 
                 // let kill_vel = self.shared_robot_state.get_battery_low() || self.shared_robot_state.get_battery_crit() || self.shared_robot_state.shutdown_requested();
                 let kill_vel = false;
