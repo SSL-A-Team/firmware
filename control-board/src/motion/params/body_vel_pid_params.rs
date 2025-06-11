@@ -4,7 +4,7 @@ use nalgebra::{matrix, vector, Matrix3x5, Vector3, Vector4};
 pub static PID_GAIN: Matrix3x5<f32> = 
         matrix![1.5, 0.0, 0.0, -1.0, 1.0;
                 1.5, 0.0, 0.0, -1.0, 1.0;
-                4.0, 0.0, 0.0, -2.0, 2.0];
+                3.0, 0.0, 0.25, -2.0, 2.0];
 
 // x, y, theta (m/s, m/s, rad/s)
 // NOTE: Because of (bad) motor model, need to give way
