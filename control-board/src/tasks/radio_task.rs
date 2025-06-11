@@ -30,7 +30,7 @@ macro_rules! create_radio_task {
 
 pub const RADIO_LOOP_RATE_MS: u64 = 10;
 
-pub const RADIO_MAX_TX_PACKET_SIZE: usize = 320;
+pub const RADIO_MAX_TX_PACKET_SIZE: usize = 448;
 pub const RADIO_TX_BUF_DEPTH: usize = 4;
 pub const RADIO_MAX_RX_PACKET_SIZE: usize = 256;
 pub const RADIO_RX_BUF_DEPTH: usize = 4;
