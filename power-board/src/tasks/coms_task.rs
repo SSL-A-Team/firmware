@@ -3,12 +3,12 @@ use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::{self, DataBits, Parity, StopBits, Uart};
 
 use ateam_lib_stm32::{audio::{songs::SongId, AudioCommand}, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
-use ateam_common_packets::bindings::{BatteryInfoPacket, PowerCommandPacket, PowerStatusPacket};
+use ateam_common_packets::bindings::{BatteryInfo, PowerCommand, PowerTelemetry};
 use embassy_time::{Duration, Instant, Ticker};
 use crate::{pins::*, power_state::SharedPowerState, SystemIrqs};
 
-const MAX_RX_PACKET_SIZE: usize = core::mem::size_of::<PowerCommandPacket>();
-const MAX_TX_PACKET_SIZE: usize = core::mem::size_of::<PowerStatusPacket>();
+const MAX_RX_PACKET_SIZE: usize = core::mem::size_of::<PowerCommand>();
+const MAX_TX_PACKET_SIZE: usize = core::mem::size_of::<PowerTelemetry>();
 const RX_BUF_DEPTH: usize = 3;
 const TX_BUF_DEPTH: usize = 2;
 static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH);
@@ -37,7 +37,7 @@ async fn coms_task_entry(
     audio_publisher: AudioPublisher
 ) {
     let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));
-    let mut last_battery_telem_packet: Option<BatteryInfoPacket> = None;
+    let mut last_battery_telem_packet: Option<BatteryInfo> = None;
     let mut last_sent_packet_time = Instant::now();
     let mut last_received_packet_time = Instant::MAX - Duration::from_secs(60);
 
@@ -48,8 +48,8 @@ async fn coms_task_entry(
         while let Ok(res) = read_queue.try_dequeue() {
             let buf = res.data();
 
-            if buf.len() != core::mem::size_of::<PowerCommandPacket>() {
-                defmt::warn!("COMS TASK - Got invalid packet of len {:?} (expected {:?}) data: {:?}", buf.len(), core::mem::size_of::<PowerCommandPacket>(), buf);
+            if buf.len() != core::mem::size_of::<PowerCommand>() {
+                defmt::warn!("COMS TASK - Got invalid packet of len {:?} (expected {:?}) data: {:?}", buf.len(), core::mem::size_of::<PowerCommand>(), buf);
                 continue;
             }
 
@@ -61,13 +61,13 @@ async fn coms_task_entry(
             }
 
             // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
-            let mut command_packet: PowerCommandPacket;
+            let mut command_packet: PowerCommand;
             unsafe {
                 command_packet = MaybeUninit::zeroed().assume_init();
 
                 // copy receieved uart bytes into packet
                 let state = &mut command_packet as *mut _ as *mut u8;
-                for i in 0..core::mem::size_of::<PowerCommandPacket>() {
+                for i in 0..core::mem::size_of::<PowerCommand>() {
                     *state.offset(i as isize) = buf[i];
                 }
             }
@@ -118,7 +118,7 @@ async fn coms_task_entry(
            (Instant::now() - last_sent_packet_time >= Duration::from_millis(POWER_TELEM_PERIOD_MS)) {
 
             // build telemetry packet from latest battery telemetry and power status
-            let mut telem_packet: PowerStatusPacket = unsafe { MaybeUninit::zeroed().assume_init() };
+            let mut telem_packet: PowerTelemetry = unsafe { MaybeUninit::zeroed().assume_init() };
 
             telem_packet.set_power_ok(cur_power_state.power_ok as u32);
             telem_packet.set_power_rail_3v3_ok(cur_power_state.power_rail_3v3_ok as u32);
@@ -131,8 +131,8 @@ async fn coms_task_entry(
             let struct_bytes;
             unsafe {
                 struct_bytes = core::slice::from_raw_parts(
-                    (&telem_packet as *const PowerStatusPacket) as *const u8,
-                    core::mem::size_of::<PowerStatusPacket>(),
+                    (&telem_packet as *const PowerTelemetry) as *const u8,
+                    core::mem::size_of::<PowerTelemetry>(),
                 );
             }
             let _ = write_queue.enqueue_copy(struct_bytes);

@@ -51,6 +51,9 @@ bind_interrupts!(pub struct SystemIrqs {
     USART1 => usart::InterruptHandler<peripherals::USART1>;
 });
 
+const ROBOT_VERSION_MAJOR: u8 = 3;
+const ROBOT_VERSION_MINOR: u8 = 1;
+
 #[derive(Debug, Clone, Copy, defmt::Format)]
 pub enum MotorIndex {
     FrontLeft = 0,

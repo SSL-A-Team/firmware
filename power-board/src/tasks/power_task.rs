@@ -1,6 +1,6 @@
 use core::mem::MaybeUninit;
 
-use ateam_common_packets::bindings::BatteryInfoPacket;
+use ateam_common_packets::bindings::BatteryInfo;
 use ateam_lib_stm32::{audio::{songs::SongId, AudioCommand}, drivers::adc::AdcConverter, filter::WindowAvergingFilter, math::range::Range, power::{battery::LipoModel, PowerRail}};
 use embassy_executor::Spawner;
 use embassy_stm32::{adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime}, peripherals::ADC1};
@@ -110,7 +110,7 @@ async fn power_task_entry(
                 ateam_lib_stm32::power::battery::CellVoltageComputeMode::Chained);
 
     // Create empty telemetry packet
-    let battery_telem_packet: BatteryInfoPacket = unsafe { MaybeUninit::zeroed().assume_init() };
+    let battery_telem_packet: BatteryInfo = unsafe { MaybeUninit::zeroed().assume_init() };
 
     loop {
         let cur_power_state = shared_power_state.get_state().await;
