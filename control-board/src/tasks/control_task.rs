@@ -7,7 +7,7 @@ use nalgebra::{Vector3, Vector4};
 
 use crate::{include_external_cpp_bin, motion::{self, params::robot_physical_params::{
         WHEEL_ANGLES_DEG, WHEEL_DISTANCE_TO_ROBOT_CENTER_M, WHEEL_RADIUS_M
-    }, robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, parameter_interface::ParameterInterface, pins::*, robot_state::SharedRobotState, stspin_motor::WheelMotor, SystemIrqs};
+    }, robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, parameter_interface::ParameterInterface, pins::*, robot_state::SharedRobotState, stspin_motor::WheelMotor, tasks::dotstar_task::{ControlBoardLedCommand, MotorStatusLedCommand}, MotorIndex, SystemIrqs};
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 
@@ -27,7 +27,7 @@ const TICKS_WITHOUT_PACKET_STOP: usize = 20;
 macro_rules! create_control_task {
     ($main_spawner:ident, $uart_queue_spawner:ident, $robot_state:ident,
         $control_command_subscriber:ident, $control_telemetry_publisher:ident,
-        $battery_volt_subscriber:ident,
+        $battery_volt_subscriber:ident, $led_cmd_publisher:ident,
         $control_gyro_data_subscriber:ident, $control_accel_data_subscriber:ident,
         $p:ident
     ) => {
@@ -35,7 +35,7 @@ macro_rules! create_control_task {
             $main_spawner, $uart_queue_spawner,
             $robot_state,
             $control_command_subscriber, $control_telemetry_publisher,
-            $battery_volt_subscriber,
+            $battery_volt_subscriber, $led_cmd_publisher,
             $control_gyro_data_subscriber, $control_accel_data_subscriber,
             $p.UART7, $p.PF6, $p.PF7, $p.DMA1_CH1, $p.DMA1_CH0, $p.PF5, $p.PF4,
             $p.USART10, $p.PE2, $p.PE3, $p.DMA1_CH3, $p.DMA1_CH2, $p.PE5, $p.PE4,
@@ -60,6 +60,7 @@ pub struct ControlTask<
     last_accel_x_ms: f32,
     last_accel_y_ms: f32,
     telemetry_publisher: TelemetryPublisher,
+    led_cmd_publisher: LedCommandPublisher,
     
     motor_fl: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
     motor_bl: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
@@ -81,6 +82,7 @@ impl <
                 battery_subscriber: BatteryVoltSubscriber,
                 gyro_subscriber: GyroDataSubscriber,
                 accel_subscriber: AccelDataSubscriber,
+                led_cmd_publisher: LedCommandPublisher,
                 motor_fl: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
                 motor_bl: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
                 motor_br: WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
@@ -91,6 +93,7 @@ impl <
                 command_subscriber: command_subscriber,
                 telemetry_publisher: telemetry_publisher,
                 battery_subscriber: battery_subscriber,
+                led_cmd_publisher,
                 last_battery_v: 0.0,
                 gyro_subscriber: gyro_subscriber,
                 accel_subscriber: accel_subscriber,
@@ -323,31 +326,64 @@ impl <
             defmt::info!("flashing firmware");
             if debug {
                 let mut had_motor_error = false;
+
+                self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                    (MotorIndex::FrontLeft, MotorStatusLedCommand::Configuring)));
                 if self.motor_fl.load_default_firmware_image().await.is_err() {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::FrontLeft, MotorStatusLedCommand::Error)));
+
                     defmt::error!("failed to flash FL");
                     had_motor_error = true;
                 } else {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::FrontLeft, MotorStatusLedCommand::Ok)));
+
                     defmt::info!("FL flashed");
                 }
 
+                self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                    (MotorIndex::BackLeft, MotorStatusLedCommand::Configuring)));
                 if self.motor_bl.load_default_firmware_image().await.is_err() {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::BackLeft, MotorStatusLedCommand::Error)));
+
                     defmt::error!("failed to flash BL");
                     had_motor_error = true;
                 } else {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::BackLeft, MotorStatusLedCommand::Ok)));
+
                     defmt::info!("BL flashed");
                 }
 
+                self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                    (MotorIndex::BackRight, MotorStatusLedCommand::Configuring)));
                 if self.motor_br.load_default_firmware_image().await.is_err() {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::BackRight, MotorStatusLedCommand::Error)));
+
                     defmt::error!("failed to flash BR");
                     had_motor_error = true;
                 } else {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::BackRight, MotorStatusLedCommand::Ok)));
+
                     defmt::info!("BR flashed");
                 }
 
+                self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                    (MotorIndex::FrontRight, MotorStatusLedCommand::Configuring)));
                 if self.motor_fr.load_default_firmware_image().await.is_err() {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::FrontRight, MotorStatusLedCommand::Error)));
+
                     defmt::error!("failed to flash FR");
                     had_motor_error = true;
                 } else {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::FrontRight, MotorStatusLedCommand::Ok)));
+
                     defmt::info!("FR flashed");
                 }
 
@@ -425,6 +461,7 @@ pub async fn start_control_task(
     battery_subscriber: BatteryVoltSubscriber,
     gyro_subscriber: GyroDataSubscriber,
     accel_subscriber: AccelDataSubscriber,
+    led_cmd_publisher: LedCommandPublisher,
     motor_fl_uart: MotorFLUart, motor_fl_rx_pin: MotorFLUartRxPin, motor_fl_tx_pin: MotorFLUartTxPin, motor_fl_rx_dma: MotorFLDmaRx, motor_fl_tx_dma: MotorFLDmaTx, motor_fl_boot0_pin: MotorFLBootPin, motor_fl_nrst_pin: MotorFLResetPin,
     motor_bl_uart: MotorBLUart, motor_bl_rx_pin: MotorBLUartRxPin, motor_bl_tx_pin: MotorBLUartTxPin, motor_bl_rx_dma: MotorBLDmaRx, motor_bl_tx_dma: MotorBLDmaTx, motor_bl_boot0_pin: MotorBLBootPin, motor_bl_nrst_pin: MotorBLResetPin,
     motor_br_uart: MotorBRUart, motor_br_rx_pin: MotorBRUartRxPin, motor_br_tx_pin: MotorBRUartTxPin, motor_br_rx_dma: MotorBRDmaRx, motor_br_tx_dma: MotorBRDmaTx, motor_br_boot0_pin: MotorBRBootPin, motor_br_nrst_pin: MotorBRResetPin,
@@ -467,7 +504,8 @@ pub async fn start_control_task(
 
     let control_task = ControlTask::new(
         robot_state, command_subscriber, telemetry_publisher, battery_subscriber,
-        gyro_subscriber, accel_subscriber, motor_fl, motor_bl, motor_br, motor_fr);
+        gyro_subscriber, accel_subscriber, led_cmd_publisher, 
+        motor_fl, motor_bl, motor_br, motor_fr);
 
     control_task_spawner.spawn(control_task_entry(control_task)).unwrap();
 }
