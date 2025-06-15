@@ -233,7 +233,11 @@ impl <
             let mut cmd_vel = Vector3::new(0.0, 0.0, 0.0);
             let mut ticks_since_control_packet = 0;
 
+            let mut prev_robot_state = self.shared_robot_state.get_state();
+
             loop {
+                let cur_robot_state = self.shared_robot_state.get_state();
+
                 self.motor_fl.process_packets();
                 self.motor_bl.process_packets();
                 self.motor_br.process_packets();
@@ -318,6 +322,8 @@ impl <
                 self.send_motor_commands_and_telemetry(
                     &mut robot_controller, self.last_battery_v);
 
+                prev_robot_state = cur_robot_state;
+
                 loop_rate_ticker.next().await;
             }
         }
@@ -393,6 +399,15 @@ impl <
                     defmt::debug!("all motors flashed");
                 }
             } else {
+
+                self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                    (MotorIndex::FrontLeft, MotorStatusLedCommand::Configuring)));
+                self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                    (MotorIndex::BackLeft, MotorStatusLedCommand::Configuring)));
+                self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                    (MotorIndex::BackRight, MotorStatusLedCommand::Configuring)));
+                self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                    (MotorIndex::FrontRight, MotorStatusLedCommand::Configuring)));
                 let res = embassy_futures::join::join4(
                     self.motor_fl.load_default_firmware_image(),
                     self.motor_bl.load_default_firmware_image(),
@@ -400,6 +415,38 @@ impl <
                     self.motor_fr.load_default_firmware_image(),
                 )
                 .await;
+
+                if res.0.is_err() {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::FrontLeft, MotorStatusLedCommand::Ok)));
+                } else {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::FrontLeft, MotorStatusLedCommand::Error)));
+                }
+
+                if res.1.is_err() {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::BackLeft, MotorStatusLedCommand::Ok)));
+                } else {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::BackLeft, MotorStatusLedCommand::Error)));
+                }
+
+                if res.2.is_err() {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::BackRight, MotorStatusLedCommand::Ok)));
+                } else {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::BackRight, MotorStatusLedCommand::Error)));
+                }
+
+                if res.3.is_err() {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::FrontRight, MotorStatusLedCommand::Ok)));
+                } else {
+                    self.led_cmd_publisher.publish_immediate(ControlBoardLedCommand::Motor(
+                        (MotorIndex::FrontRight, MotorStatusLedCommand::Error)));
+                }
                 
                 let error_mask = res.0.is_err() as u8 
                         | ((res.1.is_err() as u8) & 0x01) << 1 

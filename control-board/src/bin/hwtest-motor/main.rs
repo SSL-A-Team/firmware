@@ -10,7 +10,7 @@ use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _;
 
-use ateam_control_board::{create_control_task, create_imu_task, create_io_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, LedCommandPubSub, TelemetryPubSub}, robot_state::SharedRobotState, tasks::control_task::start_control_task};
+use ateam_control_board::{create_control_task, create_imu_task, create_io_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, LedCommandPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
 
 use embassy_time::Timer;
 // provide embedded panic probe
@@ -65,6 +65,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     // commands channel
     let control_command_subscriber = RADIO_C2_CHANNEL.subscriber().unwrap();
     let test_command_publisher = RADIO_C2_CHANNEL.publisher().unwrap();
+    let control_led_cmd_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
 
     // telemetry channel
     let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
@@ -98,7 +99,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     create_control_task!(main_spawner, uart_queue_spawner, 
         robot_state, 
         control_command_subscriber, control_telemetry_publisher,
-        battery_volt_subscriber,
+        battery_volt_subscriber, control_led_cmd_publisher,
         control_gyro_data_subscriber, control_accel_data_subscriber,
         p);
 
