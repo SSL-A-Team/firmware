@@ -332,8 +332,109 @@ impl<
         res
     }
 
-    pub async fn read_device_memory(&self) -> Result<(), ()> {
-        defmt::panic!("implement if needed.");
+    // Based on 3.4 of AN3155
+    pub async fn read_device_memory(&self, data: &mut [u8], read_base_addr: u32) -> Result<(), ()> {
+        if !self.in_bootloader {
+            defmt::error!("called bootloader operation when not in bootloader context.");
+            return Err(());
+        }
+
+        let data_len = data.len();
+        if data_len > 255 || data_len + 1 > LEN_TX {
+            defmt::error!("Data length too large for bootloader read mem command.");
+            return Err(());
+        }
+
+        // defmt::debug!("sending the read command...");
+        self.writer
+        .write(|buf| {
+            buf[0] = STM32_BOOTLOADER_CMD_READ_MEM;
+            buf[1] = !STM32_BOOTLOADER_CMD_READ_MEM;
+            2
+        })
+        .await?;
+
+        // Wait for the bootloader to acknowledge the command
+        let mut res = Err(());
+        self.reader.read(|buf| {
+            // defmt::info!("Read cmd reply {:?}", buf);
+            if buf.len() >= 1 {
+                if buf[0] == STM32_BOOTLOADER_ACK {
+                    res = Ok(());
+                } else {
+                    defmt::error!("Read mem cmd replied with NACK");
+                }
+            } else {
+                defmt::error!("Read mem cmd reply too short.");
+            }
+        }).await?;
+
+        if res.is_err() {
+            return res;
+        }
+
+        // defmt::debug!("sending the load address {:?}...", read_base_addr);
+        self.writer
+        .write(|buf| {
+            let start_address_bytes: [u8; 4] = read_base_addr.to_be_bytes();
+            let cs = Self::bootloader_checksum_u32(read_base_addr);
+            buf[0] = start_address_bytes[0];
+            buf[1] = start_address_bytes[1];
+            buf[2] = start_address_bytes[2];
+            buf[3] = start_address_bytes[3];
+            buf[4] = cs;
+            // defmt::debug!("send buffer {:?}", buf);
+            5
+        })
+        .await?;
+
+        res = Err(());
+        // Wait for the bootloader to acknowledge the address
+        self.reader.read(|buf| {
+            // defmt::info!("go cmd reply {:?}", buf);
+            if buf.len() >= 1 {
+                if buf[0] == STM32_BOOTLOADER_ACK {
+                    res = Ok(());
+                } else {
+                    defmt::error!("Address read mem replied with NACK");
+                }
+            } else {
+                defmt::error!("Address read mem reply too short.");
+            }
+        }).await?;
+
+        if res.is_err() {
+            return res;
+        }
+
+        // defmt::debug!("sending the data length...");
+        self.writer
+        .write(|buf| {
+            let data_len_minus_one = data_len as u8 - 1;
+            buf[0] = data_len_minus_one;
+            buf[1] = !data_len_minus_one;
+            // defmt::debug!("send buffer {:?}", buf);
+            2
+        })
+        .await?;
+
+        res = Err(());
+        // defmt::debug!("reading the data...");
+        self.reader.read(|buf| {
+            // defmt::info!("data reply {:?}", buf);
+            if buf.len() >= 1 {
+                if buf[0] == STM32_BOOTLOADER_ACK {
+                    data.copy_from_slice(&buf[1..]);
+                    res = Ok(());
+                } else {
+                    defmt::error!("Data read mem replied with NACK");
+                }
+            } else {
+                defmt::error!("Data read mem reply too short!");
+            }
+        }).await?;
+
+        res
     }
 
     async fn write_device_memory_chunk(&self, data: &[u8], write_base_addr: u32) -> Result<(), ()> {
@@ -535,6 +636,27 @@ impl<
                 }
             }
         };
+
+        let mut read_data = [0u8; 63];
+        if self.read_device_memory(&mut read_data, 0x0800_7C00).await.is_err() {
+            return Err(());
+        }
+        defmt::info!("read device memory: {:x}", read_data);
+
+        // TODO Implement a chunk erase.
+        //let data_write: [u8; 7] = [69, 42, 00, 1, 2, 3, 4];
+        //if self.write_device_memory_chunk(&data_write, 0x0800_7C00).await.is_err() {
+        //    return Err(());
+        //}
+        //defmt::info!("wrote device memory: {:x}", data_write);
+//
+        //// Read back the data to verify it was written correctly
+        //let mut read_data_2 = [0u8; 63];
+        //if self.read_device_memory(&mut read_data_2, 0x0800_7C00).await.is_err() {
+        //    return Err(());
+        //}
+        //defmt::info!("read back device memory: {:x}", read_data_2);
+
 
         // erase part
         if let Err(err) = self.erase_flash_memory().await {

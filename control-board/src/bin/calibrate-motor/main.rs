@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-use ateam_common_packets::{bindings::KickRequest, bindings::BasicControl, radio::DataPacket};
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
     interrupt, pac::Interrupt
@@ -10,7 +9,7 @@ use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _;
 
-use ateam_control_board::{create_control_task, create_imu_task, create_io_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
+use ateam_control_board::{create_motor_calibrate_task, create_imu_task, create_io_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
 
 use embassy_time::Timer;
 // provide embedded panic probe
@@ -72,7 +71,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
     let battery_volt_subscriber = BATTERY_VOLT_CHANNEL.subscriber().unwrap();
 
-    // TODO imu channel
+    // IMU channels
     let imu_gyro_data_publisher = GYRO_DATA_CHANNEL.publisher().unwrap();
     let control_gyro_data_subscriber = GYRO_DATA_CHANNEL.subscriber().unwrap();
 
@@ -93,24 +92,14 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         imu_gyro_data_publisher, imu_accel_data_publisher,
         p);
 
-    create_control_task!(main_spawner, uart_queue_spawner,
+    create_motor_calibrate_task!(main_spawner, uart_queue_spawner,
         robot_state,
         control_command_subscriber, control_telemetry_publisher,
         battery_volt_subscriber,
         control_gyro_data_subscriber, control_accel_data_subscriber,
         p);
 
-
     loop {
         Timer::after_millis(10).await;
-
-        test_command_publisher.publish(DataPacket::BasicControl(BasicControl {
-            vel_x_linear: 0.0,
-            vel_y_linear: 0.0,
-            vel_z_angular: 5.0,
-            kick_vel: 0.0,
-            dribbler_speed: 10.0,
-            kick_request: KickRequest::KR_DISABLE,
-        })).await;
     }
 }

@@ -480,7 +480,6 @@ int main() {
                 response_packet.data.params.version_major = VERSION_MAJOR;
                 response_packet.data.params.version_major = VERSION_MINOR;
                 response_packet.data.params.version_major = VERSION_PATCH;
-                response_packet.data.params.timestamp = time_local_epoch_s();
 
                 response_packet.data.params.vel_p = vel_pid_constants.kP;
                 response_packet.data.params.vel_i = vel_pid_constants.kI;

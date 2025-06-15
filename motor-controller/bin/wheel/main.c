@@ -60,6 +60,7 @@ int main() {
 
     uint32_t ticks_since_last_command_packet = 0;
     bool telemetry_enabled = false;
+    bool motion_enabled = false;
 
     // Setup encoder.
     quadenc_setup();
@@ -221,6 +222,7 @@ int main() {
                 }
 
                 telemetry_enabled = motor_command_packet.data.motion.enable_telemetry;
+                motion_enabled = motor_command_packet.data.motion.enable_motion;
                 r_motor_board = motor_command_packet.data.motion.setpoint;
                 motion_control_type = motor_command_packet.data.motion.motion_control_type;
             } else if (motor_command_packet.type == MCP_PARAMS) {
@@ -275,11 +277,12 @@ int main() {
 #endif
 
         // Coast motor based on failure states.
-        if (!telemetry_enabled ||
+        if (!motion_enabled ||
+            !telemetry_enabled ||
             ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS ||
             response_packet.data.motion.master_error ||
             uart_logging_status_receive != UART_LOGGING_OK) {
-            // If telemetry is disabled, that means the upstream
+            // If telemetry or motion is disabled, that means the upstream
             // isn't ready.
             // If we haven't received a command packet in a while,
             // that means the upstream isn't ready or locked up.
@@ -420,6 +423,7 @@ int main() {
             const MotorErrors_t reported_motor_errors = pwm6step_get_motor_errors();
 
             response_packet.type = MRP_MOTION;
+            response_packet.timestamp = time_get_uptime_ms();
 
             // bldc errors
             response_packet.data.motion.hall_power_error = reported_motor_errors.hall_power;
@@ -491,7 +495,6 @@ int main() {
                 response_packet.data.params.version_major = VERSION_MAJOR;
                 response_packet.data.params.version_major = VERSION_MINOR;
                 response_packet.data.params.version_major = VERSION_PATCH;
-                response_packet.data.params.timestamp = time_local_epoch_s();
 
                 response_packet.data.params.vel_p = vel_pid_constants.kP;
                 response_packet.data.params.vel_i = vel_pid_constants.kI;
@@ -533,7 +536,7 @@ int main() {
         // Red LED means we are in an error state.
         // This latches and requires resetting the robot to clear.
         if (response_packet.data.motion.master_error ||
-            (telemetry_enabled && ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS)) {
+            (motion_enabled && ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS)) {
             turn_on_red_led();
         }
 
@@ -555,7 +558,7 @@ int main() {
         }
 
         #ifdef COMP_MODE
-        if (telemetry_enabled &&
+        if (motion_enabled &&
             ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
             // If have telemetry enabled (meaning we at one
             // point received a message from upstream) and haven't

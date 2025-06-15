@@ -37,6 +37,7 @@ pub struct WheelMotor<
     >,
     firmware_image: &'a [u8],
 
+    current_timestamp_ms: u32,
     current_state: MotorResponse_Motion_Packet,
     current_params_state: MotorResponse_Params_Packet,
 
@@ -53,6 +54,7 @@ pub struct WheelMotor<
     motion_type: MotorCommand_MotionType::Type,
     reset_flagged: bool,
     telemetry_enabled: bool,
+    motion_enabled: bool,
 }
 
 impl<
@@ -87,6 +89,7 @@ impl<
             version_major: 0,
             version_minor: 0,
             version_patch: 0,
+            current_timestamp_ms: 0,
             current_state: start_state,
             current_params_state: start_params_state,
             vel_pid_constants: Vector3::new(0.0, 0.0, 0.0),
@@ -99,6 +102,7 @@ impl<
             motion_type: OPEN_LOOP,
             reset_flagged: false,
             telemetry_enabled: false,
+            motion_enabled: false,
         }
     }
 
@@ -127,6 +131,7 @@ impl<
             version_major: 0,
             version_minor: 0,
             version_patch: 0,
+            current_timestamp_ms: 0,
             current_state: start_state,
             current_params_state: start_params_state,
             vel_pid_constants: Vector3::new(0.0, 0.0, 0.0),
@@ -139,6 +144,7 @@ impl<
             motion_type: OPEN_LOOP,
             reset_flagged: false,
             telemetry_enabled: false,
+            motion_enabled: false,
         }
     }
 
@@ -194,7 +200,7 @@ impl<
                     *state.offset(i as isize) = buf[i];
                 }
 
-
+                self.current_timestamp_ms = mrp.timestamp;
                 // TODO probably do some checksum stuff eventually
 
                 // decode union type, and reinterpret subtype
@@ -257,6 +263,7 @@ impl<
             cmd.crc32 = 0;
             cmd.data.motion.set_reset(self.reset_flagged as u32);
             cmd.data.motion.set_enable_telemetry(self.telemetry_enabled as u32);
+            cmd.data.motion.set_enable_motion(self.motion_enabled as u32);
             cmd.data.motion.motion_control_type = self.motion_type;
             cmd.data.motion.setpoint = self.setpoint;
             //info!("setpoint: {:?}", cmd.data.motion.setpoint);
@@ -290,6 +297,14 @@ impl<
 
     pub fn set_telemetry_enabled(&mut self, telemetry_enabled: bool) {
         self.telemetry_enabled = telemetry_enabled;
+    }
+
+    pub fn set_motion_enabled(&mut self, enabled: bool) {
+        self.motion_enabled = enabled;
+    }
+
+    pub fn read_current_timestamp_ms(&self) -> u32 {
+        return self.current_timestamp_ms;
     }
 
     pub fn read_is_error(&self) -> bool {
