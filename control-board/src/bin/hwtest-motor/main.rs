@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use ateam_common_packets::{bindings::KickRequest, bindings::{BasicControl, BasicTelemetry}, radio::DataPacket};
+use ateam_common_packets::{bindings::KickRequest, bindings::BasicControl, radio::DataPacket};
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
     interrupt, pac::Interrupt
@@ -112,12 +112,14 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         Timer::after_millis(100).await;
 
         test_command_publisher.publish(DataPacket::BasicControl(BasicControl {
-            vel_x_linear: 0.2,
-            vel_y_linear: 0.0,
-            vel_z_angular: 0.0,
-            kick_vel: 0.0,
-            dribbler_speed: 10.0,
-            kick_request: KickRequest::KR_DISABLE,
+            vel_x_linear:0.2,
+            vel_y_linear:0.0,
+            vel_z_angular:0.0,
+            kick_vel:0.0,
+            dribbler_speed:10.0,
+            kick_request:KickRequest::KR_DISABLE,
+            _bitfield_align_1: Default::default(),
+            _bitfield_1: Default::default() 
         })).await;
     }
 }

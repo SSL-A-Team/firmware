@@ -110,23 +110,7 @@ impl<
             connection_state: RadioConnectionState::Unconnected,
             wifi_credentials: wifi_credentials,
             last_software_packet: Instant::now(),
-            last_basic_telemetry: BasicTelemetry {
-                sequence_number: 0,
-                robot_revision_major: 0,
-                robot_revision_minor: 0,
-                battery_level: 0.,
-                battery_temperature: 0.,
-                _bitfield_align_1: [],
-                _bitfield_1: BasicTelemetry::new_bitfield_1(
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                ),
-                motor_0_temperature: 0.,
-                motor_1_temperature: 0.,
-                motor_2_temperature: 0.,
-                motor_3_temperature: 0.,
-                motor_4_temperature: 0.,
-                kicker_charge_level: 0.,
-            },
+            last_basic_telemetry: Default::default(),
         }
     }
 
@@ -383,7 +367,7 @@ impl<
                     TelemetryPacket::Basic(basic) => {
                         self.last_basic_telemetry = basic;
                     },
-                    TelemetryPacket::Control(control) => {
+                    TelemetryPacket::Extended(control) => {
                         if self.radio.send_control_debug_telemetry(control).await.is_err() {
                             defmt::warn!("RadioTask - failed to send control debug telemetry packet");
                         }

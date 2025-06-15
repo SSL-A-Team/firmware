@@ -161,6 +161,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             kick_vel: 0.0,
             dribbler_speed: -0.1,
             kick_request: KickRequest::KR_ARM,
+            _bitfield_align_1: Default::default(),
+            _bitfield_1: Default::default(),
         }));
     }
 }

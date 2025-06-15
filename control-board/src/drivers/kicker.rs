@@ -62,8 +62,8 @@ impl<
             stm32_uart_interface: stm32_interface,
             firmware_image,
 
-            command_state: get_empty_control_packet(),
-            telemetry_state: get_empty_telem_packet(),
+            command_state: Default::default(),
+            telemetry_state: Default::default(),
 
             telemetry_enabled: false,
         }
@@ -200,23 +200,5 @@ impl<
 
     pub async fn init_default_firmware_image(&mut self, flash: bool) -> Result<(), ()> {
         return self.init_firmware_image(flash, self.firmware_image).await;
-    }
-}
-
-fn get_empty_control_packet() -> KickerControl {
-    KickerControl {
-        _bitfield_align_1: [],
-        _bitfield_1: KickerControl::new_bitfield_1(0, 0, 0),
-        kick_request: KickRequest::KR_DISABLE,
-        kick_speed: 0.0,
-    }
-}
-
-fn get_empty_telem_packet() -> KickerTelemetry {
-    KickerTelemetry {
-        _bitfield_align_1: [],
-        _bitfield_1: KickerTelemetry::new_bitfield_1(0, 0, 0, 0),
-        rail_voltage: 0.0,
-        battery_voltage: 0.0,
     }
 }

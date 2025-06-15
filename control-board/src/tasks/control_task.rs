@@ -1,4 +1,4 @@
-use ateam_common_packets::{bindings::{BasicTelemetry, MotorCommand_MotionType}, radio::TelemetryPacket};
+use ateam_common_packets::{bindings::{BasicTelemetry, MotionCommandType}, radio::TelemetryPacket};
 use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::Uart;
@@ -170,34 +170,41 @@ impl <
 
             let basic_telem = TelemetryPacket::Basic(BasicTelemetry {
                 sequence_number: 0,
-                robot_revision_major: 0,
+                robot_revision_major: 2,
                 robot_revision_minor: 0,
-                battery_level: battery_voltage,
-                battery_temperature: 0.,
                 _bitfield_align_1: [],
+                battery_percent: 0,
+                kicker_charge_percent: 0,
                 _bitfield_1: BasicTelemetry::new_bitfield_1(
-                    0, 0, 0, self.shared_robot_state.ball_detected() as u32, 0, 0, 0, 0, err_fl, hall_err_fl, err_bl, hall_err_bl, err_br, hall_err_br, err_fr, hall_err_fr, err_drib, hall_err_drib, 0, 0, 0,
+                    0, 1, 0, 0, 0, // power battery error flags not supported by this generation
+                    self.shared_robot_state.shutdown_requested() as u32,
+                    self.shared_robot_state.robot_tipped() as u32,
+                    0, self.shared_robot_state.ball_detected() as u32, 
+                    self.shared_robot_state.get_imu_inop() as u32, 0, 
+                    self.shared_robot_state.get_imu_inop() as u32, 0, 
+                    err_fl, hall_err_fl,
+                    err_bl, hall_err_bl,
+                    err_br, hall_err_br,
+                    err_fr, hall_err_fr,
+                    err_drib, hall_err_drib, 
+                    self.shared_robot_state.get_kicker_inop() as u32, 0, 1,
+                    1, 0, 0,
+                    Default::default()
                 ),
-                motor_0_temperature: 0.,
-                motor_1_temperature: 0.,
-                motor_2_temperature: 0.,
-                motor_3_temperature: 0.,
-                motor_4_temperature: 0.,
-                kicker_charge_level: 0.,
             });
             self.telemetry_publisher.publish_immediate(basic_telem);
 
             let mut control_debug_telem = robot_controller.get_control_debug_telem();
 
-            control_debug_telem.motor_fl = self.motor_fl.get_latest_state();
-            control_debug_telem.motor_bl = self.motor_bl.get_latest_state();
-            control_debug_telem.motor_br = self.motor_br.get_latest_state();
-            control_debug_telem.motor_fr = self.motor_fr.get_latest_state();
+            control_debug_telem.front_left_motor = self.motor_fl.get_latest_state();
+            control_debug_telem.back_left_motor = self.motor_bl.get_latest_state();
+            control_debug_telem.back_right_motor = self.motor_br.get_latest_state();
+            control_debug_telem.front_right_motor = self.motor_fr.get_latest_state();
 
             control_debug_telem.imu_accel[0] = self.last_accel_x_ms;
             control_debug_telem.imu_accel[1] = self.last_accel_y_ms;
 
-            let control_debug_telem = TelemetryPacket::Control(control_debug_telem);
+            let control_debug_telem = TelemetryPacket::Extended(control_debug_telem);
             self.telemetry_publisher.publish_immediate(control_debug_telem);
         }
     
@@ -227,10 +234,10 @@ impl <
             self.motor_fr.set_telemetry_enabled(true);
             self.motor_drib.set_telemetry_enabled(true);
 
-            self.motor_fl.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
-            self.motor_bl.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
-            self.motor_br.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
-            self.motor_fr.set_motion_type(MotorCommand_MotionType::OPEN_LOOP);
+            self.motor_fl.set_motion_type(MotionCommandType::OPEN_LOOP);
+            self.motor_bl.set_motion_type(MotionCommandType::OPEN_LOOP);
+            self.motor_br.set_motion_type(MotionCommandType::OPEN_LOOP);
+            self.motor_fr.set_motion_type(MotionCommandType::OPEN_LOOP);
 
 
             Timer::after_millis(10).await;
