@@ -46,15 +46,20 @@ inline void setup_clocks() {
     RCC->CFGR3 = 0;
     RCC->CIR = 0;
 
-    // wait for HSI to be stable
-    while ((RCC->CR & RCC_CR_HSIRDY) == 0) {
+    // HSE (High Speed External) is driven by external clock (8 MHz)
+    RCC->CR |= RCC_CR_HSEON;
+
+    // wait for HSE to be stable
+    while ((RCC->CR & RCC_CR_HSERDY) == 0) {
         asm volatile("nop");
     }
 
-    // PLL src -> HSI, follows a hard coded /2 div -> 4MHz
-    RCC->CFGR |= RCC_CFGR_PLLSRC_HSI_DIV2;
-    // PLL mul 12 -> 4 * 12 -> 48 MHz which is the sysclk max
-    RCC->CFGR |= RCC_CFGR_PLLMUL12;
+    // HSE -> PLL src, divide by 1
+    // PREDIV1 -> 1, e.g. no division
+    RCC->CFGR2 |= RCC_CFGR2_PREDIV_DIV1;
+    RCC->CFGR |= RCC_CFGR_PLLSRC_HSE_PREDIV;
+    // PLL mul 6 -> 8 * 6 -> 48 MHz which is the sysclk max
+    RCC->CFGR |= RCC_CFGR_PLLMUL6;
     // turn on the PLL
     RCC->CR |= RCC_CR_PLLON;
     // wait for PLL stability (48 MHz)
@@ -78,15 +83,14 @@ inline void setup_clocks() {
         asm volatile("nop");
     }
 
-    // Set AHB clock freq to sysclk (48MHz)
-    // HPRE -> 1
-    RCC->CFGR |= RCC_CFGR_HPRE_0;
+    // Set AHB (HCLK) clock freq to sysclk (48MHz)
+    // HPRE -> 0xxx -> SYSCLK not divided
+    RCC->CFGR &= ~(RCC_CFGR_HPRE_3);
 
-    // Set APB clock freq to AHB clk (48MHz)
-    // PPRE div -> 1
-    RCC->CFGR |= RCC_CFGR_PPRE_0;
-    // PPRE mul -> 1
-    // ??? dont see this cfg
+    // Set APB (PCLK) clock freq to AHB (HCLK) clk (48MHz)
+    // PPRE -> 0xx -> HCLK not divided
+    RCC->CFGR &= ~(RCC_CFGR_PPRE_2);
+
     // USART1SW src -> PCLK
     RCC->CFGR3 |= RCC_CFGR3_USART1SW_PCLK;
 
@@ -109,13 +113,13 @@ inline void setup_clocks() {
     // MCOPRE -> 1
     RCC->CFGR |= RCC_CFGR_MCOPRE_DIV1;
 
-    // https://developer.arm.com/documentation/dui0552/a/cortex-m3-peripherals/system-timer--systick/systick-reload-value-register
-    // set source to sysclk (48MHz)
+    // https://developer.arm.com/documentation/dui0552/a/cortex-m3-peripherals/system-timer--systick
+    // Set SysTick source to HCLK -> 48 MHz
     SysTick->CTRL |= SysTick_CTRL_CLKSOURCE_Msk;
     // timer counts down to fire approximately every 1ms
-    SysTick->LOAD = (F_SYS_CLK_HZ / 1000UL);
-    // current value set to 0, e.g. no trigger event
-    SysTick->VAL = (F_SYS_CLK_HZ / 1000UL) - 1;
+    SysTick->LOAD = (F_SYS_CLK_HZ / 1000UL) - 1;
+    // Current value set to 0
+    SysTick->VAL = 0;
     // enable the interrupt
     SysTick->CTRL |= SysTick_CTRL_TICKINT_Msk;
     // enable the counter
