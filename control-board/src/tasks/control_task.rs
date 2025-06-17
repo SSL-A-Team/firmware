@@ -288,6 +288,9 @@ impl <
                 while let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
                     match latest_packet {
                         ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
+                            if latest_control.request_shutdown() != 0 {
+                                defmt::info!("REMOTE SHUTDOWN TRIGGERED!");
+                            }
 
                             let new_cmd_vel = Vector3::new(
                                 latest_control.vel_x_linear,
