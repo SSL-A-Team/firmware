@@ -180,3 +180,7 @@ float gspid_calculate(GainScheduledPid_t *pid, float r, float y, float dt) {
     float u = r + (termP + termI + termD);
     return u;
 }
+
+size_t gspid_get_cur_gain_stage_index(GainScheduledPid_t *pid) {
+    return pid->cur_gain_stage_ind;
+}

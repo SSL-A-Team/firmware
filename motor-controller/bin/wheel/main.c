@@ -462,6 +462,8 @@ int main() {
                     || response_packet.data.motion.overvoltage_error
                     || response_packet.data.motion.control_loop_time_error;
 
+            response_packet.data.motion.gain_stage_index = gspid_get_cur_gain_stage_index(&vel_pid) & 0xFF;
+
             // transmit packets
 #ifdef UART_ENABLED
             if (telemetry_enabled && run_telemetry) {
