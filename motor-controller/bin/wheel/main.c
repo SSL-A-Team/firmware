@@ -135,16 +135,39 @@ int main() {
     df45_model.rads_to_dc_linear_map_b = DF45_RADS_TO_DC_LINEAR_B;
 
     // setup the velocity PID
-    PidConstants_t vel_pid_constants;
-    pid_constants_initialize(&vel_pid_constants);
-    Pid_t vel_pid;
-    pid_initialize(&vel_pid, &vel_pid_constants);
+    // PidConstants_t vel_pid_constants;
+    // pid_constants_initialize(&vel_pid_constants);
+    // Pid_t vel_pid;
+    // pid_initialize(&vel_pid, &vel_pid_constants);
 
-    vel_pid_constants.kP = 5.5f;
-    vel_pid_constants.kI = 8.0f;
-    vel_pid_constants.kD = 0.1f;
-    vel_pid_constants.kI_max = 20.0;
-    vel_pid_constants.kI_min = -20.0;
+    // vel_pid_constants.kP = 5.5f;
+    // vel_pid_constants.kI = 8.0f;
+    // vel_pid_constants.kD = 0.1f;
+    // vel_pid_constants.kI_max = 20.0;
+    // vel_pid_constants.kI_min = -20.0;
+
+    GainScheduledPid_t vel_pid;
+    PidConstants_t vel_gains[2] = {
+        {
+            .kP = 5.5f,
+            .kI = 8.0f,
+            .kD = 0.1f,
+            .kI_max = 20.0f,
+            .kI_min = -20.0f,
+        },
+        {
+            .kP = 5.5f,
+            .kI = 8.0f,
+            .kD = 0.1f,
+            .kI_max = 20.0f,
+            .kI_min = -20.0f,
+        }
+    };
+    float vel_gain_schedule[2] = {
+        10.0f,
+        30.0f,
+    }; // rad/s
+    gspid_initialize(&vel_pid, 2, vel_gains, vel_gain_schedule, 0.2f, true);
 
     // setup the torque PID
     PidConstants_t torque_pid_constants;
@@ -224,22 +247,24 @@ int main() {
                     time_set_epoch_seconds(motor_command_packet.data.params.update_timestamp);
                 }
 
-                if (motor_command_packet.data.params.update_vel_p) {
-                    vel_pid_constants.kP = motor_command_packet.data.params.vel_p;
-                }
+                // TODO remote PID updates are off for gain scheduled PID
 
-                if (motor_command_packet.data.params.update_vel_i) {
-                    vel_pid_constants.kI = motor_command_packet.data.params.vel_i;
-                }
+                // if (motor_command_packet.data.params.update_vel_p) {
+                //     vel_pid_constants.kP = motor_command_packet.data.params.vel_p;
+                // }
 
-                if (motor_command_packet.data.params.update_vel_d) {
-                    vel_pid_constants.kD = motor_command_packet.data.params.vel_d;
-                }
+                // if (motor_command_packet.data.params.update_vel_i) {
+                //     vel_pid_constants.kI = motor_command_packet.data.params.vel_i;
+                // }
 
-                if (motor_command_packet.data.params.update_vel_i_max) {
-                    vel_pid_constants.kI_max = motor_command_packet.data.params.vel_i_max;
-                    vel_pid_constants.kI_min = -motor_command_packet.data.params.vel_i_max;
-                }
+                // if (motor_command_packet.data.params.update_vel_d) {
+                //     vel_pid_constants.kD = motor_command_packet.data.params.vel_d;
+                // }
+
+                // if (motor_command_packet.data.params.update_vel_i_max) {
+                //     vel_pid_constants.kI_max = motor_command_packet.data.params.vel_i_max;
+                //     vel_pid_constants.kI_min = -motor_command_packet.data.params.vel_i_max;
+                // }
 
                 if (motor_command_packet.data.params.update_cur_p) {
                     torque_pid_constants.kP = motor_command_packet.data.params.cur_p;
@@ -346,7 +371,7 @@ int main() {
             enc_rad_s_filt = iir_filter_update(&encoder_filter, enc_vel_rads);
 
             // compute the velocity PID
-            control_setpoint_vel_rads = pid_calculate(&vel_pid, r_motor_board, enc_rad_s_filt, VELOCITY_LOOP_RATE_S);
+            control_setpoint_vel_rads = gspid_calculate(&vel_pid, r_motor_board, enc_rad_s_filt, VELOCITY_LOOP_RATE_S);
 
             // Clamp setpoint acceleration
             float setpoint_accel_rads_2 = (control_setpoint_vel_rads - control_setpoint_vel_rads_prev)/VELOCITY_LOOP_RATE_S;
@@ -471,10 +496,12 @@ int main() {
                 response_packet.data.params.version_patch = VERSION_PATCH;
                 response_packet.data.params.timestamp = time_local_epoch_s();
 
-                response_packet.data.params.vel_p = vel_pid_constants.kP;
-                response_packet.data.params.vel_i = vel_pid_constants.kI;
-                response_packet.data.params.vel_d = vel_pid_constants.kD;
-                response_packet.data.params.vel_i_max = vel_pid_constants.kI_max;
+                // TODO parameter updates are off for gain scheduled PID
+                // response_packet.data.params.vel_p = vel_pid_constants.kP;
+                // response_packet.data.params.vel_i = vel_pid_constants.kI;
+                // response_packet.data.params.vel_d = vel_pid_constants.kD;
+                // response_packet.data.params.vel_i_max = vel_pid_constants.kI_max;
+
                 response_packet.data.params.cur_p = torque_pid_constants.kP;
                 response_packet.data.params.cur_i = torque_pid_constants.kI;
                 response_packet.data.params.cur_d = torque_pid_constants.kD;
