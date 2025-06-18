@@ -350,6 +350,7 @@ impl<
         .write(|buf| {
             buf[0] = STM32_BOOTLOADER_CMD_READ_MEM;
             buf[1] = !STM32_BOOTLOADER_CMD_READ_MEM;
+            //defmt::info!("send buffer {:?}", buf);
             2
         })
         .await?;
@@ -431,6 +432,73 @@ impl<
                 }
             } else {
                 defmt::error!("Data read mem reply too short!");
+            }
+        }).await?;
+
+        res
+    }
+
+    // Based on 3.8 of AN3155
+    // Have to use extended erase command since the normal erase command
+    // doesn't seem to work?
+    // Designed to erase a single page of device memory.
+    pub async fn erase_device_memory_single(&self, erase_page: u8) -> Result<(), ()> {
+        if !self.in_bootloader {
+            defmt::error!("Called bootloader operation when not in bootloader context.");
+            return Err(());
+        }
+
+        // defmt::debug!("sending the erase command...");
+        self.writer
+        .write(|buf| {
+            buf[0] = STM32_BOOTLOADER_CMD_EXTENDED_ERASE;
+            buf[1] = !STM32_BOOTLOADER_CMD_EXTENDED_ERASE;
+            2
+        })
+        .await?;
+
+        let mut res = Err(());
+        self.reader.read(|buf| {
+            // defmt::info!("erase cmd reply {:?}", buf);
+            if buf.len() >= 1 {
+                if buf[0] == STM32_BOOTLOADER_ACK {
+                    res = Ok(());
+                } else {
+                    defmt::error!("Bootloader replied to erase command with NACK");
+                }
+            }
+        }).await?;
+
+        if res.is_err() {
+            return res;
+        }
+
+        // defmt::debug!("sending the page number...");
+        self.writer
+        .write(|buf| {
+            // Quantity is N + 1, so 0x0000 for single page erase, MSB
+            buf[0] = 0x00;
+            buf[1] = 0x00;
+            // Page number is the page to erase, but never greater than a byte, MSB
+            buf[2] = 0x00;
+            buf[3] = erase_page;
+            // Checksum for all previous bytes is just the erase page number
+            buf[4] = erase_page;
+            // defmt::debug!("send buffer {:?}", buf);
+            5
+        })
+        .await?;
+
+        // defmt::debug!("wait for erase reply");
+        self.reader.read(|buf| {
+            // defmt::info!("erase reply {:?}", buf);
+            if buf.len() >= 1 {
+                if buf[0] == STM32_BOOTLOADER_ACK {
+                    res = Ok(());
+                    // defmt::info!("erase accepted.");
+                } else {
+                    defmt::error!("bootloader replied to erase payload with NACK");
+                }
             }
         }).await?;
 
@@ -610,6 +678,23 @@ impl<
         Ok(())
     }
 
+    pub async fn erase_flash_memory_to_page(&self, last_erase_page: u8) -> Result<(), ()> {
+        if !self.in_bootloader {
+            defmt::error!("called bootloader operation when not in bootloader context.");
+            return Err(());
+        }
+
+        // Go through all pages up to the last erase page (exclusive)
+        for page in 0..last_erase_page {
+            if let Err(err) = self.erase_device_memory_single(page).await {
+                defmt::error!("failed to erase page {}: {:?}", page, err);
+                return Err(());
+            }
+        }
+
+        Ok(())
+    }
+
     pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
         if !self.in_bootloader {
             if let Err(err) = self.reset_into_bootloader().await {
@@ -621,45 +706,74 @@ impl<
             return Err(err);
         }
 
-        match self.get_device_id().await {
+        let device_id = match self.get_device_id().await {
             Err(err) => return Err(err),
             Ok(device_id) => match device_id {
-                68 => {
-                    defmt::trace!("found stm32f1 device");
-                }
-                19 => {
-                    defmt::trace!("found stm32f40xxx device");
-                }
-                _ => {
-                    defmt::trace!("found unknown device id {}", device_id);
-                    return Err(());
-                }
+            68 => {
+                defmt::trace!("found stm32f1 device");
+                device_id
+            }
+            19 => {
+                defmt::trace!("found stm32f40xxx device");
+                device_id
+            }
+            _ => {
+                defmt::trace!("found unknown device id {}", device_id);
+                return Err(());
+            }
             }
         };
 
-        let mut read_data = [0u8; 63];
+        let mut read_data = [0u8; 8];
         if self.read_device_memory(&mut read_data, 0x0800_7C00).await.is_err() {
             return Err(());
         }
         defmt::info!("read device memory: {:x}", read_data);
 
-        // TODO Implement a chunk erase.
-        //let data_write: [u8; 7] = [69, 42, 00, 1, 2, 3, 4];
-        //if self.write_device_memory_chunk(&data_write, 0x0800_7C00).await.is_err() {
-        //    return Err(());
-        //}
-        //defmt::info!("wrote device memory: {:x}", data_write);
-//
-        //// Read back the data to verify it was written correctly
-        //let mut read_data_2 = [0u8; 63];
-        //if self.read_device_memory(&mut read_data_2, 0x0800_7C00).await.is_err() {
-        //    return Err(());
-        //}
-        //defmt::info!("read back device memory: {:x}", read_data_2);
+        let data_write: [u8; 8] = [0x69, 0x42, 0x00, 0x51, 0x01, 0x02, 0x03, 0x04];
+        if self.write_device_memory_chunk(&data_write, 0x0800_7C00).await.is_err() {
+            return Err(());
+        }
+        defmt::info!("wrote device memory: {:x}", data_write);
 
+        // Read back the data to verify it was written correctly
+        let mut read_data_2 = [0u8; 8];
+        if self.read_device_memory(&mut read_data_2, 0x0800_7C00).await.is_err() {
+            return Err(());
+        }
+        defmt::info!("read back device memory: {:x}", read_data_2);
+
+        // Erase the page
+        let erase_page = 31; // Example page number, adjust as needed
+        if self.erase_device_memory_single(erase_page).await.is_err() {
+            return Err(());
+        }
+        defmt::info!("erased page {}", erase_page);
+
+        // Verify the page is erased
+        let mut read_data_3 = [0u8; 8];
+        if self.read_device_memory(&mut read_data_3, 0x0800_7C00).await.is_err() {
+            return Err(());
+        }
+        defmt::info!("read back device memory after erase: {:x}", read_data_3);
+
+        let data_write2: [u8; 8] = [0xAA, 0xBB, 0xCC, 0x99, 0x88, 0x77, 0x66, 0x55];
+        if self.write_device_memory_chunk(&data_write2, 0x0800_7C00).await.is_err() {
+            return Err(());
+        }
+        defmt::info!("wrote device memory after erase: {:x}", data_write2);
+
+        // Read back the data to verify it was written correctly
+        let mut read_data_4 = [0u8; 8];
+        if self.read_device_memory(&mut read_data_4, 0x0800_7C00).await.is_err() {
+            return Err(());
+        }
+        defmt::info!("read back device memory after write: {:x}", read_data_4);
+
+        // TODO account for memory size and erase size generically
 
         // erase part
-        if let Err(err) = self.erase_flash_memory().await {
+        if let Err(err) = self.erase_flash_memory_to_page(31).await {
             return Err(err);
         }
 
