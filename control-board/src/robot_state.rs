@@ -44,11 +44,11 @@ impl SharedRobotState {
             radio_inop: AtomicBool::new(true),
             imu_inop: AtomicBool::new(true),
             kicker_inop: AtomicBool::new(true),
-            wheels_inop: AtomicU8::new(0x0F), 
+            wheels_inop: AtomicU8::new(0x0F),
             dribbler_inop: AtomicBool::new(true),
             last_packet_receive_time_ticks_ms: AtomicU32::new(0),
-            radio_network_ok: AtomicBool::new(false), 
-            radio_bridge_ok: AtomicBool::new(false), 
+            radio_network_ok: AtomicBool::new(false),
+            radio_bridge_ok: AtomicBool::new(false),
             battery_low: AtomicBool::new(false),
             battery_crit: AtomicBool::new(false),
             robot_tipped: AtomicBool::new(false),
@@ -71,7 +71,7 @@ impl SharedRobotState {
             kicker_inop: self.get_kicker_inop(),
             wheels_inop: self.get_wheels_inop(),
             dribbler_inop: self.get_dribbler_inop(),
-        
+
             last_packet_receive_time_ticks_ms: 0,
             radio_network_ok: self.get_radio_network_ok(),
             radio_bridge_ok: self.get_radio_bridge_ok(),
@@ -118,7 +118,7 @@ impl SharedRobotState {
     pub fn set_hw_network_index(&self, ind: u8) {
         self.hw_wifi_network_index.store(ind, Ordering::Relaxed);
     }
- 
+
     pub fn hw_in_debug_mode(&self) -> bool {
         self.hw_debug_mode.load(Ordering::Relaxed)
     }
