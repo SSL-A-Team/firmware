@@ -1,10 +1,11 @@
 use core::mem::{self};
+use defmt::Format;
 
 use super::at_protocol::*;
 
 // Data to/from radio is in big endian mode, ensure proper conversions are done
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug, Format)]
 pub enum EdmPacketError {
     PacketTypeDecodingFailed,
     PacketTypeDecodeLengthMismatch,

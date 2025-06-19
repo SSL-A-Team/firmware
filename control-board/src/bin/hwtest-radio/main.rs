@@ -11,7 +11,7 @@ use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 
 use defmt_rtt as _;
 
-use ateam_control_board::{create_io_task, create_radio_task, get_system_config, pins::{BatteryVoltPubSub, CommandsPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
+use ateam_control_board::{create_dotstar_task, create_io_task, create_radio_task, get_system_config, pins::{BatteryVoltPubSub, CommandsPubSub, LedCommandPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
 
 
 // load credentials from correct crate
@@ -22,14 +22,23 @@ use credentials::public_credentials::wifi::wifi_credentials;
 
 use embassy_time::Timer;
 // provide embedded panic probe
-use panic_probe as _;
+// use panic_probe as _;
 use static_cell::ConstStaticCell;
+
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    defmt::error!("{}", defmt::Display2Format(info));
+    // Delay to give it a change to print
+    cortex_m::asm::delay(100_000_000);
+    cortex_m::peripheral::SCB::sys_reset();
+}
 
 static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
 
 static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
 static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
 static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
+static LED_COMMAND_PUBSUB: LedCommandPubSub = PubSubChannel::new();
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
@@ -66,12 +75,15 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     // commands channel
     let radio_command_publisher = RADIO_C2_CHANNEL.publisher().unwrap();
     let mut control_command_subscriber = RADIO_C2_CHANNEL.subscriber().unwrap();
+    let radio_led_cmd_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
 
     // telemetry channel
     let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
     let radio_telemetry_subscriber = RADIO_TELEMETRY_CHANNEL.subscriber().unwrap();
 
     let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
+
+    let led_command_subscriber = LED_COMMAND_PUBSUB.subscriber().unwrap();
 
 
     ///////////////////
@@ -80,15 +92,22 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     
     defmt::info!("starting tasks");
 
+    create_io_task!(main_spawner,
+        robot_state,
+        battery_volt_publisher,
+        p);
+
+    create_dotstar_task!(main_spawner,
+        led_command_subscriber,
+        p);
+
     create_radio_task!(main_spawner, uart_queue_spawner, uart_queue_spawner,
         robot_state,
-        radio_command_publisher, radio_telemetry_subscriber,
+        radio_command_publisher, radio_telemetry_subscriber, radio_led_cmd_publisher,
         wifi_credentials,
         p);
 
     defmt::info!("radio task started");
-
-    create_io_task!(main_spawner, robot_state, battery_volt_publisher, p);
 
     loop {
         match select::select(control_command_subscriber.next_message(), Timer::after_millis(1000)).await {

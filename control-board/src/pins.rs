@@ -6,6 +6,8 @@ use embassy_sync::{
     blocking_mutex::raw::ThreadModeRawMutex,
     pubsub::{PubSubChannel, Publisher, Subscriber}};
 
+use crate::tasks::dotstar_task::ControlBoardLedCommand;
+
 /////////////////////
 //  Pub Sub Types  //
 /////////////////////
@@ -34,6 +36,13 @@ pub type AccelDataSubscriber = Subscriber<'static, ThreadModeRawMutex, nalgebra:
 pub type BatteryVoltPubSub = PubSubChannel<ThreadModeRawMutex, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
 pub type BatteryVoltPublisher = Publisher<'static, ThreadModeRawMutex, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
 pub type BatteryVoltSubscriber = Subscriber<'static, ThreadModeRawMutex, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
+
+const LED_COMMAND_PUBSUB_DEPTH: usize = 5;
+const LED_COMMAND_PUBSUB_NUM_PUBS: usize = 3;
+const LED_COMMAND_PUBSUB_NUM_SUBS: usize = 1;
+pub type LedCommandPubSub = PubSubChannel<ThreadModeRawMutex, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, LED_COMMAND_PUBSUB_NUM_SUBS, LED_COMMAND_PUBSUB_NUM_PUBS>;
+pub type LedCommandPublisher = Publisher<'static, ThreadModeRawMutex, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, LED_COMMAND_PUBSUB_NUM_SUBS, LED_COMMAND_PUBSUB_NUM_PUBS>;
+pub type LedCommandSubscriber = Subscriber<'static, ThreadModeRawMutex, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, LED_COMMAND_PUBSUB_NUM_SUBS, LED_COMMAND_PUBSUB_NUM_PUBS>;
 
 /////////////
 //  Radio  //
@@ -120,8 +129,8 @@ pub type PowerUartRxPin = PG0;
 pub type PowerUartTxPin = PG1;
 // pub type PowerUartCtsPin = None;
 // pub type PowerUartRtsPin = None;
-pub type PowerRxDma = NoDma;
-pub type PowerTxDma = NoDma;
+pub type PowerRxDma = DMA2_CH4;
+pub type PowerTxDma = DMA2_CH5;
 
 
 ////////////////////
@@ -133,8 +142,8 @@ pub type OpticalFlowUartRxPin = PB8;
 pub type OpticalFlowUartTxPin = PB9;
 pub type OpticalFlowUartCtsPin = PB15;
 pub type OpticalFlowUartRtsPin = PB14;
-pub type OpticalFlowDmaRx = DMA2_CH4;
-pub type OpticalFlowDmaTx = DMA2_CH5;
+pub type OpticalFlowDmaRx = NoDma;
+pub type OpticalFlowDmaTx = NoDma;
 pub type OpticalFlowBootPin = PB7;
 pub type OpticalFlowResetPin = PB6;
 
@@ -245,10 +254,10 @@ pub type UsrLed2Pin = PG4;
 pub type UsrLed3Pin = PD13;
 
 pub type RobotIdSrcDisagree = PD10;
-pub type RobotIdIndicator0FlPin = PC0;
-pub type RobotIdIndicator1BlPin = PC2;
-pub type RobotIdIndicator2BrPin = PC3;
-pub type RobotIdIndicator3FrPin = PC1;
+pub type RobotIdIndicator0FlPin = PC3;
+pub type RobotIdIndicator1BlPin = PC1;
+pub type RobotIdIndicator2BrPin = PC0;
+pub type RobotIdIndicator3FrPin = PC2;
 pub type RobotIdIndicator4TeamIsBluePin = PF10;
 
 pub type DotstarSpi = SPI6;

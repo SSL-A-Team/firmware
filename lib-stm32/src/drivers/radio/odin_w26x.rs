@@ -1,4 +1,5 @@
 use core::fmt::Write;
+use defmt::Format;
 use embassy_futures::select::select;
 use embassy_stm32::usart;
 use embassy_time::Timer;
@@ -10,7 +11,7 @@ use crate::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
 use super::at_protocol::{ATEvent, ATResponse, WifiLinkDisconnectedReason};
 use super::edm_protocol::{EdmPacket, EdmPacketError};
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug, Format)]
 pub enum OdinRadioError {
     CommandConstructionFailed,
     EdmPacketError(EdmPacketError),
@@ -113,7 +114,7 @@ impl<
 
         self.reader
             .dequeue(|buf| {
-                defmt::info!("dequeueing {}", buf);
+                // defmt::trace!("radio dequeueing {}", buf);
                 if let EdmPacket::ATResponse(ATResponse::Other("+STARTUP")) = self.to_packet(buf)? {
                     Ok(())
                 } else {
@@ -445,7 +446,7 @@ impl<
         Ok(())
     }
 
-    pub async fn send_data(&self, channel_id: u8, data: &[u8]) -> Result<(), OdinRadioError> {
+    pub fn send_data(&self, channel_id: u8, data: &[u8]) -> Result<(), OdinRadioError> {
         let res = self.writer.enqueue(|buf| {
                 EdmPacket::DataCommand {
                     channel: channel_id,
@@ -502,7 +503,11 @@ impl<
                 // we read something
 
             },
-            Err(queue::Error::QueueFullEmpty) => {
+            Err(queue::Error::QueueFull) => {
+                // nothing to read
+                return Err(OdinRadioError::ReadLowLevelBufferEmpty);
+            }
+            Err(queue::Error::QueueEmpty) => {
                 // nothing to read
                 Err(OdinRadioError::ReadLowLevelBufferEmpty)
             }
@@ -526,7 +531,7 @@ impl<
                     // queue was full
                     return Err(OdinRadioError::SendCommandLowLevelBufferFull)
                 }
-                
+
                 Ok(())
             }
             RadioMode::ExtendedDataMode => {
@@ -613,7 +618,7 @@ impl<
             if brk {
                 break;
             }
-            
+
         }
 
         res

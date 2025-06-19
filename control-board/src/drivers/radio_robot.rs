@@ -15,6 +15,8 @@ use embassy_stm32::usart::{self, DataBits, Parity, StopBits};
 use embassy_time::{Duration, Timer};
 use heapless::String;
 
+use defmt::Format;
+
 const MULTICAST_IP: &str = "224.4.20.69";
 const MULTICAST_PORT: u16 = 42069;
 const LOCAL_PORT: u16 = 42069;
@@ -32,7 +34,7 @@ pub enum TeamColor {
     Blue,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Format)]
 pub enum RobotRadioError {
     DriverError(OdinRadioError),
 
@@ -68,6 +70,12 @@ impl From<OdinRadioError> for RobotRadioError {
         RobotRadioError::DriverError(err)
     }
 }
+
+// impl defmt::Format for RobotRadioError {
+//     fn format(&self, fmt: defmt::Formatter) {
+        
+//     }
+// }
 
 unsafe impl<
         'a,
@@ -313,9 +321,9 @@ impl<
         }
     }
 
-    pub async fn send_data(&self, data: &[u8]) -> Result<(), RobotRadioError> {
+    pub fn send_data(&self, data: &[u8]) -> Result<(), RobotRadioError> {
         if let Some(peer) = &self.peer {
-            self.odin_driver.send_data(peer.channel_id, data).await?;
+            self.odin_driver.send_data(peer.channel_id, data)?;
             Ok(())
         } else {
             Err(RobotRadioError::PeerMissing)
@@ -377,7 +385,7 @@ impl<
                 size_of::<RadioPacket>() - size_of::<RadioPacket_Data>(),
             )
         };
-        self.send_data(packet_bytes).await?;
+        self.send_data(packet_bytes)?;
 
         Ok(())
     }
@@ -425,12 +433,12 @@ impl<
                     + size_of::<HelloRequest>(),
             )
         };
-        self.send_data(packet_bytes).await?;
+        self.send_data(packet_bytes)?;
 
         Ok(())
     }
 
-    pub async fn send_telemetry(&self, telemetry: BasicTelemetry) -> Result<(), RobotRadioError> {
+    pub fn send_telemetry(&self, telemetry: BasicTelemetry) -> Result<(), RobotRadioError> {
         let packet = RadioPacket {
             crc32: 0,
             major_version: bindings::kProtocolVersionMajor,
@@ -448,7 +456,7 @@ impl<
                     + size_of::<BasicTelemetry>(),
             )
         };
-        self.send_data(packet_bytes).await?;
+        self.send_data(packet_bytes)?;
 
         Ok(())
     }
@@ -471,7 +479,7 @@ impl<
                     + size_of::<ControlDebugTelemetry>(),
             )
         };
-        self.send_data(packet_bytes).await?;
+        self.send_data(packet_bytes)?;
 
         Ok(())
     }
@@ -494,7 +502,7 @@ impl<
                     + size_of::<ParameterCommand>(),
             )
         };
-        self.send_data(packet_bytes).await?;
+        self.send_data(packet_bytes)?;
 
         Ok(())
     }
@@ -582,7 +590,7 @@ impl<
                             Err(_) => {
                                 // we got data that was a valid EDM DataPacket, but couldn't parse it
                                 // into any known A-Team packet format
-                                defmt::trace!("got EDM packet but wasn't A-Team");
+                                defmt::debug!("got EDM packet but wasn't A-Team");
                                 return Err(());
                             },
                         }
@@ -592,8 +600,8 @@ impl<
                     },
                 }
             },
-            Err(_) => {
-                defmt::trace!("radio in invalid state");
+            Err(err_res) => {
+                defmt::debug!("radio in invalid state {:?}", err_res);
                 // read_data_nonblocking failed because the radio was in an invalid state
                 return Err(())
             },

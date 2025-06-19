@@ -218,7 +218,7 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
 
     lt.lock_test();
 
-    COMS_IDLE_BUFFERED_UART.init().await;
+    COMS_IDLE_BUFFERED_UART.init();
 
     let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
 

@@ -4,7 +4,7 @@
 
 
 use ateam_lib_stm32::drivers::led::apa102::Apa102;
-use embassy_stm32::{gpio::{Level, Output, Speed}, Config};
+use embassy_stm32::gpio::{Level, Output, Speed};
 use ateam_control_board::get_system_config;
 
 const DOTSTAR_BUF_SIZE: usize = 8 + (11 * 4);

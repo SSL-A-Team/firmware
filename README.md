@@ -41,7 +41,7 @@ The primary command `make control-board--control--run` will build all robot firm
 
 | Actions                         | Descrption                                                                                     |
 |---------------------------------|------------------------------------------------------------------------------------------------|
-| `<module>\-\-all`               | Builds all binaries for the module                                                             |
-| `<module>\-\-<binary>`          | Builds the binary for the module                                                               |
-| `<module>\-\-<binary>\-\-run`   | Flashes the binary to the hardware target, runs the binary, print messages appear in the shell |
-| `<module>\-\-<binary>\-\-debug` | Flashes the binary to the hardware target, attaches gdb, halts the processor at reset_vector   |
+| `<module>--all`               | Builds all binaries for the module                                                             |
+| `<module>--<binary>`          | Builds the binary for the module                                                               |
+| `<module>--<binary>--run`   | Flashes the binary to the hardware target, runs the binary, print messages appear in the shell |
+| `<module>--<binary>--debug` | Flashes the binary to the hardware target, attaches gdb, halts the processor at reset_vector   |

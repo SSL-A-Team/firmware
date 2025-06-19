@@ -1,5 +1,5 @@
 use ateam_common_packets::{bindings::{BasicTelemetry, MotorCommand_MotionType}, radio::TelemetryPacket};
-use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
+use ateam_lib_stm32::{drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::Uart;
 use embassy_time::{Duration, Ticker, Timer};
@@ -7,7 +7,7 @@ use nalgebra::{Vector3, Vector4};
 
 use crate::{include_external_cpp_bin, motion::{self, params::robot_physical_params::{
         WHEEL_ANGLES_DEG, WHEEL_DISTANCE_TO_ROBOT_CENTER_M, WHEEL_RADIUS_M
-    }, robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, parameter_interface::ParameterInterface, pins::*, robot_state::SharedRobotState, stm32_interface, stspin_motor::WheelMotor, SystemIrqs};
+    }, robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, parameter_interface::ParameterInterface, pins::*, robot_state::{RobotState, SharedRobotState}, stspin_motor::WheelMotor, SystemIrqs};
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 
@@ -22,7 +22,6 @@ static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_
 static_idle_buffered_uart!(FRONT_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
 
 const TICKS_WITHOUT_PACKET_STOP: usize = 20;
-const BATTERY_MIN_VOLTAGE: f32 = 18.0;
 
 // This is Gyro for all axes.
 const MAX_STATIONARY_GYRO_RADS: f32 = 0.1; // rad/s
@@ -203,6 +202,7 @@ impl <
 
         fn send_motor_commands_and_telemetry(&mut self,
                                             robot_controller: &mut BodyVelocityController,
+                                            cur_state: RobotState,
                                             battery_voltage: f32)
         {
             self.motor_fl.send_motion_command();
@@ -228,7 +228,7 @@ impl <
                 battery_temperature: 0.,
                 _bitfield_align_1: [],
                 _bitfield_1: BasicTelemetry::new_bitfield_1(
-                    0, 0, 0, self.shared_robot_state.ball_detected() as u32, 0, 0, 0, 0, err_fl, hall_err_fl, err_bl, hall_err_bl, err_br, hall_err_br, err_fr, hall_err_fr, 0, 0, 0, 0, 0,
+                    0, 0, 0, self.shared_robot_state.ball_detected() as u32, 0, 0, 0, 0, err_fl, hall_err_fl, err_bl, hall_err_bl, err_br, hall_err_br, err_fr, hall_err_fr, 0, 0, 0, !self.shared_robot_state.get_kicker_inop() as u32, 0,
                 ),
                 motor_0_temperature: 0.,
                 motor_1_temperature: 0.,
@@ -237,7 +237,10 @@ impl <
                 motor_4_temperature: 0.,
                 kicker_charge_level: 0.,
             });
-            self.telemetry_publisher.publish_immediate(basic_telem);
+
+            if cur_state.radio_bridge_ok {
+                self.telemetry_publisher.publish_immediate(basic_telem);
+            }
 
             let mut control_debug_telem = robot_controller.get_control_debug_telem();
 
@@ -250,7 +253,9 @@ impl <
             control_debug_telem.imu_accel[1] = self.last_accel_y_ms;
 
             let control_debug_telem = TelemetryPacket::Control(control_debug_telem);
-            self.telemetry_publisher.publish_immediate(control_debug_telem);
+            if cur_state.radio_bridge_ok {
+                self.telemetry_publisher.publish_immediate(control_debug_telem);
+            }
         }
 
         async fn control_task_entry(&mut self) {
@@ -345,6 +350,8 @@ impl <
                 motor_br_last_timestamp_ms = motor_br_current_timestamp_ms;
                 motor_fr_last_timestamp_ms = motor_fr_current_timestamp_ms;
 
+                let cur_state = self.shared_robot_state.get_state();
+
                 // self.motor_fl.log_reset("FL");
                 // self.motor_bl.log_reset("BL");
                 // self.motor_br.log_reset("BR");
@@ -419,11 +426,9 @@ impl <
                 self.motor_br.set_setpoint(wheel_vels[2]);
                 self.motor_fr.set_setpoint(wheel_vels[3]);
 
-                defmt::info!("MEASURED_CUR: FL: {}, BL: {}, BR: {}, FR: {}",
-                    (self.motor_fl.read_current() * 1000.0) as i32,
-                    (self.motor_bl.read_current() * 1000.0) as i32,
-                    (self.motor_br.read_current() * 1000.0) as i32,
-                    (self.motor_fr.read_current() * 1000.0) as i32);
+                // defmt::info!("wheel vels: {} {} {} {}", self.motor_fl.read_encoder_delta(), self.motor_bl.read_encoder_delta(), self.motor_br.read_encoder_delta(), self.motor_fr.read_encoder_delta());
+                // defmt::info!("wheel curr: {} {} {} {}", self.motor_fl.read_current(), self.motor_bl.read_current(), self.motor_br.read_current(), self.motor_fr.read_current());
+
 
                 //defmt::info!("TARGET_VEL: {}, MEASURED_VEL: {}, MEASURED_CUR: {}, TARGET_TOR: {}, MEASURED_TOR: {}, COMP_TOR: {}, DC_TOR: {}, DC_VEL: {}",
                 //    (self.motor_br.read_vel_setpoint() * 1000.0) as i32,
@@ -437,7 +442,7 @@ impl <
 
                 //defmt::info!("stspin temp: {} {} {} {}", self.motor_fl.read_mcu_temperature(), self.motor_bl.read_mcu_temperature(), self.motor_br.read_mcu_temperature(), self.motor_fr.read_mcu_temperature());
                 self.send_motor_commands_and_telemetry(
-                    &mut robot_controller, self.last_battery_v);
+                    &mut robot_controller, cur_state, self.last_battery_v);
 
                 loop_rate_ticker.next().await;
             }

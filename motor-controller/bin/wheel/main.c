@@ -31,6 +31,7 @@
 #include "system.h"
 #include "time.h"
 #include "uart.h"
+#include "image_hash.h"
 
 static int slipped_control_frame_count = 0;
 
@@ -146,9 +147,9 @@ int main() {
     Pid_t vel_pid;
     pid_initialize(&vel_pid, &vel_pid_constants);
 
-    vel_pid_constants.kP = 2.0f;
-    vel_pid_constants.kI = 0.0f;
-    vel_pid_constants.kD = 0.0f;
+    vel_pid_constants.kP = 5.5f;
+    vel_pid_constants.kI = 8.0f;
+    vel_pid_constants.kD = 0.1f;
     vel_pid_constants.kI_max = 20.0;
     vel_pid_constants.kI_min = -20.0;
 
@@ -389,12 +390,16 @@ int main() {
             control_setpoint_vel_rads_prev = control_setpoint_vel_rads;
 
             // back convert rads to duty cycle
-            vel_computed_duty = mm_rads_to_dc(&df45_model, control_setpoint_vel_rads);
+            if(r_motor_board == 0.0f) {
+                vel_computed_duty = 0.0f;
+            } else {
+                vel_computed_duty = mm_rads_to_dc(&df45_model, control_setpoint_vel_rads);
+            }
 
             // velocity control data
             response_packet.data.motion.vel_setpoint = r_motor_board;
-            response_packet.data.motion.encoder_delta = enc_delta;
-            response_packet.data.motion.vel_enc_estimate = enc_vel_rads_filt;
+            response_packet.data.motion.encoder_delta = enc_vel_rads;
+            response_packet.data.motion.vel_enc_estimate = enc_rad_s_filt;
             response_packet.data.motion.vel_computed_error = vel_pid.prev_err;
             response_packet.data.motion.vel_computed_rads = control_setpoint_vel_rads;
             response_packet.data.motion.vel_computed_duty = vel_computed_duty;
@@ -493,8 +498,9 @@ int main() {
                 response_packet.type = MRP_PARAMS;
 
                 response_packet.data.params.version_major = VERSION_MAJOR;
-                response_packet.data.params.version_major = VERSION_MINOR;
-                response_packet.data.params.version_major = VERSION_PATCH;
+                response_packet.data.params.version_minor = VERSION_MINOR;
+                response_packet.data.params.version_patch = VERSION_PATCH;
+                response_packet.data.params.timestamp = time_local_epoch_s();
 
                 response_packet.data.params.vel_p = vel_pid_constants.kP;
                 response_packet.data.params.vel_i = vel_pid_constants.kI;
@@ -506,6 +512,7 @@ int main() {
                 response_packet.data.params.torque_i_max = torque_pid_constants.kI_max;
                 response_packet.data.params.cur_clamp = (uint16_t) cur_limit;
 
+                memcpy(response_packet.data.params.wheel_img_hash, get_wheel_img_hash(), sizeof(response_packet.data.params.wheel_img_hash));
 #ifdef UART_ENABLED
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
                 // Capture the status for the response packet / LED.

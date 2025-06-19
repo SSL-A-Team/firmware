@@ -1,5 +1,5 @@
 [package]
-name = "ateam-lib-stm32-test"
+name = "ateam-power-board"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
@@ -39,6 +39,7 @@ critical-section = "1.2.0"
 const_format = "0.2.34"
 
 ateam-lib-stm32 = { path = "../lib-stm32", default-features = false }
+ateam-common-packets = { path = "../software-communication/ateam-common-packets/rust-lib" }
 
 smart-leds = "0.4.0"
 

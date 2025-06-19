@@ -1,15 +1,14 @@
 use core::cmp::min;
 
 use defmt_rtt as _;
-use defmt::*;
 
-use embassy_stm32::gpio::{Level, Output, OutputOpenDrain, Pin, Speed, Pull};
+use embassy_stm32::gpio::{Level, Output, Pin, Speed, Pull};
 use embassy_stm32::usart::{self, Config, DataBits, Parity, StopBits};
 use embassy_time::{Duration, Timer};
 use embassy_time::with_timeout;
 
-use ateam_lib_stm32::queue::{DequeueRef, Error};
-use ateam_lib_stm32::uart::queue::{IdleBufferedUart, Reader, UartReadQueue, UartWriteQueue, Writer};
+use crate::queue::{DequeueRef, Error};
+use crate::uart::queue::{IdleBufferedUart, Reader, UartReadQueue, UartWriteQueue, Writer};
 
 pub const STM32_BOOTLOADER_MAX_BAUD_RATE: u32 = 115_200;
 pub const STM32_BOOTLOADER_ACK: u8 = 0x79;
@@ -89,7 +88,7 @@ impl<
         write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
-        reset_pin_pull: Pull,
+        _reset_pin_pull: Pull,
         reset_polarity_high: bool,
     ) -> Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         let boot0_output = Output::new(boot0_pin, Level::Low, Speed::Medium);
@@ -206,6 +205,7 @@ impl<
             self.enter_reset().await;
         } else {
             // reset the device
+            // defmt::info!("resetting device");
             self.hard_reset().await;
         }
     }
@@ -542,7 +542,7 @@ impl<
             return res;
         }
 
-        // defmt::debug!("sending the load address {:?}...", write_base_addr);
+        // defmt::debug!("sending the load address {:X}...", write_base_addr);
         self.writer
         .write(|buf| {
             let sa_bytes: [u8; 4] = write_base_addr.to_be_bytes();
@@ -552,18 +552,18 @@ impl<
             buf[2] = sa_bytes[2];
             buf[3] = sa_bytes[3];
             buf[4] = cs;
-            // defmt::debug!("send buffer {:?}", buf);
+            // defmt::trace!("send load address buffer {:X}", buf);
             5
         })
         .await?;
 
         // defmt::debug!("wait for load address reply");
         self.reader.read(|buf| {
-            // defmt::info!("load address reply {:?}", buf);
+            defmt::trace!("load address reply {:X}", buf);
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
                     res = Ok(());
-                    // defmt::info!("load address accepted.");
+                    // defmt::trace!("load address accepted.");
                 } else {
                     defmt::error!("load address rejected (NACK)");
                 }
@@ -575,21 +575,22 @@ impl<
         .write(|buf| {
             let cs = Self::bootloader_checksum_buf(data);
             let data_len = data.len();
+            // defmt::trace!("firmware data buffer len {:?}", data_len);
             buf[0] = data_len as u8 - 1;
             buf[1..(data_len + 1)].copy_from_slice(data);
             buf[data_len + 1] = cs;
-            // defmt::debug!("send data buffer {:?}", buf);
+            // defmt::trace!("send data buffer {:X}", buf);
             data.len() + 2
         })
         .await?;
 
         // defmt::debug!("wait send data reply");
         self.reader.read(|buf| {
-            // defmt::info!("send data reply {:?}", buf);
+            // defmt::trace!("send data reply {:X}", buf);
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
                     res = Ok(());
-                    // defmt::info!("data accepted.");
+                    // defmt::trace!("data accepted.");
                 } else {
                     defmt::error!("data rejected (NACK)");
                 }
@@ -607,8 +608,12 @@ impl<
 
         // ensure step size is below bootlaoder supported, below transmit buffer size (incl len and cs bytes),
         // and is 4-byte aligned
-        let step_size = min(256, LEN_TX - 2) & 0xFFFF_FFFC;
-        // defmt::debug!("will use data chunk sizes of {:?}", step_size);
+        let step_size = min(256, LEN_TX - 2) & 0xFFFF_FFF8;
+        defmt::debug!("bootloader will use data chunk sizes of {:?}", step_size);
+        if step_size < 8 {
+            defmt::error!("bootloader buffer too small.");
+            return Err(());
+        }
 
         // if user doesn't supply a start address, assume base of mapped flash
         let mut addr = write_base_addr.unwrap_or(0x0800_0000);
@@ -709,18 +714,19 @@ impl<
         let device_id = match self.get_device_id().await {
             Err(err) => return Err(err),
             Ok(device_id) => match device_id {
-            68 => {
-                defmt::trace!("found stm32f1 device");
-                device_id
-            }
-            19 => {
-                defmt::trace!("found stm32f40xxx device");
-                device_id
-            }
-            _ => {
-                defmt::trace!("found unknown device id {}", device_id);
-                return Err(());
-            }
+                68 => {
+                    defmt::trace!("found stm32f1 device");
+                }
+                19 => {
+                    defmt::trace!("found stm32f40xxx device");
+                }
+                105 => {
+                    defmt::trace!("found stm32g474xx device");
+                }
+                _ => {
+                    defmt::error!("found unknown device id {}", device_id);
+                    return Err(());
+                }
             }
         };
 

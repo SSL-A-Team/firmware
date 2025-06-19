@@ -1,17 +1,17 @@
 use ateam_common_packets::radio::DataPacket;
-use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use embassy_executor::{SendSpawner, Spawner};
-use embassy_stm32::{gpio::{Level, Output, Pin, Speed}, usart::Uart};
+use embassy_stm32::{gpio::Pin, usart::Uart};
 use embassy_sync::pubsub::WaitResult;
-use embassy_time::{Duration, Ticker, Timer, Instant};
+use embassy_time::{Duration, Ticker, Instant};
 
-use crate::{drivers::kicker::Kicker, include_kicker_bin, pins::*, robot_state::SharedRobotState, stm32_interface, SystemIrqs};
+use crate::{drivers::kicker::Kicker, include_kicker_bin, pins::*, robot_state::SharedRobotState, SystemIrqs};
 
 include_kicker_bin! {KICKER_FW_IMG, "kicker.bin"}
 
-const MAX_TX_PACKET_SIZE: usize = 16;
+const MAX_TX_PACKET_SIZE: usize = 20;
 const TX_BUF_DEPTH: usize = 3;
-const MAX_RX_PACKET_SIZE: usize = 16;
+const MAX_RX_PACKET_SIZE: usize = 20;
 const RX_BUF_DEPTH: usize = 20;
 const TELEMETRY_TIMEOUT_MS: u64 = 2000;
 
@@ -97,10 +97,6 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
             if self.kicker_task_state == KickerTaskState::Connected && Instant::checked_duration_since(&cur_time, last_packet_sent_time).unwrap().as_millis() > TELEMETRY_TIMEOUT_MS {
                 defmt::error!("Kicker telemetry timed out! Will reset.");
                 self.kicker_driver.reset().await;
-                // Have a small delay for bring up to prevent boot looping.
-                Timer::after_millis(1000).await;
-                // Capture packet time to just in case UART is getting set up.
-                // TODO Remove this and actually get timing on bring up tuned in.
                 last_packet_sent_time = Instant::now();
             }
 
@@ -136,6 +132,7 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
                         defmt::error!("kicker firmware load failed, try power cycle");
                     } else {
                         self.kicker_task_state = KickerTaskState::Connected;
+                        main_loop_ticker.reset();
 
                         defmt::info!("kicker connected!");
                     }
@@ -187,13 +184,16 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         if let Some(pkt) = self.commands_subscriber.try_next_message() {
             match pkt {
                 WaitResult::Lagged(amnt) => {
-                    defmt::warn!("kicker task lagged processing commands by {} msgs", amnt);
+                    if amnt > 3 {
+                        defmt::warn!("kicker task lagged processing commands by {} msgs", amnt);
+                    }
                 },
                 WaitResult::Message(cmd) => {
                     match cmd {
                         DataPacket::BasicControl(bc_pkt) => {
                             self.kicker_driver.set_kick_strength(bc_pkt.kick_vel);
                             self.kicker_driver.request_kick(bc_pkt.kick_request);
+                            self.kicker_driver.set_drib_vel(bc_pkt.dribbler_speed);
                         },
                         DataPacket::ParameterCommand(_) => {
                             // we currently don't have any kicker parameters

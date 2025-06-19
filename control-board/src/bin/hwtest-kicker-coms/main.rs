@@ -1,16 +1,19 @@
 #![no_std]
 #![no_main]
+#![feature(sync_unsafe_cell)]
 
 use ateam_control_board::{
-    drivers::kicker::Kicker, get_system_config, include_kicker_bin, stm32_interface::{self, Stm32Interface},
+    drivers::kicker::Kicker, get_system_config, include_kicker_bin,
 };
-use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
+use ateam_lib_stm32::{
+    drivers::boot::stm32_interface::{self, Stm32Interface},
+    idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
 use defmt::info;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
-    gpio::{Level, Output, Speed, Pull}, interrupt, pac::Interrupt, usart::Uart
+    gpio::Pull, interrupt, pac::Interrupt, usart::Uart
 };
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Duration, Ticker};
 use panic_probe as _;
 
 include_kicker_bin! {KICKER_FW_IMG, "hwtest-coms.bin"}
@@ -25,6 +28,7 @@ static_idle_buffered_uart!(KICKER, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACK
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
+#[allow(non_snake_case)]
 #[interrupt]
 unsafe fn CEC() {
     UART_QUEUE_EXECUTOR.on_interrupt();
@@ -39,26 +43,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CEC, embassy_stm32::interrupt::Priority::P5);
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(Interrupt::CEC);
-
-    // let kicker_det = Input::new(p.PG8, Pull::Up);
-    // if kicker_det.is_high() {
-    //     defmt::warn!("kicker appears unplugged!");
-    // }
-
-    let mut kicker_pwr_pin = Output::new(p.PG8, Level::Low, Speed::Medium);
-
-    kicker_pwr_pin.set_high();
-    defmt::info!("force power off kicker");
-    Timer::after_millis(2000).await;
-    kicker_pwr_pin.set_low();
-    defmt::info!("kicker force power off done");
-
-    defmt::info!("attempting to power on kicker.");
-    Timer::after_millis(1000).await;
-    kicker_pwr_pin.set_high();
-    Timer::after_millis(200).await;
-    kicker_pwr_pin.set_low();
-    defmt::info!("power on attempt done");
 
     // loop {
     //     Timer::after_millis(1000).await;

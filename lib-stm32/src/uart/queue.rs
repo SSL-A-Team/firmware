@@ -443,7 +443,7 @@ impl<
             // need to acquire this upfront and be smarter about releasing and reacq it
             // let mut rw_tasks_config_lock: Option<MutexGuard<'static, CriticalSectionRawMutex, bool>> = Some(self.uart_mutex.lock().await);
 
-            loop {                
+            loop {
                 // block if/until we receive a signal telling to unpause the task because a config update is not active
                 // while pause_task_for_config_update {
                 //     defmt::trace!("UartReadQueue - pausing rx task for config update");
@@ -469,7 +469,12 @@ impl<
 
 
                 // get enqueue ref to pass to the DMA layer
-                let mut buf = self.queue_rx.enqueue().await.unwrap();
+                // let mut buf = self.queue_rx.enqueue().await.unwrap();
+                // if self.queue_rx.is_full() {
+                //     defmt::warn!("a queue is discarding data");
+                // }
+
+                let mut buf = self.queue_rx.try_enqueue_override().expect("multiple threads concurrently attempted to bind an internal queue buffer to dma");
                 match select(rx.read_until_idle(buf.data()), uart_config_command_subscriber.next_message()).await {
                     Either::First(len) => {
                         if let Ok(len) = len {
@@ -590,7 +595,7 @@ impl<
                             drop(buf);
 
                             // NOTE: we used to check for DMA transaction complete here, but embassy added
-                            // it some time ago. Doing it twice causes lockup. 
+                            // it some time ago. Doing it twice causes lockup.
                         } else {
                             defmt::warn!("UartWriteQueue - result of dequeue for DMA TX was error");
                         }

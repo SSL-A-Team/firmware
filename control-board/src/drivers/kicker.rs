@@ -1,8 +1,6 @@
-use ateam_lib_stm32::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
+use ateam_lib_stm32::{drivers::boot::stm32_interface::Stm32Interface, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use embassy_stm32::{gpio::{Pin, Pull}, usart::Parity};
 use embassy_time::{Duration, Timer};
-
-use crate::stm32_interface::Stm32Interface;
 
 use ateam_common_packets::bindings::{KickerControl, KickerTelemetry, KickRequest};
 
@@ -64,7 +62,7 @@ impl<
         reset_pin: impl Pin,
         firmware_image: &'a [u8]) -> Self {
 
-        let stm32_interface = Stm32Interface::new_from_pins(uart, read_queue, write_queue, boot0_pin, reset_pin, Pull::Up, true);
+        let stm32_interface = Stm32Interface::new_from_pins(uart, read_queue, write_queue, boot0_pin, reset_pin, Pull::None, true);
 
         Self::new(stm32_interface, firmware_image)
     }
@@ -116,6 +114,10 @@ impl<
 
     pub fn set_kick_strength(&mut self, kick_str: f32) {
         self.command_state.kick_speed = kick_str;
+    }
+
+    pub fn set_drib_vel(&mut self, drib_vel: f32) {
+        self.command_state.drib_speed = drib_vel;
     }
 
     pub fn ball_detected(&self) -> bool {
@@ -198,6 +200,7 @@ fn get_empty_control_packet() -> KickerControl {
         _bitfield_1: KickerControl::new_bitfield_1(0, 0, 0),
         kick_request: KickRequest::KR_DISABLE,
         kick_speed: 0.0,
+        drib_speed: 0.0,
     }
 }
 

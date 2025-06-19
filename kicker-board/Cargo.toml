@@ -22,7 +22,7 @@ embassy-time = { version = "0.4.0", features = [
 ] }
 embassy-stm32 = { version = "0.2.0", features = [
     "defmt",
-    "stm32f407ve",
+    "stm32g474ve",
     "unstable-pac", 
     "time-driver-tim1",
     "exti",
@@ -41,9 +41,11 @@ critical-section = "1.2.0"
 const_format = "0.2.34"
 heapless = "0.7.16"
 libm = "0.2.11"
-
+nalgebra = { version = "0.33.2", default-features = false, features = [
+        "libm",
+        "macros",
+] }
 smart-leds = "0.4.0"
-apa102-spi = "0.4.0"
 
 ateam-lib-stm32 = { path = "../lib-stm32", default-features = false }
 ateam-common-packets = { path = "../software-communication/ateam-common-packets/rust-lib" }

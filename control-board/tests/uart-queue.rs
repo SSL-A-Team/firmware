@@ -69,7 +69,7 @@ mod tests {
         QUEUE_TX.enqueue_copy(&data3).unwrap();
 
         let result = QUEUE_TX.enqueue_copy(&[]);
-        assert!(result == Err(queue::Error::QueueFullEmpty));
+        assert!(result == Err(queue::Error::QueueFull));
 
         block_on(QUEUE_RX.dequeue(|buf| {
             assert_eq!(buf, data1);

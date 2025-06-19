@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
 use defmt::*;
@@ -30,12 +31,14 @@ async fn main(_spawner: Spawner) {
     let mut led_red = Output::new(p.PD0, Level::High, Speed::Low);
     let mut led_grn = Output::new(p.PD1, Level::High, Speed::Low);
 
+    let mut en_12v0 = Output::new(p.PB6, Level::Low, Speed::Low);
     let mut en_3v3 = Output::new(p.PB7, Level::Low, Speed::Low);
     let mut en_5v0 = Output::new(p.PB8, Level::Low, Speed::Low);
 
     Timer::after_millis(50).await;
     en_3v3.set_high();
     en_5v0.set_high();
+    en_12v0.set_high();
 
     let pwr_btn = Input::new(p.PB15, Pull::None);
     let mut shutdown_ind = Output::new(p.PA15, Level::High, Speed::Low);
@@ -117,7 +120,7 @@ async fn main(_spawner: Spawner) {
         Timer::after_millis(1000).await;
         
         let _ = tone_player.load_song(&TEST_SONG);
-        tone_player.play_song().await;
+        // tone_player.play_song().await;
 
         info!("low");
         led_red.set_low();

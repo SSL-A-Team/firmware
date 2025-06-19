@@ -3,6 +3,7 @@
 #![feature(type_alias_impl_trait)]
 
 use defmt::*;
+use tasks::{get_system_config, ClkSource};
 use {defmt_rtt as _, panic_probe as _};
 
 use cortex_m_rt::entry;
@@ -23,7 +24,7 @@ use ateam_kicker_board::pins::*;
 #[embassy_executor::task]
 async fn run_kick(mut adc: Adc<'static, PowerRailAdc>, 
         mut hv_pin: PowerRail200vReadPin, 
-        mut rail_12v0_pin: PowerRail12vReadPin,
+        mut rail_vsw_pin: PowerRailVswReadPin,
         reg_charge: ChargePin,
         status_led_red: RedStatusLedPin,
         status_led_green: GreenStatusLedPin,
@@ -46,8 +47,8 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
     let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
 
     let mut hv = adc.blocking_read(&mut hv_pin) as f32;
-    let mut regv = adc.blocking_read(&mut rail_12v0_pin) as f32;
-    info!("hv V: {}, 12v reg mv: {}", adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)), adc_12v_to_rail_voltage(adc_raw_to_v(regv, vrefint_sample)));
+    let mut regv = adc.blocking_read(&mut rail_vsw_pin) as f32;
+    info!("hv V: {}, vsw reg mv: {}", adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)), adc_12v_to_rail_voltage(adc_raw_to_v(regv, vrefint_sample)));
 
     let start_up_battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(regv, vrefint_sample));
     if start_up_battery_voltage < 11.5 {
@@ -66,14 +67,14 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
     }
 
     reg_charge.set_high();
-    Timer::after(Duration::from_millis(50)).await;
+    Timer::after(Duration::from_millis(100)).await;
     reg_charge.set_low();
 
     let mut vrefint = adc.enable_vrefint();
     let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
 
     hv = adc.blocking_read(&mut hv_pin) as f32;
-    regv = adc.blocking_read(&mut rail_12v0_pin) as f32;
+    regv = adc.blocking_read(&mut rail_vsw_pin) as f32;
     info!("hv V: {}, batt mv: {}", adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)), adc_12v_to_rail_voltage(adc_raw_to_v(regv, vrefint_sample)));
 
     Timer::after(Duration::from_millis(1000)).await;
@@ -83,7 +84,7 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
         let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
 
         hv = adc.blocking_read(&mut hv_pin) as f32;
-        regv = adc.blocking_read(&mut rail_12v0_pin) as f32;
+        regv = adc.blocking_read(&mut rail_vsw_pin) as f32;
 
         info!("hv V: {}, batt mv: {}", adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)), adc_12v_to_rail_voltage(adc_raw_to_v(regv, vrefint_sample)));
 
@@ -98,17 +99,18 @@ static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
 #[entry]
 fn main() -> ! {
-    let p = embassy_stm32::init(Default::default());
+    let stm32_config = get_system_config(ClkSource::InternalOscillator);
+    let p = embassy_stm32::init(stm32_config);
 
     info!("kicker startup!");
 
     let mut adc = Adc::new(p.ADC1);
     adc.set_resolution(embassy_stm32::adc::Resolution::BITS12);
-    adc.set_sample_time(SampleTime::CYCLES480);
+    adc.set_sample_time(SampleTime::CYCLES247_5);
 
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        unwrap!(spawner.spawn(run_kick(adc, p.PC0, p.PC1, p.PE4, p.PE1, p.PE0, p.PE5)));
+        unwrap!(spawner.spawn(run_kick(adc, p.PC3, p.PA1, p.PB15, p.PE0, p.PB9, p.PD9)));
     });
 }

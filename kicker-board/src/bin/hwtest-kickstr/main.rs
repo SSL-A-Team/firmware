@@ -11,6 +11,7 @@
 #![feature(type_alias_impl_trait)]
 
 use defmt::*;
+use tasks::{get_system_config, ClkSource};
 use {defmt_rtt as _, panic_probe as _};
 
 use cortex_m_rt::entry;
@@ -30,7 +31,7 @@ use ateam_kicker_board::pins::*;
 #[embassy_executor::task]
 async fn run_kick(mut adc: Adc<'static, PowerRailAdc>, 
         mut hv_pin: PowerRail200vReadPin, 
-        mut rail_12v0_pin: PowerRail12vReadPin,
+        mut rail_12v0_pin: PowerRailVswReadPin,
         reg_charge: ChargePin,
         status_led_red: RedStatusLedPin,
         status_led_green: GreenStatusLedPin,
@@ -134,17 +135,22 @@ static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
 #[entry]
 fn main() -> ! {
-    let p = embassy_stm32::init(Default::default());
+    let stm32_config = get_system_config(ClkSource::InternalOscillator);
+    let p = embassy_stm32::init(stm32_config);
 
     info!("kicker startup!");
 
     let mut adc = Adc::new(p.ADC1);
     adc.set_resolution(embassy_stm32::adc::Resolution::BITS12);
-    adc.set_sample_time(SampleTime::CYCLES480);
+    adc.set_sample_time(SampleTime::CYCLES247_5);
 
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        unwrap!(spawner.spawn(run_kick(adc, p.PC0, p.PC1, p.PE4, p.PE1, p.PE0, p.PD4, p.PE5)));
-    });
+        unwrap!(spawner.spawn(run_kick(
+            adc,
+            p.PC3, p.PA1,
+            p.PB15,
+            p.PE0, p.PB9, p.PB5, p.PD9)));
+        });
 }
