@@ -64,10 +64,9 @@ impl<
                 self.try_shutdown().await;
             }
 
-            let cmd: PowerCommand;
-            unsafe {
-                cmd = MaybeUninit::zeroed().assume_init();
-            }
+            let mut cmd: PowerCommand = Default::default();
+            cmd.set_request_shutdown(self.shared_robot_state.shutdown_requested() as u32);
+            
             // load any items into command
             self.send_command(cmd).await;
 

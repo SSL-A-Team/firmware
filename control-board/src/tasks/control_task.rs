@@ -152,6 +152,8 @@ impl <
                                             robot_controller: &mut BodyVelocityController,
                                             cur_state: RobotState) 
         {
+            
+            
             self.motor_fl.send_motion_command();
             self.motor_bl.send_motion_command();
             self.motor_br.send_motion_command();
@@ -253,12 +255,6 @@ impl <
             self.motor_br.set_telemetry_enabled(true);
             self.motor_fr.set_telemetry_enabled(true);
 
-            self.motor_fl.set_motion_type(MotionCommandType::VELOCITY);
-            self.motor_bl.set_motion_type(MotionCommandType::VELOCITY);
-            self.motor_br.set_motion_type(MotionCommandType::VELOCITY);
-            self.motor_fr.set_motion_type(MotionCommandType::VELOCITY);
-
-
             Timer::after_millis(10).await;
 
             let robot_model = self.get_robot_model();
@@ -297,6 +293,22 @@ impl <
 
                             cmd_vel = new_cmd_vel;
                             ticks_since_control_packet = 0;
+
+                            if latest_control.request_shutdown() != 0 {
+                                self.shared_robot_state.flag_shutdown_requested();
+                            }
+
+                            let wheel_motion_type = match (self.last_command.wheel_vel_control_enabled() != 0, self.last_command.wheel_torque_control_enabled() != 0) {
+                                (true, true) => MotionCommandType::BOTH,
+                                (true, false) => MotionCommandType::VELOCITY,
+                                (false, true) => MotionCommandType::TORQUE,
+                                (false, false) => MotionCommandType::OPEN_LOOP,
+                            };
+
+                            self.motor_fl.set_motion_type(wheel_motion_type);
+                            self.motor_bl.set_motion_type(wheel_motion_type);
+                            self.motor_br.set_motion_type(wheel_motion_type);
+                            self.motor_fr.set_motion_type(wheel_motion_type);
 
                             self.last_command = latest_control;
                         },
@@ -340,14 +352,18 @@ impl <
                     self.last_power_telemetry = power_telemetry;
                 }
                 
-                let controls_enabled = self.last_command.body_vel_controls_enabled() != 0;
+                if self.stop_wheels() {
+                    cmd_vel = Vector3::new(0.0, 0.0, 0.0);
+                } else if self.last_command.game_state_in_stop() != 0 {
+                    // TODO impl 1.5m/s clamping or something
+                }
 
-                let kill_vel = self.last_power_telemetry.high_current_operations_allowed() == 0 || self.shared_robot_state.shutdown_requested();
-                let wheel_vels = if !kill_vel {
-                    self.do_control_update(&mut robot_controller, cmd_vel, self.last_gyro_rads, controls_enabled)
-                } else {
+                let wheel_vels = if self.stop_wheels() {
                     defmt::warn!("control task - motor commands locked out");
                     Vector4::new(0.0, 0.0, 0.0, 0.0)
+                } else {
+                    let controls_enabled = self.last_command.body_vel_controls_enabled() != 0;
+                    self.do_control_update(&mut robot_controller, cmd_vel, self.last_gyro_rads, controls_enabled)
                 };
 
                 self.motor_fl.set_setpoint(wheel_vels[0]);
@@ -460,6 +476,12 @@ impl <
             let robot_model: RobotModel = RobotModel::new(robot_model_constants);
             
             return robot_model; 
+        }
+
+        fn stop_wheels(&self) -> bool {
+            self.last_power_telemetry.high_current_operations_allowed() == 0 
+            || self.shared_robot_state.shutdown_requested()
+            || self.last_command.emergency_stop() == 0
         }
     }
     
