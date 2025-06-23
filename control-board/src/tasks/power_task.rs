@@ -60,6 +60,12 @@ impl<
         // let mut next_connection_state = self.connection_state;
         loop {
             self.process_packets();
+            if self.last_power_status_time.is_some() && self.last_power_status_time.unwrap().elapsed() < Duration::from_millis(1000) {
+                self.shared_robot_state.set_power_inop(false);
+            } else {
+                self.shared_robot_state.set_power_inop(true);
+            }
+
             if (self.last_power_status_time.is_some() && self.last_power_status.shutdown_requested() == 1) || self.shared_robot_state.shutdown_requested() {
                 self.try_shutdown().await;
             }
