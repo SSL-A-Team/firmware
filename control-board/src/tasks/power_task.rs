@@ -60,7 +60,7 @@ impl<
         // let mut next_connection_state = self.connection_state;
         loop {
             self.process_packets();
-            if self.last_power_status_time.is_some() && self.last_power_status.shutdown_requested() == 1 {
+            if (self.last_power_status_time.is_some() && self.last_power_status.shutdown_requested() == 1) || self.shared_robot_state.shutdown_requested() {
                 self.try_shutdown().await;
             }
 
@@ -85,10 +85,9 @@ impl<
         // wait for tasks to flag shutdown complete, power board will
         // hard temrinate after hard after 30s shutdown time
         loop {
-            let cmd: PowerCommand;
-            unsafe {
-                cmd = MaybeUninit::zeroed().assume_init();
-            }
+            let mut cmd: PowerCommand = Default::default();
+            cmd.set_request_shutdown(true as u32);
+
             // load any items into command
             self.send_command(cmd).await;
 

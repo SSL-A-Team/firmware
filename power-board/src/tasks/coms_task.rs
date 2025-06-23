@@ -13,7 +13,7 @@ const RX_BUF_DEPTH: usize = 3;
 const TX_BUF_DEPTH: usize = 2;
 static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH);
 
-const POWER_TELEM_PERIOD_MS: u64 = 1000;
+const POWER_TELEM_PERIOD_MS: u64 = 100;
 
 const COMS_RX_TIMEOUT: Duration = Duration::from_millis(1000);
 
@@ -37,7 +37,7 @@ async fn coms_task_entry(
     audio_publisher: AudioPublisher
 ) {
     let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));
-    let mut last_battery_telem_packet: Option<BatteryInfo> = None;
+    let mut last_battery_telem_packet: BatteryInfo = Default::default();
     let mut last_sent_packet_time = Instant::now();
     let mut last_received_packet_time = Instant::MAX - Duration::from_secs(60);
 
@@ -99,14 +99,11 @@ async fn coms_task_entry(
         }
 
         // Read from telemetry channel, only keep latest telemetry
-        loop {
-            if let Some(telemetry_packet) = telemetry_subscriber.try_next_message_pure() {
-                defmt::trace!("COMS TASK - New battery telemetry packet received from power task");
-                last_battery_telem_packet = Some(telemetry_packet);
-            } else {
-                break
-            }
+        while let Some(telemetry_packet) = telemetry_subscriber.try_next_message_pure() {
+            defmt::trace!("COMS TASK - New battery telemetry packet received from power task");
+            last_battery_telem_packet = telemetry_packet;
         }
+        
 
         // if we've timed out coms, set it in the state
         if cur_power_state.coms_established && Instant::now() > last_received_packet_time + COMS_RX_TIMEOUT {
@@ -114,11 +111,10 @@ async fn coms_task_entry(
         }
 
         // Send telemetry to control board
-        if last_battery_telem_packet.is_some() && 
-           (Instant::now() - last_sent_packet_time >= Duration::from_millis(POWER_TELEM_PERIOD_MS)) {
+        if Instant::now() - last_sent_packet_time >= Duration::from_millis(POWER_TELEM_PERIOD_MS) {
 
             // build telemetry packet from latest battery telemetry and power status
-            let mut telem_packet: PowerTelemetry = unsafe { MaybeUninit::zeroed().assume_init() };
+            let mut telem_packet: PowerTelemetry = Default::default();
 
             telem_packet.set_power_ok(cur_power_state.power_ok as u32);
             telem_packet.set_power_rail_3v3_ok(cur_power_state.power_rail_3v3_ok as u32);
@@ -126,7 +122,7 @@ async fn coms_task_entry(
             telem_packet.set_power_rail_12v0_ok(cur_power_state.power_rail_12v0_ok as u32);
             telem_packet.set_high_current_operations_allowed(cur_power_state.high_current_operations_allowed as u32);
             telem_packet.set_shutdown_requested(cur_power_state.shutdown_requested as u32);
-            telem_packet.battery_info.clone_from(&last_battery_telem_packet.unwrap());
+            telem_packet.battery_info = last_battery_telem_packet;
 
             let struct_bytes;
             unsafe {

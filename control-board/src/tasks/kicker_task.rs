@@ -9,9 +9,9 @@ use crate::{drivers::kicker::Kicker, include_kicker_bin, pins::*, robot_state::S
 
 include_kicker_bin! {KICKER_FW_IMG, "kicker.bin"}
 
-const MAX_TX_PACKET_SIZE: usize = 20;
+const MAX_TX_PACKET_SIZE: usize = 32;
 const TX_BUF_DEPTH: usize = 3;
-const MAX_RX_PACKET_SIZE: usize = 20;
+const MAX_RX_PACKET_SIZE: usize = 64;
 const RX_BUF_DEPTH: usize = 20;
 const TELEMETRY_TIMEOUT_MS: u64 = 2000;
 

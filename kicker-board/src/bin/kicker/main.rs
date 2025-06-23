@@ -42,9 +42,9 @@ pub const CHARGE_SAFE_VOLTAGE: f32 = 10.0;
 
 const RAIL_BUFFER_SIZE: usize = 10;
 
-const MAX_TX_PACKET_SIZE: usize = 20;
+const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 3;
-const MAX_RX_PACKET_SIZE: usize = 20;
+const MAX_RX_PACKET_SIZE: usize = 32;
 const RX_BUF_DEPTH: usize = 3;
 static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH);
 
@@ -356,7 +356,7 @@ async fn high_pri_kick_task(
                 );
             
                 let charge_pct = rail_voltage_ave / CHARGE_TARGET_VOLTAGE;
-                kicker_telemetry_packet.charge_pct = charge_pct as u16;
+                kicker_telemetry_packet.charge_pct = (charge_pct * 100.0) as u16;
                 kicker_telemetry_packet.rail_voltage = rail_voltage_ave;
                 kicker_telemetry_packet.battery_voltage = battery_voltage;
 

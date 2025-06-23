@@ -225,6 +225,9 @@ impl <
             control_debug_telem.imu_accel[0] = self.last_accel_x_ms;
             control_debug_telem.imu_accel[1] = self.last_accel_y_ms;
 
+            control_debug_telem.kicker_status = self.last_kicker_telemetry;
+            control_debug_telem.power_status = self.last_power_telemetry;
+
             let control_debug_telem = TelemetryPacket::Extended(control_debug_telem);
             if cur_state.radio_bridge_ok {
                 self.telemetry_publisher.publish_immediate(control_debug_telem);
@@ -293,6 +296,12 @@ impl <
 
                             cmd_vel = new_cmd_vel;
                             ticks_since_control_packet = 0;
+
+                            if latest_control.reboot_robot() != 0 {
+                                loop {
+                                    cortex_m::peripheral::SCB::sys_reset();
+                                }
+                            }
 
                             if latest_control.request_shutdown() != 0 {
                                 self.shared_robot_state.flag_shutdown_requested();
@@ -479,9 +488,11 @@ impl <
         }
 
         fn stop_wheels(&self) -> bool {
+            // defmt::debug!("hco: {}, sd req: {}, estop: {}", self.last_power_telemetry.high_current_operations_allowed() == 0, self.shared_robot_state.shutdown_requested(), self.last_command.emergency_stop() != 0);
+
             self.last_power_telemetry.high_current_operations_allowed() == 0 
             || self.shared_robot_state.shutdown_requested()
-            || self.last_command.emergency_stop() == 0
+            || self.last_command.emergency_stop() != 0
         }
     }
     
