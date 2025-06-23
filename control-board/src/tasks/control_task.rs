@@ -12,9 +12,9 @@ use crate::{include_external_cpp_bin, motion::{self, params::robot_physical_para
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
 
-const MAX_TX_PACKET_SIZE: usize = 64;
+const MAX_TX_PACKET_SIZE: usize = 60;
 const TX_BUF_DEPTH: usize = 3;
-const MAX_RX_PACKET_SIZE: usize = 64;
+const MAX_RX_PACKET_SIZE: usize = 60;
 const RX_BUF_DEPTH: usize = 20;
 
 make_uart_queue_pair!(FRONT_LEFT,
@@ -238,6 +238,7 @@ impl <
             self.motor_bl.set_motion_type(MotionCommandType::OPEN_LOOP);
             self.motor_br.set_motion_type(MotionCommandType::OPEN_LOOP);
             self.motor_fr.set_motion_type(MotionCommandType::OPEN_LOOP);
+            self.motor_drib.set_motion_type(MotionCommandType::OPEN_LOOP);
 
 
             Timer::after_millis(10).await;
@@ -337,6 +338,7 @@ impl <
                 self.motor_fr.set_setpoint(wheel_vels[3]);
 
                 let drib_dc = -1.0 * drib_vel / 1000.0;
+                defmt::info!("set drib: {}", drib_dc);
                 self.motor_drib.set_setpoint(drib_dc);
 
                 self.send_motor_commands_and_telemetry(

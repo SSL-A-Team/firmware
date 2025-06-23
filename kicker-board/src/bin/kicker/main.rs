@@ -48,9 +48,9 @@ pub const CHARGE_OVERVOLT_THRESH_VOLTAGE: f32 = 195.0;
 pub const CHARGED_THRESH_VOLTAGE: f32 = 170.0;
 pub const CHARGE_SAFE_VOLTAGE: f32 = 10.0;
 
-const MAX_TX_PACKET_SIZE: usize = 16;
+const MAX_TX_PACKET_SIZE: usize = 68;
 const TX_BUF_DEPTH: usize = 3;
-const MAX_RX_PACKET_SIZE: usize = 16;
+const MAX_RX_PACKET_SIZE: usize = 36;
 const RX_BUF_DEPTH: usize = 3;
 
 const RAIL_BUFFER_SIZE: usize = 10;
