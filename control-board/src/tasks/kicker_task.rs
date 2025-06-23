@@ -85,19 +85,20 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
 
     pub async fn kicker_task_entry(&mut self) {
         let mut main_loop_ticker = Ticker::every(Duration::from_hz(100));
-        let mut last_packet_sent_time = Instant::now();
+        // Connection timeout start will be reset when connection is established and when a telemetry packet is received
+        let mut connection_timeout_start = Instant::now();
         loop {
             let cur_robot_state = self.robot_state.get_state();
 
             if self.kicker_driver.process_telemetry() {
-                last_packet_sent_time = Instant::now();
+                connection_timeout_start = Instant::now();
             }
 
             let cur_time = Instant::now();
-            if self.kicker_task_state == KickerTaskState::Connected && Instant::checked_duration_since(&cur_time, last_packet_sent_time).unwrap().as_millis() > TELEMETRY_TIMEOUT_MS {
+            if self.kicker_task_state == KickerTaskState::Connected && Instant::checked_duration_since(&cur_time, connection_timeout_start).unwrap().as_millis() > TELEMETRY_TIMEOUT_MS {
+                // Check if telemetry has been received in this timeout period
                 defmt::error!("Kicker telemetry timed out! Will reset.");
                 self.kicker_driver.reset().await;
-                last_packet_sent_time = Instant::now();
             }
 
             // TODO global state overrides of kicker state
@@ -122,8 +123,8 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
                     self.kicker_task_state = KickerTaskState::ConnectUart;
                 },
                 KickerTaskState::ConnectUart => {
-                    let flash_firmware = cur_robot_state.hw_debug_mode;
-                    if self.kicker_driver.init_default_firmware_image(flash_firmware).await.is_err() {
+                    let force_flash = cur_robot_state.hw_debug_mode;
+                    if self.kicker_driver.init_default_firmware_image(force_flash).await.is_err() {
                         // attempt to power on the board again
                         // if the kicker is missing or bugged we'll stay in a power on -> attempt
                         // uart loop forever
@@ -132,6 +133,7 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
                         defmt::error!("kicker firmware load failed, try power cycle");
                     } else {
                         self.kicker_task_state = KickerTaskState::Connected;
+                        connection_timeout_start = Instant::now();
                         main_loop_ticker.reset();
 
                         defmt::info!("kicker connected!");

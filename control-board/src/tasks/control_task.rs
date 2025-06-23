@@ -330,29 +330,30 @@ impl <
         async fn flash_motor_firmware(&mut self, debug: bool) {
             defmt::info!("flashing firmware");
             if debug {
+                let force_flash = true;
                 let mut had_motor_error = false;
-                if self.motor_fl.load_default_firmware_image().await.is_err() {
+                if self.motor_fl.init_default_firmware_image(force_flash).await.is_err() {
                     defmt::error!("failed to flash FL");
                     had_motor_error = true;
                 } else {
                     defmt::info!("FL flashed");
                 }
 
-                if self.motor_bl.load_default_firmware_image().await.is_err() {
+                if self.motor_bl.init_default_firmware_image(force_flash).await.is_err() {
                     defmt::error!("failed to flash BL");
                     had_motor_error = true;
                 } else {
                     defmt::info!("BL flashed");
                 }
 
-                if self.motor_br.load_default_firmware_image().await.is_err() {
+                if self.motor_br.init_default_firmware_image(force_flash).await.is_err() {
                     defmt::error!("failed to flash BR");
                     had_motor_error = true;
                 } else {
                     defmt::info!("BR flashed");
                 }
 
-                if self.motor_fr.load_default_firmware_image().await.is_err() {
+                if self.motor_fr.init_default_firmware_image(force_flash).await.is_err() {
                     defmt::error!("failed to flash FR");
                     had_motor_error = true;
                 } else {
@@ -365,11 +366,12 @@ impl <
                     defmt::debug!("all motors flashed");
                 }
             } else {
+                let force_flash = false;
                 let res = embassy_futures::join::join4(
-                    self.motor_fl.load_default_firmware_image(),
-                    self.motor_bl.load_default_firmware_image(),
-                    self.motor_br.load_default_firmware_image(),
-                    self.motor_fr.load_default_firmware_image(),
+                    self.motor_fl.init_default_firmware_image(force_flash),
+                    self.motor_bl.init_default_firmware_image(force_flash),
+                    self.motor_br.init_default_firmware_image(force_flash),
+                    self.motor_fr.init_default_firmware_image(force_flash),
                 )
                 .await;
                 

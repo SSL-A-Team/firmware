@@ -57,6 +57,7 @@ fn get_empty_telem_packet() -> KickerTelemetry {
         _bitfield_1: KickerTelemetry::new_bitfield_1(0, 0, 0, 0),
         rail_voltage: 0.0,
         battery_voltage: 0.0,
+        kicker_image_hash: [0; 4],
     }
 }
 

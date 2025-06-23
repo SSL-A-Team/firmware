@@ -514,7 +514,7 @@ impl<
         Ok(())
     }
 
-    pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
+    pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8], leave_in_reset: bool) -> Result<(), ()> {
         if !self.in_bootloader {
             if let Err(err) = self.reset_into_bootloader().await {
                 return Err(err);
@@ -554,7 +554,7 @@ impl<
             return Err(err);
         }
 
-        self.reset_into_program(false).await;
+        self.reset_into_program(leave_in_reset).await;
 
         Ok(())
     }

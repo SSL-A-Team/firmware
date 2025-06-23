@@ -1,8 +1,10 @@
 use ateam_lib_stm32::{drivers::boot::stm32_interface::Stm32Interface, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use embassy_stm32::{gpio::{Pin, Pull}, usart::Parity};
-use embassy_time::{Duration, Timer};
+use embassy_time::{with_timeout, Duration, Timer};
 
 use ateam_common_packets::bindings::{KickerControl, KickerTelemetry, KickRequest};
+
+use crate::image_hash;
 
 pub struct Kicker<
     'a,
@@ -172,11 +174,60 @@ impl<
         self.stm32_uart_interface.leave_reset().await;
     }
 
+    pub fn get_latest_default_img_hash(&mut self) -> [u8; 16] {
+        image_hash::get_kicker_img_hash()
+    }
+
+    /// Get the first 4 bytes of the currently loaded image hash on the device, Run with timeout!
+    pub async fn get_current_device_img_hash(&mut self) -> [u8; 4] {
+        loop {
+            // Parse incoming packets
+            let received_telemetry = self.process_telemetry();
+            if received_telemetry {
+                let current_img_hash = self.telemetry_state.kicker_image_hash;
+                defmt::debug!("Kicker Interface - Received telemetry");
+                defmt::trace!("Kicker Interface - Current device image hash {:x}", current_img_hash);
+                return current_img_hash
+            };
+            Timer::after(Duration::from_millis(10)).await;
+        }
+    }
+
+    pub async fn check_device_has_latest_default_image(&mut self) -> Result<bool, ()> {
+        let latest_img_hash = self.get_latest_default_img_hash();
+        defmt::debug!("Kicker Interface - Latest default image hash - {:x}", latest_img_hash);
+
+        defmt::trace!("Kicker Interface - Update UART config 2 MHz");
+        self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
+        Timer::after(Duration::from_millis(1)).await;
+
+        let res;
+        let timeout = Duration::from_millis(100);
+        defmt::trace!("Kicker Interface - Waiting for device response");
+        match with_timeout(timeout, self.get_current_device_img_hash()).await {
+            Ok(current_img_hash) => {
+                if current_img_hash == latest_img_hash[..4] {
+                    defmt::trace!("Kicker Interface - Device has the latest default image");
+                    res = Ok(true);
+                } else {
+                    defmt::trace!("Kicker Interface - Device does not have the latest default image");
+                    res = Ok(false);
+                }
+            },
+            Err(_) => {
+                defmt::debug!("Kicker Interface - No device response, image hash unknown");
+                res = Err(());
+            },
+        }
+        return res;
+    }
+
     pub async fn init_firmware_image(&mut self, flash: bool, fw_image_bytes: &[u8]) -> Result<(), ()> {
         if flash {
-            self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await?;
+            defmt::info!("Kicker Interface - Flashing firmware image");
+            self.stm32_uart_interface.load_firmware_image(fw_image_bytes, true).await?;
         } else {
-            defmt::warn!("currently skipping kicker firmware flash");
+            defmt::info!("Kicker Interface - Skipping firmware flash");
         }
 
         self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
@@ -189,7 +240,26 @@ impl<
         return Ok(());
     }
 
-    pub async fn init_default_firmware_image(&mut self, flash: bool) -> Result<(), ()> {
+    pub async fn init_default_firmware_image(&mut self, force_flash: bool) -> Result<(), ()> {
+        let flash;
+        if force_flash {
+            defmt::info!("Kicker Interface - Force flash enabled");
+            flash = true
+        } else {
+            let res = self.check_device_has_latest_default_image().await;
+            match res {
+                Ok(has_latest) => {
+                    if has_latest {
+                        flash = false;
+                    } else {
+                        flash = true;
+                    }
+                },
+                Err(_) => {
+                    flash = true;
+                }
+            }
+        }
         return self.init_firmware_image(flash, self.firmware_image).await;
     }
 }
@@ -210,5 +280,6 @@ fn get_empty_telem_packet() -> KickerTelemetry {
         _bitfield_1: KickerTelemetry::new_bitfield_1(0, 0, 0, 0),
         rail_voltage: 0.0,
         battery_voltage: 0.0,
+        kicker_image_hash: [0; 4],
     }
 }
