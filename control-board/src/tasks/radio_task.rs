@@ -434,8 +434,8 @@ pub fn start_radio_task(radio_task_spawner: Spawner,
         radio_ndet_pin: RadioNDetectPin) {
 
     let uart_conifg = startup_uart_config();
-    let radio_uart = Uart::new(radio_uart, radio_uart_rx_pin, radio_uart_tx_pin, SystemIrqs, radio_uart_tx_dma, radio_uart_rx_dma, uart_conifg).unwrap();
-    // let radio_uart = Uart::new_with_rtscts(radio_uart, radio_uart_rx_pin, radio_uart_tx_pin, SystemIrqs, _radio_uart_rts_pin, _radio_uart_cts_pin, radio_uart_tx_dma, radio_uart_rx_dma, radio_uart_config).unwrap();
+    // let radio_uart = Uart::new(radio_uart, radio_uart_rx_pin, radio_uart_tx_pin, SystemIrqs, radio_uart_tx_dma, radio_uart_rx_dma, uart_conifg).unwrap();
+    let radio_uart = Uart::new_with_rtscts(radio_uart, radio_uart_rx_pin, radio_uart_tx_pin, SystemIrqs, _radio_uart_rts_pin, _radio_uart_cts_pin, radio_uart_tx_dma, radio_uart_rx_dma, uart_conifg).unwrap();
     let (radio_uart_tx, radio_uart_rx) = Uart::split(radio_uart);
 
     defmt::info!("uart initialized");
