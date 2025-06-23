@@ -195,6 +195,13 @@ impl <
                 self.telemetry_publisher.publish_immediate(control_debug_telem);
             }
         }
+
+        fn send_motor_pid_constants(&mut self) {
+            self.motor_fl.send_params_command();
+            self.motor_bl.send_params_command();
+            self.motor_br.send_params_command();
+            self.motor_fr.send_params_command();
+        }
     
         async fn control_task_entry(&mut self) {
             defmt::info!("control task init.");

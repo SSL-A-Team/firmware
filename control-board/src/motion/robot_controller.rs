@@ -1,8 +1,9 @@
 use ateam_common_packets::bindings::{
     ParameterCommandCode::*,
     ParameterName,
-    ParameterDataFormat::{PID_LIMITED_INTEGRAL_F32, VEC3_F32, VEC4_F32},
-    ParameterName::{VEL_PID_X, RC_BODY_VEL_LIMIT, RC_BODY_ACC_LIMIT, VEL_PID_Y, ANGULAR_VEL_PID_Z, VEL_CGKF_ENCODER_NOISE, VEL_CGKF_PROCESS_NOISE, VEL_CGKF_GYRO_NOISE, VEL_CGFK_INITIAL_COVARIANCE, VEL_CGKF_K_MATRIX, RC_WHEEL_ACC_LIMIT}};
+    ParameterDataFormat::{PID_LIMITED_INTEGRAL_F32, VEC3_F32, VEC4_F32, GS_PID_LIMITED_INTEGRAL_F32},
+    ParameterName::{VEL_PID_X, RC_BODY_VEL_LIMIT, RC_BODY_ACC_LIMIT, VEL_PID_Y, ANGULAR_VEL_PID_Z, VEL_CGKF_ENCODER_NOISE, VEL_CGKF_PROCESS_NOISE, VEL_CGKF_GYRO_NOISE, VEL_CGFK_INITIAL_COVARIANCE, VEL_CGKF_K_MATRIX, RC_WHEEL_ACC_LIMIT,
+    WHEEL_PID}};
 use ateam_common_packets::radio::get_motor_response_motion_packet;
 use nalgebra::{SVector, Vector3, Vector4, Vector5};
 use crate::parameter_interface::ParameterInterface;
@@ -252,7 +253,7 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
 
         // if we haven't been given an actionable command code, ignore the call
         if !(param_cmd.command_code == PCC_READ || param_cmd.command_code == PCC_WRITE) {
-            defmt::warn!("asked to apply a command with out and actional command code");
+            defmt::warn!("asked to apply a command without an actional command code");
             return Err(reply_cmd);
         }
 
@@ -473,6 +474,9 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                         reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
                         return Err(reply_cmd);
                     }
+                },
+                WHEEL_PID => {
+                    defmt::debug!("Wheel PID commands TODO!");
                 },
                 _ => {
                     defmt::debug!("unimplemented key write in RobotController");
