@@ -272,6 +272,7 @@ impl <
                             ticks_since_control_packet = 0;
                         },
                         ateam_common_packets::radio::DataPacket::ParameterCommand(latest_param_cmd) => {
+                            // How to also have the WheelMotors process the commands?
                             let param_cmd_resp = robot_controller.apply_command(&latest_param_cmd);
 
                             if let Ok(resp) = param_cmd_resp {

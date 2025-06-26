@@ -312,10 +312,17 @@ impl<
             cmd.type_ = MCP_PARAMS;
             cmd.crc32 = 0;
 
-            // TODO figure out what to set here
             // Update a param like this
             // cmd.data.params.set_update_timestamp(1);
             // cmd.data.params.timestamp = 0x0;
+            cmd.data.params.vel_p = self.vel_pid_constants[0];
+            cmd.data.params.vel_i = self.vel_pid_constants[1];
+            cmd.data.params.vel_d = self.vel_pid_constants[2];
+            // TODO: Actually make this dependent on whether we update
+            // from what it was before 
+            cmd.data.params.set_update_vel_p(true as u32);
+            cmd.data.params.set_update_vel_i(true as u32);
+            cmd.data.params.set_update_vel_d(true as u32);
 
             let struct_bytes = core::slice::from_raw_parts(
                 (&cmd as *const MotorCommandPacket) as *const u8,
