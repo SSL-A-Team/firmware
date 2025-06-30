@@ -25,7 +25,7 @@ void pid_initialize(Pid_t *pid, PidConstants_t *pid_constants);
 float pid_calculate(Pid_t *pid, float r, float y, float dt);
 
 typedef enum GainScheduledPidResult {
-
+    PID_INIT_OK,
     PID_NUM_TUNING_POINTS_TOO_LOW,
     PID_CONSTANTS_BAD_LENGTH,
     GAIN_SCHEDULE_BAD_LENGTH,

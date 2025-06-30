@@ -78,8 +78,8 @@ int main() {
     quadenc_reset_encoder_delta();
 
     // Initialized response_packet here to capture the reset method.
-    MotorResponsePacket response_packet;
-    memset(&response_packet, 0, sizeof(MotorResponsePacket));
+    MotorResponse response_packet;
+    memset(&response_packet, 0, sizeof(MotorResponse));
 
     response_packet.data.motion.reset_watchdog_independent = (rcc_csr & RCC_CSR_IWDGRSTF) != 0;
     response_packet.data.motion.reset_watchdog_window = (rcc_csr & RCC_CSR_WWDGRSTF) != 0;
@@ -105,7 +105,7 @@ int main() {
     iir_filter_init(&torque_filter, iir_filter_alpha_from_Tf(TORQUE_IIR_TF_MS, TORQUE_LOOP_RATE_MS));
 
     // set the default command mode to open loop (no PID)
-    MotorCommand_MotionType motion_control_type = OPEN_LOOP;
+    MotionCommandType motion_control_type = OPEN_LOOP;
 
     // define the control points the loops use to interact
     float r_motor_board = 0.0f;
@@ -471,7 +471,7 @@ int main() {
                 // wait for it to finish.
                 uart_wait_for_transmission();
                 // takes ~270uS, mostly hardware DMA, but should be cleared out by now.
-                uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
+                uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponse));
                 // Capture the status for the response packet / LED.
                 if (uart_tx_get_logging_status() != UART_LOGGING_OK) {
                     uart_logging_status_send = uart_tx_get_logging_status();
@@ -512,7 +512,7 @@ int main() {
 
                 memcpy(response_packet.data.params.wheel_img_hash, get_wheel_img_hash(), sizeof(response_packet.data.params.wheel_img_hash));
 #ifdef UART_ENABLED
-                uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponsePacket));
+                uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponse));
                 // Capture the status for the response packet / LED.
                 if (uart_tx_get_logging_status() != UART_LOGGING_OK) {
                     uart_logging_status_send = uart_tx_get_logging_status();

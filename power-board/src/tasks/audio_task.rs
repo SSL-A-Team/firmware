@@ -3,7 +3,7 @@ use ateam_lib_stm32::{audio::{songs::SongId, tone_player::TonePlayer, AudioComma
 use embassy_stm32::{timer::{simple_pwm::{PwmPin, SimplePwm}, Channel},
                     gpio::OutputType, time::hz};
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Ticker};
+use embassy_time::{Duration, Ticker, Timer};
 use defmt::*;
 
 use crate::{pins::*, songs::{BALANCE_CONNECTED_SONG, BALANCE_DISCONNECTED_SONG, BATTERY_CRITICAL_SONG, BATTERY_LOW_SONG, BATTERY_UH_OH_SONG, POWER_OFF_SONG, POWER_ON_SONG, SHUTDOWN_REQUESTED_SONG, TEST_SONG}};
@@ -76,6 +76,8 @@ async fn audio_task_entry(
                     tone_player.play_song().await;
                 },
             }
+
+            Timer::after_millis(500).await;
         }
 
         loop_rate_ticker.next().await;

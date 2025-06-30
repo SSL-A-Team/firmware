@@ -51,28 +51,28 @@ GainScheduledPidResult_t gspid_initialize(
         PidConstants_t pid_constants[],
         float gain_schedule[], float hyst_pct,
         bool gain_schedule_abs) {
-    size_t pid_constants_len = sizeof(pid_constants) / sizeof(pid_constants[0]);
-    size_t gain_sched_len = sizeof(pid_constants) / sizeof(pid_constants[0]);
+    // size_t pid_constants_len = sizeof(pid_constants) / sizeof(pid_constants[0]);
+    // size_t gain_sched_len = sizeof(pid_constants) / sizeof(pid_constants[0]);
 
     // must have at least two sets of constants to use gain scheduling
-    if (pid_constants_len <= 1) {
+    if (num_gain_stages <= 1) {
         return PID_NUM_TUNING_POINTS_TOO_LOW;
     }
 
-    // num sets of constants provided must match user stated number of gain stages
-    if (pid_constants_len != num_gain_stages) {
-        return PID_CONSTANTS_BAD_LENGTH;
-    }
+    // // num sets of constants provided must match user stated number of gain stages
+    // if (pid_constants_len != num_gain_stages) {
+    //     return PID_CONSTANTS_BAD_LENGTH;
+    // }
 
-    // num of gain schedule points must match user stated number of gain stages
-    if (gain_sched_len != num_gain_stages) {
-        return GAIN_SCHEDULE_BAD_LENGTH;
-    }
+    // // num of gain schedule points must match user stated number of gain stages
+    // if (gain_sched_len != num_gain_stages) {
+    //     return GAIN_SCHEDULE_BAD_LENGTH;
+    // }
 
-    // length of gains and schedule provided must match (think this always true by now)
-    if (pid_constants_len != gain_sched_len) {
-        return GAIN_SCHEDULE_PID_CONSTANTS_LENS_NOT_EQUAL;
-    }
+    // // length of gains and schedule provided must match (think this always true by now)
+    // if (pid_constants_len != gain_sched_len) {
+    //     return GAIN_SCHEDULE_PID_CONSTANTS_LENS_NOT_EQUAL;
+    // }
 
     // gain schedule must be positive monotonic (required to find the operating region)
     float prev_gain = FLT_MIN;
@@ -98,6 +98,8 @@ GainScheduledPidResult_t gspid_initialize(
     
     pid->eI = 0.0f;
     pid->prev_err = 0.0f;
+
+    return PID_INIT_OK;
 }
 
 static void gspid_update_gain_stage(GainScheduledPid_t *pid, float y) {
