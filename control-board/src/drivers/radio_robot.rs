@@ -95,6 +95,7 @@ pub struct RobotRadio<
         DEPTH_RX,
     >,
     reset_pin: Output<'a>,
+    use_flow_control: bool,
     peer: Option<PeerConnection>,
 }
 
@@ -111,6 +112,7 @@ impl<
         read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
         write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
         reset_pin: impl Pin,
+        use_flow_control: bool,
     ) -> RobotRadio<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX> {
         let reset_pin = Output::new(reset_pin, Level::High, Speed::Medium);
         let radio = OdinW262::new(read_queue, write_queue, uart);
@@ -119,6 +121,7 @@ impl<
             odin_driver: radio,
             reset_pin,
             peer: None,
+            use_flow_control,
         }
     }
 
@@ -166,7 +169,7 @@ impl<
             return Err(RobotRadioError::ConnectUartBadEcho);
         }
         
-        if self.odin_driver.config_uart(baudrate, true, 8, true).await.is_err() {
+        if self.odin_driver.config_uart(baudrate, self.use_flow_control, 8, true).await.is_err() {
             defmt::debug!("error increasing radio baud rate.");
             return Err(RobotRadioError::ConnectUartBadRadioConfigUpdate);
         }

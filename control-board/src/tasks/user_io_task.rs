@@ -79,6 +79,7 @@ async fn user_io_task_entry(
 
         // read switches
         let robot_network_index = dip_switch.read_block(7..4);
+        let robot_radio_driver_use_flow_control = dip_switch.read_pin(3);
         let hw_debug_mode = debug_mode_dip_switch.read_pin(0);
         let robot_team_isblue = robot_color_dip_switch.read_pin(1);
         let robot_id = robot_id_rotary.read_value();
@@ -88,6 +89,11 @@ async fn user_io_task_entry(
             if hw_debug_mode {
                 defmt::info!("robot entered debug mode");
             }
+        }
+
+        if robot_radio_driver_use_flow_control != cur_robot_state.hw_wifi_driver_use_flow_control {
+            robot_state.set_hw_wifi_driver_use_flow_control(robot_radio_driver_use_flow_control);
+            defmt::info!("updated radio driver use flow control {} -> {}", cur_robot_state.hw_wifi_driver_use_flow_control, robot_radio_driver_use_flow_control);
         }
 
         // publish updates to robot_state
@@ -150,7 +156,12 @@ async fn user_io_task_entry(
         }
 
         debug_led1.set_low();
-        debug_led2.set_low();
+        
+        if robot_radio_driver_use_flow_control {
+            debug_led2.set_high();
+        } else {
+            debug_led2.set_low();
+        }
 
         if hw_debug_mode {
             debug_led3.set_high();

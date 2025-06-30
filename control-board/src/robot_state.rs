@@ -6,6 +6,7 @@ pub struct SharedRobotState {
     hw_robot_id: AtomicU8,
     hw_robot_team_is_blue: AtomicBool,
     hw_wifi_network_index: AtomicU8,
+    hw_wifi_driver_use_flow_control: AtomicBool,
     hw_debug_mode: AtomicBool,
 
     radio_inop: AtomicBool,
@@ -41,6 +42,7 @@ impl SharedRobotState {
             hw_robot_id: AtomicU8::new(0),
             hw_robot_team_is_blue: AtomicBool::new(false),
             hw_wifi_network_index: AtomicU8::new(0),
+            hw_wifi_driver_use_flow_control: AtomicBool::new(true),
             hw_debug_mode: AtomicBool::new(true),
             radio_inop: AtomicBool::new(true),
             imu_inop: AtomicBool::new(true),
@@ -66,6 +68,7 @@ impl SharedRobotState {
             hw_robot_id: self.get_hw_robot_id(),
             hw_robot_team_is_blue: self.hw_robot_team_is_blue(),
             hw_wifi_network_index: self.hw_wifi_network_index(),
+            hw_wifi_driver_use_flow_control: self.hw_wifi_driver_use_flow_control(),
             hw_debug_mode: self.hw_in_debug_mode(),
 
             radio_inop: self.get_radio_inop(),
@@ -120,6 +123,14 @@ impl SharedRobotState {
 
     pub fn set_hw_network_index(&self, ind: u8) {
         self.hw_wifi_network_index.store(ind, Ordering::Relaxed);
+    }
+
+    pub fn hw_wifi_driver_use_flow_control(&self) -> bool {
+        self.hw_wifi_driver_use_flow_control.load(Ordering::SeqCst)
+    }
+
+    pub fn set_hw_wifi_driver_use_flow_control(&self, use_flow_control: bool) {
+        self.hw_wifi_driver_use_flow_control.store(use_flow_control, Ordering::SeqCst);
     }
  
     pub fn hw_in_debug_mode(&self) -> bool {
@@ -250,6 +261,7 @@ pub struct RobotState {
     pub hw_robot_id: u8,
     pub hw_robot_team_is_blue: bool,
     pub hw_wifi_network_index: usize,
+    pub hw_wifi_driver_use_flow_control: bool,
     pub hw_debug_mode: bool,
 
     pub radio_inop: bool,
