@@ -166,7 +166,7 @@ impl<
         let wheel_img_hash_future = async {
             loop {
                 defmt::trace!("Drive Motor - sending parameter command packet");
-                self.send_params_command();
+                self.send_params_command(false);
 
                 Timer::after(Duration::from_millis(10)).await;
 
@@ -305,7 +305,7 @@ impl<
         }
     }
 
-    pub fn send_params_command(&mut self) {
+    pub fn send_params_command(&mut self, set_max_i: bool) {
         unsafe {
             let mut cmd: MotorCommandPacket = { MaybeUninit::zeroed().assume_init() };
 
@@ -318,11 +318,14 @@ impl<
             cmd.data.params.vel_p = self.vel_pid_constants[0];
             cmd.data.params.vel_i = self.vel_pid_constants[1];
             cmd.data.params.vel_d = self.vel_pid_constants[2];
-            // TODO: Actually make this dependent on whether we update
-            // from what it was before 
             cmd.data.params.set_update_vel_p(true as u32);
             cmd.data.params.set_update_vel_i(true as u32);
             cmd.data.params.set_update_vel_d(true as u32);
+            
+            if set_max_i {
+                cmd.data.params.vel_i_max = self.vel_pid_i_max;
+                cmd.data.params.set_update_vel_i_max(true as u32);
+            }
 
             let struct_bytes = core::slice::from_raw_parts(
                 (&cmd as *const MotorCommandPacket) as *const u8,
@@ -362,6 +365,15 @@ impl<
 
     pub fn set_motion_type(&mut self, motion_type: MotorCommand_MotionType::Type) {
         self.motion_type = motion_type;
+    }
+
+    pub fn set_vel_pid_constants(&mut self, pid_constants: Vector3<f32>) {
+        self.vel_pid_constants = pid_constants;
+    }
+
+    // NOTE: We assume imin = imax.
+    pub fn set_vel_pid_imax(&mut self, pid_imax: f32) {
+        self.vel_pid_i_max = pid_imax;
     }
 
     pub fn set_setpoint(&mut self, setpoint: f32) {

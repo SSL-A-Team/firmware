@@ -116,5 +116,11 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             dribbler_speed: 10.0,
             kick_request: KickRequest::KR_DISABLE,
         })).await;
+
+        // TODO (Christian): publish one param packet to the control task containing wheel PID gains
+        // Check that we've acknowledged that param setting
+        // and check whether the wheel PID gains are changed
+        // (Request a params packet returned from main.c in the stspin, that those PID values 
+        // are the same as the ones that we've sent)
     }
 }

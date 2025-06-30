@@ -1,4 +1,4 @@
-use ateam_common_packets::{bindings::{BasicTelemetry, MotorCommand_MotionType}, radio::TelemetryPacket};
+use ateam_common_packets::{bindings::{BasicTelemetry, MotorCommand_MotionType, ParameterDataFormat::{PID_F32, PID_LIMITED_INTEGRAL_F32, GS_PID_LIMITED_INTEGRAL_F32}, ParameterName::WHEEL_PID}, radio::TelemetryPacket};
 use ateam_lib_stm32::{drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::Uart;
@@ -196,13 +196,6 @@ impl <
             }
         }
 
-        fn send_motor_pid_constants(&mut self) {
-            self.motor_fl.send_params_command();
-            self.motor_bl.send_params_command();
-            self.motor_br.send_params_command();
-            self.motor_fr.send_params_command();
-        }
-    
         async fn control_task_entry(&mut self) {
             defmt::info!("control task init.");
 
@@ -274,6 +267,62 @@ impl <
                         ateam_common_packets::radio::DataPacket::ParameterCommand(latest_param_cmd) => {
                             // How to also have the WheelMotors process the commands?
                             let param_cmd_resp = robot_controller.apply_command(&latest_param_cmd);
+
+                            if latest_param_cmd.parameter_name == WHEEL_PID {
+                                match latest_param_cmd.data_format {
+                                    PID_F32 => {
+                                        // Accessing data in a union that might be uninit is unsafe
+                                        unsafe {
+                                            let new_pid_constants = Vector3::new(
+                                                latest_param_cmd.data.pid_f32[0],
+                                                latest_param_cmd.data.pid_f32[1],
+                                                latest_param_cmd.data.pid_f32[2],
+                                            );
+                                            self.motor_fl.set_vel_pid_constants(new_pid_constants);
+                                            self.motor_bl.set_vel_pid_constants(new_pid_constants);
+                                            self.motor_fr.set_vel_pid_constants(new_pid_constants);
+                                            self.motor_br.set_vel_pid_constants(new_pid_constants);
+
+                                            self.motor_fl.send_params_command(false);
+                                            self.motor_bl.send_params_command(false);
+                                            self.motor_fr.send_params_command(false);
+                                            self.motor_br.send_params_command(false);
+                                        }
+                                    },
+                                    PID_LIMITED_INTEGRAL_F32 => {
+                                        // Accessing data in a union that might be uninit is unsafe
+                                        unsafe {
+                                            let new_pid_constants = Vector3::new(
+                                                latest_param_cmd.data.pidii_f32[0],
+                                                latest_param_cmd.data.pidii_f32[1],
+                                                latest_param_cmd.data.pidii_f32[2],
+                                            );
+                                            self.motor_fl.set_vel_pid_constants(new_pid_constants);
+                                            self.motor_bl.set_vel_pid_constants(new_pid_constants);
+                                            self.motor_fr.set_vel_pid_constants(new_pid_constants);
+                                            self.motor_br.set_vel_pid_constants(new_pid_constants);
+                                            
+                                            // NOTE: Currently we assume I_max = I_min
+                                            let pid_imax = latest_param_cmd.data.pidii_f32[4];
+                                            self.motor_fl.set_vel_pid_imax(pid_imax);
+                                            self.motor_bl.set_vel_pid_imax(pid_imax);
+                                            self.motor_fr.set_vel_pid_imax(pid_imax);
+                                            self.motor_br.set_vel_pid_imax(pid_imax);
+                                            
+                                            self.motor_fl.send_params_command(true);
+                                            self.motor_bl.send_params_command(true);
+                                            self.motor_fr.send_params_command(true);
+                                            self.motor_br.send_params_command(true);
+                                        }
+                                    },
+                                    GS_PID_LIMITED_INTEGRAL_F32 => {
+                                        defmt::error!("TODO: Gain scheduled PID packets!");
+                                    },
+                                    _ => {
+                                        defmt::error!("Unrecognized packet type for assigning wheel PID!");
+                                    }
+                                }
+                            }
 
                             if let Ok(resp) = param_cmd_resp {
                                 defmt::info!("sending successful parameter update command response");
