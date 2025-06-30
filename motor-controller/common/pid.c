@@ -108,7 +108,7 @@ static void gspid_update_gain_stage(GainScheduledPid_t *pid, float y) {
     if (y < pid->gain_schedule[0]) {
         // we are below the lowest gain stage, not between
         pid->cur_gain_stage_ind = 0;
-    } else if (y < pid->gain_schedule[pid->num_gain_stages - 1]) {
+    } else if (y > pid->gain_schedule[pid->num_gain_stages - 1]) {
         // we are above the highest gain stage, not between
         pid->cur_gain_stage_ind = pid->num_gain_stages - 1;
     } else {
