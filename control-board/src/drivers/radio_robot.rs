@@ -1,7 +1,7 @@
 use ateam_lib_stm32::drivers::radio::odin_w26x::{PeerConnection, OdinW262, WifiAuth};
 use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
 use ateam_common_packets::bindings::{
-    self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data, BasicTelemetry, ControlDebugTelemetry, ParameterCommand,
+    self, BasicControl, CommandCode, HelloRequest, HelloResponse, RadioPacket, RadioPacket_Data, BasicTelemetry, ExtendedTelemetry, ParameterCommand,
 };
 use ateam_common_packets::radio::DataPacket;
 use const_format::formatcp;
@@ -448,13 +448,13 @@ impl<
         Ok(())
     }
 
-    pub async fn send_control_debug_telemetry(&self, telemetry: ControlDebugTelemetry) -> Result<(), ()> {
+    pub async fn send_control_debug_telemetry(&self, telemetry: ExtendedTelemetry) -> Result<(), ()> {
         let packet = RadioPacket {
             crc32: 0,
             major_version: bindings::kProtocolVersionMajor,
             minor_version: bindings::kProtocolVersionMinor,
             command_code: CommandCode::CC_CONTROL_DEBUG_TELEMETRY,
-            data_length: size_of::<ControlDebugTelemetry>() as u16,
+            data_length: size_of::<ExtendedTelemetry>() as u16,
             data: RadioPacket_Data {
                 control_debug_telemetry: telemetry
             },
@@ -463,7 +463,7 @@ impl<
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
                 size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
-                    + size_of::<ControlDebugTelemetry>(),
+                    + size_of::<ExtendedTelemetry>(),
             )
         };
         self.send_data(packet_bytes).await?;

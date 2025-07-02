@@ -100,18 +100,12 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                                     sequence_number: 0,
                                     robot_revision_major: 0,
                                     robot_revision_minor: 0,
-                                    battery_level: 0.0,
-                                    battery_temperature: 0.0,
+                                    battery_percent: 0,
+                                    kicker_charge_percent: 0,
                                     _bitfield_align_1: [0; 0],
                                     _bitfield_1: BasicTelemetry::new_bitfield_1(
-                                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
                                     ),
-                                    motor_0_temperature: 0.0,
-                                    motor_1_temperature: 0.0,
-                                    motor_2_temperature: 0.0,
-                                    motor_3_temperature: 0.0,
-                                    motor_4_temperature: 0.0,
-                                    kicker_charge_level: 0.0
                                 };
 
                                 let pkt_wrapped = TelemetryPacket::Basic(basic_telem);

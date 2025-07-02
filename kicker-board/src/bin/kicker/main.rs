@@ -48,9 +48,9 @@ pub const CHARGE_OVERVOLT_THRESH_VOLTAGE: f32 = 195.0;
 pub const CHARGED_THRESH_VOLTAGE: f32 = 170.0;
 pub const CHARGE_SAFE_VOLTAGE: f32 = 10.0;
 
-const MAX_TX_PACKET_SIZE: usize = 16;
+const MAX_TX_PACKET_SIZE: usize = 68;
 const TX_BUF_DEPTH: usize = 3;
-const MAX_RX_PACKET_SIZE: usize = 16;
+const MAX_RX_PACKET_SIZE: usize = 36;
 const RX_BUF_DEPTH: usize = 3;
 
 const RAIL_BUFFER_SIZE: usize = 10;
@@ -60,24 +60,6 @@ make_uart_queue_pair!(COMS,
     MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
     MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
     #[link_section = ".bss"]);
-
-fn get_empty_control_packet() -> KickerControl {
-    KickerControl {
-        _bitfield_align_1: [],
-        _bitfield_1: KickerControl::new_bitfield_1(0, 0, 0),
-        kick_request: KickRequest::KR_DISABLE,
-        kick_speed: 0.0,
-    }
-}
-
-fn get_empty_telem_packet() -> KickerTelemetry {
-    KickerTelemetry {
-        _bitfield_align_1: [],
-        _bitfield_1: KickerTelemetry::new_bitfield_1(0, 0, 0, 0),
-        rail_voltage: 0.0,
-        battery_voltage: 0.0,
-    }
-}
 
 #[embassy_executor::task]
 async fn high_pri_kick_task(
@@ -123,8 +105,8 @@ async fn high_pri_kick_task(
 
     // coms buffers
     let mut telemetry_enabled: bool; //  = false;
-    let mut kicker_control_packet: KickerControl = get_empty_control_packet();
-    let mut kicker_telemetry_packet: KickerTelemetry = get_empty_telem_packet();
+    let mut kicker_control_packet: KickerControl = Default::default();
+    let mut kicker_telemetry_packet: KickerTelemetry = Default::default();
 
     // bookkeeping for latched state
     let mut kick_command_cleared: bool = false;
@@ -362,10 +344,13 @@ async fn high_pri_kick_task(
                 > 20
             {
                 kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(
-                    shutdown_requested as u32,
-                    shutdown_completed as u32,
-                    ball_detected as u32,
-                    res.is_err() as u32,
+                    res.is_err() as u16,  // error detected
+                    false as u16, // dribbler error
+                    shutdown_requested as u16,
+                    shutdown_completed as u16,
+                    ball_detected as u16,
+                    (rail_voltage_ave > CHARGED_THRESH_VOLTAGE) as u16, // charge full
+                    Default::default(),
                 );
                 kicker_telemetry_packet.rail_voltage = rail_voltage_ave;
                 kicker_telemetry_packet.battery_voltage = battery_voltage;
