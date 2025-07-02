@@ -65,20 +65,20 @@ pub struct ControlTask<
     last_accel_x_ms: f32,
     last_accel_y_ms: f32,
     telemetry_publisher: TelemetryPublisher,
-    
+
     motor_fl: WheelMotor<'static, MotorFLUart, MotorFLDmaRx, MotorFLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
     motor_bl: WheelMotor<'static, MotorBLUart, MotorBLDmaRx, MotorBLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
     motor_br: WheelMotor<'static, MotorBRUart, MotorBRDmaRx, MotorBRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
     motor_fr: WheelMotor<'static, MotorFRUart, MotorFRDmaRx, MotorFRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-    motor_drib: DribblerMotor<'static, MotorDUart, MotorDDmaRx, MotorDDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH> 
+    motor_drib: DribblerMotor<'static, MotorDUart, MotorDDmaRx, MotorDDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>
 }
 
 impl <
     const MAX_RX_PACKET_SIZE: usize,
     const MAX_TX_PACKET_SIZE: usize,
     const RX_BUF_DEPTH: usize,
-    const TX_BUF_DEPTH: usize> 
-    ControlTask<MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH> 
+    const TX_BUF_DEPTH: usize>
+    ControlTask<MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>
     {
 
         pub fn new(robot_state: &'static SharedRobotState,
@@ -91,7 +91,7 @@ impl <
                 motor_bl: WheelMotor<'static, MotorBLUart, MotorBLDmaRx, MotorBLDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
                 motor_br: WheelMotor<'static, MotorBRUart, MotorBRDmaRx, MotorBRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
                 motor_fr: WheelMotor<'static, MotorFRUart, MotorFRDmaRx, MotorFRDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>,
-                motor_drib: DribblerMotor<'static, MotorDUart, MotorDDmaRx, MotorDDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH> 
+                motor_drib: DribblerMotor<'static, MotorDUart, MotorDDmaRx, MotorDDmaTx, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>
         ) -> Self {
             ControlTask {
                 shared_robot_state: robot_state,
@@ -104,15 +104,15 @@ impl <
                 last_gyro_rads: 0.0,
                 last_accel_x_ms: 0.0,
                 last_accel_y_ms: 0.0,
-                motor_fl: motor_fl, 
+                motor_fl: motor_fl,
                 motor_bl: motor_bl,
                 motor_br: motor_br,
                 motor_fr: motor_fr,
-                motor_drib: motor_drib 
+                motor_drib: motor_drib
             }
         }
 
-        fn do_control_update(&mut self, 
+        fn do_control_update(&mut self,
             robot_controller: &mut BodyVelocityController,
             cmd_vel: Vector3<f32>,
             gyro_rads: f32,
@@ -122,7 +122,7 @@ impl <
             Provide the motion controller with the current wheel velocities
             and torques from the appropriate sensors, then get a set of wheel
             velocities to apply based on the controller's current state.
-         */ 
+         */
         {
             let wheel_vels = Vector4::new(
                 self.motor_fl.read_rads(),
@@ -139,16 +139,16 @@ impl <
                 self.motor_br.read_current(),
                 self.motor_fr.read_current()
             );
-        
+
             // TODO read from channel or something
 
-            robot_controller.control_update(&cmd_vel, &wheel_vels, &wheel_torques, gyro_rads, controls_enabled); 
-            robot_controller.get_wheel_velocities()   
+            robot_controller.control_update(&cmd_vel, &wheel_vels, &wheel_torques, gyro_rads, controls_enabled);
+            robot_controller.get_wheel_velocities()
         }
 
         fn send_motor_commands_and_telemetry(&mut self,
                                             robot_controller: &mut BodyVelocityController,
-                                            battery_voltage: f32) 
+                                            battery_voltage: f32)
         {
             self.motor_fl.send_motion_command();
             self.motor_bl.send_motion_command();
@@ -179,14 +179,14 @@ impl <
                     0, 1, 0, 0, 0, // power battery error flags not supported by this generation
                     self.shared_robot_state.shutdown_requested() as u32,
                     self.shared_robot_state.robot_tipped() as u32,
-                    0, self.shared_robot_state.ball_detected() as u32, 
-                    self.shared_robot_state.get_imu_inop() as u32, 0, 
-                    self.shared_robot_state.get_imu_inop() as u32, 0, 
+                    0, self.shared_robot_state.ball_detected() as u32,
+                    self.shared_robot_state.get_imu_inop() as u32, 0,
+                    self.shared_robot_state.get_imu_inop() as u32, 0,
                     err_fl, hall_err_fl,
                     err_bl, hall_err_bl,
                     err_br, hall_err_br,
                     err_fr, hall_err_fr,
-                    err_drib, hall_err_drib, 
+                    err_drib, hall_err_drib,
                     self.shared_robot_state.get_kicker_inop() as u32, 0, 1,
                     1, 0, 0,
                     Default::default()
@@ -207,7 +207,7 @@ impl <
             let control_debug_telem = TelemetryPacket::Extended(control_debug_telem);
             self.telemetry_publisher.publish_immediate(control_debug_telem);
         }
-    
+
         async fn control_task_entry(&mut self) {
             defmt::info!("control task init.");
 
@@ -215,10 +215,10 @@ impl <
             while !self.shared_robot_state.hw_init_state_valid() {
                 Timer::after_millis(10).await;
             }
- 
+
             self.flash_motor_firmware(
                 self.shared_robot_state.hw_in_debug_mode()).await;
-             
+
             embassy_futures::join::join5(
                 self.motor_fl.leave_reset(),
                 self.motor_bl.leave_reset(),
@@ -245,7 +245,7 @@ impl <
 
             let robot_model = self.get_robot_model();
             let mut robot_controller = BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
-    
+
             let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));
 
             let mut cmd_vel = Vector3::new(0.0, 0.0, 0.0);
@@ -299,7 +299,7 @@ impl <
                         },
                     }
                 }
-                
+
                 if ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
                     cmd_vel = Vector3::new(0., 0., 0.);
                     drib_vel = 0.0;
@@ -319,7 +319,7 @@ impl <
                     self.last_accel_x_ms = accel_ms[0];
                     self.last_accel_y_ms = accel_ms[1];
                 }
-                
+
                 let controls_enabled = true;
 
                 let wheel_vels = if !(self.shared_robot_state.get_battery_low() || self.shared_robot_state.get_battery_crit()) && !self.shared_robot_state.shutdown_requested() {
@@ -338,7 +338,6 @@ impl <
                 self.motor_fr.set_setpoint(wheel_vels[3]);
 
                 let drib_dc = -1.0 * drib_vel / 1000.0;
-                defmt::info!("set drib: {}", drib_dc);
                 self.motor_drib.set_setpoint(drib_dc);
 
                 self.send_motor_commands_and_telemetry(
@@ -401,9 +400,9 @@ impl <
                     self.motor_drib.load_default_firmware_image(),
                 )
                 .await;
-                
-                let error_mask = res.0.is_err() as u8 
-                        | ((res.1.is_err() as u8) & 0x01) << 1 
+
+                let error_mask = res.0.is_err() as u8
+                        | ((res.1.is_err() as u8) & 0x01) << 1
                         | ((res.2.is_err() as u8) & 0x01) << 2
                         | ((res.3.is_err() as u8) & 0x01) << 3;
 
@@ -441,11 +440,11 @@ impl <
             };
 
             let robot_model: RobotModel = RobotModel::new(robot_model_constants);
-            
-            return robot_model; 
+
+            return robot_model;
         }
     }
-    
+
 #[embassy_executor::task]
 async fn control_task_entry(mut control_task: ControlTask<MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>) {
     loop {
@@ -501,7 +500,7 @@ pub async fn start_control_task(
     ////////////////////////////////
     //  create motor controllers  //
     ////////////////////////////////
-    
+
     let motor_fl = WheelMotor::new_from_pins(&FRONT_LEFT_RX_UART_QUEUE,  &FRONT_LEFT_TX_UART_QUEUE,  motor_fl_boot0_pin, motor_fl_nrst_pin, WHEEL_FW_IMG);
     let motor_bl = WheelMotor::new_from_pins(&BACK_LEFT_RX_UART_QUEUE,   &BACK_LEFT_TX_UART_QUEUE,   motor_bl_boot0_pin, motor_bl_nrst_pin, WHEEL_FW_IMG);
     let motor_br = WheelMotor::new_from_pins(&BACK_RIGHT_RX_UART_QUEUE,  &BACK_RIGHT_TX_UART_QUEUE,  motor_br_boot0_pin, motor_br_nrst_pin, WHEEL_FW_IMG);
