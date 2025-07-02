@@ -477,13 +477,8 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                 },
                 WHEEL_PID => {
                     if param_cmd.data_format == PID_LIMITED_INTEGRAL_F32 {
-                        
-                        // TODO: Use the provided PID constants to update the vel_pid_constants
-                        // for each WheelMotor :)
-                        // Need to figure out how to handle this, since the WheelMotors are part of
-                        // the ControlTask struct and not the robot controller...
-                        defmt::debug!("Wheel PID commands TODO!");
-
+                        reply_cmd.command_code = PCC_ACK;
+                    } else if param_cmd.data_format == GS_PID_LIMITED_INTEGRAL_F32 {
                         reply_cmd.command_code = PCC_ACK;
                     } else {
                         reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;

@@ -1,10 +1,10 @@
 #![no_std]
 #![no_main]
 
-use ateam_common_packets::{bindings::KickRequest, bindings::BasicControl, radio::DataPacket};
+use ateam_common_packets::{bindings::{BasicControl, KickRequest, ParameterCommand, ParameterCommandCode::PCC_WRITE, ParameterCommand_ParameterData, ParameterDataFormat::GS_PID_LIMITED_INTEGRAL_F32, ParameterName::WHEEL_PID}, radio::DataPacket};
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
-    interrupt, pac::Interrupt
+    interrupt, pac::{fmac::regs::Param, Interrupt}
 };
 use embassy_sync::pubsub::PubSubChannel;
 
@@ -115,6 +115,17 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             kick_vel: 0.0,
             dribbler_speed: 10.0,
             kick_request: KickRequest::KR_DISABLE,
+        })).await;
+
+        test_command_publisher.publish(DataPacket::ParameterCommand(
+            ParameterCommand {
+                command_code: PCC_WRITE,
+                data_format: GS_PID_LIMITED_INTEGRAL_F32,
+                parameter_name: WHEEL_PID,
+                // Stage, P, I, D, I_max, I_min 
+                data: ParameterCommand_ParameterData{ 
+                    gspidii_f32: [0., 5.5, 8.0, 0.1, 20.0, -20.0]
+            },
         })).await;
 
         // TODO (Christian): publish one param packet to the control task containing wheel PID gains
