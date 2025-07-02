@@ -10,7 +10,7 @@ use embassy_sync::pubsub::PubSubChannel;
 use defmt_rtt as _; 
 
 use ateam_control_board::{
-    create_control_task, create_dotstar_task, create_imu_task, create_io_task, create_kicker_task, create_power_task, create_radio_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, LedCommandPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
+    create_audio_task, create_control_task, create_dotstar_task, create_imu_task, create_io_task, create_kicker_task, create_power_task, create_radio_task, get_system_config, pins::{AccelDataPubSub, CommandsPubSub, GyroDataPubSub, KickerTelemetryPubSub, LedCommandPubSub, PowerTelemetryPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
 
 // load credentials from correct crate
 #[cfg(not(feature = "no-private-credentials"))]
@@ -37,7 +37,8 @@ static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
 static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
 static GYRO_DATA_CHANNEL: GyroDataPubSub = PubSubChannel::new();
 static ACCEL_DATA_CHANNEL: AccelDataPubSub = PubSubChannel::new();
-static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
+static POWER_DATA_CHANNEL: PowerTelemetryPubSub = PubSubChannel::new();
+static KICKER_DATA_CHANNEL: KickerTelemetryPubSub = PubSubChannel::new();
 static LED_COMMAND_PUBSUB: LedCommandPubSub = PubSubChannel::new();
 
 static RADIO_UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
@@ -93,10 +94,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let radio_telemetry_subscriber = RADIO_TELEMETRY_CHANNEL.subscriber().unwrap();
     let radio_led_cmd_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
 
-    // Battery Channel
-    let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
-    let battery_volt_subscriber = BATTERY_VOLT_CHANNEL.subscriber().unwrap();
-
     // imu channel
     let imu_gyro_data_publisher = GYRO_DATA_CHANNEL.publisher().unwrap();
     let imu_accel_data_publisher = ACCEL_DATA_CHANNEL.publisher().unwrap();
@@ -104,6 +101,14 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     let control_gyro_data_subscriber = GYRO_DATA_CHANNEL.subscriber().unwrap();
     let control_accel_data_subscriber = ACCEL_DATA_CHANNEL.subscriber().unwrap();
+
+    // power channel
+    let power_board_telemetry_publisher = POWER_DATA_CHANNEL.publisher().unwrap();
+    let control_task_power_telemetry_subscriber = POWER_DATA_CHANNEL.subscriber().unwrap();
+
+    // kicker channel
+    let kicker_board_telemetry_publisher = KICKER_DATA_CHANNEL.publisher().unwrap();
+    let control_task_kicker_telemetry_subscriber = KICKER_DATA_CHANNEL.subscriber().unwrap();
 
     // power board
     let power_led_cmd_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
@@ -114,17 +119,15 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     create_io_task!(main_spawner,
         robot_state,
-        battery_volt_publisher,
         p);
 
     create_dotstar_task!(main_spawner,
         led_command_subscriber,
         p);
 
-    // TODO Come back to. Extra compute.
-    // create_audio_task!(main_spawner,
-    //    robot_state,
-    //    p);
+    create_audio_task!(main_spawner,
+       robot_state,
+       p);
 
     create_radio_task!(main_spawner, radio_uart_queue_spawner, uart_queue_spawner,
         robot_state,
@@ -133,7 +136,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p);
 
     create_power_task!(main_spawner, uart_queue_spawner,
-        robot_state, power_led_cmd_publisher,
+        robot_state, power_board_telemetry_publisher, power_led_cmd_publisher,
         p);
 
     create_imu_task!(main_spawner,
@@ -144,7 +147,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     create_control_task!(main_spawner, uart_queue_spawner, 
         robot_state, 
         control_command_subscriber, control_telemetry_publisher,
-        battery_volt_subscriber,
+        control_task_power_telemetry_subscriber, control_task_kicker_telemetry_subscriber,
         control_gyro_data_subscriber, control_accel_data_subscriber,
         p);
 
@@ -152,6 +155,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         main_spawner, uart_queue_spawner,
         robot_state,
         kicker_command_subscriber,
+        kicker_board_telemetry_publisher,
         p);
 
     loop {

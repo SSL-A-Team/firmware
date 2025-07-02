@@ -26,13 +26,13 @@ async fn audio_task_entry(
 
         // Structure so only one song can play per 
         if cur_robot_state.battery_crit {
-            defmt::warn!("battery critical");
-            let _ = tone_player.load_song(&BATTERY_CRITICAL_SONG);
-            tone_player.play_song().await;
+            // defmt::warn!("battery critical");
+            // let _ = tone_player.load_song(&BATTERY_CRITICAL_SONG);
+            // tone_player.play_song().await;
         } else if cur_robot_state.battery_low {
-            defmt::warn!("battery low");
-            let _ = tone_player.load_song(&BATTERY_WARNING_SONG);
-            tone_player.play_song().await;
+            // defmt::warn!("battery low");
+            // let _ = tone_player.load_song(&BATTERY_WARNING_SONG);
+            // tone_player.play_song().await;
         } else if cur_robot_state.robot_tipped {
             defmt::warn!("robot tipped audio");
             let _ = tone_player.load_song(&TIPPED_WARNING_SONG);

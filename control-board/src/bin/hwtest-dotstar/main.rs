@@ -6,7 +6,7 @@ use embassy_stm32::interrupt;
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{create_dotstar_task, create_io_task, get_system_config, pins::{BatteryVoltPubSub, LedCommandPubSub}, robot_state::SharedRobotState, tasks::dotstar_task::{ControlBoardLedCommand, ControlGeneralLedCommand}};
+use ateam_control_board::{create_dotstar_task, create_io_task, get_system_config, pins::LedCommandPubSub, robot_state::SharedRobotState, tasks::dotstar_task::{ControlBoardLedCommand, ControlGeneralLedCommand}};
 
 
 use embassy_sync::pubsub::PubSubChannel;
@@ -17,7 +17,6 @@ use static_cell::ConstStaticCell;
 
 static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
 
-static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
 static LED_COMMAND_CHANNEL: LedCommandPubSub = PubSubChannel::new();
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
@@ -46,8 +45,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  setup inter-task coms channels  //
     //////////////////////////////////////
     
-    let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
-
     let led_command_subscriber = LED_COMMAND_CHANNEL.subscriber().unwrap();
     let led_command_publisher = LED_COMMAND_CHANNEL.publisher().unwrap();
 
@@ -55,7 +52,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  start tasks  //
     ///////////////////
 
-    create_io_task!(main_spawner, robot_state, battery_volt_publisher, p);
+    create_io_task!(main_spawner, robot_state, p);
 
     create_dotstar_task!(main_spawner, led_command_subscriber, p);
 

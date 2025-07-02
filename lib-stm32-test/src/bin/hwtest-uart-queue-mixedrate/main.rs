@@ -35,7 +35,7 @@ const TX_BUF_DEPTH: usize = 5;
 const MAX_RX_PACKET_SIZE: usize = 64;
 const RX_BUF_DEPTH: usize = 200;
 
-static_idle_buffered_uart!(coms, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
 
 static LOOP_RATE_MS: AtomicU16 = AtomicU16::new(100);
 

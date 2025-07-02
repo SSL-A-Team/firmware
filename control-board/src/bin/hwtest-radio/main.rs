@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use ateam_common_packets::{bindings::{BasicTelemetry, ParameterCommandCode}, radio::{DataPacket, TelemetryPacket}};
+use ateam_common_packets::{bindings::ParameterCommandCode, radio::{DataPacket, TelemetryPacket}};
 use embassy_executor::InterruptExecutor;
 use embassy_futures::select::{self, Either};
 use embassy_stm32::{
@@ -11,7 +11,7 @@ use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 
 use defmt_rtt as _;
 
-use ateam_control_board::{create_dotstar_task, create_io_task, create_radio_task, get_system_config, pins::{BatteryVoltPubSub, CommandsPubSub, LedCommandPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
+use ateam_control_board::{create_dotstar_task, create_io_task, create_radio_task, get_system_config, pins::{CommandsPubSub, LedCommandPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
 
 
 // load credentials from correct crate
@@ -37,7 +37,6 @@ static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(Sha
 
 static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
 static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
-static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
 static LED_COMMAND_PUBSUB: LedCommandPubSub = PubSubChannel::new();
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
@@ -81,8 +80,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
     let radio_telemetry_subscriber = RADIO_TELEMETRY_CHANNEL.subscriber().unwrap();
 
-    let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
-
     let led_command_subscriber = LED_COMMAND_PUBSUB.subscriber().unwrap();
 
 
@@ -94,7 +91,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     create_io_task!(main_spawner,
         robot_state,
-        battery_volt_publisher,
         p);
 
     create_dotstar_task!(main_spawner,
@@ -121,24 +117,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                             DataPacket::BasicControl(_bc) => {
                                 defmt::info!("got command packet");
 
-                                let basic_telem = BasicTelemetry {
-                                    sequence_number: 0,
-                                    robot_revision_major: 0,
-                                    robot_revision_minor: 0,
-                                    battery_level: 0.0,
-                                    battery_temperature: 0.0,
-                                    _bitfield_align_1: [0; 0],
-                                    _bitfield_1: BasicTelemetry::new_bitfield_1(
-                                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                                    ),
-                                    motor_0_temperature: 0.0,
-                                    motor_1_temperature: 0.0,
-                                    motor_2_temperature: 0.0,
-                                    motor_3_temperature: 0.0,
-                                    motor_4_temperature: 0.0,
-                                    kicker_charge_level: 0.0
-                                };
-
+                                let basic_telem = Default::default();
+                            
                                 let pkt_wrapped = TelemetryPacket::Basic(basic_telem);
                                 control_telemetry_publisher.publish(pkt_wrapped).await;
 
