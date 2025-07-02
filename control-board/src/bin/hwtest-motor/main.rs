@@ -10,7 +10,7 @@ use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _;
 
-use ateam_control_board::{create_control_task, create_imu_task, create_io_task, get_system_config, pins::{AccelDataPubSub, BatteryVoltPubSub, CommandsPubSub, GyroDataPubSub, LedCommandPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
+use ateam_control_board::{create_control_task, create_imu_task, create_io_task, get_system_config, pins::{AccelDataPubSub, CommandsPubSub, GyroDataPubSub, KickerTelemetryPubSub, LedCommandPubSub, PowerTelemetryPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
 
 use embassy_time::Timer;
 // provide embedded panic probe
@@ -23,7 +23,8 @@ static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
 static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
 static GYRO_DATA_CHANNEL: GyroDataPubSub = PubSubChannel::new();
 static ACCEL_DATA_CHANNEL: AccelDataPubSub = PubSubChannel::new();
-static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
+static POWER_DATA_CHANNEL: PowerTelemetryPubSub = PubSubChannel::new();
+static KICKER_DATA_CHANNEL: KickerTelemetryPubSub = PubSubChannel::new();
 static LED_COMMAND_PUBSUB: LedCommandPubSub = PubSubChannel::new();
 
 static RADIO_UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
@@ -71,11 +72,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     // telemetry channel
     let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
 
-    // Battery Channel
-    let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
-    let battery_volt_subscriber = BATTERY_VOLT_CHANNEL.subscriber().unwrap();
-
-    // TODO imu channel
+    // imu channel
     let imu_gyro_data_publisher = GYRO_DATA_CHANNEL.publisher().unwrap();
     let control_gyro_data_subscriber = GYRO_DATA_CHANNEL.subscriber().unwrap();
     let imu_led_cmd_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
@@ -83,13 +80,18 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let imu_accel_data_publisher = ACCEL_DATA_CHANNEL.publisher().unwrap();
     let control_accel_data_subscriber = ACCEL_DATA_CHANNEL.subscriber().unwrap();
 
+    // power channel
+    let control_task_power_telemetry_subscriber = POWER_DATA_CHANNEL.subscriber().unwrap();
+
+    // kicker channel
+    let control_task_kicker_telemetry_subscriber = KICKER_DATA_CHANNEL.subscriber().unwrap();
+
     ///////////////////
     //  start tasks  //
     ///////////////////
 
     create_io_task!(main_spawner,
         robot_state,
-        battery_volt_publisher,
         p);
 
     create_imu_task!(main_spawner,
@@ -100,7 +102,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     create_control_task!(main_spawner, uart_queue_spawner, 
         robot_state, 
         control_command_subscriber, control_telemetry_publisher,
-        battery_volt_subscriber,
+        control_task_power_telemetry_subscriber, control_task_kicker_telemetry_subscriber,
         control_gyro_data_subscriber, control_accel_data_subscriber,
         p);
 
@@ -109,6 +111,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         Timer::after_millis(100).await;
 
         test_command_publisher.publish(DataPacket::BasicControl(BasicControl {
+            _bitfield_1: Default::default(),
+            _bitfield_align_1: Default::default(),
             vel_x_linear: 1.0,
             vel_y_linear: 0.0,
             vel_z_angular: 0.0,

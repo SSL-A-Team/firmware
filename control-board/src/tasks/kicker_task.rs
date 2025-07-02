@@ -9,9 +9,9 @@ use crate::{drivers::kicker::Kicker, include_kicker_bin, pins::*, robot_state::S
 
 include_kicker_bin! {KICKER_FW_IMG, "kicker.bin"}
 
-const MAX_TX_PACKET_SIZE: usize = 20;
+const MAX_TX_PACKET_SIZE: usize = 32;
 const TX_BUF_DEPTH: usize = 3;
-const MAX_RX_PACKET_SIZE: usize = 20;
+const MAX_RX_PACKET_SIZE: usize = 64;
 const RX_BUF_DEPTH: usize = 20;
 const TELEMETRY_TIMEOUT_MS: u64 = 2000;
 
@@ -20,11 +20,12 @@ static_idle_buffered_uart!(KICKER, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACK
 #[macro_export]
 macro_rules! create_kicker_task {
     ($main_spawner:ident, $uart_queue_spawner:ident, $robot_state:ident,
-        $command_subscriber:ident, $p:ident) => {
+        $command_subscriber:ident, $kicker_telemetry_publisher:ident, $p:ident) => {
         ateam_control_board::tasks::kicker_task::start_kicker_task(
             $main_spawner, $uart_queue_spawner,
             $robot_state,
             $command_subscriber,
+            $kicker_telemetry_publisher,
             $p.UART8, $p.PE0, $p.PE1,
             $p.DMA2_CH2, $p.DMA2_CH3,
             $p.PG2, $p.PG3).await;
@@ -50,6 +51,7 @@ pub struct KickerTask<'a,
     kicker_task_state: KickerTaskState,
     robot_state: &'static SharedRobotState,
     commands_subscriber: CommandsSubscriber,
+    kicker_telemetry_publisher: KickerTelemetryPublisher,
 }
 
 impl<'a,
@@ -59,12 +61,14 @@ const DEPTH_RX: usize,
 const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
     pub fn new(kicker_driver: Kicker<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>,
             robot_state: &'static SharedRobotState,
-            command_subscriber: CommandsSubscriber) -> Self {
+            command_subscriber: CommandsSubscriber,
+            kicker_telemetry_publisher: KickerTelemetryPublisher) -> Self {
         KickerTask {
             kicker_driver: kicker_driver,
             kicker_task_state: KickerTaskState::PoweredOff,
             robot_state: robot_state,
             commands_subscriber: command_subscriber,
+            kicker_telemetry_publisher,
         }
     }
 
@@ -76,11 +80,12 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         reset_pin: impl Pin,
         firmware_image: &'a [u8],
         robot_state: &'static SharedRobotState,
-        command_subscriber: CommandsSubscriber) -> Self {
+        command_subscriber: CommandsSubscriber,
+        kicker_telemetry_publisher: KickerTelemetryPublisher) -> Self {
 
         let kicker_driver = Kicker::new_from_pins(uart, read_queue, write_queue, boot0_pin, reset_pin, firmware_image);
 
-        Self::new(kicker_driver, robot_state, command_subscriber)
+        Self::new(kicker_driver, robot_state, command_subscriber, kicker_telemetry_publisher)
     }
 
     pub async fn kicker_task_entry(&mut self) {
@@ -91,6 +96,8 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
 
             if self.kicker_driver.process_telemetry() {
                 last_packet_sent_time = Instant::now();
+
+                self.kicker_telemetry_publisher.publish_immediate(self.kicker_driver.get_lastest_state());
             }
 
             let cur_time = Instant::now();
@@ -217,6 +224,7 @@ pub async fn start_kicker_task(kicker_task_spawner: Spawner,
     queue_spawner: SendSpawner,
     robot_state: &'static SharedRobotState,
     command_subscriber: CommandsSubscriber,
+    kicker_telemetry_publisher: KickerTelemetryPublisher,
     kicker_uart: KickerUart,
     kicker_uart_rx_pin: KickerUartRxPin,
     kicker_uart_tx_pin: KickerUartTxPin,
@@ -232,6 +240,6 @@ pub async fn start_kicker_task(kicker_task_spawner: Spawner,
     KICKER_IDLE_BUFFERED_UART.init();
     idle_buffered_uart_spawn_tasks!(queue_spawner, KICKER, kicker_uart);
 
-    let kicker_task = KickerTask::new_from_pins(&KICKER_IDLE_BUFFERED_UART, KICKER_IDLE_BUFFERED_UART.get_uart_read_queue(), KICKER_IDLE_BUFFERED_UART.get_uart_write_queue(), kicker_boot0_pin, kicker_reset_pin, KICKER_FW_IMG, robot_state, command_subscriber);
+    let kicker_task = KickerTask::new_from_pins(&KICKER_IDLE_BUFFERED_UART, KICKER_IDLE_BUFFERED_UART.get_uart_read_queue(), KICKER_IDLE_BUFFERED_UART.get_uart_write_queue(), kicker_boot0_pin, kicker_reset_pin, KICKER_FW_IMG, robot_state, command_subscriber, kicker_telemetry_publisher);
     kicker_task_spawner.spawn(kicker_task_entry(kicker_task)).unwrap();
 }
