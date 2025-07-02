@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use ateam_common_packets::radio::{DataPacket, TelemetryPacket};
+use ateam_common_packets::{bindings::{KickerTelemetry, PowerTelemetry}, radio::{DataPacket, TelemetryPacket}};
 use embassy_stm32::{dma::NoDma, peripherals::*};
 use embassy_sync::{
     blocking_mutex::raw::ThreadModeRawMutex,
@@ -16,7 +16,10 @@ const COMMANDS_PUBSUB_DEPTH: usize = 4;
 const TELEMETRY_PUBSUB_DEPTH: usize = 4;
 const GYRO_DATA_PUBSUB_DEPTH: usize = 1;
 const ACCEL_DATA_PUBSUB_DEPTH: usize = 1;
+const POWER_TELEMETRY_PUBSUB_DEPTH: usize = 1;
+const KICKER_TELEMETRY_PUBSUB_DEPTH: usize = 1;
 const BATTERY_VOLT_PUBSUB_DEPTH: usize = 1;
+const LED_COMMAND_PUBSUB_DEPTH: usize = 5;
 
 pub type CommandsPubSub = PubSubChannel<ThreadModeRawMutex, DataPacket, COMMANDS_PUBSUB_DEPTH, 2, 1>;
 pub type CommandsPublisher = Publisher<'static, ThreadModeRawMutex, DataPacket, COMMANDS_PUBSUB_DEPTH, 2, 1>;
@@ -33,11 +36,22 @@ pub type AccelDataPubSub = PubSubChannel<ThreadModeRawMutex, nalgebra::Vector3<f
 pub type AccelDataPublisher = Publisher<'static, ThreadModeRawMutex, nalgebra::Vector3<f32>, ACCEL_DATA_PUBSUB_DEPTH, 1, 1>;
 pub type AccelDataSubscriber = Subscriber<'static, ThreadModeRawMutex, nalgebra::Vector3<f32>, ACCEL_DATA_PUBSUB_DEPTH, 1, 1>;
 
+const POWER_TELEM_PUBSUB_NUM_PUBS: usize = 1;
+const POWER_TELEM_PUBSUB_NUM_SUBS: usize = 1;
+pub type PowerTelemetryPubSub = PubSubChannel<ThreadModeRawMutex, PowerTelemetry, POWER_TELEMETRY_PUBSUB_DEPTH, POWER_TELEM_PUBSUB_NUM_SUBS, POWER_TELEM_PUBSUB_NUM_PUBS>;
+pub type PowerTelemetryPublisher = Publisher<'static, ThreadModeRawMutex, PowerTelemetry, POWER_TELEMETRY_PUBSUB_DEPTH, POWER_TELEM_PUBSUB_NUM_SUBS, POWER_TELEM_PUBSUB_NUM_PUBS>;
+pub type PowerTelemetrySubscriber = Subscriber<'static, ThreadModeRawMutex, PowerTelemetry, POWER_TELEMETRY_PUBSUB_DEPTH, POWER_TELEM_PUBSUB_NUM_SUBS, POWER_TELEM_PUBSUB_NUM_PUBS>;
+
+const KICKER_TELEM_PUBSUB_NUM_PUBS: usize = 1;
+const KICKER_TELEM_PUBSUB_NUM_SUBS: usize = 1;
+pub type KickerTelemetryPubSub = PubSubChannel<ThreadModeRawMutex, KickerTelemetry, KICKER_TELEMETRY_PUBSUB_DEPTH, KICKER_TELEM_PUBSUB_NUM_SUBS, KICKER_TELEM_PUBSUB_NUM_PUBS>;
+pub type KickerTelemetryPublisher = Publisher<'static, ThreadModeRawMutex, KickerTelemetry, KICKER_TELEMETRY_PUBSUB_DEPTH, KICKER_TELEM_PUBSUB_NUM_SUBS, KICKER_TELEM_PUBSUB_NUM_PUBS>;
+pub type KickerTelemetrySubscriber = Subscriber<'static, ThreadModeRawMutex, KickerTelemetry, KICKER_TELEMETRY_PUBSUB_DEPTH, KICKER_TELEM_PUBSUB_NUM_SUBS, KICKER_TELEM_PUBSUB_NUM_PUBS>;
+
 pub type BatteryVoltPubSub = PubSubChannel<ThreadModeRawMutex, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
 pub type BatteryVoltPublisher = Publisher<'static, ThreadModeRawMutex, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
 pub type BatteryVoltSubscriber = Subscriber<'static, ThreadModeRawMutex, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
 
-const LED_COMMAND_PUBSUB_DEPTH: usize = 5;
 const LED_COMMAND_PUBSUB_NUM_PUBS: usize = 3;
 const LED_COMMAND_PUBSUB_NUM_SUBS: usize = 1;
 pub type LedCommandPubSub = PubSubChannel<ThreadModeRawMutex, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, LED_COMMAND_PUBSUB_NUM_SUBS, LED_COMMAND_PUBSUB_NUM_PUBS>;

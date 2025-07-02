@@ -23,7 +23,7 @@ use super::params::body_vel_pid_params::{
 };
 
 use ateam_common_packets::bindings::{
-    ControlDebugTelemetry,
+    ExtendedTelemetry,
     ParameterCommand
 };
 
@@ -47,7 +47,7 @@ pub struct BodyVelocityController<'a> {
     wheel_acceleration_limits: Vector4<f32>,
     prev_output: Vector3<f32>,
     cmd_wheel_velocities: Vector4<f32>,
-    debug_telemetry: ControlDebugTelemetry,
+    debug_telemetry: ExtendedTelemetry,
 }
 
 impl<'a> BodyVelocityController<'a> {
@@ -69,20 +69,7 @@ impl<'a> BodyVelocityController<'a> {
             wheel_acceleration_limits: Vector4::zeros(),
             prev_output: Vector3::zeros(),
             cmd_wheel_velocities: Vector4::zeros(),
-            debug_telemetry: ControlDebugTelemetry { 
-                motor_fl: get_motor_response_motion_packet(),
-                motor_bl: get_motor_response_motion_packet(),
-                motor_br: get_motor_response_motion_packet(),
-                motor_fr: get_motor_response_motion_packet(),
-                imu_gyro: [0.0, 0.0, 0.0],
-                imu_accel: [0.0, 0.0, 0.0],
-                commanded_body_velocity: [0.0, 0.0, 0.0],
-                clamped_commanded_body_velocity: [0.0, 0.0, 0.0],
-                cgkf_body_velocity_state_estimate: [0.0, 0.0, 0.0],
-                body_velocity_u: [0.0, 0.0, 0.0],
-                wheel_velocity_u: [0.0, 0.0, 0.0, 0.0],
-                wheel_velocity_clamped_u: [0.0, 0.0, 0.0, 0.0] 
-            }
+            debug_telemetry: Default::default(),
         };
 
         bvc.body_velocity_limit.copy_from(&BODY_VEL_LIM);
@@ -113,20 +100,7 @@ impl<'a> BodyVelocityController<'a> {
             wheel_acceleration_limits: wa_limit,
             prev_output: Vector3::zeros(),
             cmd_wheel_velocities: Vector4::zeros(),
-            debug_telemetry: ControlDebugTelemetry { 
-                motor_fl: get_motor_response_motion_packet(),
-                motor_bl: get_motor_response_motion_packet(),
-                motor_br: get_motor_response_motion_packet(),
-                motor_fr: get_motor_response_motion_packet(),
-                imu_gyro: [0.0, 0.0, 0.0],
-                imu_accel: [0.0, 0.0, 0.0],
-                commanded_body_velocity: [0.0, 0.0, 0.0],
-                clamped_commanded_body_velocity: [0.0, 0.0, 0.0],
-                cgkf_body_velocity_state_estimate: [0.0, 0.0, 0.0],
-                body_velocity_u: [0.0, 0.0, 0.0],
-                wheel_velocity_u: [0.0, 0.0, 0.0, 0.0],
-                wheel_velocity_clamped_u: [0.0, 0.0, 0.0, 0.0] 
-            }
+            debug_telemetry: Default::default(),
         }
     }
 
@@ -228,7 +202,7 @@ impl<'a> BodyVelocityController<'a> {
         self.cmd_wheel_velocities
     }
 
-    pub fn get_control_debug_telem(&self) -> ControlDebugTelemetry {
+    pub fn get_control_debug_telem(&self) -> ExtendedTelemetry {
         self.debug_telemetry
     }
 }
