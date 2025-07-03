@@ -23,10 +23,9 @@ const BATTERY_FILTER_WINDOW: Duration = Duration::from_secs(10);
 
 #[macro_export]
 macro_rules! create_io_task {
-    ($spawner:ident, $robot_state:ident, $battery_volt_publisher:ident, $p:ident) => {
+    ($spawner:ident, $robot_state:ident, $p:ident) => {
         ateam_control_board::tasks::user_io_task::start_io_task(&$spawner,
             $robot_state,
-            $battery_volt_publisher,
             $p.ADC1, $p.PA0,
             $p.ADC3,
             $p.PE9, $p.PE8, $p.PE7, $p.PF15, $p.PF14, $p.PF13, $p.PF12, $p.PF11,
@@ -42,7 +41,6 @@ macro_rules! create_io_task {
 #[embassy_executor::task]
 async fn user_io_task_entry(
     robot_state: &'static SharedRobotState,
-    battery_volt_publisher: BatteryVoltPublisher,
     mut battery_volt_adc: AdcHelper<'static, BatteryAdc, BatteryAdcPin>,
     vref_int_adc: Adc<'static, VrefIntAdc>,
     dip_switch: DipSwitch<'static, 8>,
@@ -122,7 +120,8 @@ async fn user_io_task_entry(
         battery_voltage_filter.add_sample(cur_battery_voltage);        
         let battery_voltage_ave = battery_voltage_filter.filtered_value().expect("iir never return None here");
 
-        battery_volt_publisher.publish_immediate(battery_voltage_ave);
+        // TODO do something with local voltage?
+        // battery_volt_publisher.publish_immediate(battery_voltage_ave);
         robot_state.set_battery_low(battery_voltage_ave < BATTERY_MIN_SAFE_VOLTAGE);
         robot_state.set_battery_crit(battery_voltage_ave < BATTERY_MIN_CRIT_VOLTAGE || battery_voltage_ave > BATTERY_MAX_VOLTAGE);
 
@@ -165,7 +164,6 @@ async fn user_io_task_entry(
 
 pub async fn start_io_task(spawner: &Spawner,
     robot_state: &'static SharedRobotState,
-    battery_volt_publisher: BatteryVoltPublisher,
     battery_adc_peri: BatteryAdc, battery_adc_pin: BatteryAdcPin,
     vref_int_adc_peri: VrefIntAdc,
     usr_dip7_pin: UsrDip7Pin, usr_dip6_pin: UsrDip6Pin, usr_dip5_pin: UsrDip5Pin, usr_dip4_pin: UsrDip4Pin,
@@ -209,7 +207,7 @@ pub async fn start_io_task(spawner: &Spawner,
 
     spawner.spawn(user_io_task_entry(
         robot_state,
-        battery_volt_publisher, battery_volt_adc, vref_int_adc,
+        battery_volt_adc, vref_int_adc,
         dip_switch, debug_mode_dip, team_color_dip, robot_id_rotary,
         debug_led0, debug_led1, debug_led2, debug_led3,
         robot_id_src_disagree_led, robot_id_indicator)).unwrap();

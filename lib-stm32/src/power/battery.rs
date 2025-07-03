@@ -81,6 +81,18 @@ impl<'a, const NUM_CELLS: usize, F: Filter<f32>> LipoModel<'a, NUM_CELLS, F> {
         &self.cell_percentages
     }
 
+    pub fn get_cell_voltage(&self, cell: usize) -> f32 {
+        self.get_cell_voltages()[cell]
+    }
+
+    pub fn get_cell_mv(&self, cell: usize) -> u16 {
+        (self.get_cell_voltage(cell) / 1000.0) as u16
+    }
+
+    pub fn get_cell_pct(&self, cell: usize) -> u8 {
+        self.get_cell_percentages()[cell]
+    }
+
     pub fn get_worst_cell_imbalance(&self) -> f32 {
         let mut min = f32::MAX;
         let mut max = f32::MIN;
@@ -93,9 +105,17 @@ impl<'a, const NUM_CELLS: usize, F: Filter<f32>> LipoModel<'a, NUM_CELLS, F> {
         max - min
     }
 
+    pub fn battery_ok(&self) -> bool {
+        !(self.battery_crit() || self.battery_power_off())
+    }
+
     pub fn battery_warn(&self) -> bool {
-        self.get_worst_cell_imbalance() > self.config.cell_voltage_difference_warn ||
+        self.battery_cell_imbalance_warn()||
             self.get_cell_voltages().into_iter().any(|cell_voltage| *cell_voltage > self.config.cell_voltage_high_warn || *cell_voltage < self.config.cell_voltage_low_warn)
+    }
+
+    pub fn battery_cell_imbalance_warn(&self) -> bool {
+        self.get_worst_cell_imbalance() > self.config.cell_voltage_difference_warn
     }
 
     pub fn battery_crit(&self) -> bool {

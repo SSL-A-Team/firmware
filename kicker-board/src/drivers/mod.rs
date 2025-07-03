@@ -1,6 +1,6 @@
 use core::mem::MaybeUninit;
 
-use ateam_common_packets::bindings::{MotorCommandPacket, MotorCommandPacketType::{MCP_MOTION, MCP_PARAMS}, MotorCommand_MotionType::{self, OPEN_LOOP}, MotorResponsePacket, MotorResponsePacketType::{MRP_MOTION, MRP_PARAMS}, MotorResponse_Motion_Packet, MotorResponse_Params_Packet};
+use ateam_common_packets::bindings::{MotionCommandType::{self, OPEN_LOOP}, MotorCommandPacket, MotorCommandType::{MCP_MOTION, MCP_PARAMS}, MotorResponse, MotorResponseType::{MRP_MOTION, MRP_PARAMS}, MotorTelemetry, ParameterMotorResponse};
 use ateam_lib_stm32::{drivers::boot::stm32_interface::Stm32Interface, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use embassy_stm32::{gpio::{Pin, Pull}, usart::Parity};
 use embassy_time::{with_timeout, Duration, Timer};
@@ -25,11 +25,11 @@ pub struct DribblerMotor<
     >,
     firmware_image: &'a [u8],
 
-    current_state: MotorResponse_Motion_Packet,
-    current_params_state: MotorResponse_Params_Packet,
+    current_state: MotorTelemetry,
+    current_params_state: ParameterMotorResponse,
 
     setpoint: f32,
-    motion_type: MotorCommand_MotionType::Type,
+    motion_type: MotionCommandType::Type,
     reset_flagged: bool,
     telemetry_enabled: bool,
 
@@ -56,10 +56,10 @@ impl<
         ball_detected_thresh: f32,
     ) -> DribblerMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
     {
-        let start_state: MotorResponse_Motion_Packet =
+        let start_state: MotorTelemetry =
             { unsafe { MaybeUninit::zeroed().assume_init() } };
 
-        let start_params_state: MotorResponse_Params_Packet =
+        let start_params_state: ParameterMotorResponse =
             { unsafe { MaybeUninit::zeroed().assume_init() } };
 
         DribblerMotor {
@@ -91,10 +91,10 @@ impl<
         // Need a Pull None to allow for STSPIN watchdog usage.
         let stm32_interface = Stm32Interface::new_from_pins(uart, read_queue, write_queue, boot0_pin, reset_pin, Pull::None, false);
 
-        let start_state: MotorResponse_Motion_Packet =
+        let start_state: MotorTelemetry =
             { unsafe { MaybeUninit::zeroed().assume_init() } };
 
-        let start_params_state: MotorResponse_Params_Packet =
+        let start_params_state: ParameterMotorResponse =
             { unsafe { MaybeUninit::zeroed().assume_init() } };
 
         DribblerMotor {
@@ -224,19 +224,19 @@ impl<
         while let Ok(res) = self.stm32_uart_interface.try_read_data() {
             let buf = res.data();
 
-            if buf.len() != core::mem::size_of::<MotorResponsePacket>() {
-                defmt::warn!("Dribbler - Got invalid packet of len {:?} (expected {:?}) data: {:?}", buf.len(), core::mem::size_of::<MotorResponsePacket>(), buf);
+            if buf.len() != core::mem::size_of::<MotorResponse>() {
+                defmt::warn!("Dribbler - Got invalid packet of len {:?} (expected {:?}) data: {:?}", buf.len(), core::mem::size_of::<MotorResponse>(), buf);
                 continue;
             }
 
             // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
             unsafe {
                 // zero initialize a local response packet
-                let mut mrp: MotorResponsePacket = { MaybeUninit::zeroed().assume_init() };
+                let mut mrp: MotorResponse = { MaybeUninit::zeroed().assume_init() };
 
                 // copy receieved uart bytes into packet
                 let state = &mut mrp as *mut _ as *mut u8;
-                for i in 0..core::mem::size_of::<MotorResponse_Motion_Packet>() {
+                for i in 0..core::mem::size_of::<MotorTelemetry>() {
                     *state.add(i) = buf[i];
                 }
 
@@ -281,7 +281,7 @@ impl<
         }
     }
 
-    pub fn get_latest_state(&self) -> MotorResponse_Motion_Packet {
+    pub fn get_latest_state(&self) -> MotorTelemetry {
         self.current_state
     }
 
@@ -346,7 +346,7 @@ impl<
         self.reset_flagged = false;
     }
 
-    pub fn set_motion_type(&mut self, motion_type: MotorCommand_MotionType::Type) {
+    pub fn set_motion_type(&mut self, motion_type: MotionCommandType::Type) {
         self.motion_type = motion_type;
     }
 

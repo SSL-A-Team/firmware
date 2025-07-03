@@ -1,10 +1,10 @@
 use core::mem::MaybeUninit;
 
-use ateam_common_packets::bindings::BatteryInfoPacket;
-use ateam_lib_stm32::{audio::{songs::SongId, AudioCommand}, drivers::adc::AdcConverter, filter::WindowAvergingFilter, math::range::Range, power::{battery::LipoModel, PowerRail}};
+use ateam_common_packets::bindings::BatteryInfo;
+use ateam_lib_stm32::{audio::{songs::SongId, AudioCommand}, drivers::adc::AdcConverter, filter::WindowAvergingFilter, math::range::Range, power::{battery::LipoModel, model::lipo_model::{lipo_pct_interp, LIPO_6S_VOLTAGE_PERCENT}, PowerRail}};
 use embassy_executor::Spawner;
 use embassy_stm32::{adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime}, peripherals::ADC1};
-use embassy_time::{Duration, Instant, Ticker};
+use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{config::{LIPO6S_BALANCE_RAW_SAMPLES_TO_VOLTAGES, LIPO_BATTERY_CONFIG_6S, POWER_RAIL_12V0_PARAMETERS, POWER_RAIL_3V3_PARAMETERS, POWER_RAIL_5V0_PARAMETERS, POWER_RAIL_BATTERY_PARAMETERS}, pins::*, power_state::SharedPowerState};
 
@@ -41,6 +41,8 @@ async fn power_task_entry(
     power_rail_vbatt_before_lsw_adc_pin: BatteryPreLoadSwitchVoltageMonitorPin,
     power_rail_vbatt_adc_pin: BatteryVoltageMonitorPin,
 ) {
+    // give time for the power on sequence to happen
+    Timer::after_millis(500).await;
 
     /////////////////
     //  ADC Setup  //
@@ -73,7 +75,7 @@ async fn power_task_entry(
     // ADC needs to polled no faster than every 0.793Hz = 1261ms due to the very high impedance inputs
     // and no active amplification. This is to keep powered off current draw on the battery very low.
     let mut loop_ticker = Ticker::every(Duration::from_millis(100));
-    let mut last_battery_cell_read_time = Instant::now();
+    let mut last_battery_cell_read_time = Instant::MIN;
 
     ////////////////////////
     //  Power Rail Setup  //
@@ -110,7 +112,7 @@ async fn power_task_entry(
                 ateam_lib_stm32::power::battery::CellVoltageComputeMode::Chained);
 
     // Create empty telemetry packet
-    let battery_telem_packet: BatteryInfoPacket = unsafe { MaybeUninit::zeroed().assume_init() };
+    let mut battery_telem_packet: BatteryInfo = Default::default();
 
     loop {
         let cur_power_state = shared_power_state.get_state().await;
@@ -140,7 +142,7 @@ async fn power_task_entry(
         power_rail_12v0.add_rail_voltage_sample(power_rail_voltage_samples[2] as f32);
         power_rail_battery.add_rail_voltage_sample(power_rail_voltage_samples[3] as f32);
 
-        // defmt::info!("power rail voltages: Battery {}, 12v0 {}, 5v0 {}, 3v3 {}", power_rail_battery.get_rail_voltage(), power_rail_12v0.get_rail_voltage(), power_rail_5v0.get_rail_voltage(), power_rail_3v3.get_rail_voltage());
+        defmt::info!("power rail voltages: Battery {}, 12v0 {}, 5v0 {}, 3v3 {}", power_rail_battery.get_rail_voltage(), power_rail_12v0.get_rail_voltage(), power_rail_5v0.get_rail_voltage(), power_rail_3v3.get_rail_voltage());
 
         ///////////////////////////////
         //  Check Power Rail Errors  //
@@ -244,6 +246,32 @@ async fn power_task_entry(
 
             shared_power_state.set_high_current_operations_allowed(high_current_ops_allowed).await;
         }
+
+        battery_telem_packet.set_battery_ok(lipo6s_battery_model.battery_ok() as u16);
+        battery_telem_packet.set_battery_balance_connected(cur_power_state.balance_connected as u16);
+        battery_telem_packet.set_battery_low(power_rail_battery.warning_flagged() as u16);
+        battery_telem_packet.set_battery_critical(power_rail_battery.critical_warning_flagged() as u16);
+        battery_telem_packet.set_battery_cell_low(lipo6s_battery_model.battery_warn() as u16);
+        battery_telem_packet.set_battery_cell_critical(lipo6s_battery_model.battery_crit() as u16);
+        battery_telem_packet.set_battery_cell_imbalance_warn(lipo6s_battery_model.battery_cell_imbalance_warn() as u16);
+
+        battery_telem_packet.battery_mv = (power_rail_battery.get_rail_voltage().unwrap_or(0.0) / 1000.0) as u16;
+        battery_telem_packet.battery_pct = lipo_pct_interp(power_rail_battery.get_rail_voltage().unwrap_or(0.0), &LIPO_6S_VOLTAGE_PERCENT) as u8;
+
+        battery_telem_packet.cell1_mv = lipo6s_battery_model.get_cell_mv(0);
+        battery_telem_packet.cell2_mv = lipo6s_battery_model.get_cell_mv(1);
+        battery_telem_packet.cell3_mv = lipo6s_battery_model.get_cell_mv(2);
+        battery_telem_packet.cell4_mv = lipo6s_battery_model.get_cell_mv(3);
+        battery_telem_packet.cell5_mv = lipo6s_battery_model.get_cell_mv(4);
+        battery_telem_packet.cell6_mv = lipo6s_battery_model.get_cell_mv(5);
+
+        battery_telem_packet.cell1_pct = lipo6s_battery_model.get_cell_pct(0);
+        battery_telem_packet.cell2_pct = lipo6s_battery_model.get_cell_pct(1);
+        battery_telem_packet.cell3_pct = lipo6s_battery_model.get_cell_pct(2);
+        battery_telem_packet.cell4_pct = lipo6s_battery_model.get_cell_pct(3);
+        battery_telem_packet.cell5_pct = lipo6s_battery_model.get_cell_pct(4);
+        battery_telem_packet.cell6_pct = lipo6s_battery_model.get_cell_pct(5);
+
 
         // send pubsub message to coms task
         telemetry_publisher.publish_immediate(battery_telem_packet);

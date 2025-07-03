@@ -31,7 +31,7 @@ use ateam_kicker_board::image_hash::get_kicker_img_hash;
 
 use ateam_common_packets::bindings::{
     KickRequest::{self, KR_ARM, KR_DISABLE},
-    KickerControl, KickerTelemetry,
+    KickerControl, KickerTelemetry, MotorTelemetry,
 };
 
 const MAX_KICK_SPEED: f32 = 5.5;
@@ -44,9 +44,9 @@ pub const CHARGE_SAFE_VOLTAGE: f32 = 10.0;
 
 const RAIL_BUFFER_SIZE: usize = 10;
 
-const MAX_TX_PACKET_SIZE: usize = 20;
+const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 3;
-const MAX_RX_PACKET_SIZE: usize = 20;
+const MAX_RX_PACKET_SIZE: usize = 32;
 const RX_BUF_DEPTH: usize = 3;
 static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH);
 
@@ -59,26 +59,8 @@ const DRIB_RX_BUF_DEPTH: usize = 20;
 static_idle_buffered_uart_nl!(DRIB, DRIB_MAX_RX_PACKET_SIZE, DRIB_RX_BUF_DEPTH, DRIB_MAX_TX_PACKET_SIZE, DRIB_TX_BUF_DEPTH);
 
 static DRIB_VEL_PUBSUB: PubSubChannel<CriticalSectionRawMutex, f32, 1, 1, 1> = PubSubChannel::new();
+static DRIB_TELEM_PUBSUB: PubSubChannel<CriticalSectionRawMutex, MotorTelemetry, 1, 1, 1> = PubSubChannel::new();
 
-fn get_empty_control_packet() -> KickerControl {
-    KickerControl {
-        _bitfield_align_1: [],
-        _bitfield_1: KickerControl::new_bitfield_1(0, 0, 0),
-        kick_request: KickRequest::KR_DISABLE,
-        kick_speed: 0.0,
-        drib_speed: 0.0,
-    }
-}
-
-fn get_empty_telem_packet() -> KickerTelemetry {
-    KickerTelemetry {
-        _bitfield_align_1: [],
-        _bitfield_1: KickerTelemetry::new_bitfield_1(0, 0, 0, 0),
-        rail_voltage: 0.0,
-        battery_voltage: 0.0,
-        kicker_image_hash: [0; 4],
-    }
-}
 
 #[embassy_executor::task]
 async fn high_pri_kick_task(
@@ -101,6 +83,7 @@ async fn high_pri_kick_task(
     err_led_pin: RedStatusLedPin,
     ball_detected_led1_pin: BlueStatusLedPin,
     drib_vel_pub: Publisher<'static, CriticalSectionRawMutex, f32, 1, 1, 1>,
+    mut drib_telem_sub: Subscriber<'static, CriticalSectionRawMutex, MotorTelemetry, 1, 1, 1>
 ) -> ! {
     // pins/safety management
     let charge_pin = Output::new(charge_pin, Level::Low, Speed::Medium);
@@ -122,8 +105,9 @@ async fn high_pri_kick_task(
 
     // coms buffers
     let mut telemetry_enabled: bool; //  = false;
-    let mut kicker_control_packet: KickerControl = get_empty_control_packet();
-    let mut kicker_telemetry_packet: KickerTelemetry = get_empty_telem_packet();
+    let mut kicker_control_packet: KickerControl = Default::default();
+    let mut kicker_telemetry_packet: KickerTelemetry = Default::default();
+    let mut dribbler_motor_telemetry: MotorTelemetry = Default::default();
 
     // bookkeeping for latched state
     let mut kick_command_cleared: bool = false;
@@ -194,7 +178,11 @@ async fn high_pri_kick_task(
             drib_vel_pub.publish_immediate(kicker_control_packet.drib_speed);
         }
 
-        // TODO: read breakbeam
+        // get latest dribbler telem from lower prio task
+        while let Some(drib_telem) = drib_telem_sub.try_next_message_pure() {
+            dribbler_motor_telemetry = drib_telem;
+        }
+
         let ball_detected = breakbeam.read();
 
         ///////////////////////////////////////////////
@@ -363,13 +351,21 @@ async fn high_pri_kick_task(
                 > 20
             {
                 kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(
-                    shutdown_requested as u32,
-                    shutdown_completed as u32,
-                    ball_detected as u32,
-                    res.is_err() as u32,
+                    res.is_err() as u16,
+                    dribbler_motor_telemetry.master_error() as u16,
+                    shutdown_requested as u16,
+                    shutdown_completed as u16,
+                    ball_detected as u16,
+                    (rail_voltage_ave > CHARGED_THRESH_VOLTAGE) as u16,
+                    Default::default()
                 );
+            
+                let charge_pct = rail_voltage_ave / CHARGE_TARGET_VOLTAGE;
+                kicker_telemetry_packet.charge_pct = (charge_pct * 100.0) as u16;
                 kicker_telemetry_packet.rail_voltage = rail_voltage_ave;
                 kicker_telemetry_packet.battery_voltage = battery_voltage;
+
+                kicker_telemetry_packet.dribbler_motor = dribbler_motor_telemetry;
                 kicker_telemetry_packet.kicker_image_hash.copy_from_slice(&kicker_img_hash_kicker[0..4]);
 
                 // raw interpretaion of a struct for wire transmission is unsafe
@@ -411,7 +407,8 @@ async fn high_pri_kick_task(
 #[embassy_executor::task]
 async fn low_pri_dribble_task(
         drib_motor_interface: Stm32Interface<'static, DRIB_MAX_RX_PACKET_SIZE, DRIB_MAX_TX_PACKET_SIZE, DRIB_RX_BUF_DEPTH, DRIB_TX_BUF_DEPTH>,
-        mut drib_vel_sub: Subscriber<'static, CriticalSectionRawMutex, f32, 1, 1, 1>) -> ! {
+        mut drib_vel_sub: Subscriber<'static, CriticalSectionRawMutex, f32, 1, 1, 1>,
+        drib_telem_pub: Publisher<'static, CriticalSectionRawMutex, MotorTelemetry, 1, 1, 1>) -> ! {
     let mut drib_motor = DribblerMotor::new(drib_motor_interface, DRIB_FW_IMG, 1.0);
 
     defmt::info!("flashing dribbler motor firmware...");
@@ -450,6 +447,8 @@ async fn low_pri_dribble_task(
         if drib_motor.check_hall_error() {
             defmt::error!("dribbler motor reporting hall error");
         }
+
+        drib_telem_pub.publish_immediate(drib_motor.get_latest_state());
 
         dribbler_ticker.next().await;
     }
@@ -517,7 +516,8 @@ async fn main(spawner: Spawner) -> ! {
         p.PC3,
         p.PB9, p.PE0,
         p.PE1,
-        DRIB_VEL_PUBSUB.publisher().expect("failed to get dribbler vel publisher for kick task")
+        DRIB_VEL_PUBSUB.publisher().expect("failed to get dribbler vel publisher for kick task"),
+        DRIB_TELEM_PUBSUB.subscriber().expect("failed to get drib telem sub for kick task")
     )));
 
 
@@ -567,7 +567,8 @@ async fn main(spawner: Spawner) -> ! {
 
     spawner.spawn(low_pri_dribble_task(
         drib_motor_interface,
-        DRIB_VEL_PUBSUB.subscriber().expect("failed to get dribler vel subscriber for drib task")
+        DRIB_VEL_PUBSUB.subscriber().expect("failed to get dribler vel subscriber for drib task"),
+        DRIB_TELEM_PUBSUB.publisher().expect("failed to get drib telem pub for dribble task")
     )).expect("failed to spawn dribble task");
 
     /////////////////////////////////////////

@@ -10,7 +10,7 @@ use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _;
 
-use ateam_control_board::{create_io_task, create_kicker_task, get_system_config, pins::{BatteryVoltPubSub, CommandsPubSub}, robot_state::SharedRobotState};
+use ateam_control_board::{create_io_task, create_kicker_task, get_system_config, pins::{CommandsPubSub, KickerTelemetryPubSub}, robot_state::SharedRobotState};
 
 use embassy_time::Timer;
 // provide embedded panic probe
@@ -20,7 +20,7 @@ use static_cell::ConstStaticCell;
 static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
 
 static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
-static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
+static KICKER_DATA_CHANNEL: KickerTelemetryPubSub = PubSubChannel::new();
 
 static RADIO_UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
@@ -45,6 +45,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     let robot_state = ROBOT_STATE.take();
 
+    let kicker_telemetry_publisher = KICKER_DATA_CHANNEL.publisher().unwrap();
+
     ////////////////////////
     //  setup task pools  //
     ////////////////////////
@@ -62,22 +64,18 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let kicker_command_subscriber = RADIO_C2_CHANNEL.subscriber().unwrap();
     let test_command_publisher = RADIO_C2_CHANNEL.publisher().unwrap();
 
-    // Battery Channel
-    let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
-
     ///////////////////
     //  start tasks  //
     ///////////////////
 
     create_io_task!(main_spawner,
         robot_state,
-        battery_volt_publisher,
         p);
 
     create_kicker_task!(
         main_spawner, uart_queue_spawner,
         robot_state,
-        kicker_command_subscriber,
+        kicker_command_subscriber, kicker_telemetry_publisher,
         p);
 
 
@@ -85,6 +83,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         Timer::after_millis(100).await;
 
         test_command_publisher.publish(DataPacket::BasicControl(BasicControl {
+            _bitfield_1: Default::default(),
+            _bitfield_align_1: Default::default(),
             vel_x_linear: 0.0,
             vel_y_linear: 0.0,
             vel_z_angular: 0.0,

@@ -2,7 +2,7 @@ use ateam_lib_stm32::{drivers::boot::stm32_interface::Stm32Interface, uart::queu
 use embassy_stm32::{gpio::{Pin, Pull}, usart::Parity};
 use embassy_time::{with_timeout, Duration, Timer};
 
-use ateam_common_packets::bindings::{KickerControl, KickerTelemetry, KickRequest};
+use ateam_common_packets::bindings::{KickerControl, KickerTelemetry};
 
 use crate::image_hash;
 
@@ -50,8 +50,8 @@ impl<
             stm32_uart_interface: stm32_interface,
             firmware_image,
 
-            command_state: get_empty_control_packet(),
-            telemetry_state: get_empty_telem_packet(),
+            command_state: Default::default(),
+            telemetry_state: Default::default(),
 
             telemetry_enabled: false,
         }
@@ -103,6 +103,10 @@ impl<
 
             self.stm32_uart_interface.send_or_discard_data(struct_bytes);
         }
+    }
+
+    pub fn get_lastest_state(&self) -> KickerTelemetry {
+        self.telemetry_state
     }
 
     pub fn set_telemetry_enabled(&mut self, telemetry_enabled: bool) {
@@ -261,25 +265,5 @@ impl<
             }
         }
         return self.init_firmware_image(flash, self.firmware_image).await;
-    }
-}
-
-fn get_empty_control_packet() -> KickerControl {
-    KickerControl {
-        _bitfield_align_1: [],
-        _bitfield_1: KickerControl::new_bitfield_1(0, 0, 0),
-        kick_request: KickRequest::KR_DISABLE,
-        kick_speed: 0.0,
-        drib_speed: 0.0,
-    }
-}
-
-fn get_empty_telem_packet() -> KickerTelemetry {
-    KickerTelemetry {
-        _bitfield_align_1: [],
-        _bitfield_1: KickerTelemetry::new_bitfield_1(0, 0, 0, 0),
-        rail_voltage: 0.0,
-        battery_voltage: 0.0,
-        kicker_image_hash: [0; 4],
     }
 }
