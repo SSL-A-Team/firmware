@@ -91,9 +91,6 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
             let cur_robot_state = self.robot_state.get_state();
 
             if self.kicker_driver.process_telemetry() {
-                // DEBUG REMOVE //
-                defmt::trace!("Kicker Interface - Resetting connection timeout");
-                //////////////////
                 connection_timeout_start = Instant::now();
             }
 
