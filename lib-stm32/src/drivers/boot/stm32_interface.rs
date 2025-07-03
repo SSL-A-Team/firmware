@@ -515,7 +515,10 @@ impl<
     }
 
     pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8], leave_in_reset: bool) -> Result<(), ()> {
-        if !self.in_bootloader {
+        if self.in_bootloader {
+            defmt::trace!("device is already in bootloader");
+        } else {
+            defmt::trace!("resetting device into bootloader");
             if let Err(err) = self.reset_into_bootloader().await {
                 return Err(err);
             }

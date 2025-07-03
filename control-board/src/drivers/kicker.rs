@@ -79,6 +79,11 @@ impl<
                 continue;
             }
 
+            // DEBUG REMOVE //
+            defmt::trace!("Kicker Interface - Received telemetry");
+            defmt::debug!("Kicker Interface - Telemetry content: {:?}", buf);
+            //////////////////
+
             received_packet = true;
 
             // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
@@ -202,7 +207,8 @@ impl<
         Timer::after(Duration::from_millis(1)).await;
 
         let res;
-        let timeout = Duration::from_millis(100);
+        // CHANGE BACK TO 100 ms AFTER DEBUG
+        let timeout = Duration::from_millis(1000);
         defmt::trace!("Kicker Interface - Waiting for device response");
         match with_timeout(timeout, self.get_current_device_img_hash()).await {
             Ok(current_img_hash) => {
