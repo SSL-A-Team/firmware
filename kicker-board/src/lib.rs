@@ -9,6 +9,7 @@ pub mod tasks;
 
 pub mod kick_manager;
 pub mod pins;
+pub mod image_hash;
 // pub mod queue;
 // pub mod uart_queue;
 
