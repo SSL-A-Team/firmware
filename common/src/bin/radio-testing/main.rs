@@ -78,6 +78,8 @@ fn main() -> std::io::Result<()> {
                 kick_vel: 0.,
                 dribbler_speed: 0.,
                 kick_request: KickRequest::KR_ARM,
+                _bitfield_align_1: Default::default(),
+                _bitfield_1: Default::default(),
             },
         },
     };
