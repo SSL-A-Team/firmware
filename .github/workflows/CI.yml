@@ -68,4 +68,5 @@ jobs:
         shell: bash
         run: |
           nix develop -c make clean
+          nix develop -c make motor-controller--all
           nix develop -c make NO_ATEAM_WIFI_CREDENTIALS=true control-board--all
