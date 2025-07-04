@@ -96,7 +96,7 @@ GainScheduledPidResult_t gspid_initialize(
     pid_constants_initialize(&pid->cur_pid_constants);
     pid->gain_schedule_abs = gain_schedule_abs;
     pid->hyst = hyst_pct;
-    
+
     pid->eI = 0.0f;
     pid->prev_err = 0.0f;
 
@@ -125,28 +125,28 @@ static void gspid_update_gain_stage(GainScheduledPid_t *pid, float y) {
             size_t lower_gain_stage_ind = i;
             size_t upper_gain_stage_ind = i + 1;
             float lower_gain_stage_point = pid->gain_schedule[lower_gain_stage_ind];
-            float upper_gain_stage_point = pid->gain_schedule[upper_gain_stage_ind]; 
+            float upper_gain_stage_point = pid->gain_schedule[upper_gain_stage_ind];
 
             if (lower_gain_stage_point <= y && y < upper_gain_stage_point) {
-                // we found the gain stages 
+                // we found the gain stages
 
                 const float t = (y - lower_gain_stage_point) / (upper_gain_stage_point - lower_gain_stage_point);
                 // t is the percentage of the way we are between the two gain stages
                 pid->cur_gain_stage_ind = (size_t)(10 * (lower_gain_stage_ind + t));
 
-                pid->cur_pid_constants.kP = pid->pid_constants[lower_gain_stage_ind].kP + 
+                pid->cur_pid_constants.kP = pid->pid_constants[lower_gain_stage_ind].kP +
                     t * (pid->pid_constants[upper_gain_stage_ind].kP - pid->pid_constants[lower_gain_stage_ind].kP);
-                
-                pid->cur_pid_constants.kI = pid->pid_constants[lower_gain_stage_ind].kI + 
+
+                pid->cur_pid_constants.kI = pid->pid_constants[lower_gain_stage_ind].kI +
                     t * (pid->pid_constants[upper_gain_stage_ind].kI - pid->pid_constants[lower_gain_stage_ind].kI);
-                
-                pid->cur_pid_constants.kD = pid->pid_constants[lower_gain_stage_ind].kD + 
+
+                pid->cur_pid_constants.kD = pid->pid_constants[lower_gain_stage_ind].kD +
                     t * (pid->pid_constants[upper_gain_stage_ind].kD - pid->pid_constants[lower_gain_stage_ind].kD);
-                
-                pid->cur_pid_constants.kI_max = pid->pid_constants[lower_gain_stage_ind].kI_max + 
+
+                pid->cur_pid_constants.kI_max = pid->pid_constants[lower_gain_stage_ind].kI_max +
                     t * (pid->pid_constants[upper_gain_stage_ind].kI_max - pid->pid_constants[lower_gain_stage_ind].kI_max);
-                
-                pid->cur_pid_constants.kI_min = pid->pid_constants[lower_gain_stage_ind].kI_min + 
+
+                pid->cur_pid_constants.kI_min = pid->pid_constants[lower_gain_stage_ind].kI_min +
                     t * (pid->pid_constants[upper_gain_stage_ind].kI_min - pid->pid_constants[lower_gain_stage_ind].kI_min);
                 return;
             }
