@@ -24,8 +24,8 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 use ateam_kicker_board::{
     adc_200v_to_rail_voltage, adc_raw_to_v,
     kick_manager::{
-        KickManager, 
-        KickType}, 
+        KickManager,
+        KickType},
     pins::*, tasks::{get_system_config, ClkSource}
 };
 
@@ -39,7 +39,6 @@ const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 3;
 
 static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH);
-
 
 #[embassy_executor::task]
 async fn high_pri_kick_task(
@@ -79,12 +78,12 @@ async fn high_pri_kick_task(
         let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
 
         let rail_voltage = adc_200v_to_rail_voltage(adc_raw_to_v(adc.blocking_read(&mut rail_pin) as f32, vrefint_sample));
-        // optionally pre-flag errors? 
+        // optionally pre-flag errors?
 
         /////////////////////////////////////
         //  process any available packets  //
         /////////////////////////////////////
-        
+
         while let Ok(res) = coms_reader.try_dequeue() {
             let buf = res.data();
 
@@ -99,7 +98,7 @@ async fn high_pri_kick_task(
                 let state = &mut kicker_control_packet as *mut _ as *mut u8;
                 for i in 0..core::mem::size_of::<KickerControl>() {
                     *state.offset(i as isize) = buf[i];
-                }                
+                }
             }
         }
 
@@ -131,7 +130,7 @@ async fn high_pri_kick_task(
                         (&kicker_telemetry_packet as *const KickerTelemetry) as *const u8,
                         core::mem::size_of::<KickerTelemetry>(),
                     );
-        
+
                     // send the packet
                     let _res = coms_writer.enqueue_copy(struct_bytes);
                 }
