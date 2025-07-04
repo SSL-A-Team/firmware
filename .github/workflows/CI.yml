@@ -23,7 +23,7 @@ jobs:
           extra_nix_config:
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
 
-      - name: Validate Nix Envoirnment
+      - name: Validate Nix Environment
         shell: bash
         run: |
           nix flake check
