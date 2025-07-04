@@ -47,16 +47,16 @@ jobs:
         shell: bash
         run: |
           nix develop -c make software-communication--test
-      - name: Build Kicker Firmware
-        shell: bash
-        run: |
-          nix develop -c make clean
-          nix develop -c make kicker-board--all
       - name: Build Motor Controller Firmware
         shell: bash
         run: |
           nix develop -c make clean
           nix develop -c make motor-controller--all
+      - name: Build Kicker Firmware
+        shell: bash
+        run: |
+          nix develop -c make clean
+          nix develop -c make kicker-board--all
       - name: Build Control Board Firmware
         shell: bash
         run: |
