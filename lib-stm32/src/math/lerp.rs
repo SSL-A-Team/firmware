@@ -20,19 +20,19 @@ where N: FromPrimitive + Copy + Bounded,
       f32: core::convert::From<N>
 {
     let t_pct = Into::<f32>::into(t) / Into::<f32>::into(N::max_value());
-    return N::from_f32(f_lerp_f(Into::<f32>::into(a), Into::<f32>::into(b), t_pct)).unwrap();
+    N::from_f32(f_lerp_f(Into::<f32>::into(a), Into::<f32>::into(b), t_pct)).unwrap()
 }
 
 pub fn lerp_f<N>(a: N, b: N, t: f32) -> N 
 where N: FromPrimitive + Copy + Bounded,
       f32: core::convert::From<N>
 {
-    return N::from_f32(f_lerp_f(Into::<f32>::into(a), Into::<f32>::into(b), t)).unwrap();
+    N::from_f32(f_lerp_f(Into::<f32>::into(a), Into::<f32>::into(b), t)).unwrap()
 }
 
 pub fn f_lerp_f(a: f32, b: f32, t: f32) -> f32 {
     let t = clamp(t, 0.0, 1.0);
-    return a + (b - a) * t;
+    a + (b - a) * t
 }
 
 pub trait Lerp<N>: Clone + Copy
@@ -81,9 +81,9 @@ L: Lerp<N>
 {
     pub const fn new(a: L, b: L, duration: Duration) -> TimeLerp<'a, N, L> {
         TimeLerp {
-            a: a,
-            b: b,
-            duration: duration,
+            a,
+            b,
+            duration,
             start_time: Instant::MIN,
             pd2: PhantomData,
         }

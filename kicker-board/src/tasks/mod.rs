@@ -1,4 +1,4 @@
-use embassy_stm32::{rcc::{AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllMul, PllPDiv, PllPreDiv, PllQDiv, PllSource, Sysclk}, time::Hertz, Config};
+use embassy_stm32::{rcc::{mux::Adcsel, AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllMul, PllPDiv, PllPreDiv, PllQDiv, PllRDiv, PllSource, Sysclk}, time::Hertz, Config};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ClkSource {
@@ -9,41 +9,44 @@ pub enum ClkSource {
 pub fn get_system_config(clk_src: ClkSource) -> Config {
     let mut config = Config::default();
 
-    let pre_div = if clk_src == ClkSource::External8MHzOscillator {
+    if clk_src == ClkSource::External8MHzOscillator {
         // configure the external clock mode
         config.rcc.hse = Some(Hse {
             freq: Hertz(8_000_000),
-            mode: HseMode::Bypass,
+            mode: HseMode::Oscillator,
         });
-        // set the pll source to be the high speed external oscillator
-        config.rcc.pll_src = PllSource::HSE;
 
-        // 8MHz ext osc means we divide by 4 to get 2MHz root clock
-        PllPreDiv::DIV4
+        // configure the main PLL
+        config.rcc.pll = Some(Pll {
+            source: PllSource::HSE,
+            prediv: PllPreDiv::DIV2, // root frequency to PLL will be 4MHz after pre_div regardless of source
+            mul: PllMul::MUL85, // multiply up by 85 to get 340 MHz
+            divp: Some(PllPDiv::DIV2), // 340 MHz / 2 = 170 MHz p which is feeds sysclk
+            divq: Some(PllQDiv::DIV2), // 340 MHz / 2 = 170 MHz
+            divr: Some(PllRDiv::DIV2), // 340 MHz / 2 = 170 MHz
+        });
     } else {
-        // set the pll source to be the high speed intenal oscillator
-        config.rcc.pll_src = PllSource::HSI;
-
-        // 16MHz internal osc means we divide by 8 to get a 2MHz root clock
-        PllPreDiv::DIV8
+        // configure the main PLL
+        config.rcc.pll = Some(Pll {
+            source: PllSource::HSI,
+            prediv: PllPreDiv::DIV4, // root frequency to PLL will be 4MHz after pre_div regardless of source
+            mul: PllMul::MUL85, // multiply up by 85 to get 340 MHz
+            divp: Some(PllPDiv::DIV2), // 340 MHz / 2 = 170MHz p which is feeds sysclk
+            divq: Some(PllQDiv::DIV2), // 340 MHz / 2 = 170MHz
+            divr: Some(PllRDiv::DIV2), // 340 MHz / 2 = 170MHz
+        });
     };
 
-    // configure the main PLL
-    config.rcc.pll = Some(Pll {
-        prediv: pre_div, // root frequency to PLL will be 2MHz after pre_div regardless of source
-        mul: PllMul::MUL168, // multiply up by 168 to get 336 MHz
-        divp: Some(PllPDiv::DIV2), // 336 MHz / 2 = 168 MHZ p which is feeds sysclk
-        divq: Some(PllQDiv::DIV7), // 336 MHz / 7 = 48Mhz which feeds the 48MHz bus exactly
-        divr: None, // not using the I2S clock
-    });
+    config.rcc.mux.adc12sel = Adcsel::PLL1_P;
+    config.rcc.mux.adc345sel = Adcsel::PLL1_P;
 
     // configure the busses
-    config.rcc.ahb_pre = AHBPrescaler::DIV1; // don't scale the AHB bus, it has a max frequency of 168 MHz, so it can match the sysclk
-    config.rcc.apb1_pre = APBPrescaler::DIV4; // 168 / 4 = 42 MHz which is the max frequency of APB1
-    config.rcc.apb2_pre = APBPrescaler::DIV2; // 168 / 2 = 84 MHz which is the max frequency of APB2
+    config.rcc.ahb_pre = AHBPrescaler::DIV1;
+    config.rcc.apb1_pre = APBPrescaler::DIV1;
+    config.rcc.apb2_pre = APBPrescaler::DIV1;
 
     // all configs should be good now, switch the system root clock from the raw HSI (16 MHz) to the PLL (168 MHz)
-    config.rcc.sys = Sysclk::PLL1_P;
+    config.rcc.sys = Sysclk::PLL1_R;
 
-    return config;
+    config
 }

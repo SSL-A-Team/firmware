@@ -11,6 +11,7 @@ pub struct SharedRobotState {
     radio_inop: AtomicBool,
     imu_inop: AtomicBool,
     kicker_inop: AtomicBool,
+    power_inop: AtomicBool,
     wheels_inop: AtomicU8,
     dribbler_inop: AtomicBool,
 
@@ -44,6 +45,7 @@ impl SharedRobotState {
             radio_inop: AtomicBool::new(true),
             imu_inop: AtomicBool::new(true),
             kicker_inop: AtomicBool::new(true),
+            power_inop: AtomicBool::new(true),
             wheels_inop: AtomicU8::new(0x0F), 
             dribbler_inop: AtomicBool::new(true),
             last_packet_receive_time_ticks_ms: AtomicU32::new(0),
@@ -69,6 +71,7 @@ impl SharedRobotState {
             radio_inop: self.get_radio_inop(),
             imu_inop: self.get_imu_inop(),
             kicker_inop: self.get_kicker_inop(),
+            power_inop: self.get_power_inop(),
             wheels_inop: self.get_wheels_inop(),
             dribbler_inop: self.get_dribbler_inop(),
         
@@ -81,8 +84,8 @@ impl SharedRobotState {
 
             robot_tipped: self.robot_tipped(),
 
-            shutdown_requested: self.shutdown_requested(),
             ball_detected: self.ball_detected(),
+            shutdown_requested: self.shutdown_requested(),
             kicker_shutdown_complete: self.kicker_shutdown_complete(),
         }
     }
@@ -175,6 +178,14 @@ impl SharedRobotState {
         self.kicker_inop.store(kicker_inop, Ordering::Relaxed);
     }
 
+    pub fn get_power_inop(&self) -> bool {
+        self.power_inop.load(Ordering::Relaxed)
+    }
+
+    pub fn set_power_inop(&self, power_inop: bool) {
+        self.power_inop.store(power_inop, Ordering::Relaxed);
+    }
+
     pub fn shutdown_requested(&self) -> bool {
         self.shutdown_requested.load(Ordering::Relaxed)
     }
@@ -244,6 +255,7 @@ pub struct RobotState {
     pub radio_inop: bool,
     pub imu_inop: bool,
     pub kicker_inop: bool,
+    pub power_inop: bool,
     pub wheels_inop: u8,
     pub dribbler_inop: bool,
 
@@ -256,7 +268,7 @@ pub struct RobotState {
 
     pub robot_tipped: bool,
 
-    pub shutdown_requested: bool,
     pub ball_detected: bool,
+    pub shutdown_requested: bool,
     pub kicker_shutdown_complete: bool,
 }
