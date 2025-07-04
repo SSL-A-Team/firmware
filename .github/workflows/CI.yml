@@ -56,11 +56,13 @@ jobs:
         shell: bash
         run: |
           nix develop -c make clean
+          nix develop -c make motor-controller--all
           nix develop -c make kicker-board--all
       - name: Build Control Board Firmware
         shell: bash
         run: |
           nix develop -c make clean
+          nix develop -c make motor-controller--all
           nix develop -c make control-board--all
       - name: Build Control Board Firmware - Public Wifi Credentials
         shell: bash
