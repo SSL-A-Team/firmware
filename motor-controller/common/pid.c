@@ -93,9 +93,10 @@ GainScheduledPidResult_t gspid_initialize(
     pid->pid_constants = pid_constants;
     pid->gain_schedule = gain_schedule;
     pid->cur_gain_stage_ind = 0;
+    pid_constants_initialize(&pid->cur_pid_constants);
     pid->gain_schedule_abs = gain_schedule_abs;
     pid->hyst = hyst_pct;
-    
+
     pid->eI = 0.0f;
     pid->prev_err = 0.0f;
 
@@ -110,9 +111,11 @@ static void gspid_update_gain_stage(GainScheduledPid_t *pid, float y) {
     if (y < pid->gain_schedule[0]) {
         // we are below the lowest gain stage, not between
         pid->cur_gain_stage_ind = 0;
+        pid->cur_pid_constants = pid->pid_constants[0];
     } else if (y > pid->gain_schedule[pid->num_gain_stages - 1]) {
         // we are above the highest gain stage, not between
-        pid->cur_gain_stage_ind = pid->num_gain_stages - 1;
+        pid->cur_gain_stage_ind = (int)(10 * (pid->num_gain_stages - 1));
+        pid->cur_pid_constants = pid->pid_constants[pid->num_gain_stages - 1];
     } else {
         // we are between gain stages
 
@@ -122,37 +125,30 @@ static void gspid_update_gain_stage(GainScheduledPid_t *pid, float y) {
             size_t lower_gain_stage_ind = i;
             size_t upper_gain_stage_ind = i + 1;
             float lower_gain_stage_point = pid->gain_schedule[lower_gain_stage_ind];
-            float upper_gain_stage_point = pid->gain_schedule[upper_gain_stage_ind]; 
+            float upper_gain_stage_point = pid->gain_schedule[upper_gain_stage_ind];
 
             if (lower_gain_stage_point <= y && y < upper_gain_stage_point) {
-                // we found the gain stages 
+                // we found the gain stages
 
-                float midpoint = (lower_gain_stage_point + upper_gain_stage_point) / 2.0f;
-                float stage_range_hyst = (upper_gain_stage_point - lower_gain_stage_point) * pid->hyst;
-                if (pid->cur_gain_stage_ind == lower_gain_stage_ind) {
-                    // the current gain index is the lower value, apply hyst to upper thresh
+                const float t = (y - lower_gain_stage_point) / (upper_gain_stage_point - lower_gain_stage_point);
+                // t is the percentage of the way we are between the two gain stages
+                pid->cur_gain_stage_ind = (size_t)(10 * (lower_gain_stage_ind + t));
 
-                    if (y > midpoint + stage_range_hyst) {
-                        pid->cur_gain_stage_ind = upper_gain_stage_ind;
-                    } else {
-                        // stay where we are
-                    }
-                } else if (pid->cur_gain_stage_ind == upper_gain_stage_ind) {
-                    // the current gain index is the upper value, apply hist the lower thresh
+                pid->cur_pid_constants.kP = pid->pid_constants[lower_gain_stage_ind].kP +
+                    t * (pid->pid_constants[upper_gain_stage_ind].kP - pid->pid_constants[lower_gain_stage_ind].kP);
 
-                    if (y < midpoint - stage_range_hyst) {
-                        pid->cur_gain_stage_ind = lower_gain_stage_ind;
-                    } else {
-                        // stay where we are
-                    }
-                } else {
-                    // the current gain index is neither, the system state has moved rapidly, choose the closest
-                    if (y < midpoint) {
-                        pid->cur_gain_stage_ind = lower_gain_stage_ind;
-                    } else {
-                        pid->cur_gain_stage_ind = upper_gain_stage_ind;
-                    }
-                }
+                pid->cur_pid_constants.kI = pid->pid_constants[lower_gain_stage_ind].kI +
+                    t * (pid->pid_constants[upper_gain_stage_ind].kI - pid->pid_constants[lower_gain_stage_ind].kI);
+
+                pid->cur_pid_constants.kD = pid->pid_constants[lower_gain_stage_ind].kD +
+                    t * (pid->pid_constants[upper_gain_stage_ind].kD - pid->pid_constants[lower_gain_stage_ind].kD);
+
+                pid->cur_pid_constants.kI_max = pid->pid_constants[lower_gain_stage_ind].kI_max +
+                    t * (pid->pid_constants[upper_gain_stage_ind].kI_max - pid->pid_constants[lower_gain_stage_ind].kI_max);
+
+                pid->cur_pid_constants.kI_min = pid->pid_constants[lower_gain_stage_ind].kI_min +
+                    t * (pid->pid_constants[upper_gain_stage_ind].kI_min - pid->pid_constants[lower_gain_stage_ind].kI_min);
+                return;
             }
         }
     }
@@ -161,8 +157,7 @@ static void gspid_update_gain_stage(GainScheduledPid_t *pid, float y) {
 float gspid_calculate(GainScheduledPid_t *pid, float r, float y, float dt) {
     // choose correct gains for current state
     gspid_update_gain_stage(pid, y);
-    PidConstants_t cur_gains = pid->pid_constants[pid->cur_gain_stage_ind];
-
+    PidConstants_t cur_gains = pid->cur_pid_constants;
     float err = r - y;
 
     float termP = err * cur_gains.kP;

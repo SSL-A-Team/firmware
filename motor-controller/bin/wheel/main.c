@@ -147,27 +147,35 @@ int main() {
     // vel_pid_constants.kI_min = -20.0;
 
     GainScheduledPid_t vel_pid;
-    PidConstants_t vel_gains[2] = {
+    PidConstants_t vel_gains[3] = {
         {
-            .kP = 5.5f,
+            .kP = 6.0f,
             .kI = 8.0f,
             .kD = 0.1f,
             .kI_max = 20.0f,
             .kI_min = -20.0f,
         },
         {
-            .kP = 5.5f,
-            .kI = 8.0f,
+            .kP = 6.0f,
+            .kI = 0.0f,
+            .kD = 0.5f,
+            .kI_max = 0.0f,
+            .kI_min = 0.0f,
+        },
+        {
+            .kP = 1.0f,
+            .kI = 0.0f,
             .kD = 0.1f,
-            .kI_max = 20.0f,
-            .kI_min = -20.0f,
+            .kI_max = 0.0f,
+            .kI_min = 0.0f,
         }
     };
-    float vel_gain_schedule[2] = {
-        10.0f,
+    float vel_gain_schedule[3] = {
+        3.0,
+        7.0f,
         30.0f,
     }; // rad/s
-    gspid_initialize(&vel_pid, 2, vel_gains, vel_gain_schedule, 0.2f, true);
+    gspid_initialize(&vel_pid, 3, vel_gains, vel_gain_schedule, 0.2f, true);
 
     // setup the torque PID
     PidConstants_t torque_pid_constants;
