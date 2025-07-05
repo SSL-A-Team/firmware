@@ -491,14 +491,6 @@ impl <
             || self.shared_robot_state.shutdown_requested()
             || self.last_command.emergency_stop() != 0
         }
-
-        fn stop_wheels(&self) -> bool {
-            // defmt::debug!("hco: {}, sd req: {}, estop: {}", self.last_power_telemetry.high_current_operations_allowed() == 0, self.shared_robot_state.shutdown_requested(), self.last_command.emergency_stop() != 0);
-
-            self.last_power_telemetry.high_current_operations_allowed() == 0 
-            || self.shared_robot_state.shutdown_requested()
-            || self.last_command.emergency_stop() != 0
-        }
     }
 
 #[embassy_executor::task]
