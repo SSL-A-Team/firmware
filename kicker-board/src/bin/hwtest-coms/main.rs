@@ -24,14 +24,14 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 use ateam_kicker_board::{
     adc_200v_to_rail_voltage, adc_raw_to_v,
     kick_manager::{
-        KickManager, 
-        KickType}, 
+        KickManager,
+        KickType},
     pins::*, tasks::{get_system_config, ClkSource}
 };
 
 use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl, uart::queue::{UartReadQueue, UartWriteQueue}};
 
-use ateam_common_packets::bindings::{KickerControl, KickerTelemetry, KickRequest};
+use ateam_common_packets::bindings::{KickerControl, KickerTelemetry};
 
 const MAX_TX_PACKET_SIZE: usize = 16;
 const TX_BUF_DEPTH: usize = 3;
@@ -39,26 +39,6 @@ const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 3;
 
 static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH);
-
-
-fn get_empty_control_packet() -> KickerControl {
-    KickerControl {
-        _bitfield_align_1: [],
-        _bitfield_1: KickerControl::new_bitfield_1(0, 0, 0),
-        kick_request: KickRequest::KR_DISABLE,
-        kick_speed: 0.0,
-        drib_speed: 0.0,
-    }
-}
-
-fn get_empty_telem_packet() -> KickerTelemetry {
-    KickerTelemetry {
-        _bitfield_align_1: [],
-        _bitfield_1: KickerTelemetry::new_bitfield_1(0, 0, 0, 0),
-        rail_voltage: 0.0,
-        battery_voltage: 0.0,
-    }
-}
 
 #[embassy_executor::task]
 async fn high_pri_kick_task(
@@ -86,8 +66,8 @@ async fn high_pri_kick_task(
 
     // coms buffers
     let mut telemetry_enabled: bool;
-    let mut kicker_control_packet: KickerControl = get_empty_control_packet();
-    let mut kicker_telemetry_packet: KickerTelemetry = get_empty_telem_packet();
+    let mut kicker_control_packet: KickerControl = Default::default();
+    let mut kicker_telemetry_packet: KickerTelemetry = Default::default();
 
     // loop rate control
     let mut ticker = Ticker::every(Duration::from_millis(1));
@@ -98,12 +78,12 @@ async fn high_pri_kick_task(
         let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
 
         let rail_voltage = adc_200v_to_rail_voltage(adc_raw_to_v(adc.blocking_read(&mut rail_pin) as f32, vrefint_sample));
-        // optionally pre-flag errors? 
+        // optionally pre-flag errors?
 
         /////////////////////////////////////
         //  process any available packets  //
         /////////////////////////////////////
-        
+
         while let Ok(res) = coms_reader.try_dequeue() {
             let buf = res.data();
 
@@ -118,7 +98,7 @@ async fn high_pri_kick_task(
                 let state = &mut kicker_control_packet as *mut _ as *mut u8;
                 for i in 0..core::mem::size_of::<KickerControl>() {
                     *state.offset(i as isize) = buf[i];
-                }                
+                }
             }
         }
 
@@ -139,7 +119,7 @@ async fn high_pri_kick_task(
         if telemetry_enabled {
             let cur_time = Instant::now();
             if Instant::checked_duration_since(&cur_time, last_packet_sent_time).unwrap().as_millis() > 20 {
-                kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(0, 0, ball_detected as u32, res.is_err() as u32);
+                kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(res.is_err() as u16, 0, 0, 0, ball_detected as u16, 0, Default::default());
                 kicker_telemetry_packet.rail_voltage = rail_voltage;
                 kicker_telemetry_packet.battery_voltage = 22.5;
 
@@ -150,7 +130,7 @@ async fn high_pri_kick_task(
                         (&kicker_telemetry_packet as *const KickerTelemetry) as *const u8,
                         core::mem::size_of::<KickerTelemetry>(),
                     );
-        
+
                     // send the packet
                     let _res = coms_writer.enqueue_copy(struct_bytes);
                 }

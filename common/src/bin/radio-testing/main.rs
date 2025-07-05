@@ -70,12 +70,14 @@ fn main() -> std::io::Result<()> {
         data_length: size_of::<BasicControl>() as u16,
         data: RadioPacket_Data {
             control: BasicControl {
+                _bitfield_1: Default::default(),
+                _bitfield_align_1: Default::default(),
                 vel_x_linear: 0.,
                 vel_y_linear: 0.,
                 vel_z_angular: 0.,
                 kick_vel: 0.,
                 dribbler_speed: 0.,
-                kick_request: KickRequest::KR_ARM,
+                kick_request: KickRequest::KR_ARM
             },
         },
     };

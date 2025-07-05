@@ -4,20 +4,13 @@ use ateam_lib_stm32::{drivers::boot::stm32_interface::Stm32Interface, uart::queu
 use defmt::*;
 use embassy_stm32::{
     gpio::{Pin, Pull},
-    usart::{self, Parity},
+    usart::Parity,
 };
 use embassy_time::{with_timeout, Duration, Timer};
 use nalgebra::Vector3;
 
 use ateam_common_packets::bindings::{
-    MotorCommandPacket,
-    MotorCommandPacketType::MCP_MOTION,
-    MotorCommandPacketType::MCP_PARAMS,
-    MotorCommand_MotionType,
-    MotorCommand_MotionType::OPEN_LOOP,
-    MotorResponsePacket,
-    MotorResponsePacketType::{MRP_MOTION, MRP_PARAMS},
-    MotorResponse_Motion_Packet, MotorResponse_Params_Packet,
+    MotionCommandType::{self, OPEN_LOOP}, MotorCommandPacket, MotorCommandType::{MCP_MOTION, MCP_PARAMS}, MotorResponse, MotorResponseType::{MRP_MOTION, MRP_PARAMS}, MotorTelemetry, ParameterMotorResponse
 };
 use crate::image_hash;
 
@@ -36,11 +29,9 @@ pub struct WheelMotor<
         DEPTH_TX,
     >,
     firmware_image: &'a [u8],
-
     current_timestamp_ms: u32,
-    current_state: MotorResponse_Motion_Packet,
-    current_params_state: MotorResponse_Params_Packet,
-
+    current_state: MotorTelemetry,
+    current_params_state: ParameterMotorResponse,
     version_major: u8,
     version_minor: u8,
     version_patch: u16,
@@ -51,7 +42,7 @@ pub struct WheelMotor<
     torque_limit: f32,
 
     setpoint: f32,
-    motion_type: MotorCommand_MotionType::Type,
+    motion_type: MotionCommandType::Type,
     reset_flagged: bool,
     telemetry_enabled: bool,
     motion_enabled: bool,
@@ -76,11 +67,8 @@ impl<
         firmware_image: &'a [u8],
     ) -> WheelMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
     {
-        let start_state: MotorResponse_Motion_Packet =
-            { unsafe { MaybeUninit::zeroed().assume_init() } };
-
-        let start_params_state: MotorResponse_Params_Packet =
-            { unsafe { MaybeUninit::zeroed().assume_init() } };
+        let start_state: MotorTelemetry = Default::default();
+        let start_params_state: ParameterMotorResponse = Default::default();
 
         WheelMotor {
             stm32_uart_interface: stm32_interface,
@@ -118,11 +106,8 @@ impl<
         // Need a Pull None to allow for STSPIN watchdog usage.
         let stm32_interface = Stm32Interface::new_from_pins(uart, read_queue, write_queue, boot0_pin, reset_pin, Pull::None, true);
 
-        let start_state: MotorResponse_Motion_Packet =
-            { unsafe { MaybeUninit::zeroed().assume_init() } };
-
-        let start_params_state: MotorResponse_Params_Packet =
-            { unsafe { MaybeUninit::zeroed().assume_init() } };
+        let start_state: MotorTelemetry = Default::default();
+        let start_params_state: ParameterMotorResponse = Default::default();
 
         WheelMotor {
             stm32_uart_interface: stm32_interface,
@@ -236,19 +221,19 @@ impl<
         while let Ok(res) = self.stm32_uart_interface.try_read_data() {
             let buf = res.data();
 
-            if buf.len() != core::mem::size_of::<MotorResponsePacket>() {
-                defmt::warn!("Drive Motor - Got invalid packet of len {:?} (expected {:?}) data: {:?}", buf.len(), core::mem::size_of::<MotorResponsePacket>(), buf);
+            if buf.len() != core::mem::size_of::<MotorResponse>() {
+                defmt::warn!("Drive Motor - Got invalid packet of len {:?} (expected {:?}) data: {:?}", buf.len(), core::mem::size_of::<MotorResponse>(), buf);
                 continue;
             }
 
             // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
             unsafe {
                 // zero initialize a local response packet
-                let mut mrp: MotorResponsePacket = { MaybeUninit::zeroed().assume_init() };
+                let mut mrp: MotorResponse = Default::default();
 
                 // copy receieved uart bytes into packet
                 let state = &mut mrp as *mut _ as *mut u8;
-                for i in 0..core::mem::size_of::<MotorResponsePacket>() {
+                for i in 0..core::mem::size_of::<MotorResponse>() {
                     *state.offset(i as isize) = buf[i];
                 }
 
@@ -354,11 +339,11 @@ impl<
         self.reset_flagged = false;
     }
 
-    pub fn get_latest_state(&self) -> MotorResponse_Motion_Packet {
+    pub fn get_latest_state(&self) -> MotorTelemetry {
         self.current_state
     }
 
-    pub fn set_motion_type(&mut self, motion_type: MotorCommand_MotionType::Type) {
+    pub fn set_motion_type(&mut self, motion_type: MotionCommandType::Type) {
         self.motion_type = motion_type;
     }
 
