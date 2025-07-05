@@ -185,6 +185,9 @@ impl<
     /// Get the first 4 bytes of the currently loaded image hash on the device, Run with timeout!
     pub async fn get_current_device_img_hash(&mut self) -> [u8; 4] {
         loop {
+            defmt::trace!("Kicker Interface - Enabling kicker telemetry");
+            self.set_telemetry_enabled(true);
+            self.send_command();
             // Parse incoming packets
             let received_telemetry = self.process_telemetry();
             if received_telemetry {
