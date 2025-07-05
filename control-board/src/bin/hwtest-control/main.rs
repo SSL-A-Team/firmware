@@ -140,8 +140,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         imu_gyro_data_publisher, imu_accel_data_publisher, imu_led_cmd_publisher,
         p);
 
-    create_control_task!(main_spawner, uart_queue_spawner, 
-        robot_state, 
+    create_control_task!(main_spawner, uart_queue_spawner,
+        robot_state,
         control_command_subscriber, control_telemetry_publisher,
         control_task_power_telemetry_subscriber, control_task_kicker_telemetry_subscriber,
         control_gyro_data_subscriber, control_accel_data_subscriber,
@@ -166,9 +166,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             vel_z_angular: 0.0,
             kick_vel: 0.0,
             dribbler_speed: -0.1,
-            kick_request: KickRequest::KR_ARM,
-            _bitfield_align_1: Default::default(),
-            _bitfield_1: Default::default(),
+            kick_request: KickRequest::KR_ARM
         }));
     }
 }

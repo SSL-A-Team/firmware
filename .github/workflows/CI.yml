@@ -4,7 +4,7 @@ on:
     branches: [ main ]
   pull_request:
     branches:
-      - main
+      - '**'
 jobs:
   test-firmware-build:
     runs-on: ubuntu-24.04
@@ -23,7 +23,7 @@ jobs:
           extra_nix_config:
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
 
-      - name: Validate Nix Envoirnment
+      - name: Validate Nix Environment
         shell: bash
         run: |
           nix flake check
@@ -47,23 +47,26 @@ jobs:
         shell: bash
         run: |
           nix develop -c make software-communication--test
-      - name: Build Kicker Firmware
-        shell: bash
-        run: |
-          nix develop -c make clean
-          nix develop -c make kicker-board--all
       - name: Build Motor Controller Firmware
         shell: bash
         run: |
           nix develop -c make clean
           nix develop -c make motor-controller--all
+      - name: Build Kicker Firmware
+        shell: bash
+        run: |
+          nix develop -c make clean
+          nix develop -c make motor-controller--all
+          nix develop -c make kicker-board--all
       - name: Build Control Board Firmware
         shell: bash
         run: |
           nix develop -c make clean
+          nix develop -c make motor-controller--all
           nix develop -c make control-board--all
       - name: Build Control Board Firmware - Public Wifi Credentials
         shell: bash
         run: |
           nix develop -c make clean
+          nix develop -c make motor-controller--all
           nix develop -c make NO_ATEAM_WIFI_CREDENTIALS=true control-board--all
