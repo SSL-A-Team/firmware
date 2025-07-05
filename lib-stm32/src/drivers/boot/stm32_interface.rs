@@ -29,6 +29,9 @@ pub const STM32_BOOTLOADER_CMD_READ_PROT: u8 = 0x82;
 pub const STM32_BOOTLOADER_CMD_READ_UNPROT: u8 = 0x92;
 pub const STM32_BOOTLOADER_CMD_GET_CHECKSUM: u8 = 0xA1;
 
+// TODO Make this shared in software-communication
+pub const MOTOR_CURRENT_START_ADDRESS: u32 = 0x0800_7C00; // 512k flash, so this is the start of the last page
+
 pub fn get_bootloader_uart_config() -> Config {
     let mut config = usart::Config::default();
     config.baudrate = 115_200; // max officially support baudrate
@@ -730,55 +733,52 @@ impl<
             }
         };
 
-        let mut read_data = [0u8; 8];
-        if self.read_device_memory(&mut read_data, 0x0800_7C00).await.is_err() {
-            return Err(());
-        }
-        defmt::info!("read device memory: {:x}", read_data);
-
-        let data_write: [u8; 8] = [0x69, 0x42, 0x00, 0x51, 0x01, 0x02, 0x03, 0x04];
-        if self.write_device_memory_chunk(&data_write, 0x0800_7C00).await.is_err() {
-            return Err(());
-        }
-        defmt::info!("wrote device memory: {:x}", data_write);
-
-        // Read back the data to verify it was written correctly
-        let mut read_data_2 = [0u8; 8];
-        if self.read_device_memory(&mut read_data_2, 0x0800_7C00).await.is_err() {
-            return Err(());
-        }
-        defmt::info!("read back device memory: {:x}", read_data_2);
-
-        // Erase the page
-        let erase_page = 31; // Example page number, adjust as needed
-        if self.erase_device_memory_single(erase_page).await.is_err() {
-            return Err(());
-        }
-        defmt::info!("erased page {}", erase_page);
-
-        // Verify the page is erased
-        let mut read_data_3 = [0u8; 8];
-        if self.read_device_memory(&mut read_data_3, 0x0800_7C00).await.is_err() {
-            return Err(());
-        }
-        defmt::info!("read back device memory after erase: {:x}", read_data_3);
-
-        let data_write2: [u8; 8] = [0xAA, 0xBB, 0xCC, 0x99, 0x88, 0x77, 0x66, 0x55];
-        if self.write_device_memory_chunk(&data_write2, 0x0800_7C00).await.is_err() {
-            return Err(());
-        }
-        defmt::info!("wrote device memory after erase: {:x}", data_write2);
-
-        // Read back the data to verify it was written correctly
-        let mut read_data_4 = [0u8; 8];
-        if self.read_device_memory(&mut read_data_4, 0x0800_7C00).await.is_err() {
-            return Err(());
-        }
-        defmt::info!("read back device memory after write: {:x}", read_data_4);
-
-        // TODO account for memory size and erase size generically
-
         // erase part
+        if let Err(err) = self.erase_flash_memory().await {
+            return Err(err);
+        }
+
+        // program image
+        if let Err(err) = self.write_device_memory(fw_image_bytes, None).await {
+            return Err(err);
+        }
+
+        self.reset_into_program(false).await;
+
+        Ok(())
+    }
+
+    pub async fn load_motor_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
+        if !self.in_bootloader {
+            if let Err(err) = self.reset_into_bootloader().await {
+                return Err(err);
+            }
+        }
+
+        if let Err(err) = self.verify_bootloader().await {
+            return Err(err);
+        }
+
+        let device_id = match self.get_device_id().await {
+            Err(err) => return Err(err),
+            Ok(device_id) => match device_id {
+                68 => {
+                    defmt::trace!("found stm32f1 device");
+                }
+                19 => {
+                    defmt::trace!("found stm32f40xxx device");
+                }
+                105 => {
+                    defmt::trace!("found stm32g474xx device");
+                }
+                _ => {
+                    defmt::error!("found unknown device id {}", device_id);
+                    return Err(());
+                }
+            }
+        };
+
+        // Erase up to Page 31 since the last page is used for current calibration constants.
         if let Err(err) = self.erase_flash_memory_to_page(31).await {
             return Err(err);
         }
@@ -789,6 +789,43 @@ impl<
         }
 
         self.reset_into_program(false).await;
+
+        Ok(())
+    }
+
+    pub async fn write_current_calibration_constants(&mut self, constants: &[u8]) -> Result<(), ()> {
+        if !self.in_bootloader {
+            if let Err(err) = self.reset_into_bootloader().await {
+                return Err(err);
+            }
+        }
+
+        if let Err(err) = self.verify_bootloader().await {
+            return Err(err);
+        }
+
+        let device_id = match self.get_device_id().await {
+            Err(err) => return Err(err),
+            Ok(device_id) => match device_id {
+                19 => {
+                    defmt::trace!("found stm32f40xxx device");
+                }
+                _ => {
+                    defmt::error!("Invalid device id for current calibration constants {}", device_id);
+                    return Err(());
+                }
+            }
+        };
+
+        // Erase the last page
+        if let Err(err) = self.erase_device_memory_single(31).await {
+            return Err(err);
+        }
+
+        // Write the constants to the last page
+        if let Err(err) = self.write_device_memory(constants, Some(MOTOR_CURRENT_START_ADDRESS)).await {
+            return Err(err);
+        }
 
         Ok(())
     }

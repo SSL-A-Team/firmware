@@ -189,7 +189,7 @@ impl<
             }
         };
         let wheel_response_timeout = Duration::from_millis(100);
-    
+
         defmt::trace!("Drive Motor - waiting for parameter response packet");
         match with_timeout(wheel_response_timeout, wheel_img_hash_future).await {
             Ok(wheel_img_hash_motr) => {
@@ -212,13 +212,11 @@ impl<
         let res;
         if controller_needs_flash {
             defmt::trace!("UART config updated");
-            res = self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await;
+            res = self.stm32_uart_interface.load_motor_firmware_image(fw_image_bytes).await;
         } else {
             defmt::info!("Wheel image is up to date, skipping flash");
             res = Ok(());
         }
-
-        // let res = self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await;
 
         // this is safe because load firmware image call will reset the target device
         // it will begin issueing telemetry updates
