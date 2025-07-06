@@ -23,6 +23,8 @@ static CS_Mode_t m_cs_mode;
 static ADC_Result_t m_adc_result;
 static bool m_adc_calibrated = false;
 
+static float m_motor_current_adc_offset = 0.0f;
+
 void currsen_enable_ht() {
     ADC1->CR |= ADC_CR_ADSTART;
 }
@@ -374,6 +376,28 @@ float currsen_get_motor_current()
     return i_motor;
 }
 
+float currsen_get_motor_current_offset()
+{
+    return m_motor_current_adc_offset;
+}
+
+float currsen_get_motor_current_with_offset()
+{
+    // Get the current in amps from the current sense ADC.
+    // Should always be positive with the current electrical architecture.
+    float i_motor = currsen_get_motor_current();
+    // Apply the offset to the motor current.
+    i_motor -= currsen_get_motor_current_offset();
+
+    if (i_motor < 0.0f) {
+        // If the current is negative, set it to 0.0f.
+        // This is to prevent negative current readings.
+        i_motor = 0.0f;
+    }
+
+    return i_motor;
+}
+
 /**
  * @brief gets the Vbus voltage. Translate from raw ADC value to
  *       to Vbus voltage in volts.
@@ -405,4 +429,17 @@ int32_t currsen_get_temperature()
     // Add the offset of 30 degrees Celsius from the base calibration point.
     temperature = temperature + 30;
     return temperature;
+}
+
+void init_motor_current_adc_offset()
+{
+    // Read the motor current offset from flash.
+    // If not set, set to 0.0f.
+    volatile uint32_t* current_offset_ptr = (uint32_t*) CURRENT_OFFSET_ADDRESS;
+    if (*current_offset_ptr != CURRENT_OFFSET_MAGIC) {
+        m_motor_current_adc_offset = 0.0f;
+    } else {
+        // If the magic number matches, read the float value one after the magic number.
+        m_motor_current_adc_offset = *((float*) (current_offset_ptr + 1));
+    }
 }

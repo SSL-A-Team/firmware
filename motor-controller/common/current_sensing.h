@@ -56,6 +56,10 @@ static const float V_MIN_OP_AMP = 0.2f; // V
 // V_bus = V_adc_raw * VBUS_SCALE
 static const float VBUS_SCALE = 0.0091575f;
 
+// TODO Move to software-communication
+static const uint32_t CURRENT_OFFSET_ADDRESS = 0x0800_7C00;
+static const uint32_t CURRENT_OFFSET_MAGIC = 0xAABBCCDD;
+
 typedef enum {
     CS_MODE_PWM_DMA,
     CS_MODE_SOFTWARE
@@ -153,7 +157,7 @@ CS_Status_t currsen_adc_dis();
 CS_Status_t calculate_motor_zero_current_setpoint();
 
 float currsen_get_motor_current();
-float currsen_get_motor_current_raw();
+float currsen_get_motor_current_with_offset();
 float currsen_get_vbus_voltage();
 int32_t currsen_get_temperature();
 uint16_t currsen_get_motor_current_zero_adc_raw();

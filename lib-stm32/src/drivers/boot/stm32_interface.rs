@@ -31,6 +31,8 @@ pub const STM32_BOOTLOADER_CMD_GET_CHECKSUM: u8 = 0xA1;
 
 // TODO Make this shared in software-communication
 pub const MOTOR_CURRENT_START_ADDRESS: u32 = 0x0800_7C00; // 512k flash, so this is the start of the last page
+pub const MOTOR_CURRENT_PAGE: u8 = 31;
+pub const MOTOR_CURRENT_MAGIC: [u8; 4] = [0xAA, 0xBB, 0xCC, 0xDD]; // Magic number to identify the motor current calibration data
 
 pub fn get_bootloader_uart_config() -> Config {
     let mut config = usart::Config::default();
@@ -714,7 +716,7 @@ impl<
             return Err(err);
         }
 
-        let device_id = match self.get_device_id().await {
+        match self.get_device_id().await {
             Err(err) => return Err(err),
             Ok(device_id) => match device_id {
                 68 => {
@@ -759,7 +761,7 @@ impl<
             return Err(err);
         }
 
-        let device_id = match self.get_device_id().await {
+        match self.get_device_id().await {
             Err(err) => return Err(err),
             Ok(device_id) => match device_id {
                 68 => {
@@ -779,7 +781,7 @@ impl<
         };
 
         // Erase up to Page 31 since the last page is used for current calibration constants.
-        if let Err(err) = self.erase_flash_memory_to_page(31).await {
+        if let Err(err) = self.erase_flash_memory_to_page(MOTOR_CURRENT_PAGE).await {
             return Err(err);
         }
 
@@ -793,7 +795,7 @@ impl<
         Ok(())
     }
 
-    pub async fn write_current_calibration_constants(&mut self, constants: &[u8]) -> Result<(), ()> {
+    pub async fn write_current_calibration_constants(&mut self, current_constant: f32) -> Result<(), ()> {
         if !self.in_bootloader {
             if let Err(err) = self.reset_into_bootloader().await {
                 return Err(err);
@@ -804,7 +806,7 @@ impl<
             return Err(err);
         }
 
-        let device_id = match self.get_device_id().await {
+        match self.get_device_id().await {
             Err(err) => return Err(err),
             Ok(device_id) => match device_id {
                 19 => {
@@ -818,12 +820,18 @@ impl<
         };
 
         // Erase the last page
-        if let Err(err) = self.erase_device_memory_single(31).await {
+        if let Err(err) = self.erase_device_memory_single(MOTOR_CURRENT_PAGE).await {
             return Err(err);
         }
 
-        // Write the constants to the last page
-        if let Err(err) = self.write_device_memory(constants, Some(MOTOR_CURRENT_START_ADDRESS)).await {
+        // Write the constants to the last page but with the magic number prepended
+        let mut data_to_write = [0u8; 8];
+        data_to_write[..4].copy_from_slice(&MOTOR_CURRENT_MAGIC);
+        // Convert the f32 to bytes and write it after the magic number
+        let current_bytes = current_constant.to_le_bytes();
+        data_to_write[4..8].copy_from_slice(&current_bytes);
+
+        if let Err(err) = self.write_device_memory(&data_to_write, Some(MOTOR_CURRENT_START_ADDRESS)).await {
             return Err(err);
         }
 

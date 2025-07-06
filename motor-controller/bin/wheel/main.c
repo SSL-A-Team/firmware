@@ -335,7 +335,15 @@ int main() {
         if (run_torque_loop) {
             // Get the current in amps from the current sense ADC.
             // Should always be positive with the current electrical architecture.
-            float current_sense_I = currsen_get_motor_current();
+            float current_sense_I = 0.0f;
+            if (motor_command_packet.data.motion.calibrate_current) {
+                // Just return the current with no offset applied.
+                current_sense_I = currsen_get_motor_current();
+            }
+            else {
+                current_sense_I = currsen_get_motor_current_with_offset();
+            }
+
             float vbus_voltage = currsen_get_vbus_voltage();
             // Map current to torque using the motor model
             float measured_torque_Nm = mm_current_to_torque(&df45_model, current_sense_I);
@@ -388,7 +396,8 @@ int main() {
             // load data frame
             // torque control data
             response_packet.data.motion.torque_setpoint = r_Nm;
-            response_packet.data.motion.vbus_voltage = vbus_voltage;
+            // TODO Temp undo
+            response_packet.data.motion.vbus_voltage = currsen_get_motor_current_offset();
             response_packet.data.motion.current_estimate = current_sense_I;
             response_packet.data.motion.torque_estimate = measured_torque_Nm;
             response_packet.data.motion.torque_computed_error = torque_pid.prev_err;
@@ -409,7 +418,7 @@ int main() {
             vel_target_accel_rads2 = (r_motor_board - enc_vel_rads_filt) / VELOCITY_LOOP_RATE_S;
 
             // compute the velocity PID
-            control_setpoint_vel_rads = gspid_calculate(&vel_pid, r_motor_board, enc_rad_s_filt, VELOCITY_LOOP_RATE_S);
+            control_setpoint_vel_rads = gspid_calculate(&vel_pid, r_motor_board, enc_vel_rads_filt, VELOCITY_LOOP_RATE_S);
 
             // Clamp setpoint acceleration
             float setpoint_accel_rads_2 = (control_setpoint_vel_rads - control_setpoint_vel_rads_prev)/VELOCITY_LOOP_RATE_S;
@@ -432,7 +441,7 @@ int main() {
             // velocity control data
             response_packet.data.motion.vel_setpoint = r_motor_board;
             response_packet.data.motion.encoder_delta = enc_vel_rads;
-            response_packet.data.motion.vel_enc_estimate = enc_rad_s_filt;
+            response_packet.data.motion.vel_enc_estimate = enc_vel_rads_filt;
             response_packet.data.motion.vel_computed_error = vel_pid.prev_err;
             response_packet.data.motion.vel_computed_rads = control_setpoint_vel_rads;
             response_packet.data.motion.vel_computed_duty = vel_computed_duty;
@@ -535,7 +544,6 @@ int main() {
                 response_packet.data.params.version_major = VERSION_MAJOR;
                 response_packet.data.params.version_minor = VERSION_MINOR;
                 response_packet.data.params.version_patch = VERSION_PATCH;
-                response_packet.data.params.timestamp = time_local_epoch_s();
 
                 // TODO parameter updates are off for gain scheduled PID
                 // response_packet.data.params.vel_p = vel_pid_constants.kP;

@@ -46,6 +46,7 @@ pub struct WheelMotor<
     reset_flagged: bool,
     telemetry_enabled: bool,
     motion_enabled: bool,
+    calibrate_current: bool,
 }
 
 impl<
@@ -91,6 +92,7 @@ impl<
             reset_flagged: false,
             telemetry_enabled: false,
             motion_enabled: false,
+            calibrate_current: false,
         }
     }
 
@@ -130,6 +132,7 @@ impl<
             reset_flagged: false,
             telemetry_enabled: false,
             motion_enabled: false,
+            calibrate_current: false,
         }
     }
 
@@ -215,6 +218,11 @@ impl<
 
     pub async fn load_default_firmware_image(&mut self) -> Result<(), ()> {
         return self.load_firmware_image(self.firmware_image).await;
+    }
+
+    pub async fn save_motor_current_constants(&mut self, current_constant: f32) -> Result<(), ()> {
+        defmt::debug!("Drive Motor - Saving motor current constant: {:?}", current_constant);
+        self.stm32_uart_interface.write_current_calibration_constants(current_constant).await
     }
 
     pub fn process_packets(&mut self) {
@@ -324,6 +332,7 @@ impl<
             cmd.data.motion.set_reset(self.reset_flagged as u32);
             cmd.data.motion.set_enable_telemetry(self.telemetry_enabled as u32);
             cmd.data.motion.set_enable_motion(self.motion_enabled as u32);
+            cmd.data.motion.set_calibrate_current(self.calibrate_current as u32);
             cmd.data.motion.motion_control_type = self.motion_type;
             cmd.data.motion.setpoint = self.setpoint;
             //info!("setpoint: {:?}", cmd.data.motion.setpoint);
@@ -361,6 +370,10 @@ impl<
 
     pub fn set_motion_enabled(&mut self, enabled: bool) {
         self.motion_enabled = enabled;
+    }
+
+    pub fn set_calibrate_current(&mut self, calibrate_current: bool) {
+        self.calibrate_current = calibrate_current;
     }
 
     pub fn read_current_timestamp_ms(&self) -> u32 {

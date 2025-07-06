@@ -7,7 +7,7 @@ use embassy_stm32::{
 };
 use embassy_sync::pubsub::PubSubChannel;
 
-use defmt_rtt as _; 
+use defmt_rtt as _;
 
 use ateam_control_board::{
     create_audio_task, create_control_task, create_dotstar_task, create_imu_task, create_io_task, create_kicker_task, create_power_task, create_radio_task, get_system_config, pins::{AccelDataPubSub, CommandsPubSub, GyroDataPubSub, KickerTelemetryPubSub, LedCommandPubSub, PowerTelemetryPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
@@ -144,8 +144,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         imu_gyro_data_publisher, imu_accel_data_publisher, imu_led_cmd_publisher,
         p);
 
-    create_control_task!(main_spawner, uart_queue_spawner, 
-        robot_state, 
+    create_control_task!(main_spawner, uart_queue_spawner,
+        robot_state,
         control_command_subscriber, control_telemetry_publisher,
         control_task_power_telemetry_subscriber, control_task_kicker_telemetry_subscriber,
         control_gyro_data_subscriber, control_accel_data_subscriber,
