@@ -354,6 +354,7 @@ async fn high_pri_kick_task(
                     (rail_voltage_ave > CHARGED_THRESH_VOLTAGE) as u16,
                     Default::default()
                 );
+
                 let charge_pct = rail_voltage_ave / CHARGE_TARGET_VOLTAGE;
                 kicker_telemetry_packet.charge_pct = (charge_pct * 100.0) as u16;
                 kicker_telemetry_packet.rail_voltage = rail_voltage_ave;

@@ -165,6 +165,7 @@ impl<
             defmt::debug!("error disabling echo on radio");
             return Err(RobotRadioError::ConnectUartBadEcho);
         }
+
         if self.odin_driver.config_uart(baudrate, true, 8, true).await.is_err() {
             defmt::debug!("error increasing radio baud rate.");
             return Err(RobotRadioError::ConnectUartBadRadioConfigUpdate);

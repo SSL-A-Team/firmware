@@ -96,6 +96,7 @@ GainScheduledPidResult_t gspid_initialize(
     pid_constants_initialize(&pid->cur_pid_constants);
     pid->gain_schedule_abs = gain_schedule_abs;
     pid->hyst = hyst_pct;
+
     pid->eI = 0.0f;
     pid->prev_err = 0.0f;
 

@@ -117,7 +117,6 @@ impl<'a> BodyVelocityController<'a> {
 
         // Read the current body velocity state estimate from the CGKF.
         let mut body_vel_estimate = self.body_vel_filter.get_state();
-        // let mut body_vel_estimate = self.robot_model.wheel_vel_to_robot_vel(wheel_velocities);
 
         // Deadzone the velocity estimate
         if libm::fabsf(body_vel_estimate[0]) < 0.05 {
@@ -138,7 +137,7 @@ impl<'a> BodyVelocityController<'a> {
         let body_vel_control_pid = self.body_vel_controller.calculate(&body_vel_setpoint, &body_vel_estimate, self.loop_dt_s);
 
         // Add the commanded setpoint as a feedforward component.
-        let body_vel_output = body_vel_control_pid  + body_vel_setpoint;
+        let body_vel_output = body_vel_control_pid + body_vel_setpoint;
         // let body_vel_output = body_vel_setpoint;
 
         self.debug_telemetry.body_velocity_u.copy_from_slice(body_vel_output.as_slice());

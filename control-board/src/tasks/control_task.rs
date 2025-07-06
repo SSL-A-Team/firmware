@@ -65,6 +65,7 @@ pub struct ControlTask<
     last_command: BasicControl,
     last_power_telemetry: PowerTelemetry,
     last_kicker_telemetry: KickerTelemetry,
+
     motor_fl: ControlWheelMotor,
     motor_bl: ControlWheelMotor,
     motor_br: ControlWheelMotor,
@@ -261,6 +262,7 @@ impl <
 
             let robot_model = self.get_robot_model();
             let mut robot_controller = BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
+
             let mut seq_number = 0;
             let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));
 
@@ -358,6 +360,7 @@ impl <
                 while let Some(power_telemetry) = self.power_telemetry_subscriber.try_next_message_pure() {
                     self.last_power_telemetry = power_telemetry;
                 }
+
                 if self.stop_wheels() {
                     cmd_vel = Vector3::new(0.0, 0.0, 0.0);
                 } else if self.last_command.game_state_in_stop() != 0 {
