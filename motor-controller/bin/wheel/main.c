@@ -150,20 +150,20 @@ int main() {
     PidConstants_t vel_gains[3] = {
         {
             .kP = 6.0f,
-            .kI = 8.0f,
-            .kD = 0.1f,
+            .kI = 12.0f,
+            .kD = 0.4f,
             .kI_max = 20.0f,
             .kI_min = -20.0f,
         },
         {
-            .kP = 6.0f,
+            .kP = 7.0f,
             .kI = 0.0f,
             .kD = 0.5f,
             .kI_max = 0.0f,
             .kI_min = 0.0f,
         },
         {
-            .kP = 1.0f,
+            .kP = 2.0f,
             .kI = 0.0f,
             .kD = 0.1f,
             .kI_max = 0.0f,
@@ -377,6 +377,11 @@ int main() {
 
             // filter the recovered velocity
             enc_rad_s_filt = iir_filter_update(&encoder_filter, enc_vel_rads);
+
+            // reset integrator when commanded to stop
+            if(fabsf(r_motor_board) < 1e-3f) {
+                vel_pid.eI = 0.0f;
+            }
 
             // compute the velocity PID
             control_setpoint_vel_rads = gspid_calculate(&vel_pid, r_motor_board, enc_rad_s_filt, VELOCITY_LOOP_RATE_S);
