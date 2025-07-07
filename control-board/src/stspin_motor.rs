@@ -67,11 +67,8 @@ impl<
         firmware_image: &'a [u8],
     ) -> WheelMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
     {
-        let start_state: MotorTelemetry =
-            { unsafe { MaybeUninit::zeroed().assume_init() } };
-
-        let start_params_state: ParameterMotorResponse =
-            { unsafe { MaybeUninit::zeroed().assume_init() } };
+        let start_state: MotorTelemetry = Default::default();
+        let start_params_state: ParameterMotorResponse = Default::default();
 
         WheelMotor {
             stm32_uart_interface: stm32_interface,
@@ -107,11 +104,8 @@ impl<
         // Need a Pull None to allow for STSPIN watchdog usage.
         let stm32_interface = Stm32Interface::new_from_pins(uart, read_queue, write_queue, boot0_pin, reset_pin, Pull::None, true);
 
-        let start_state: MotorTelemetry =
-            { unsafe { MaybeUninit::zeroed().assume_init() } };
-
-        let start_params_state: ParameterMotorResponse =
-            { unsafe { MaybeUninit::zeroed().assume_init() } };
+        let start_state: MotorTelemetry = Default::default();
+        let start_params_state: ParameterMotorResponse = Default::default();
 
         WheelMotor {
             stm32_uart_interface: stm32_interface,
@@ -176,7 +170,7 @@ impl<
             }
         };
         let wheel_response_timeout = Duration::from_millis(100);
-    
+
         defmt::trace!("Drive Motor - waiting for parameter response packet");
         match with_timeout(wheel_response_timeout, wheel_img_hash_future).await {
             Ok(wheel_img_hash_motr) => {
@@ -233,7 +227,7 @@ impl<
             // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
             unsafe {
                 // zero initialize a local response packet
-                let mut mrp: MotorResponse = { MaybeUninit::zeroed().assume_init() };
+                let mut mrp: MotorResponse = Default::default();
 
                 // copy receieved uart bytes into packet
                 let state = &mut mrp as *mut _ as *mut u8;

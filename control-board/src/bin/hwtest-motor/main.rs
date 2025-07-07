@@ -99,8 +99,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         imu_gyro_data_publisher, imu_accel_data_publisher, imu_led_cmd_publisher,
         p);
 
-    create_control_task!(main_spawner, uart_queue_spawner, 
-        robot_state, 
+    create_control_task!(main_spawner, uart_queue_spawner,
+        robot_state,
         control_command_subscriber, control_telemetry_publisher,
         control_task_power_telemetry_subscriber, control_task_kicker_telemetry_subscriber,
         control_gyro_data_subscriber, control_accel_data_subscriber,

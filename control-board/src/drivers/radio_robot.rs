@@ -194,7 +194,7 @@ impl<
                 if self.odin_driver.wait_edm_startup().await.is_err() {
                     defmt::debug!("error waiting for EDM startup after uart baudrate increase");
                     return Err(RobotRadioError::ConnectUartNoEdmStartup);
-                } 
+                }
             } else {
                 defmt::trace!("got EDM startup command");
             }

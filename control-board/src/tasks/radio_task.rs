@@ -24,7 +24,7 @@ macro_rules! create_radio_task {
             &$wifi_credentials,
             $p.USART2, $p.PD6, $p.PD5, $p.PD3, $p.PD4,
             $p.DMA2_CH1, $p.DMA2_CH0,
-            $p.PD7, $p.PA15); 
+            $p.PD7, $p.PA15).await; 
     };
 }
 
@@ -350,6 +350,8 @@ impl<
     }
 
     async fn process_packets(&mut self) -> Result<(), ()> {
+        // defmt::info!("processing packets: {:?}", Instant::now());
+
         // read any packets
         loop {
             if let Ok(pkt) = self.radio.read_packet_nonblocking() {
@@ -447,8 +449,10 @@ pub async fn start_radio_task(radio_task_spawner: Spawner,
 
 
     let radio_uart = if robot_state.hw_wifi_driver_use_flow_control() {
+        defmt::info!("radio will use flow control");
         Uart::new_with_rtscts(radio_uart, radio_uart_rx_pin, radio_uart_tx_pin, SystemIrqs, _radio_uart_rts_pin, _radio_uart_cts_pin, radio_uart_tx_dma, radio_uart_rx_dma, uart_conifg).unwrap()
     } else {
+        defmt::info!("radio will NOT use flow control");
         Uart::new(radio_uart, radio_uart_rx_pin, radio_uart_tx_pin, SystemIrqs, radio_uart_tx_dma, radio_uart_rx_dma, uart_conifg).unwrap()
     };
     let (radio_uart_tx, radio_uart_rx) = Uart::split(radio_uart);
