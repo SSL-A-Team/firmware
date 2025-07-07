@@ -101,8 +101,8 @@ inline void setup_clocks() {
     // RTCSEL -> LSI (40Khz)
     RCC->BDCR |= RCC_BDCR_RTCSEL_LSI;
 
-    // HSI14 enable (for ADC)
-    // on by default??
+    // ADC Clock Divider set in ADC setup.
+    // Based on PCLK (APB clock).
 
     // Setup TIM14 sysclk source
     RCC->CFGR |= RCC_CFGR_MCO_SYSCLK;

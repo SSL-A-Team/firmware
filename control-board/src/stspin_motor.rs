@@ -29,10 +29,9 @@ pub struct WheelMotor<
         DEPTH_TX,
     >,
     firmware_image: &'a [u8],
-
+    current_timestamp_ms: u32,
     current_state: MotorTelemetry,
     current_params_state: ParameterMotorResponse,
-
     version_major: u8,
     version_minor: u8,
     version_patch: u16,
@@ -46,6 +45,8 @@ pub struct WheelMotor<
     motion_type: MotionCommandType::Type,
     reset_flagged: bool,
     telemetry_enabled: bool,
+    motion_enabled: bool,
+    calibrate_current: bool,
 }
 
 impl<
@@ -77,6 +78,7 @@ impl<
             version_major: 0,
             version_minor: 0,
             version_patch: 0,
+            current_timestamp_ms: 0,
             current_state: start_state,
             current_params_state: start_params_state,
             vel_pid_constants: Vector3::new(0.0, 0.0, 0.0),
@@ -89,6 +91,8 @@ impl<
             motion_type: OPEN_LOOP,
             reset_flagged: false,
             telemetry_enabled: false,
+            motion_enabled: false,
+            calibrate_current: false,
         }
     }
 
@@ -114,6 +118,7 @@ impl<
             version_major: 0,
             version_minor: 0,
             version_patch: 0,
+            current_timestamp_ms: 0,
             current_state: start_state,
             current_params_state: start_params_state,
             vel_pid_constants: Vector3::new(0.0, 0.0, 0.0),
@@ -126,6 +131,8 @@ impl<
             motion_type: OPEN_LOOP,
             reset_flagged: false,
             telemetry_enabled: false,
+            motion_enabled: false,
+            calibrate_current: false,
         }
     }
 
@@ -186,20 +193,24 @@ impl<
         return wheel_needs_flash;
     }
 
-    pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
-        let controller_needs_flash: bool = self.check_wheel_needs_flash().await;
-        defmt::debug!("Motor Controller Needs Flash - {:?}", controller_needs_flash);
-
+    pub async fn load_firmware_image(&mut self, debug_switch: bool, fw_image_bytes: &[u8]) -> Result<(), ()> {
         let res;
-        if controller_needs_flash {
-            defmt::trace!("UART config updated");
-            res = self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await;
+        if debug_switch {
+            defmt::info!("Drive Motor - Flashing firmware image in debug mode");
+            res = self.stm32_uart_interface.load_motor_firmware_image(fw_image_bytes).await;
         } else {
-            defmt::info!("Wheel image is up to date, skipping flash");
-            res = Ok(());
-        }
+            defmt::info!("Drive Motor - Will check if firmware image needs flashing");
+            let controller_needs_flash: bool = self.check_wheel_needs_flash().await;
+            defmt::debug!("Motor Controller Needs Flash - {:?}", controller_needs_flash);
 
-        // let res = self.stm32_uart_interface.load_firmware_image(fw_image_bytes).await;
+            if controller_needs_flash {
+                defmt::trace!("UART config updated");
+                res = self.stm32_uart_interface.load_motor_firmware_image(fw_image_bytes).await;
+            } else {
+                defmt::info!("Wheel image is up to date, skipping flash");
+                res = Ok(());
+            }
+        }
 
         // this is safe because load firmware image call will reset the target device
         // it will begin issueing telemetry updates
@@ -211,8 +222,13 @@ impl<
         return res;
     }
 
-    pub async fn load_default_firmware_image(&mut self) -> Result<(), ()> {
-        return self.load_firmware_image(self.firmware_image).await;
+    pub async fn load_default_firmware_image(&mut self, debug_switch: bool) -> Result<(), ()> {
+        return self.load_firmware_image(debug_switch, self.firmware_image).await;
+    }
+
+    pub async fn save_motor_current_constants(&mut self, current_constant: f32) -> Result<(), ()> {
+        defmt::debug!("Drive Motor - Saving motor current constant: {:?}", current_constant);
+        self.stm32_uart_interface.write_current_calibration_constants(current_constant).await
     }
 
     pub fn process_packets(&mut self) {
@@ -235,7 +251,7 @@ impl<
                     *state.offset(i as isize) = buf[i];
                 }
 
-
+                self.current_timestamp_ms = mrp.timestamp;
                 // TODO probably do some checksum stuff eventually
 
                 // decode union type, and reinterpret subtype
@@ -321,6 +337,8 @@ impl<
             cmd.crc32 = 0;
             cmd.data.motion.set_reset(self.reset_flagged as u32);
             cmd.data.motion.set_enable_telemetry(self.telemetry_enabled as u32);
+            cmd.data.motion.set_enable_motion(self.motion_enabled as u32);
+            cmd.data.motion.set_calibrate_current(self.calibrate_current as u32);
             cmd.data.motion.motion_control_type = self.motion_type;
             cmd.data.motion.setpoint = self.setpoint;
             //info!("setpoint: {:?}", cmd.data.motion.setpoint);
@@ -356,16 +374,24 @@ impl<
         self.telemetry_enabled = telemetry_enabled;
     }
 
+    pub fn set_motion_enabled(&mut self, enabled: bool) {
+        self.motion_enabled = enabled;
+    }
+
+    pub fn set_calibrate_current(&mut self, calibrate_current: bool) {
+        self.calibrate_current = calibrate_current;
+    }
+
+    pub fn read_current_timestamp_ms(&self) -> u32 {
+        return self.current_timestamp_ms;
+    }
+
     pub fn read_is_error(&self) -> bool {
         return self.current_state.master_error() != 0;
     }
 
     pub fn check_hall_error(&self) -> bool {
         return self.current_state.hall_power_error() != 0 || self.current_state.hall_disconnected_error() != 0 || self.current_state.hall_enc_vel_disagreement_error() != 0;
-    }
-
-    pub fn read_current(&self) -> f32 {
-        return self.current_state.current_estimate;
     }
 
     pub fn read_encoder_delta(&self) -> i32 {
@@ -384,7 +410,35 @@ impl<
         return self.current_state.vel_setpoint;
     }
 
-    pub fn read_vel_computed_setpoint(&self) -> f32 {
-        return self.current_state.vel_computed_setpoint;
+    pub fn read_vel_computed_duty(&self) -> f32 {
+        return self.current_state.vel_computed_duty;
+    }
+
+    pub fn read_current(&self) -> f32 {
+        return self.current_state.current_estimate;
+    }
+
+    pub fn read_torque_setpoint(&self) -> f32 {
+        return self.current_state.torque_setpoint;
+    }
+
+    pub fn read_torque_estimate(&self) -> f32 {
+        return self.current_state.torque_estimate;
+    }
+
+    pub fn read_torque_computed_error(&self) -> f32 {
+        return self.current_state.torque_computed_error;
+    }
+
+    pub fn read_torque_computed_nm(&self) -> f32 {
+        return self.current_state.torque_computed_nm;
+    }
+
+    pub fn read_torque_computed_duty(&self) -> f32 {
+        return self.current_state.torque_computed_duty;
+    }
+
+    pub fn read_vbus_voltage(&self) -> f32 {
+        return self.current_state.vbus_voltage;
     }
 }

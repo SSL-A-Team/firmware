@@ -126,7 +126,7 @@ impl<
     pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
         let res = self
             .stm32_uart_interface
-            .load_firmware_image(fw_image_bytes)
+            .load_motor_firmware_image(fw_image_bytes)
             .await;
 
         // this is safe because load firmware image call will reset the target device
