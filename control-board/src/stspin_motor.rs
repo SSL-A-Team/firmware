@@ -193,17 +193,23 @@ impl<
         return wheel_needs_flash;
     }
 
-    pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
-        let controller_needs_flash: bool = self.check_wheel_needs_flash().await;
-        defmt::debug!("Motor Controller Needs Flash - {:?}", controller_needs_flash);
-
+    pub async fn load_firmware_image(&mut self, debug_switch: bool, fw_image_bytes: &[u8]) -> Result<(), ()> {
         let res;
-        if controller_needs_flash {
-            defmt::trace!("UART config updated");
+        if debug_switch {
+            defmt::info!("Drive Motor - Flashing firmware image in debug mode");
             res = self.stm32_uart_interface.load_motor_firmware_image(fw_image_bytes).await;
         } else {
-            defmt::info!("Wheel image is up to date, skipping flash");
-            res = Ok(());
+            defmt::info!("Drive Motor - Will check if firmware image needs flashing");
+            let controller_needs_flash: bool = self.check_wheel_needs_flash().await;
+            defmt::debug!("Motor Controller Needs Flash - {:?}", controller_needs_flash);
+
+            if controller_needs_flash {
+                defmt::trace!("UART config updated");
+                res = self.stm32_uart_interface.load_motor_firmware_image(fw_image_bytes).await;
+            } else {
+                defmt::info!("Wheel image is up to date, skipping flash");
+                res = Ok(());
+            }
         }
 
         // this is safe because load firmware image call will reset the target device
@@ -216,8 +222,8 @@ impl<
         return res;
     }
 
-    pub async fn load_default_firmware_image(&mut self) -> Result<(), ()> {
-        return self.load_firmware_image(self.firmware_image).await;
+    pub async fn load_default_firmware_image(&mut self, debug_switch: bool) -> Result<(), ()> {
+        return self.load_firmware_image(debug_switch, self.firmware_image).await;
     }
 
     pub async fn save_motor_current_constants(&mut self, current_constant: f32) -> Result<(), ()> {

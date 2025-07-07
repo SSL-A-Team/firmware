@@ -62,6 +62,7 @@ int main() {
     uint32_t ticks_since_last_command_packet = 0;
     bool telemetry_enabled = false;
     bool motion_enabled = false;
+    bool calibrate_current = false;
 
     // Setup encoder.
     quadenc_setup();
@@ -255,6 +256,7 @@ int main() {
 
                 telemetry_enabled = motor_command_packet.data.motion.enable_telemetry;
                 motion_enabled = motor_command_packet.data.motion.enable_motion;
+                calibrate_current = motor_command_packet.data.motion.calibrate_current;
                 r_motor_board = motor_command_packet.data.motion.setpoint;
                 motion_control_type = motor_command_packet.data.motion.motion_control_type;
             } else if (motor_command_packet.type == MCP_PARAMS) {
@@ -336,7 +338,7 @@ int main() {
             // Get the current in amps from the current sense ADC.
             // Should always be positive with the current electrical architecture.
             float current_sense_I = 0.0f;
-            if (motor_command_packet.data.motion.calibrate_current) {
+            if (calibrate_current) {
                 // Just return the current with no offset applied.
                 current_sense_I = currsen_get_motor_current();
             }

@@ -158,8 +158,8 @@ impl <
                 telemetry_publisher: telemetry_publisher,
                 gyro_subscriber: gyro_subscriber,
                 accel_subscriber: accel_subscriber,
-                power_telemetry_subscriber,
-                kicker_telemetry_subscriber,
+                power_telemetry_subscriber: power_telemetry_subscriber,
+                kicker_telemetry_subscriber: kicker_telemetry_subscriber,
                 last_gyro_x_rads: 0.0,
                 last_gyro_y_rads: 0.0,
                 last_gyro_z_rads: 0.0,
@@ -344,13 +344,13 @@ impl <
             self.motor_br.set_motion_type(CONTROL_MOTION_TYPE);
             self.motor_fr.set_motion_type(CONTROL_MOTION_TYPE);
 
+            Timer::after_millis(10).await;
+
             // Need to send one motion command to get telemetry started.
             self.motor_fl.send_motion_command();
             self.motor_bl.send_motion_command();
             self.motor_br.send_motion_command();
             self.motor_fr.send_motion_command();
-
-            Timer::after_millis(10).await;
 
             let mut motor_fl_last_timestamp_ms = self.motor_fl.read_current_timestamp_ms();
             let mut motor_bl_last_timestamp_ms = self.motor_bl.read_current_timestamp_ms();
@@ -693,28 +693,28 @@ impl <
             defmt::info!("flashing firmware");
             if debug {
                 let mut had_motor_error = false;
-                if self.motor_fl.load_default_firmware_image().await.is_err() {
+                if self.motor_fl.load_default_firmware_image(debug).await.is_err() {
                     defmt::error!("failed to flash FL");
                     had_motor_error = true;
                 } else {
                     defmt::info!("FL flashed");
                 }
 
-                if self.motor_bl.load_default_firmware_image().await.is_err() {
+                if self.motor_bl.load_default_firmware_image(debug).await.is_err() {
                     defmt::error!("failed to flash BL");
                     had_motor_error = true;
                 } else {
                     defmt::info!("BL flashed");
                 }
 
-                if self.motor_br.load_default_firmware_image().await.is_err() {
+                if self.motor_br.load_default_firmware_image(debug).await.is_err() {
                     defmt::error!("failed to flash BR");
                     had_motor_error = true;
                 } else {
                     defmt::info!("BR flashed");
                 }
 
-                if self.motor_fr.load_default_firmware_image().await.is_err() {
+                if self.motor_fr.load_default_firmware_image(debug).await.is_err() {
                     defmt::error!("failed to flash FR");
                     had_motor_error = true;
                 } else {
@@ -728,10 +728,10 @@ impl <
                 }
             } else {
                 let res = embassy_futures::join::join4(
-                    self.motor_fl.load_default_firmware_image(),
-                    self.motor_bl.load_default_firmware_image(),
-                    self.motor_br.load_default_firmware_image(),
-                    self.motor_fr.load_default_firmware_image(),
+                    self.motor_fl.load_default_firmware_image(debug),
+                    self.motor_bl.load_default_firmware_image(debug),
+                    self.motor_br.load_default_firmware_image(debug),
+                    self.motor_fr.load_default_firmware_image(debug),
                 )
                 .await;
 

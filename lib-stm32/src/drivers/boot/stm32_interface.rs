@@ -189,7 +189,10 @@ impl<
                 } else {
                     defmt::debug!("bootloader replied with NACK after calibration.");
                 }
+            } else {
+                defmt::debug!("bootloader reply too short after calibration.");
             }
+            res
         })).await;
 
         if sync_res.is_err() {
@@ -446,10 +449,15 @@ impl<
     // Based on 3.8 of AN3155
     // Have to use extended erase command since the normal erase command
     // doesn't seem to work?
-    // Designed to erase a single page of device memory.
-    pub async fn erase_device_memory_single(&self, erase_page: u8) -> Result<(), ()> {
+    // Designed to erase a up to N + 1 page of device memory.
+    pub async fn erase_device_memory_to_page(&self, start_page: u8, end_page: u8) -> Result<(), ()> {
         if !self.in_bootloader {
             defmt::error!("Called bootloader operation when not in bootloader context.");
+            return Err(());
+        }
+
+        if end_page < start_page {
+            defmt::error!("End page must be greater than or equal to start page.");
             return Err(());
         }
 
@@ -471,6 +479,8 @@ impl<
                 } else {
                     defmt::error!("Bootloader replied to erase command with NACK");
                 }
+            } else {
+                defmt::error!("Erase command reply too short.");
             }
         }).await?;
 
@@ -481,16 +491,27 @@ impl<
         // defmt::debug!("sending the page number...");
         self.writer
         .write(|buf| {
-            // Quantity is N + 1, so 0x0000 for single page erase, MSB
+            // Quantity is N + 1 lead with MSB. Limited to 32 pages on STM32F1.
+            let erase_page_quantity = end_page - start_page;
             buf[0] = 0x00;
-            buf[1] = 0x00;
-            // Page number is the page to erase, but never greater than a byte, MSB
-            buf[2] = 0x00;
-            buf[3] = erase_page;
+            buf[1] = erase_page_quantity;
+            // Need to send the page number for each page to erase in two bytes, MSB first
+            let mut checksum = erase_page_quantity;
+            // Track the index for use in returning the buffer length
+            let mut buf_indx: usize = 2;
+            for i in start_page ..= end_page {
+                // Won't erase more than 256 pages, so always lead with 0x00
+                buf[buf_indx] = 0x00;
+                buf[buf_indx + 1] = i;
+                buf_indx += 2;
+                // Checksum is XOR of all previous bytes. Ignore 0x00 so just LSB
+                checksum ^= i;
+            }
             // Checksum for all previous bytes is just the erase page number
-            buf[4] = erase_page;
+            buf[buf_indx] = checksum;
             // defmt::debug!("send buffer {:?}", buf);
-            5
+            // Final size is buf_indx + 1 from checksum byte
+            buf_indx + 1
         })
         .await?;
 
@@ -508,6 +529,11 @@ impl<
         }).await?;
 
         res
+    }
+
+    // Single page of device memory is just a page to the same page.
+    pub async fn erase_device_memory_single(&self, erase_page: u8) -> Result<(), ()> {
+        self.erase_device_memory_to_page(erase_page, erase_page).await
     }
 
     async fn write_device_memory_chunk(&self, data: &[u8], write_base_addr: u32) -> Result<(), ()> {
@@ -611,7 +637,7 @@ impl<
             return Err(());
         }
 
-        // ensure step size is below bootlaoder supported, below transmit buffer size (incl len and cs bytes),
+        // ensure step size is below bootloader supported, below transmit buffer size (incl len and cs bytes),
         // and is 4-byte aligned
         let step_size = min(256, LEN_TX - 2) & 0xFFFF_FFF8;
         defmt::debug!("bootloader will use data chunk sizes of {:?}", step_size);
@@ -684,23 +710,6 @@ impl<
                 }
             }
         }).await?;
-
-        Ok(())
-    }
-
-    pub async fn erase_flash_memory_to_page(&self, last_erase_page: u8) -> Result<(), ()> {
-        if !self.in_bootloader {
-            defmt::error!("called bootloader operation when not in bootloader context.");
-            return Err(());
-        }
-
-        // Go through all pages up to the last erase page (exclusive)
-        for page in 0..last_erase_page {
-            if let Err(err) = self.erase_device_memory_single(page).await {
-                defmt::error!("failed to erase page {}: {:?}", page, err);
-                return Err(());
-            }
-        }
 
         Ok(())
     }
@@ -781,7 +790,12 @@ impl<
         };
 
         // Erase up to Page 31 since the last page is used for current calibration constants.
-        if let Err(err) = self.erase_flash_memory_to_page(MOTOR_CURRENT_PAGE).await {
+        if let Err(err) = self.erase_device_memory_to_page(0, 15).await {
+            return Err(err);
+        }
+
+        // Split up to 2 commands to reduce UART packet size.
+        if let Err(err) = self.erase_device_memory_to_page(16, MOTOR_CURRENT_PAGE).await {
             return Err(err);
         }
 
@@ -790,7 +804,7 @@ impl<
             return Err(err);
         }
 
-        self.reset_into_program(false).await;
+        self.reset_into_program(true).await;
 
         Ok(())
     }
@@ -809,8 +823,8 @@ impl<
         match self.get_device_id().await {
             Err(err) => return Err(err),
             Ok(device_id) => match device_id {
-                19 => {
-                    defmt::trace!("found stm32f40xxx device");
+                68 => {
+                    defmt::trace!("found STSPINF0 device");
                 }
                 _ => {
                     defmt::error!("Invalid device id for current calibration constants {}", device_id);
