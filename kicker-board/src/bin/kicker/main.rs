@@ -134,7 +134,7 @@ async fn high_pri_kick_task(
         let vrefint_sample = adc.blocking_read(&mut vrefint);
 
         let rail_voltage_cur = adc_200v_to_rail_voltage(adc_raw_to_v(adc.blocking_read(&mut rail_pin) as f32, vrefint_sample as f32));
-        
+
         // Add new battery read to cyclical buffer.
         rail_voltage_buffer[rail_voltage_filt_indx] = rail_voltage_cur;
 
@@ -148,7 +148,7 @@ async fn high_pri_kick_task(
         let rail_voltage_sum: f32 = rail_voltage_buffer.iter().sum();
         // Calculate battery average
         let rail_voltage_ave = rail_voltage_sum / (RAIL_BUFFER_SIZE as f32);
-        
+
         // let battery_voltage =
         //     adc_v_to_battery_voltage(adc_raw_to_v(adc.read(&mut battery_voltage_pin) as f32, vrefint_sample as f32));
         // optionally pre-flag errors?
@@ -258,7 +258,7 @@ async fn high_pri_kick_task(
         } else if shutdown_requested {
             if ball_detected {
                 // If shutdown requested, person could be picking up the robot.
-                // Don't want to kick if ball detected since it might 
+                // Don't want to kick if ball detected since it might
                 // be someone's finger.
                 KickType::None
             } else {
@@ -323,7 +323,7 @@ async fn high_pri_kick_task(
                     false => KickRequest::KR_DISABLE,
                 }
             }
-            
+
             kick_manager
                 .command(
                     battery_voltage,
@@ -359,7 +359,7 @@ async fn high_pri_kick_task(
                     (rail_voltage_ave > CHARGED_THRESH_VOLTAGE) as u16,
                     Default::default()
                 );
-            
+
                 let charge_pct = rail_voltage_ave / CHARGE_TARGET_VOLTAGE;
                 kicker_telemetry_packet.charge_pct = (charge_pct * 100.0) as u16;
                 kicker_telemetry_packet.rail_voltage = rail_voltage_ave;
@@ -510,7 +510,7 @@ async fn main(spawner: Spawner) -> ! {
     // spawn the task at the highest prio
     unwrap!(hp_spawner.spawn(high_pri_kick_task(
         COMS_IDLE_BUFFERED_UART.get_uart_read_queue(), COMS_IDLE_BUFFERED_UART.get_uart_write_queue(),
-        adc, 
+        adc,
         p.PB15, p.PD9, p.PD8,
         p.PC2, p.PC0,
         p.PC3,
@@ -561,7 +561,7 @@ async fn main(spawner: Spawner) -> ! {
 
     let drib_motor_interface = Stm32Interface::new_from_pins(
         &DRIB_IDLE_BUFFERED_UART,
-        DRIB_IDLE_BUFFERED_UART.get_uart_read_queue(), DRIB_IDLE_BUFFERED_UART.get_uart_write_queue(), 
+        DRIB_IDLE_BUFFERED_UART.get_uart_read_queue(), DRIB_IDLE_BUFFERED_UART.get_uart_write_queue(),
         p.PE13, p.PE14,
         Pull::None, true);
 

@@ -86,7 +86,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     ///////////////////
     //  start tasks  //
     ///////////////////
-    
+
     defmt::info!("starting tasks");
 
     create_io_task!(main_spawner,
@@ -118,7 +118,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                                 defmt::info!("got command packet");
 
                                 let basic_telem = Default::default();
-                            
+
                                 let pkt_wrapped = TelemetryPacket::Basic(basic_telem);
                                 control_telemetry_publisher.publish(pkt_wrapped).await;
 

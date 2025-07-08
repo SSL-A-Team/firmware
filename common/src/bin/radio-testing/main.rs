@@ -77,7 +77,7 @@ fn main() -> std::io::Result<()> {
                 vel_z_angular: 0.,
                 kick_vel: 0.,
                 dribbler_speed: 0.,
-                kick_request: KickRequest::KR_ARM,
+                kick_request: KickRequest::KR_ARM
             },
         },
     };
