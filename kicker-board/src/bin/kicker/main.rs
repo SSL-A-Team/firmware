@@ -121,6 +121,7 @@ async fn high_pri_kick_task(
     // loop rate control
     let mut ticker = Ticker::every(Duration::from_millis(1));
     let mut last_packet_sent_time = Instant::now();
+    let mut last_packet_received_time = Instant::now();
 
     breakbeam.enable_tx();
 
@@ -171,6 +172,8 @@ async fn high_pri_kick_task(
             }
 
             drib_vel_pub.publish_immediate(kicker_control_packet.drib_speed);
+
+            last_packet_received_time = Instant::now();
         }
 
         // get latest dribbler telem from lower prio task
@@ -179,6 +182,14 @@ async fn high_pri_kick_task(
         }
 
         let ball_detected = breakbeam.read();
+
+        // we've missed 20 packet frames from control
+        if Instant::now() - last_packet_received_time > Duration::from_millis(200) {
+            defmt::warn!("the kicker board is not receiving commands from the control board and dearm itself");
+            kicker_control_packet.drib_speed = 0.0;
+            kicker_control_packet.kick_speed = 0.0;
+            kicker_control_packet.kick_request = KickRequest::KR_DISABLE;
+        }
 
         ///////////////////////////////////////////////
         //  manage repetitive kick commands + state  //

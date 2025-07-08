@@ -1,4 +1,4 @@
-use ateam_common_packets::radio::DataPacket;
+use ateam_common_packets::{bindings::KickRequest, radio::DataPacket};
 use ateam_lib_stm32::{drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::{gpio::Pin, usart::Uart};
@@ -51,6 +51,7 @@ pub struct KickerTask<'a,
     kicker_task_state: KickerTaskState,
     robot_state: &'static SharedRobotState,
     commands_subscriber: CommandsSubscriber,
+    last_command_received_time: Instant,
     kicker_telemetry_publisher: KickerTelemetryPublisher,
 }
 
@@ -68,6 +69,7 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
             kicker_task_state: KickerTaskState::PoweredOff,
             robot_state: robot_state,
             commands_subscriber: command_subscriber,
+            last_command_received_time: Instant::now(),
             kicker_telemetry_publisher,
         }
     }
@@ -166,6 +168,16 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
                 },
             }
 
+            // kicker and radio loop rates are both 100Hz, so 10ms packet interval
+            // if we miss 10 in a row, something has gone quite wrong
+            // override commands to safe ones
+            if Instant::now() - self.last_command_received_time > Duration::from_millis(100) {
+                defmt::error!("kicker task has stopped receiving commands from the radio task and will de-arm the kicker board");
+                self.kicker_driver.set_kick_strength(0.0);
+                self.kicker_driver.request_kick(KickRequest::KR_DISABLE);
+                self.kicker_driver.set_drib_vel(0.0);
+            }
+
             // if we are in any substate of connected, then send
             // commands to the kicker
             if self.kicker_task_state >= KickerTaskState::Connected {
@@ -198,6 +210,8 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
                 WaitResult::Message(cmd) => {
                     match cmd {
                         DataPacket::BasicControl(bc_pkt) => {
+                            self.last_command_received_time = Instant::now();
+
                             self.kicker_driver.set_kick_strength(bc_pkt.kick_vel);
                             self.kicker_driver.request_kick(bc_pkt.kick_request);
                             self.kicker_driver.set_drib_vel(bc_pkt.dribbler_speed);
