@@ -157,18 +157,21 @@ impl<
             // defmt::trace!("Wheel Interface - Sending parameter command packet");
             self.send_params_command();
 
-            Timer::after(Duration::from_millis(10)).await;
+            Timer::after(Duration::from_millis(5)).await;
 
             // defmt::debug!("Wheel Interface - Checking for parameter response");
             // Parse incoming packets
             self.process_packets();
-            // Check if curret_params_state has updated
+            // Check if curret_params_state has updated, assuming that the
+            // params state firmware_img_hash field is initialized as 0's
             if self.current_params_state.firmware_img_hash != [0; 4] {
                 let current_img_hash = self.current_params_state.firmware_img_hash;
                 defmt::debug!("Wheel Interface - Received parameter response");
                 defmt::trace!("Wheel Interface - Current device image hash {:x}", current_img_hash);
                 return current_img_hash
             };
+
+            Timer::after(Duration::from_millis(5)).await;
         }
     }
 
@@ -198,6 +201,10 @@ impl<
                 res = Err(());
             },
         }
+        // Make sure that the uart queue is empty of any possible parameter
+        // response packets, which may cause side effects for the flashing
+        // process
+        self.process_packets();
         return res;
     }
 

@@ -188,6 +188,9 @@ impl<
             defmt::trace!("Kicker Interface - Enabling kicker telemetry");
             self.set_telemetry_enabled(true);
             self.send_command();
+
+            Timer::after(Duration::from_millis(5)).await;
+
             // Parse incoming packets
             let received_telemetry = self.process_telemetry();
             if received_telemetry {
@@ -196,7 +199,8 @@ impl<
                 defmt::trace!("Kicker Interface - Current device image hash {:x}", current_img_hash);
                 return current_img_hash
             };
-            Timer::after(Duration::from_millis(10)).await;
+
+            Timer::after(Duration::from_millis(5)).await;
         }
     }
 
@@ -226,6 +230,10 @@ impl<
                 res = Err(());
             },
         }
+        // Make sure that the uart queue is empty of any possible parameter
+        // response packets, which may cause side effects for the flashing
+        // process
+        self.process_telemetry();
         return res;
     }
 
