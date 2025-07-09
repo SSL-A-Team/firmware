@@ -148,7 +148,6 @@ impl <
         }
 
         fn send_motor_commands_and_telemetry(&mut self,
-                                            seq_number: u16,
                                             robot_controller: &mut BodyVelocityController,
                                             cur_state: RobotState)
         {
@@ -172,7 +171,7 @@ impl <
             let dribbler_motor_hall_error = self.last_kicker_telemetry.dribbler_motor.hall_disconnected_error() as u32;
 
             let basic_telem = TelemetryPacket::Basic(BasicTelemetry {
-                sequence_number: seq_number,
+                sequence_number: 0,
                 robot_revision_major: ROBOT_VERSION_MAJOR,
                 robot_revision_minor: ROBOT_VERSION_MINOR,
                 _bitfield_align_1: Default::default(),
@@ -263,7 +262,6 @@ impl <
             let robot_model = self.get_robot_model();
             let mut robot_controller = BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
 
-            let mut seq_number = 0;
             let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));
 
             let mut cmd_vel = Vector3::new(0.0, 0.0, 0.0);
@@ -388,12 +386,7 @@ impl <
                 //  send commands and telemetry  //
                 ///////////////////////////////////
 
-                self.send_motor_commands_and_telemetry(seq_number,
-                    &mut robot_controller, cur_state);
-
-                // increment seq number
-                seq_number += 1;
-                seq_number &= 0xFFF;
+                self.send_motor_commands_and_telemetry(&mut robot_controller, cur_state);
 
                 loop_rate_ticker.next().await;
             }
