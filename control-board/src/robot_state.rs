@@ -22,6 +22,7 @@ pub struct SharedRobotState {
     last_packet_receive_time_ticks_ms: AtomicU32,
     radio_network_ok: AtomicBool,
     radio_bridge_ok: AtomicBool,
+    radio_send_extended_telem: AtomicBool,
 
 
     battery_low: AtomicBool,
@@ -52,7 +53,8 @@ impl SharedRobotState {
             dribbler_inop: AtomicBool::new(true),
             last_packet_receive_time_ticks_ms: AtomicU32::new(0),
             radio_network_ok: AtomicBool::new(false), 
-            radio_bridge_ok: AtomicBool::new(false), 
+            radio_bridge_ok: AtomicBool::new(false),
+            radio_send_extended_telem: AtomicBool::new(false),
             battery_low: AtomicBool::new(false),
             battery_crit: AtomicBool::new(false),
             robot_tipped: AtomicBool::new(false),
@@ -81,6 +83,7 @@ impl SharedRobotState {
             last_packet_receive_time_ticks_ms: 0,
             radio_network_ok: self.get_radio_network_ok(),
             radio_bridge_ok: self.get_radio_bridge_ok(),
+            radio_send_extended_telem: self.get_radio_send_extended_telem(),
 
             battery_low: self.get_battery_low(),
             battery_crit: self.get_battery_crit(),
@@ -237,6 +240,14 @@ impl SharedRobotState {
         self.radio_bridge_ok.store(bridge_ok, Ordering::Relaxed);
     }
 
+    pub fn get_radio_send_extended_telem(&self) -> bool {
+        self.radio_send_extended_telem.load(Ordering::SeqCst)
+    }
+
+    pub fn set_radio_send_extended_telem(&self, send_extended_telem: bool) {
+        self.radio_send_extended_telem.store(send_extended_telem, Ordering::SeqCst);
+    }
+
     pub fn ball_detected(&self) -> bool {
         self.ball_detected.load(Ordering::Relaxed)
     }
@@ -274,6 +285,7 @@ pub struct RobotState {
     pub last_packet_receive_time_ticks_ms: u32,
     pub radio_network_ok: bool,
     pub radio_bridge_ok: bool,
+    pub radio_send_extended_telem: bool,
 
     pub battery_low: bool,
     pub battery_crit: bool,

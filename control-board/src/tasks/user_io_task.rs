@@ -80,8 +80,12 @@ async fn user_io_task_entry(
         // read switches
         let robot_network_index = dip_switch.read_block(7..4);
         let robot_radio_driver_use_flow_control = dip_switch.read_pin(3);
+        let send_extended_telem = dip_switch.read_pin(0);
+
         let hw_debug_mode = debug_mode_dip_switch.read_pin(0);
+        
         let robot_team_isblue = robot_color_dip_switch.read_pin(1);
+        
         let robot_id = robot_id_rotary.read_value();
 
         if hw_debug_mode != cur_robot_state.hw_debug_mode {
@@ -110,6 +114,11 @@ async fn user_io_task_entry(
         if robot_network_index != cur_robot_state.hw_wifi_network_index as u8 {
             robot_state.set_hw_network_index(robot_network_index);
             defmt::info!("updated robot network index {} -> {}", cur_robot_state.hw_wifi_network_index, robot_network_index);
+        }
+
+        if send_extended_telem != cur_robot_state.radio_send_extended_telem {
+            robot_state.set_radio_send_extended_telem(send_extended_telem);
+            defmt::info!("updated robot send extended telem {} -> {}", cur_robot_state.radio_send_extended_telem, send_extended_telem);
         }
     
         ///////////////////////
@@ -155,8 +164,12 @@ async fn user_io_task_entry(
             debug_led0.set_high();
         }
 
-        debug_led1.set_low();
-        
+        if send_extended_telem {
+            debug_led1.set_high();
+        } else {
+            debug_led1.set_low();
+        }
+
         if robot_radio_driver_use_flow_control {
             debug_led2.set_high();
         } else {

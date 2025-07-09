@@ -375,8 +375,10 @@ impl<
                         self.last_basic_telemetry = basic;
                     },
                     TelemetryPacket::Extended(control) => {
-                        if self.radio.send_control_debug_telemetry(control).await.is_err() {
-                            defmt::warn!("RadioTask - failed to send control debug telemetry packet");
+                        if self.shared_robot_state.get_radio_send_extended_telem() {
+                            if self.radio.send_control_debug_telemetry(control).await.is_err() {
+                                defmt::warn!("RadioTask - failed to send control debug telemetry packet");
+                            }
                         }
                     },
                     TelemetryPacket::ParameterCommandResponse(pc_resp) => {
