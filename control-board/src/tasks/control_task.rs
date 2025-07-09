@@ -2,7 +2,7 @@ use ateam_common_packets::{bindings::{BasicControl, BasicTelemetry, KickerTeleme
 use ateam_lib_stm32::{drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::Uart;
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Duration, Instant, Ticker, Timer};
 use nalgebra::{Vector3, Vector4};
 
 use crate::{include_external_cpp_bin, motion::{self, params::robot_physical_params::{
@@ -269,7 +269,15 @@ impl <
             let mut cmd_vel = Vector3::new(0.0, 0.0, 0.0);
             let mut ticks_since_control_packet = 0;
 
+            let mut last_loop_term_time = Instant::now();
+
             loop {
+                let loop_start_time = Instant::now();
+                let loop_invocation_dead_time = loop_start_time - last_loop_term_time;
+                if loop_start_time - last_loop_term_time > Duration::from_millis(11) {
+                    defmt::warn!("control loop scheuling lagged. Expected ~10ms between loop invocations, but got {:?}us", loop_invocation_dead_time.as_micros());
+                }
+
                 self.motor_fl.process_packets();
                 self.motor_bl.process_packets();
                 self.motor_br.process_packets();
@@ -394,6 +402,14 @@ impl <
                 // increment seq number
                 seq_number += 1;
                 seq_number &= 0xFFF;
+
+                let loop_end_time = Instant::now();
+                let loop_execution_time = loop_end_time - loop_start_time;
+                if loop_execution_time > Duration::from_millis(2) {
+                    defmt::warn!("control loop is taking >2ms to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {:?}", loop_execution_time);
+                }
+
+                last_loop_term_time = Instant::now();
 
                 loop_rate_ticker.next().await;
             }

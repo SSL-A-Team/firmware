@@ -121,6 +121,7 @@ impl<
         defmt::info!("radio task startup");
 
         let mut radio_loop_rate_ticker = Ticker::every(Duration::from_millis(RADIO_LOOP_RATE_MS));
+        let mut last_loop_term_time = Instant::now();
 
         // initialize a copy of the robot state so we can track updates
         let mut last_robot_state = self.shared_robot_state.get_state();
@@ -129,6 +130,12 @@ impl<
         #[allow(unused_assignments)]
         // let mut next_connection_state = self.connection_state;
         loop {
+            let loop_start_time = Instant::now();
+            let loop_invocation_dead_time = loop_start_time - last_loop_term_time;
+            if loop_start_time - last_loop_term_time > Duration::from_millis(11) {
+                defmt::warn!("radio loop scheuling lagged. Expected ~10ms between loop invocations, but got {:?}us", loop_invocation_dead_time.as_micros());
+            }
+
             // Keep a local flag of radio issues.
             let mut radio_inop_flag_local = false;
             let mut radio_network_fail_local = false;
@@ -268,6 +275,14 @@ impl<
 
             last_robot_state = cur_robot_state;
 
+            let loop_end_time = Instant::now();
+            let loop_execution_time = loop_end_time - loop_start_time;
+            if loop_execution_time > Duration::from_millis(2) {
+                defmt::warn!("radio loop is taking >2ms to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {:?}", loop_execution_time);
+            }
+
+            last_loop_term_time = Instant::now();
+
             radio_loop_rate_ticker.next().await;
         }
 
@@ -350,8 +365,6 @@ impl<
     }
 
     async fn process_packets(&mut self) -> Result<(), ()> {
-        // defmt::info!("processing packets: {:?}", Instant::now());
-
         // read any packets
         loop {
             if let Ok(pkt) = self.radio.read_packet_nonblocking() {
@@ -376,6 +389,7 @@ impl<
                     },
                     TelemetryPacket::Extended(control) => {
                         if self.shared_robot_state.get_radio_send_extended_telem() {
+                            defmt::info!("RadioTask - sending extended telemetry");
                             if self.radio.send_control_debug_telemetry(control).await.is_err() {
                                 defmt::warn!("RadioTask - failed to send control debug telemetry packet");
                             }
@@ -393,6 +407,7 @@ impl<
         }
 
         // always send the latest telemetry
+        defmt::info!("RadioTask - sending basic telemetry");
         if let Err(e) = self.radio.send_telemetry(self.last_basic_telemetry) {
             defmt::warn!("RadioTask - failed to send basic telem packet {:?}", e);
         }
