@@ -51,7 +51,7 @@ pub struct KickerTask<'a,
     kicker_task_state: KickerTaskState,
     robot_state: &'static SharedRobotState,
     commands_subscriber: CommandsSubscriber,
-    last_command_received_time: Instant,
+    last_command_received_time: Option<Instant>,
     kicker_telemetry_publisher: KickerTelemetryPublisher,
 }
 
@@ -69,7 +69,7 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
             kicker_task_state: KickerTaskState::PoweredOff,
             robot_state: robot_state,
             commands_subscriber: command_subscriber,
-            last_command_received_time: Instant::now(),
+            last_command_received_time: None,
             kicker_telemetry_publisher,
         }
     }
@@ -171,7 +171,8 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
             // kicker and radio loop rates are both 100Hz, so 10ms packet interval
             // if we miss 10 in a row, something has gone quite wrong
             // override commands to safe ones
-            if Instant::now() - self.last_command_received_time > Duration::from_millis(100) {
+            if Instant::now() - self.last_command_received_time.unwrap_or(Instant::now()) > Duration::from_millis(500) {
+                // Avoid spamming logs while the system starts up
                 defmt::error!("kicker task has stopped receiving commands from the radio task and will de-arm the kicker board");
                 self.kicker_driver.set_kick_strength(0.0);
                 self.kicker_driver.request_kick(KickRequest::KR_DISABLE);
@@ -210,7 +211,7 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
                 WaitResult::Message(cmd) => {
                     match cmd {
                         DataPacket::BasicControl(bc_pkt) => {
-                            self.last_command_received_time = Instant::now();
+                            self.last_command_received_time = Some(Instant::now());
 
                             self.kicker_driver.set_kick_strength(bc_pkt.kick_vel);
                             self.kicker_driver.request_kick(bc_pkt.kick_request);
