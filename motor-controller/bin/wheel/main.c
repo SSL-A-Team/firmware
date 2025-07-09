@@ -195,10 +195,12 @@ int main() {
     turn_off_red_led();
     turn_off_yellow_led();
 
+    #ifdef UART_ENABLED
     // Initialize UART and logging status.
     uart_initialize();
     uart_logging_status_rx_t uart_logging_status_receive;
     uart_logging_status_tx_t uart_logging_status_send;
+    #endif
 
     // toggle J1-1
     while (true) {
