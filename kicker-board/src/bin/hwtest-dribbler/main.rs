@@ -66,7 +66,7 @@ async fn main(_spawner: Spawner) -> ! {
 
     defmt::info!("programming firmware image");
 
-    let res = drib_motor.load_firmware_image(WHEEL_FW_IMG).await;
+    let res = drib_motor.load_firmware_image(WHEEL_FW_IMG, false).await;
     if res.is_err() {
         defmt::error!("failed to load dribbler firmware");
     } else {

@@ -1,9 +1,11 @@
 use core::mem::MaybeUninit;
 
-use ateam_common_packets::bindings::{MotionCommandType::{self, OPEN_LOOP}, MotorCommandPacket, MotorCommandType::MCP_MOTION, MotorResponse, MotorResponseType::{MRP_MOTION, MRP_PARAMS}, MotorTelemetry, ParameterMotorResponse};
+use ateam_common_packets::bindings::{MotionCommandType::{self, OPEN_LOOP}, MotorCommandPacket, MotorCommandType::{MCP_MOTION, MCP_PARAMS}, MotorResponse, MotorResponseType::{MRP_MOTION, MRP_PARAMS}, MotorTelemetry, ParameterMotorResponse};
 use ateam_lib_stm32::{drivers::boot::stm32_interface::Stm32Interface, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use embassy_stm32::{gpio::{Pin, Pull}, usart::Parity};
-use embassy_time::{Duration, Timer};
+use embassy_time::{with_timeout, Duration, Timer};
+
+use crate::image_hash;
 
 pub mod breakbeam;
 
@@ -123,27 +125,106 @@ impl<
         self.stm32_uart_interface.leave_reset().await;
     }
 
-    pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
-        let res = self
-            .stm32_uart_interface
-            .load_firmware_image(fw_image_bytes)
-            .await;
+    pub fn get_latest_default_img_hash(&mut self) -> [u8; 16] {
+        image_hash::get_dribbler_img_hash()
+    }
 
-        // this is safe because load firmware image call will reset the target device
-        // it will begin issueing telemetry updates
-        // these are the only packets it sends so any blocked process should get the data it now needs
-        defmt::debug!("Dribbler - Update config");
+    /// Get the first 4 bytes of the currently loaded image hash on the device, Run with timeout!
+    pub async fn get_current_device_img_hash(&mut self) -> [u8; 4] {
+        loop {
+            // defmt::trace!("Dribbler Interface - Sending parameter command packet");
+            self.send_params_command();
+
+            Timer::after(Duration::from_millis(5)).await;
+
+            // defmt::debug!("Dribbler Interface - Checking for parameter response");
+            // Parse incoming packets
+            self.process_packets();
+            // Check if curret_params_state has updated, assuming that the
+            // params state firmware_img_hash field is initialized as 0's
+            if self.current_params_state.firmware_img_hash != [0; 4] {
+                let current_img_hash = self.current_params_state.firmware_img_hash;
+                defmt::debug!("Dribbler Interface - Received parameter response");
+                defmt::trace!("Dribbler Interface - Current device image hash {:x}", current_img_hash);
+                return current_img_hash
+            };
+
+            Timer::after(Duration::from_millis(5)).await;
+        }
+    }
+
+    pub async fn check_device_has_latest_default_image(&mut self) -> Result<bool, ()> {
+        let latest_img_hash = self.get_latest_default_img_hash();
+        defmt::debug!("Dribbler Interface - Latest default image hash - {:x}", latest_img_hash);
+
+        defmt::trace!("Dribbler Interface - Update UART config 2 MHz");
         self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
+        Timer::after(Duration::from_millis(1)).await;
+
+        let res;
+        let timeout = Duration::from_millis(100);
+        defmt::trace!("Dribbler Interface - Waiting for device response");
+        match with_timeout(timeout, self.get_current_device_img_hash()).await {
+            Ok(current_img_hash) => {
+                if current_img_hash == latest_img_hash[..4] {
+                    defmt::trace!("Dribbler Interface - Device has the latest default image");
+                    res = Ok(true);
+                } else {
+                    defmt::trace!("Dribbler Interface - Device does not have the latest default image");
+                    res = Ok(false);
+                }
+            },
+            Err(_) => {
+                defmt::debug!("Dribbler Interface - No device response, image hash unknown");
+                res = Err(());
+            },
+        }
+        // Make sure that the uart queue is empty of any possible parameter
+        // response packets, which may cause side effects for the flashing
+        // process
+        self.process_packets();
+        return res;
+    }
+
+    pub async fn init_firmware_image(&mut self, flash: bool, fw_image_bytes: &[u8]) -> Result<(), ()> {
+        if flash {
+            defmt::info!("Dribbler Interface - Flashing firmware image");
+            self.stm32_uart_interface.load_firmware_image(fw_image_bytes, true).await?;
+        } else {
+            defmt::info!("Dribbler Interface - Skipping firmware flash");
+        }
+
+        self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
+
         Timer::after(Duration::from_millis(1)).await;
 
         // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
         self.stm32_uart_interface.leave_reset().await;
 
-        res
+        return Ok(());
     }
 
-    pub async fn load_default_firmware_image(&mut self) -> Result<(), ()> {
-        return self.load_firmware_image(self.firmware_image).await;
+    pub async fn init_default_firmware_image(&mut self, force_flash: bool) -> Result<(), ()> {
+        let flash;
+        if force_flash {
+            defmt::info!("Dribbler Interface - Force flash enabled");
+            flash = true
+        } else {
+            let res = self.check_device_has_latest_default_image().await;
+            match res {
+                Ok(has_latest) => {
+                    if has_latest {
+                        flash = false;
+                    } else {
+                        flash = true;
+                    }
+                },
+                Err(_) => {
+                    flash = true;
+                }
+            }
+        }
+        return self.init_firmware_image(flash, self.firmware_image).await;
     }
 
     pub fn process_packets(&mut self) {
@@ -226,6 +307,27 @@ impl<
         }
         if self.current_state.reset_pin() != 0 {
             defmt::warn!("Dribbler {} Reset: Pin", motor_id);
+        }
+    }
+
+    pub fn send_params_command(&mut self) {
+        unsafe {
+            let mut cmd: MotorCommandPacket = { MaybeUninit::zeroed().assume_init() };
+
+            cmd.type_ = MCP_PARAMS;
+            cmd.crc32 = 0;
+
+            // TODO figure out what to set here
+            // Update a param like this
+            // cmd.data.params.set_update_timestamp(1);
+            // cmd.data.params.timestamp = 0x0;
+
+            let struct_bytes = core::slice::from_raw_parts(
+                (&cmd as *const MotorCommandPacket) as *const u8,
+                core::mem::size_of::<MotorCommandPacket>(),
+            );
+
+            self.stm32_uart_interface.send_or_discard_data(struct_bytes);
         }
     }
 

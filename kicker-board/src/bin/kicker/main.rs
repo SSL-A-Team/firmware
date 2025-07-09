@@ -27,6 +27,8 @@ use ateam_kicker_board::{
 
 use ateam_lib_stm32::{drivers::boot::stm32_interface::{get_bootloader_uart_config, Stm32Interface}, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl, uart::queue::{UartReadQueue, UartWriteQueue}};
 
+use ateam_kicker_board::image_hash::get_kicker_img_hash;
+
 use ateam_common_packets::bindings::{
     KickRequest::{self, KR_ARM, KR_DISABLE},
     KickerControl, KickerTelemetry, MotorTelemetry,
@@ -88,6 +90,9 @@ async fn high_pri_kick_task(
     let kick_pin = Output::new(kick_pin, Level::Low, Speed::Medium);
     let chip_pin = Output::new(chip_pin, Level::Low, Speed::Medium);
     let mut kick_manager = KickManager::new(charge_pin, kick_pin, chip_pin);
+
+    // image hash
+    let kicker_img_hash_kicker = get_kicker_img_hash();
 
     // debug LEDs
     let mut status_led = Output::new(grn_led_pin, Level::Low, Speed::Low);
@@ -372,6 +377,7 @@ async fn high_pri_kick_task(
                 kicker_telemetry_packet.battery_voltage = battery_voltage;
 
                 kicker_telemetry_packet.dribbler_motor = dribbler_motor_telemetry;
+                kicker_telemetry_packet.kicker_image_hash.copy_from_slice(&kicker_img_hash_kicker[0..4]);
 
                 // raw interpretaion of a struct for wire transmission is unsafe
                 unsafe {
@@ -417,7 +423,8 @@ async fn low_pri_dribble_task(
     let mut drib_motor = DribblerMotor::new(drib_motor_interface, DRIB_FW_IMG, 1.0);
 
     defmt::info!("flashing dribbler motor firmware...");
-    let res = drib_motor.load_default_firmware_image().await;
+    let force_flash = false;
+    let res = drib_motor.init_default_firmware_image(force_flash).await;
     if res.is_err() {
         defmt::error!("failed to load dribbler firmware");
     } else {
