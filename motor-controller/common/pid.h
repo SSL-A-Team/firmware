@@ -39,6 +39,7 @@ typedef struct GainScheduledPid {
     PidConstants_t *pid_constants;
     float *gain_schedule;
     size_t cur_gain_stage_ind;
+    PidConstants_t cur_pid_constants;
     bool gain_schedule_abs;
     float hyst;
 
