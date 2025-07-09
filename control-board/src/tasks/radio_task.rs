@@ -395,12 +395,12 @@ impl<
         }
 
         // always send the latest telemetry
-        self.last_basic_telemetry.sequence_number = self.seq_number;
+        self.last_basic_telemetry.transmission_sequence_number = self.seq_number as u8;
         if let Err(e) = self.radio.send_telemetry(self.last_basic_telemetry) {
             defmt::warn!("RadioTask - failed to send basic telem packet {:?}", e);
         }
 
-        self.seq_number = (self.seq_number + 1) & 0x0FFF;
+        self.seq_number = (self.seq_number + 1) & 0x00FF;
 
         return Ok(())
     }
