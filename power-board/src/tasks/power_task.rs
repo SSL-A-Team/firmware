@@ -240,7 +240,8 @@ async fn power_task_entry(
             }
 
             if cur_power_state.balance_connected && lipo6s_battery_model.battery_power_off() {
-                shared_power_state.set_shutdown_requested(true).await;
+                defmt::warn!("battery balance health thinks robot should shutdown but feature is disabled.");
+                // shared_power_state.set_shutdown_requested(true).await;
                 high_current_ops_allowed = false;
             }
 
