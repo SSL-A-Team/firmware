@@ -13,6 +13,9 @@ pub mod image_hash;
 // pub mod queue;
 // pub mod uart_queue;
 
+pub const DEBUG_COMS_UART_QUEUES: bool = false;
+pub const DEBUG_DRIB_UART_QUEUES: bool = false;
+
 #[macro_export]
 macro_rules! include_external_cpp_bin {
     ($var_name:ident, $bin_file:literal) => {

@@ -5,7 +5,7 @@ use embassy_stm32::{gpio::Pin, usart::Uart};
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Ticker, Instant};
 
-use crate::{drivers::kicker::Kicker, include_kicker_bin, pins::*, robot_state::SharedRobotState, SystemIrqs};
+use crate::{drivers::kicker::Kicker, include_kicker_bin, pins::*, robot_state::SharedRobotState, SystemIrqs, DEBUG_KICKER_UART_QUEUES};
 
 include_kicker_bin! {KICKER_FW_IMG, "kicker.bin"}
 
@@ -15,7 +15,7 @@ const MAX_RX_PACKET_SIZE: usize = 64;
 const RX_BUF_DEPTH: usize = 20;
 const TELEMETRY_TIMEOUT_MS: u64 = 2000;
 
-static_idle_buffered_uart!(KICKER, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(KICKER, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_KICKER_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
 #[macro_export]
 macro_rules! create_kicker_task {
@@ -75,9 +75,9 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
     }
 
     pub fn new_from_pins(
-        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
-        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_KICKER_UART_QUEUES>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_KICKER_UART_QUEUES>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_KICKER_UART_QUEUES>,
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
         firmware_image: &'a [u8],

@@ -6,7 +6,7 @@ use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::{self, DataBits, Parity, StopBits, Uart};
 use embassy_time::{Duration, Instant, Ticker, Timer};
 
-use crate::{pins::*, robot_state::SharedRobotState, tasks::dotstar_task::{ControlBoardLedCommand, ControlGeneralLedCommand}, SystemIrqs};
+use crate::{pins::*, robot_state::SharedRobotState, tasks::dotstar_task::{ControlBoardLedCommand, ControlGeneralLedCommand}, SystemIrqs, DEBUG_POWER_UART_QUEUES};
 
 #[macro_export]
 macro_rules! create_power_task {
@@ -25,7 +25,7 @@ pub const POWER_MAX_RX_PACKET_SIZE: usize = core::mem::size_of::<PowerTelemetry>
 pub const POWER_TX_BUF_DEPTH: usize = 4;
 pub const POWER_RX_BUF_DEPTH: usize = 4;
 
-static_idle_buffered_uart!(POWER, POWER_MAX_RX_PACKET_SIZE, POWER_RX_BUF_DEPTH, POWER_MAX_TX_PACKET_SIZE, POWER_TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(POWER, POWER_MAX_RX_PACKET_SIZE, POWER_RX_BUF_DEPTH, POWER_MAX_TX_PACKET_SIZE, POWER_TX_BUF_DEPTH, DEBUG_POWER_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
 
 pub struct PowerTask<
@@ -36,9 +36,9 @@ pub struct PowerTask<
     shared_robot_state: &'static SharedRobotState,
     power_telemetry_publisher: PowerTelemetryPublisher,
     led_cmd_publisher: LedCommandPublisher,
-    _power_uart: &'static IdleBufferedUart<POWER_MAX_RX_PACKET_SIZE, POWER_RX_BUF_DEPTH, POWER_MAX_TX_PACKET_SIZE, POWER_TX_BUF_DEPTH>,
-    power_rx_uart_queue: &'static UartReadQueue<POWER_MAX_RX_PACKET_SIZE, POWER_RX_BUF_DEPTH>,
-    power_tx_uart_queue: &'static UartWriteQueue<POWER_MAX_TX_PACKET_SIZE, POWER_TX_BUF_DEPTH>,
+    _power_uart: &'static IdleBufferedUart<POWER_MAX_RX_PACKET_SIZE, POWER_RX_BUF_DEPTH, POWER_MAX_TX_PACKET_SIZE, POWER_TX_BUF_DEPTH, DEBUG_POWER_UART_QUEUES>,
+    power_rx_uart_queue: &'static UartReadQueue<POWER_MAX_RX_PACKET_SIZE, POWER_RX_BUF_DEPTH, DEBUG_POWER_UART_QUEUES>,
+    power_tx_uart_queue: &'static UartWriteQueue<POWER_MAX_TX_PACKET_SIZE, POWER_TX_BUF_DEPTH, DEBUG_POWER_UART_QUEUES>,
     last_power_status_time: Option<Instant>,
     last_power_status: PowerTelemetry,
 }

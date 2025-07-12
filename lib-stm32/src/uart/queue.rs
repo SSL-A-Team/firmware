@@ -13,6 +13,7 @@ use embassy_sync::{
     mutex::Mutex,
     pubsub::{PubSubChannel, Publisher, Subscriber, WaitResult},
 };
+use embassy_time::Timer;
 
 use crate::queue::{
     self,
@@ -23,24 +24,24 @@ use crate::queue::{
 
 #[macro_export]
 macro_rules! static_idle_buffered_uart_nl {
-    ($name:ident, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr) => {
+    ($name:ident, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr, $debug:expr) => {
         $crate::paste::paste! {
             static [<$name _RX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::queue::Buffer<$rx_buffer_size>>; $rx_buffer_depth] = 
                 [const { core::cell::SyncUnsafeCell::new($crate::queue::Buffer::<$rx_buffer_size>::new()) }; $rx_buffer_depth];
             static [<$name _TX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::queue::Buffer<$tx_buffer_size>>; $tx_buffer_depth] = 
                 [const { core::cell::SyncUnsafeCell::new($crate::queue::Buffer::<$tx_buffer_size>::new()) }; $tx_buffer_depth];
 
-            static [<$name:upper _IDLE_BUFFERED_UART>]: $crate::uart::queue::IdleBufferedUart<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth> = 
+            static [<$name:upper _IDLE_BUFFERED_UART>]: $crate::uart::queue::IdleBufferedUart<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth, $debug> = 
                 $crate::uart::queue::IdleBufferedUart::new(
                 $crate::queue::Queue::new(&[<$name _RX_BUFFER>]),
                 $crate::queue::Queue::new(&[<$name _TX_BUFFER>])
             );
 
             static [<$name:upper _READ_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
-                $crate::uart::queue::IdleBufferedUartReadFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth>> = 
+                $crate::uart::queue::IdleBufferedUartReadFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth, $debug>> = 
                 embassy_executor::raw::TaskStorage::new();
             static [<$name:upper _WRITE_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
-                $crate::uart::queue::IdleBufferedUartWriteFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth>> = 
+                $crate::uart::queue::IdleBufferedUartWriteFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth, $debug>> = 
                 embassy_executor::raw::TaskStorage::new();
         }
     }
@@ -48,7 +49,7 @@ macro_rules! static_idle_buffered_uart_nl {
 
 #[macro_export]
 macro_rules! static_idle_buffered_uart {
-    ($name:ident, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr, $(#[$m:meta])*) => {
+    ($name:ident, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr, $debug:expr, $(#[$m:meta])*) => {
         $crate::paste::paste! {
             $(#[$m])*
             static [<$name _RX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::queue::Buffer<$rx_buffer_size>>; $rx_buffer_depth] = 
@@ -57,17 +58,17 @@ macro_rules! static_idle_buffered_uart {
             static [<$name _TX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::queue::Buffer<$tx_buffer_size>>; $tx_buffer_depth] = 
                 [const { core::cell::SyncUnsafeCell::new($crate::queue::Buffer::<$tx_buffer_size>::new()) }; $tx_buffer_depth];
 
-            static [<$name:upper _IDLE_BUFFERED_UART>]: $crate::uart::queue::IdleBufferedUart<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth> = 
+            static [<$name:upper _IDLE_BUFFERED_UART>]: $crate::uart::queue::IdleBufferedUart<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth, $debug> = 
                 $crate::uart::queue::IdleBufferedUart::new(
                 $crate::queue::Queue::new(&[<$name _RX_BUFFER>]),
                 $crate::queue::Queue::new(&[<$name _TX_BUFFER>])
             );
 
             static [<$name:upper _READ_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
-                $crate::uart::queue::IdleBufferedUartReadFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth>> = 
+                $crate::uart::queue::IdleBufferedUartReadFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth, $debug>> = 
                 embassy_executor::raw::TaskStorage::new();
             static [<$name:upper _WRITE_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
-                $crate::uart::queue::IdleBufferedUartWriteFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth>> = 
+                $crate::uart::queue::IdleBufferedUartWriteFuture<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth, $debug>> = 
                 embassy_executor::raw::TaskStorage::new();
         }
     }
@@ -115,6 +116,7 @@ pub type IdleBufferedUartReadFuture<
     const RDEPTH: usize,
     const WLEN: usize,
     const WDEPTH: usize,
+    const DEBUG: bool,
 > = impl Future;
 
 pub type IdleBufferedUartWriteFuture<
@@ -122,16 +124,19 @@ pub type IdleBufferedUartWriteFuture<
     const RDEPTH: usize,
     const WLEN: usize,
     const WDEPTH: usize,
+    const DEBUG: bool,
 > = impl Future;
 
 pub type ReadTaskFuture<
     const LENGTH: usize,
     const DEPTH: usize,
+    const DEBUG: bool,
 > = impl Future;
 
 pub type WriteTaskFuture<
     const LENGTH: usize,
     const DEPTH: usize,
+    const DEBUG: bool,
 > = impl Future;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -156,9 +161,10 @@ pub struct IdleBufferedUart<
     const RDEPTH: usize,
     const WLEN: usize,
     const WDEPTH: usize,
+    const DEBUG: bool,
 > {
-    uart_read_queue: UartReadQueue<RLEN, RDEPTH>,
-    uart_write_queue: UartWriteQueue<WLEN, WDEPTH>,
+    uart_read_queue: UartReadQueue<RLEN, RDEPTH, DEBUG>,
+    uart_write_queue: UartWriteQueue<WLEN, WDEPTH, DEBUG>,
     uart_config_initialized: AtomicBool,
     uart_config_update_in_progress: AtomicBool,
     uart_config_command_pubsub: UartQueueSyncCommandPubSub,
@@ -172,7 +178,8 @@ impl <
     const RDEPTH: usize,
     const WLEN: usize,
     const WDEPTH: usize,
-    > IdleBufferedUart<RLEN, RDEPTH, WLEN, WDEPTH> 
+    const DEBUG: bool,
+    > IdleBufferedUart<RLEN, RDEPTH, WLEN, WDEPTH, DEBUG> 
 {
     pub const fn new(
         read_queue: Queue<RLEN, RDEPTH>,
@@ -190,14 +197,14 @@ impl <
         }
     }
 
-    pub fn get_uart_read_queue(&'static self) -> &'static UartReadQueue<RLEN, RDEPTH> {
+    pub fn get_uart_read_queue(&'static self) -> &'static UartReadQueue<RLEN, RDEPTH, DEBUG> {
         &self.uart_read_queue
     }
 
     pub fn read_task(
         &'static self,
         rx: UartRx<'static, Async>,
-    ) -> IdleBufferedUartReadFuture<RLEN, RDEPTH, WLEN, WDEPTH> {
+    ) -> IdleBufferedUartReadFuture<RLEN, RDEPTH, WLEN, WDEPTH, DEBUG> {
         async move {
             self.uart_read_queue.read_task(rx,
                 self.uart_config_command_pubsub.subscriber().expect("uart read task command sub failed"),
@@ -206,14 +213,14 @@ impl <
         }
     }
 
-    pub fn get_uart_write_queue(&'static self) -> &'static UartWriteQueue<WLEN, WDEPTH> {
+    pub fn get_uart_write_queue(&'static self) -> &'static UartWriteQueue<WLEN, WDEPTH, DEBUG> {
         &self.uart_write_queue
     }
 
     pub fn write_task(
         &'static self,
         tx: UartTx<'static, Async>,
-    ) -> IdleBufferedUartWriteFuture<RLEN, RDEPTH, WLEN, WDEPTH> {
+    ) -> IdleBufferedUartWriteFuture<RLEN, RDEPTH, WLEN, WDEPTH, DEBUG> {
         async move {
             self.uart_write_queue.write_task(tx,
                 self.uart_config_command_pubsub.subscriber().expect("uart write task command sub failed"),
@@ -411,6 +418,7 @@ impl <
 pub struct UartReadQueue<
     const LENGTH: usize,
     const DEPTH: usize,
+    const DEBUG: bool,
 > {
     queue_rx: Queue<LENGTH, DEPTH>,
 }
@@ -418,7 +426,8 @@ pub struct UartReadQueue<
 impl<
         const LENGTH: usize,
         const DEPTH: usize,
-    > UartReadQueue<LENGTH, DEPTH>
+        const DEBUG: bool,
+    > UartReadQueue<LENGTH, DEPTH, DEBUG>
 {
     pub const fn new(
             queue: Queue<LENGTH, DEPTH>) -> Self {
@@ -433,7 +442,7 @@ impl<
         mut rx: UartRx<'static, Async>,
         mut uart_config_command_subscriber: UartQueueSyncCommandSub,
         uart_config_response_publisher: UartQueueSyncResponsePub,
-    ) -> ReadTaskFuture<LENGTH, DEPTH> {
+    ) -> ReadTaskFuture<LENGTH, DEPTH, DEBUG> {
         async move {
             // if you panic here you spawned multiple ReadQueues from the same instance
             // that isn't allowed
@@ -556,6 +565,7 @@ impl<
 pub struct UartWriteQueue<
     const LENGTH: usize,
     const DEPTH: usize,
+    const DEBUG: bool,
 > {
     queue_tx: Queue<LENGTH, DEPTH>,
 }
@@ -563,7 +573,8 @@ pub struct UartWriteQueue<
 impl<
         const LENGTH: usize,
         const DEPTH: usize,
-    > UartWriteQueue<LENGTH, DEPTH>
+        const DEBUG: bool,
+    > UartWriteQueue<LENGTH, DEPTH, DEBUG>
 {
     pub const fn new(
             queue: Queue<LENGTH, DEPTH>,
@@ -578,21 +589,34 @@ impl<
         mut tx: UartTx<'static, Async>,
         mut uart_config_command_subscriber: UartQueueSyncCommandSub,
         uart_config_response_publisher: UartQueueSyncResponsePub,
-    ) -> WriteTaskFuture<LENGTH, DEPTH> {
+    ) -> WriteTaskFuture<LENGTH, DEPTH, DEBUG> {
         async move {
             loop {
                 // the tx task primarily blocks on queue_tx.queue(), e.g. waiting for other async tasks
                 // to enqueue data. Use a select to break waiting if another task signals there's a UART
                 // config update. They probably want the update before the next data is enqueued
-                match select(self.queue_tx.dequeue(), uart_config_command_subscriber.next_message()).await {
+                match select(self.queue_tx.dequeue(), uart_config_command_subscriber.next_message()).await {                    
                     // we are dequeing data
                     Either::First(dq_res) => {
+                        if DEBUG {
+                            defmt::info!("uart q write task dequeueing");
+                            Timer::after_micros(1000).await;
+                        }
+
                         if let Ok(buf) = dq_res {
+                            if DEBUG {
+                                defmt::info!("uart q write task DMA write");
+                            }
+
                             // write the message to the DMA
                             tx.write(buf.data()).await.unwrap(); // we are blocked here!
 
                             // drop the buffer, cleans up queue
                             drop(buf);
+
+                            if DEBUG {
+                                defmt::info!("uart q write task DMA done");
+                            }
 
                             // NOTE: we used to check for DMA transaction complete here, but embassy added
                             // it some time ago. Doing it twice causes lockup.
@@ -661,7 +685,8 @@ pub trait Writer {
 impl<
         const LEN: usize,
         const DEPTH: usize,
-    > Reader for UartReadQueue<LEN, DEPTH>
+        const DEBUG: bool,
+    > Reader for UartReadQueue<LEN, DEPTH, DEBUG>
 {
     async fn read<RET, FN: FnOnce(&[u8]) -> RET>(&self, fn_read: FN) -> Result<RET, ()> {
         Ok(self.dequeue(|buf| fn_read(buf)).await)
@@ -671,7 +696,8 @@ impl<
 impl<
         const LEN: usize,
         const DEPTH: usize,
-    > Writer for UartWriteQueue<LEN, DEPTH>
+        const DEBUG: bool,
+    > Writer for UartWriteQueue<LEN, DEPTH, DEBUG>
 {
     async fn write<FN: FnOnce(&mut [u8]) -> usize>(&self, fn_write: FN) -> Result<(), ()> {
         self.enqueue(|buf| fn_write(buf)).or(Err(()))

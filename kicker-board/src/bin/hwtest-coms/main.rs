@@ -26,7 +26,7 @@ use ateam_kicker_board::{
     kick_manager::{
         KickManager,
         KickType},
-    pins::*, tasks::{get_system_config, ClkSource}
+    pins::*, tasks::{get_system_config, ClkSource}, DEBUG_COMS_UART_QUEUES
 };
 
 use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl, uart::queue::{UartReadQueue, UartWriteQueue}};
@@ -38,12 +38,12 @@ const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 3;
 
-static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH);
+static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES);
 
 #[embassy_executor::task]
 async fn high_pri_kick_task(
-        coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>,
-        coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>,
+        coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES>,
+        coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES>,
         mut adc: Adc<'static, embassy_stm32::peripherals::ADC1>,
         charge_pin: ChargePin,
         kick_pin: KickPin,

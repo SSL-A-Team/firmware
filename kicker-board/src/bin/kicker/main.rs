@@ -3,7 +3,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(sync_unsafe_cell)]
 
-use ateam_kicker_board::{drivers::{breakbeam::Breakbeam, DribblerMotor}, include_external_cpp_bin, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin, GreenStatusLedPin}, tasks::{get_system_config, ClkSource}};
+use ateam_kicker_board::{drivers::{breakbeam::Breakbeam, DribblerMotor}, include_external_cpp_bin, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin, GreenStatusLedPin}, tasks::{get_system_config, ClkSource}, DEBUG_COMS_UART_QUEUES, DEBUG_DRIB_UART_QUEUES};
 
 use defmt::*;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, pubsub::{PubSubChannel, Publisher, Subscriber}};
@@ -48,7 +48,7 @@ const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 32;
 const RX_BUF_DEPTH: usize = 3;
-static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH);
+static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES);
 
 include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
 
@@ -56,7 +56,7 @@ const DRIB_MAX_TX_PACKET_SIZE: usize = 64;
 const DRIB_TX_BUF_DEPTH: usize = 3;
 const DRIB_MAX_RX_PACKET_SIZE: usize = 64;
 const DRIB_RX_BUF_DEPTH: usize = 20;
-static_idle_buffered_uart_nl!(DRIB, DRIB_MAX_RX_PACKET_SIZE, DRIB_RX_BUF_DEPTH, DRIB_MAX_TX_PACKET_SIZE, DRIB_TX_BUF_DEPTH);
+static_idle_buffered_uart_nl!(DRIB, DRIB_MAX_RX_PACKET_SIZE, DRIB_RX_BUF_DEPTH, DRIB_MAX_TX_PACKET_SIZE, DRIB_TX_BUF_DEPTH, DEBUG_DRIB_UART_QUEUES);
 
 static DRIB_VEL_PUBSUB: PubSubChannel<CriticalSectionRawMutex, f32, 1, 1, 1> = PubSubChannel::new();
 static DRIB_TELEM_PUBSUB: PubSubChannel<CriticalSectionRawMutex, MotorTelemetry, 1, 1, 1> = PubSubChannel::new();
@@ -67,10 +67,12 @@ async fn high_pri_kick_task(
     coms_reader: &'static UartReadQueue<
         MAX_RX_PACKET_SIZE,
         RX_BUF_DEPTH,
+        DEBUG_COMS_UART_QUEUES,
     >,
     coms_writer: &'static UartWriteQueue<
         MAX_TX_PACKET_SIZE,
         TX_BUF_DEPTH,
+        DEBUG_COMS_UART_QUEUES,
     >,
     mut adc: Adc<'static, embassy_stm32::peripherals::ADC1>,
     charge_pin: ChargePin,
@@ -417,7 +419,7 @@ async fn high_pri_kick_task(
 
 #[embassy_executor::task]
 async fn low_pri_dribble_task(
-        drib_motor_interface: Stm32Interface<'static, DRIB_MAX_RX_PACKET_SIZE, DRIB_MAX_TX_PACKET_SIZE, DRIB_RX_BUF_DEPTH, DRIB_TX_BUF_DEPTH>,
+        drib_motor_interface: Stm32Interface<'static, DRIB_MAX_RX_PACKET_SIZE, DRIB_MAX_TX_PACKET_SIZE, DRIB_RX_BUF_DEPTH, DRIB_TX_BUF_DEPTH, DEBUG_DRIB_UART_QUEUES>,
         mut drib_vel_sub: Subscriber<'static, CriticalSectionRawMutex, f32, 1, 1, 1>,
         drib_telem_pub: Publisher<'static, CriticalSectionRawMutex, MotorTelemetry, 1, 1, 1>) -> ! {
     let mut drib_motor = DribblerMotor::new(drib_motor_interface, DRIB_FW_IMG, 1.0);

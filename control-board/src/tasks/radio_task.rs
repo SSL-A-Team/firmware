@@ -10,7 +10,7 @@ use embassy_stm32::{
 };
 use embassy_time::{Duration, Instant, Ticker, Timer};
 
-use crate::{drivers::radio_robot::{RobotRadio, TeamColor}, pins::*, robot_state::SharedRobotState, tasks::dotstar_task::{ControlBoardLedCommand, RadioStatusLedCommand}, SystemIrqs};
+use crate::{drivers::radio_robot::{RobotRadio, TeamColor}, pins::*, robot_state::SharedRobotState, tasks::dotstar_task::{ControlBoardLedCommand, RadioStatusLedCommand}, SystemIrqs, DEBUG_RADIO_UART_QUEUES};
 
 #[macro_export]
 macro_rules! create_radio_task {
@@ -35,7 +35,7 @@ pub const RADIO_TX_BUF_DEPTH: usize = 4;
 pub const RADIO_MAX_RX_PACKET_SIZE: usize = 256;
 pub const RADIO_RX_BUF_DEPTH: usize = 4;
 
-static_idle_buffered_uart!(RADIO, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(RADIO, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, DEBUG_RADIO_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
@@ -51,12 +51,13 @@ pub struct RadioTask<
         const RADIO_MAX_TX_PACKET_SIZE: usize,
         const RADIO_MAX_RX_PACKET_SIZE: usize,
         const RADIO_TX_BUF_DEPTH: usize,
-        const RADIO_RX_BUF_DEPTH: usize> {
+        const RADIO_RX_BUF_DEPTH: usize,
+        const DEBUG_UART_QUEUES: bool> {
     shared_robot_state: &'static SharedRobotState,
     command_publisher: CommandsPublisher,
     telemetry_subscriber: TelemetrySubcriber,
     led_command_pub: LedCommandPublisher,
-    radio: RobotRadio<'static, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH>,
+    radio: RobotRadio<'static, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH, DEBUG_UART_QUEUES>,
     radio_ndet_input: Input<'static>,
 
     connection_state: RadioConnectionState,
@@ -70,8 +71,9 @@ impl<
         const RADIO_MAX_TX_PACKET_SIZE: usize,
         const RADIO_MAX_RX_PACKET_SIZE: usize,
         const RADIO_TX_BUF_DEPTH: usize,
-        const RADIO_RX_BUF_DEPTH: usize> 
-    RadioTask<RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH> {
+        const RADIO_RX_BUF_DEPTH: usize,
+        const DEBUG_UART_QUEUES: bool> 
+    RadioTask<RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH, DEBUG_UART_QUEUES> {
     // pub type TaskRobotRadio = RobotRadio<'static, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH>;
 
     const RETRY_DELAY_MS: u64 = 1000;
@@ -82,7 +84,7 @@ impl<
             command_publisher: CommandsPublisher,
             telemetry_subscriber: TelemetrySubcriber,
             led_command_pub: LedCommandPublisher,
-            radio: RobotRadio<'static, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH>,
+            radio: RobotRadio<'static, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH, DEBUG_UART_QUEUES>,
             radio_ndet_input: Input<'static>,
             wifi_credentials: &'static [WifiCredential]) -> Self {
         RadioTask {
@@ -103,9 +105,9 @@ impl<
             command_publisher: CommandsPublisher,
             telemetry_subscriber: TelemetrySubcriber,
             led_command_pub: LedCommandPublisher,
-            radio_uart: &'static IdleBufferedUart<RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH>,
-            radio_rx_uart_queue: &'static UartReadQueue<RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH>,
-            radio_tx_uart_queue: &'static UartWriteQueue<RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH>,
+            radio_uart: &'static IdleBufferedUart<RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, DEBUG_UART_QUEUES>,
+            radio_rx_uart_queue: &'static UartReadQueue<RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, DEBUG_UART_QUEUES>,
+            radio_tx_uart_queue: &'static UartWriteQueue<RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, DEBUG_UART_QUEUES>,
             radio_reset_pin: impl Pin,
             radio_ndet_pin: impl Pin,
             wifi_credentials: &'static [WifiCredential]) -> Self {
@@ -123,6 +125,8 @@ impl<
         let mut radio_loop_rate_ticker = Ticker::every(Duration::from_millis(RADIO_LOOP_RATE_MS));
         let mut last_loop_term_time = Instant::now();
 
+        let mut tx_ctr = 0;
+
         // initialize a copy of the robot state so we can track updates
         let mut last_robot_state = self.shared_robot_state.get_state();
 
@@ -130,6 +134,9 @@ impl<
         #[allow(unused_assignments)]
         // let mut next_connection_state = self.connection_state;
         loop {
+            tx_ctr += 1;
+            tx_ctr &= 0x03;
+        
             let loop_start_time = Instant::now();
             let loop_invocation_dead_time = loop_start_time - last_loop_term_time;
             if loop_start_time - last_loop_term_time > Duration::from_millis(11) {
@@ -244,7 +251,7 @@ impl<
                     }
                 },
                 RadioConnectionState::Connected => {
-                    let _ = self.process_packets().await;
+                    let _ = self.process_packets(tx_ctr).await;
                     // if we're stably connected, process packets at 100Hz
 
                     // If timeout have elapsed since we last got a packet, 
@@ -364,7 +371,7 @@ impl<
         }
     }
 
-    async fn process_packets(&mut self) -> Result<(), ()> {
+    async fn process_packets(&mut self, tx_ctr: i32) -> Result<(), ()> {
         // read any packets
         loop {
             if let Ok(pkt) = self.radio.read_packet_nonblocking() {
@@ -389,7 +396,7 @@ impl<
                     },
                     TelemetryPacket::Extended(control) => {
                         if self.shared_robot_state.get_radio_send_extended_telem() {
-                            defmt::info!("RadioTask - sending extended telemetry");
+                            // defmt::info!("RadioTask - sending extended telemetry");
                             if self.radio.send_control_debug_telemetry(control).await.is_err() {
                                 defmt::warn!("RadioTask - failed to send control debug telemetry packet");
                             }
@@ -408,8 +415,10 @@ impl<
 
         // always send the latest telemetry
         defmt::info!("RadioTask - sending basic telemetry");
-        if let Err(e) = self.radio.send_telemetry(self.last_basic_telemetry) {
-            defmt::warn!("RadioTask - failed to send basic telem packet {:?}", e);
+        if tx_ctr == 0 {
+            if let Err(e) = self.radio.send_telemetry(self.last_basic_telemetry) {
+                defmt::warn!("RadioTask - failed to send basic telem packet {:?}", e);
+            }
         }
 
         return Ok(())
@@ -427,7 +436,7 @@ pub fn startup_uart_config() -> usart::Config {
 }
 
 #[embassy_executor::task]
-async fn radio_task_entry(mut radio_task: RadioTask<RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH>) {
+async fn radio_task_entry(mut radio_task: RadioTask<RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH, DEBUG_RADIO_UART_QUEUES>) {
     loop {
         radio_task.radio_task_entry().await;
         defmt::error!("radio task returned");

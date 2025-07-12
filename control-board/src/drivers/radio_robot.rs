@@ -77,7 +77,8 @@ unsafe impl<
         const LEN_TX: usize,
         const DEPTH_TX: usize,
         const DEPTH_RX: usize,
-    > Send for RobotRadio<'a, LEN_RX, LEN_TX, DEPTH_TX, DEPTH_RX> {}
+        const DEBUG_UART_QUEUES: bool,
+    > Send for RobotRadio<'a, LEN_RX, LEN_TX, DEPTH_TX, DEPTH_RX, DEBUG_UART_QUEUES> {}
 
 
 pub struct RobotRadio<
@@ -86,6 +87,7 @@ pub struct RobotRadio<
     const LEN_RX: usize,
     const DEPTH_TX: usize,
     const DEPTH_RX: usize,
+    const DEBUG_UART_QUEUES: bool,
 > {
     odin_driver: OdinW262<
         'a,
@@ -93,6 +95,7 @@ pub struct RobotRadio<
         LEN_RX,
         DEPTH_TX,
         DEPTH_RX,
+        DEBUG_UART_QUEUES,
     >,
     reset_pin: Output<'a>,
     use_flow_control: bool,
@@ -105,15 +108,16 @@ impl<
         const LEN_RX: usize,
         const DEPTH_TX: usize,
         const DEPTH_RX: usize,
-    > RobotRadio<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>
+        const DEBUG_UART_QUEUES: bool,
+    > RobotRadio<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, DEBUG_UART_QUEUES>
 {
     pub fn new(
-        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
-        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
         reset_pin: impl Pin,
         use_flow_control: bool,
-    ) -> RobotRadio<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX> {
+    ) -> RobotRadio<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, DEBUG_UART_QUEUES> {
         let reset_pin = Output::new(reset_pin, Level::High, Speed::Medium);
         let radio = OdinW262::new(read_queue, write_queue, uart);
 
@@ -137,7 +141,7 @@ impl<
 
     pub fn get_highspeed_uart_config(&self) -> usart::Config {
         let mut highspeed_radio_uart_config = usart::Config::default();
-        highspeed_radio_uart_config.baudrate = 5_250_000;
+        highspeed_radio_uart_config.baudrate = 3_000_000;
         highspeed_radio_uart_config.stop_bits = StopBits::STOP1;
         highspeed_radio_uart_config.data_bits = DataBits::DataBits8;
         highspeed_radio_uart_config.parity = usart::Parity::ParityEven;
@@ -163,7 +167,7 @@ impl<
         }
         defmt::trace!("increasing link speed");
 
-        let baudrate = 5_250_000;
+        let baudrate = 3_000_000;
         if self.odin_driver.set_echo(false).await.is_err() {
             defmt::debug!("error disabling echo on radio");
             return Err(RobotRadioError::ConnectUartBadEcho);

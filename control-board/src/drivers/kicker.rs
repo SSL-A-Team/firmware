@@ -4,7 +4,7 @@ use embassy_time::{with_timeout, Duration, Timer};
 
 use ateam_common_packets::bindings::{KickerControl, KickerTelemetry};
 
-use crate::image_hash;
+use crate::{image_hash, DEBUG_KICKER_UART_QUEUES};
 
 pub struct Kicker<
     'a,
@@ -19,6 +19,7 @@ pub struct Kicker<
         LEN_TX,
         DEPTH_RX,
         DEPTH_TX,
+        DEBUG_KICKER_UART_QUEUES,
     >,
     firmware_image: &'a [u8],
 
@@ -43,6 +44,7 @@ impl<
             LEN_TX,
             DEPTH_RX,
             DEPTH_TX,
+            DEBUG_KICKER_UART_QUEUES,
         >,
         firmware_image: &'a [u8],
     ) -> Kicker<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
@@ -57,9 +59,9 @@ impl<
         }
     }
 
-    pub fn new_from_pins(uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
-        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
+    pub fn new_from_pins(uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_KICKER_UART_QUEUES>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_KICKER_UART_QUEUES>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_KICKER_UART_QUEUES>,
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
         firmware_image: &'a [u8]) -> Self {

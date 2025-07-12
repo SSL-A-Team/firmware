@@ -7,6 +7,8 @@ use embassy_time::{with_timeout, Duration, Timer};
 
 use crate::image_hash;
 
+use crate::DEBUG_DRIB_UART_QUEUES;
+
 pub mod breakbeam;
 
 pub struct DribblerMotor<
@@ -22,6 +24,7 @@ pub struct DribblerMotor<
         LEN_TX,
         DEPTH_RX,
         DEPTH_TX,
+        DEBUG_DRIB_UART_QUEUES
     >,
     firmware_image: &'a [u8],
 
@@ -51,6 +54,7 @@ impl<
             LEN_TX,
             DEPTH_RX,
             DEPTH_TX,
+            DEBUG_DRIB_UART_QUEUES
         >,
         firmware_image: &'a [u8],
         ball_detected_thresh: f32,
@@ -79,9 +83,9 @@ impl<
     }
 
     pub fn new_from_pins(
-        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
-        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_DRIB_UART_QUEUES>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_DRIB_UART_QUEUES>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_DRIB_UART_QUEUES>,
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
         firmware_image: &'a [u8],

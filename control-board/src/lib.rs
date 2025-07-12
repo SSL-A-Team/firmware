@@ -51,6 +51,11 @@ bind_interrupts!(pub struct SystemIrqs {
     USART1 => usart::InterruptHandler<peripherals::USART1>;
 });
 
+pub const DEBUG_RADIO_UART_QUEUES: bool = false;
+pub const DEBUG_MOTOR_UART_QUEUES: bool = false;
+pub const DEBUG_POWER_UART_QUEUES: bool = false;
+pub const DEBUG_KICKER_UART_QUEUES: bool = false;
+
 const ROBOT_VERSION_MAJOR: u8 = 3;
 const ROBOT_VERSION_MINOR: u8 = 1;
 
