@@ -263,6 +263,8 @@ impl<
             defmt::info!("Kicker Interface - Force flash enabled");
             flash = true
         } else {
+            defmt::debug!("Kicker Interface - Resetting kicker");
+            self.reset().await;
             let res = self.check_device_has_latest_default_image().await;
             match res {
                 Ok(has_latest) => {

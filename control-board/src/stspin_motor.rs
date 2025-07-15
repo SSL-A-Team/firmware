@@ -228,6 +228,8 @@ impl<
             defmt::info!("Wheel Interface - Force flash enabled");
             flash = true
         } else {
+            defmt::debug!("Wheel Interface - Resetting motor controller");
+            self.reset().await;
             let res = self.check_device_has_latest_default_image().await;
             match res {
                 Ok(has_latest) => {

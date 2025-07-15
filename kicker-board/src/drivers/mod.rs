@@ -214,6 +214,8 @@ impl<
             defmt::info!("Dribbler Interface - Force flash enabled");
             flash = true
         } else {
+            defmt::debug!("Dribbler Interface - Resetting dribbler");
+            self.reset().await;
             let res = self.check_device_has_latest_default_image().await;
             match res {
                 Ok(has_latest) => {
