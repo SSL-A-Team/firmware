@@ -141,7 +141,8 @@ impl<
 
     pub fn get_highspeed_uart_config(&self) -> usart::Config {
         let mut highspeed_radio_uart_config = usart::Config::default();
-        highspeed_radio_uart_config.baudrate = 3_000_000;
+        // highspeed_radio_uart_config.baudrate = 3_000_000;
+        highspeed_radio_uart_config.baudrate = 921_600;
         highspeed_radio_uart_config.stop_bits = StopBits::STOP1;
         highspeed_radio_uart_config.data_bits = DataBits::DataBits8;
         highspeed_radio_uart_config.parity = usart::Parity::ParityEven;
@@ -167,7 +168,8 @@ impl<
         }
         defmt::trace!("increasing link speed");
 
-        let baudrate = 3_000_000;
+        // let baudrate = 3_000_000;
+        let baudrate = 921_600;
         if self.odin_driver.set_echo(false).await.is_err() {
             defmt::debug!("error disabling echo on radio");
             return Err(RobotRadioError::ConnectUartBadEcho);

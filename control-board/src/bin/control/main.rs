@@ -158,7 +158,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         kicker_board_telemetry_publisher,
         p);
 
-    let mut iwdg = IndependentWatchdog::new(p.IWDG1, 100_000);
+    let mut iwdg = IndependentWatchdog::new(p.IWDG1, 1_000_000);
     iwdg.unleash();
 
     loop {
