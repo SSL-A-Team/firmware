@@ -34,6 +34,9 @@ pub struct SharedRobotState {
 
     ball_detected: AtomicBool,
     kicker_shutdown_complete: AtomicBool,
+    dribbler_on: AtomicBool,
+    dribbler_speed: core::sync::atomic::AtomicI32,
+    dribbler_multiplier: core::sync::atomic::AtomicI32,
 }
 
 impl SharedRobotState {
@@ -61,6 +64,9 @@ impl SharedRobotState {
             shutdown_requested: AtomicBool::new(false),
             ball_detected: AtomicBool::new(false),
             kicker_shutdown_complete: AtomicBool::new(false),
+            dribbler_on: AtomicBool::new(false),
+            dribbler_speed: core::sync::atomic::AtomicI32::new(360),
+            dribbler_multiplier: core::sync::atomic::AtomicI32::new(150),
         }
     }
 
@@ -93,6 +99,9 @@ impl SharedRobotState {
             ball_detected: self.ball_detected(),
             shutdown_requested: self.shutdown_requested(),
             kicker_shutdown_complete: self.kicker_shutdown_complete(),
+            dribbler_on: self.dribbler_on(),
+            dribbler_speed: self.dribbler_speed(),
+            dribbler_multiplier: self.dribbler_multiplier(),
         }
     }
 
@@ -263,6 +272,30 @@ impl SharedRobotState {
     pub fn set_kicker_shutdown_complete(&self, shutdown_complete: bool) {
         self.kicker_shutdown_complete.store(shutdown_complete, Ordering::Relaxed);
     }
+
+    pub fn dribbler_on(&self) -> bool {
+        self.dribbler_on.load(Ordering::Relaxed)
+    }
+
+    pub fn set_dribbler_on(&self, dribbler_on: bool) {
+        self.dribbler_on.store(dribbler_on, Ordering::Relaxed);
+    }
+    
+    pub fn dribbler_speed(&self) -> i32 {
+        self.dribbler_speed.load(Ordering::Relaxed)
+    }
+
+    pub fn set_dribbler_speed(&self, dribbler_speed: i32) {
+        self.dribbler_speed.store(dribbler_speed, Ordering::Relaxed);
+    }
+
+    pub fn dribbler_multiplier(&self) -> i32 {
+        self.dribbler_multiplier.load(Ordering::Relaxed)
+    }
+
+    pub fn set_dribbler_multiplier(&self, dribbler_multiplier: i32) {
+        self.dribbler_multiplier.store(dribbler_multiplier, Ordering::Relaxed);
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -295,4 +328,7 @@ pub struct RobotState {
     pub ball_detected: bool,
     pub shutdown_requested: bool,
     pub kicker_shutdown_complete: bool,
+    pub dribbler_on: bool,
+    pub dribbler_speed: i32,
+    pub dribbler_multiplier: i32,
 }

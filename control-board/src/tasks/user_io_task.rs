@@ -1,8 +1,8 @@
 use ateam_lib_stm32::filter::{Filter, IirFilter};
 use ateam_lib_stm32::time::SyncTicker;
 use embassy_executor::Spawner;
-use embassy_stm32::gpio::{AnyPin, Level, Output, Pull, Speed};
-use embassy_time::{Duration, Ticker};
+use embassy_stm32::gpio::{self, AnyPin, Input, Level, Output, Pull, Speed};
+use embassy_time::{Duration, Ticker, Timer};
 
 use ateam_lib_stm32::drivers::switches::dip::DipSwitch;
 use ateam_lib_stm32::drivers::switches::rotary_encoder::RotaryEncoder;
@@ -30,6 +30,7 @@ macro_rules! create_io_task {
             $p.ADC3,
             $p.PE9, $p.PE8, $p.PE7, $p.PF15, $p.PF14, $p.PF13, $p.PF12, $p.PF11,
             $p.PC13,
+            $p.PE11, $p.PE12, $p.PE13, $p.PE14, $p.PE15,
             $p.PB10, $p.PB11,
             $p.PD0, $p.PD1, $p.PG10, $p.PG11,
             $p.PG6, $p.PG5, $p.PG4, $p.PD13,
@@ -53,6 +54,11 @@ async fn user_io_task_entry(
     mut debug_led3: Output<'static>,
     mut robot_id_src_disagree: Output<'static>,
     mut robot_id_indicator: ShellIndicator<'static>,
+    mut enter_btn: Input<'static>,
+    mut left_btn: Input<'static>,
+    mut right_btn: Input<'static>,
+    mut up_btn: Input<'static>,
+    mut down_btn: Input<'static>,
 ) {
     defmt::info!("user io task initialized");
 
@@ -88,6 +94,28 @@ async fn user_io_task_entry(
         
         let robot_id = robot_id_rotary.read_value();
 
+        let dribbler_on = enter_btn.get_level() == gpio::Level::Low;
+        if up_btn.get_level() == gpio::Level::Low {
+            let dribbler_speed = cur_robot_state.dribbler_speed + 10;
+            robot_state.set_dribbler_speed(dribbler_speed);
+            Timer::after_millis(100).await;
+        }
+        if down_btn.get_level() == gpio::Level::Low {
+            let dribbler_speed = cur_robot_state.dribbler_speed - 10;
+            robot_state.set_dribbler_speed(dribbler_speed);
+            Timer::after_millis(100).await;
+        }
+        if right_btn.get_level() == gpio::Level::Low {
+            let dribbler_multiplier = cur_robot_state.dribbler_multiplier + 10;
+            robot_state.set_dribbler_multiplier(dribbler_multiplier);
+            Timer::after_millis(100).await;
+        }
+        if left_btn.get_level() == gpio::Level::Low {
+            let dribbler_multiplier = cur_robot_state.dribbler_multiplier - 10;
+            robot_state.set_dribbler_multiplier(dribbler_multiplier);
+            Timer::after_millis(100).await;
+        }
+
         if hw_debug_mode != cur_robot_state.hw_debug_mode {
             robot_state.set_hw_in_debug_mode(hw_debug_mode);
             if hw_debug_mode {
@@ -119,6 +147,11 @@ async fn user_io_task_entry(
         if send_extended_telem != cur_robot_state.radio_send_extended_telem {
             robot_state.set_radio_send_extended_telem(send_extended_telem);
             defmt::info!("updated robot send extended telem {} -> {}", cur_robot_state.radio_send_extended_telem, send_extended_telem);
+        }
+
+        if dribbler_on != cur_robot_state.dribbler_on {
+            defmt::info!("Setting dribbler to state: {}", cur_robot_state.dribbler_on);
+            robot_state.set_dribbler_on(dribbler_on);
         }
     
         ///////////////////////
@@ -192,7 +225,8 @@ pub async fn start_io_task(spawner: &Spawner,
     vref_int_adc_peri: VrefIntAdc,
     usr_dip7_pin: UsrDip7Pin, usr_dip6_pin: UsrDip6Pin, usr_dip5_pin: UsrDip5Pin, usr_dip4_pin: UsrDip4Pin,
     usr_dip3_pin: UsrDip3Pin, usr_dip2_pin: UsrDip2Pin, usr_dip1_pin: UsrDip1Pin, usr_dip0_pin: UsrDip0Pin,
-    debug_mode_pin: UsrDipDebugMode,
+    debug_mode_pin: UsrDipDebugMode, 
+    enter_btn_pin: UsrBtnEnterPin, left_btn_pin: UsrBtnLeftPin, right_btn_pin: UsrBtnRightPin, up_btn_pin: UsrBtnUpPin, down_btn_pin: UsrBtnDownPin,
     robot_id_team_is_blue_pin: UsrDipTeamIsBluePin, robot_id_src_select_pin: UsrDipBotIdSrcSelect,
     robot_id_selector3_pin: RobotIdSelector3Pin, robot_id_selector2_pin: RobotIdSelector2Pin,
     robot_id_selector1_pin: RobotIdSelector1Pin, robot_id_selector0_pin: RobotIdSelector0Pin,
@@ -205,6 +239,12 @@ pub async fn start_io_task(spawner: &Spawner,
 
     let dip_sw_pins: [AnyPin; 8] = [usr_dip7_pin.into(), usr_dip6_pin.into(), usr_dip5_pin.into(), usr_dip4_pin.into(), usr_dip3_pin.into(), usr_dip2_pin.into(), usr_dip1_pin.into(), usr_dip0_pin.into()];
     let dip_switch = DipSwitch::new_from_pins(dip_sw_pins, Pull::None, None);
+
+    let enter_btn = Input::new(enter_btn_pin, gpio::Pull::None);
+    let left_btn = Input::new(left_btn_pin, gpio::Pull::None);
+    let right_btn = Input::new(right_btn_pin, gpio::Pull::None);
+    let up_btn = Input::new(up_btn_pin, gpio::Pull::None);
+    let down_btn = Input::new(down_btn_pin, gpio::Pull::None);
 
     let debug_mode_pins: [AnyPin; 1] = [debug_mode_pin.into()];
     let debug_mode_dip = DipSwitch::new_from_pins(debug_mode_pins, Pull::None, Some([true]));
@@ -234,5 +274,6 @@ pub async fn start_io_task(spawner: &Spawner,
         battery_volt_adc, vref_int_adc,
         dip_switch, debug_mode_dip, team_color_dip, robot_id_rotary,
         debug_led0, debug_led1, debug_led2, debug_led3,
-        robot_id_src_disagree_led, robot_id_indicator)).unwrap();
+        robot_id_src_disagree_led, robot_id_indicator, 
+        enter_btn, left_btn, right_btn, up_btn, down_btn)).unwrap();
 }

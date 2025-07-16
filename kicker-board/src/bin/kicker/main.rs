@@ -3,6 +3,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(sync_unsafe_cell)]
 
+use core::sync::atomic;
+
 use ateam_kicker_board::{drivers::{breakbeam::Breakbeam, DribblerMotor}, include_external_cpp_bin, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin, GreenStatusLedPin}, tasks::{get_system_config, ClkSource}, DEBUG_COMS_UART_QUEUES, DEBUG_DRIB_UART_QUEUES};
 
 use defmt::*;
@@ -34,6 +36,9 @@ use ateam_common_packets::bindings::{
     KickerControl, KickerTelemetry, MotorTelemetry,
 };
 
+use core::sync::atomic::AtomicBool;
+use core::sync::atomic::AtomicI32;
+
 const MAX_KICK_SPEED: f32 = 5.5;
 const SHUTDOWN_KICK_SPEED: f32 = 0.20;
 
@@ -60,6 +65,9 @@ static_idle_buffered_uart_nl!(DRIB, DRIB_MAX_RX_PACKET_SIZE, DRIB_RX_BUF_DEPTH, 
 
 static DRIB_VEL_PUBSUB: PubSubChannel<CriticalSectionRawMutex, f32, 1, 1, 1> = PubSubChannel::new();
 static DRIB_TELEM_PUBSUB: PubSubChannel<CriticalSectionRawMutex, MotorTelemetry, 1, 1, 1> = PubSubChannel::new();
+
+static BALL_DETECTED: AtomicBool = AtomicBool::new(false);
+static DRIBBLER_MULTIPLIER: AtomicI32 = AtomicI32::new(0);
 
 
 #[embassy_executor::task]
@@ -189,6 +197,8 @@ async fn high_pri_kick_task(
         }
 
         let ball_detected = breakbeam.read();
+        BALL_DETECTED.store(ball_detected, atomic::Ordering::Relaxed);
+        DRIBBLER_MULTIPLIER.store((kicker_control_packet.drib_multiplier * 100.0f32) as i32, atomic::Ordering::Relaxed);
 
         // we've missed 20 packet frames from control
         if Instant::now() - last_packet_received_time > Duration::from_millis(200) {
@@ -447,7 +457,12 @@ async fn low_pri_dribble_task(
 
         drib_motor.process_packets();
 
-        let drib_sp = -1.0 * lastest_drib_vel / 1000.0;
+        let drib_mult = (DRIBBLER_MULTIPLIER.load(atomic::Ordering::Relaxed) as f32) / 100.0f32;
+        let mut drib_sp = -1.0 * lastest_drib_vel / 1000.0;
+        let ball_detected = BALL_DETECTED.load(atomic::Ordering::Relaxed);
+        if ball_detected && drib_mult != 0.0f32 {
+            drib_sp *= drib_mult;
+        }
         drib_motor.set_setpoint(drib_sp);
 
         drib_motor.send_motion_command();

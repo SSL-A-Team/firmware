@@ -91,6 +91,10 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
     }
 
     pub async fn kicker_task_entry(&mut self) {
+
+        self.robot_state.set_dribbler_speed(360);
+        self.robot_state.set_dribbler_multiplier(100);
+
         let mut main_loop_ticker = Ticker::every(Duration::from_hz(100));
         // Connection timeout start will be reset when connection is established and when a telemetry packet is received
         let mut connection_timeout_start = Instant::now();
@@ -151,6 +155,16 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
                 },
                 KickerTaskState::Connected => {
                     self.connected_poll_loop().await;
+                    // Override if push button is pressed
+                    if cur_robot_state.dribbler_on {
+                        let drib_vel = cur_robot_state.dribbler_speed;
+                        let drib_multiplier = cur_robot_state.dribbler_multiplier;
+                        self.kicker_driver.set_drib_vel(drib_vel as f32);
+                        self.kicker_driver.set_dribbler_multiplier((drib_multiplier as f32) / 100.0f32);
+                    } else {
+                        self.kicker_driver.set_drib_vel(0.0f32);
+                        self.kicker_driver.set_dribbler_multiplier(0.0f32);
+                    }
                     // external events will move us out of this state
                 },
                 KickerTaskState::InitiateShutdown => {
