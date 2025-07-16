@@ -17,6 +17,7 @@
 #![feature(variant_count)]
 
 
+use ateam_common_packets::radio::DataPacket;
 use embassy_stm32::{
     bind_interrupts, peripherals, rcc::{
         mux::{Adcsel, Saisel, Sdmmcsel, Spi6sel, Usart16910sel, Usart234578sel, Usbsel},
@@ -173,5 +174,32 @@ pub fn get_system_config() -> Config {
     config.rcc.voltage_scale = VoltageScale::Scale0;
 
     config
+}
+
+pub const fn is_float_safe(f: f32) -> bool {
+    !(f.is_nan() || !f.is_finite())
+}
+
+pub fn is_command_packet_safe(cmd_pck: DataPacket) -> bool {
+    match cmd_pck {
+        DataPacket::BasicControl(basic_control) => {
+            is_float_safe(basic_control.vel_x_linear) &&
+            is_float_safe(basic_control.vel_y_linear) &&
+            is_float_safe(basic_control.vel_z_angular) &&
+            is_float_safe(basic_control.kick_vel) &&
+            is_float_safe(basic_control.dribbler_speed)
+        },
+        DataPacket::ParameterCommand(parameter_command) => {
+            // for val in parameter_command.data.matrix_f32.iter()
+            //     .chain(&parameter_command.data.pid_f32)
+            //     .chain(&parameter_command.data.pidii_f32)
+            //     .chain(&parameter_command.data.vec3_f32) {
+            //     if !is_float_safe(*val) {
+            //         return false;
+            //     }
+            // }
+            return true;             
+        },
+    }
 }
 
