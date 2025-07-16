@@ -10,7 +10,7 @@ use embassy_stm32::{
 };
 use embassy_time::{Duration, Instant, Ticker, Timer};
 
-use crate::{drivers::radio_robot::{RobotRadio, TeamColor}, is_command_packet_safe, pins::*, robot_state::SharedRobotState, tasks::dotstar_task::{ControlBoardLedCommand, RadioStatusLedCommand}, SystemIrqs, DEBUG_RADIO_UART_QUEUES};
+use crate::{create_error_telemetry_from_string, drivers::radio_robot::{RobotRadio, TeamColor}, is_command_packet_safe, pins::*, robot_state::SharedRobotState, tasks::dotstar_task::{ControlBoardLedCommand, RadioStatusLedCommand}, SystemIrqs, DEBUG_RADIO_UART_QUEUES};
 
 #[macro_export]
 macro_rules! create_radio_task {
@@ -376,12 +376,16 @@ impl<
         loop {
             if let Ok(pkt) = self.radio.read_packet_nonblocking() {
                 if let Some(c2_pkt) = pkt {
+                    // update the last packet timestamp
+                    self.last_software_packet = Instant::now();
                     if is_command_packet_safe(c2_pkt) {
-                        // update the last packet timestamp
-                        self.last_software_packet = Instant::now();
-                        self.command_publisher.publish_immediate(c2_pkt);                        
+                        self.command_publisher.publish_immediate(c2_pkt);
                     } else {
-                        defmt::error!("RadioTask - received unsafe packet")
+                        defmt::error!("RadioTask - received unsafe packet");
+                        let error_telemetry = create_error_telemetry_from_string("Received unsafe command packet - check for NaNs");
+                        if self.radio.send_error_telemetry(error_telemetry).await.is_err() {
+                            defmt::warn!("RadioTask - failed to send error telemetry packet");
+                        }
                     }
                 } else {
                     break;
@@ -411,6 +415,11 @@ impl<
                             defmt::warn!("RadioTask - failed to send control parameter response packet");
                         }
                     },
+                    TelemetryPacket::ErrorTelemetry(error_packet) => {
+                        if self.radio.send_error_telemetry(error_packet).await.is_err() {
+                            defmt::warn!("RadioTask - failed to send error packet");
+                        }
+                    }
                 }
             } else {
                 break;

@@ -1,7 +1,7 @@
 use ateam_lib_stm32::drivers::radio::odin_w26x::{OdinRadioError, OdinW262, PeerConnection, WifiAuth};
 use ateam_lib_stm32::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
 use ateam_common_packets::bindings::{
-    self, BasicControl, BasicTelemetry, CommandCode, ExtendedTelemetry, HelloRequest, HelloResponse, ParameterCommand, RadioPacket, RadioPacket_Data
+    self, BasicControl, BasicTelemetry, CommandCode, ErrorTelemetry, ExtendedTelemetry, HelloRequest, HelloResponse, ParameterCommand, RadioPacket, RadioPacket_Data
 };
 use ateam_common_packets::radio::DataPacket;
 use const_format::formatcp;
@@ -503,6 +503,29 @@ impl<
                 &packet as *const _ as *const u8,
                 size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
                     + size_of::<ParameterCommand>(),
+            )
+        };
+        self.send_data(packet_bytes)?;
+
+        Ok(())
+    }
+
+    pub async fn send_error_telemetry(&self, error_telemetry: ErrorTelemetry) -> Result<(), RobotRadioError> {
+        let packet = RadioPacket {
+            crc32: 0,
+            major_version: bindings::kProtocolVersionMajor,
+            minor_version: bindings::kProtocolVersionMinor,
+            command_code: CommandCode::CC_ERROR_TELEMETRY,
+            data_length: size_of::<ParameterCommand>() as u16,
+            data: RadioPacket_Data {
+                error_telemetry
+            },
+        };
+        let packet_bytes = unsafe {
+            core::slice::from_raw_parts(
+                &packet as *const _ as *const u8,
+                size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                    + size_of::<ErrorTelemetry>(),
             )
         };
         self.send_data(packet_bytes)?;
