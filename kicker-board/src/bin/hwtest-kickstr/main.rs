@@ -19,7 +19,7 @@ use cortex_m_rt::entry;
 use embassy_executor::Executor;
 use embassy_stm32::{
     adc::{Adc, SampleTime},
-    gpio::{Input, Level, Output, Pull, Speed},
+    gpio::{Input, Level, Output, Pull, Speed}, opamp::{OpAmp, OpAmpGain, OpAmpSpeed},
 };
 use embassy_time::{Duration, Timer, Ticker};
 
@@ -77,7 +77,7 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
     }
 
     // in us
-    let durations = [500, 1000, 2000, 4000];
+    let durations = [1000, 1500, 2000, 3000, 4000, 6000];
 
     // For each duration, wait for button, charge, then kick
     for d in durations {
@@ -93,7 +93,7 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
         // We can't charge and kick at the same time...
         // The kicker fully charges within ~400 ms
         reg_charge.set_high();
-        Timer::after(Duration::from_millis(450)).await;
+        Timer::after(Duration::from_millis(2000)).await;
         reg_charge.set_low();
     
         let mut vrefint = adc.enable_vrefint();
@@ -139,6 +139,12 @@ fn main() -> ! {
     let p = embassy_stm32::init(stm32_config);
 
     info!("kicker startup!");
+
+    let _vsw_en = Output::new(p.PE10, Level::High, Speed::Medium);
+
+    let mut hv_opamp_inst = OpAmp::new(p.OPAMP3, OpAmpSpeed::HighSpeed);
+    let _hv_opamp = hv_opamp_inst.buffer_ext(p.PB0, p.PB1, OpAmpGain::Mul2);
+
 
     let mut adc = Adc::new(p.ADC1);
     adc.set_resolution(embassy_stm32::adc::Resolution::BITS12);
