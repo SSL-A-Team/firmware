@@ -37,7 +37,7 @@ use ateam_common_packets::bindings::{
     KickerControl, KickerTelemetry, MotorTelemetry,
 };
 
-const MAX_KICK_SPEED: f32 = 5.5;
+const MAX_KICK_SPEED: f32 = 6.5;
 const SHUTDOWN_KICK_SPEED: f32 = 0.20;
 
 pub const CHARGE_TARGET_VOLTAGE: f32 = 182.0;
