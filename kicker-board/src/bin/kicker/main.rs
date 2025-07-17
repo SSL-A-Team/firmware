@@ -3,6 +3,9 @@
 #![feature(type_alias_impl_trait)]
 #![feature(sync_unsafe_cell)]
 
+use core::sync::atomic::{AtomicBool, AtomicU32};
+use core::sync::atomic::Ordering::Relaxed;
+
 use ateam_kicker_board::{drivers::{breakbeam::Breakbeam, DribblerMotor}, include_external_cpp_bin, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin, GreenStatusLedPin}, tasks::{get_system_config, ClkSource}, DEBUG_COMS_UART_QUEUES, DEBUG_DRIB_UART_QUEUES};
 
 use defmt::*;
@@ -59,6 +62,8 @@ const DRIB_RX_BUF_DEPTH: usize = 20;
 static_idle_buffered_uart_nl!(DRIB, DRIB_MAX_RX_PACKET_SIZE, DRIB_RX_BUF_DEPTH, DRIB_MAX_TX_PACKET_SIZE, DRIB_TX_BUF_DEPTH, DEBUG_DRIB_UART_QUEUES);
 
 static DRIB_VEL_PUBSUB: PubSubChannel<CriticalSectionRawMutex, f32, 1, 1, 1> = PubSubChannel::new();
+static DRIB_MULT: AtomicU32 = AtomicU32::new(100);
+static BALL_DETECT: AtomicBool = AtomicBool::new(false);
 static DRIB_TELEM_PUBSUB: PubSubChannel<CriticalSectionRawMutex, MotorTelemetry, 1, 1, 1> = PubSubChannel::new();
 
 
@@ -179,6 +184,7 @@ async fn high_pri_kick_task(
             }
 
             drib_vel_pub.publish_immediate(kicker_control_packet.drib_speed);
+            DRIB_MULT.store(kicker_control_packet.dribbler_mult(), Relaxed);
 
             last_packet_received_time = Instant::now();
         }
@@ -189,6 +195,7 @@ async fn high_pri_kick_task(
         }
 
         let ball_detected = breakbeam.read();
+        BALL_DETECT.store(ball_detected, Relaxed);
 
         // we've missed 20 packet frames from control
         if Instant::now() - last_packet_received_time > Duration::from_millis(200) {
@@ -444,10 +451,18 @@ async fn low_pri_dribble_task(
             lastest_drib_vel = drib_vel;
             defmt::debug!("got a dribbler velocity update {:?}", lastest_drib_vel);
         }
-
         drib_motor.process_packets();
 
-        let drib_sp = -1.0 * lastest_drib_vel / 1000.0;
+        let mut drib_mult = DRIB_MULT.load(Relaxed);
+        if drib_mult == 0 || drib_mult > 100 {
+            drib_mult = 100;
+        }
+        let drib_mult_float = (drib_mult as f32) / 100.0f32;
+
+        let mut drib_sp = -1.0 * lastest_drib_vel / 1000.0;
+        if !BALL_DETECT.load(Relaxed) {
+            drib_sp *= drib_mult_float;
+        }
         drib_motor.set_setpoint(drib_sp);
 
         drib_motor.send_motion_command();
@@ -581,7 +596,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(low_pri_dribble_task(
         drib_motor_interface,
         DRIB_VEL_PUBSUB.subscriber().expect("failed to get dribler vel subscriber for drib task"),
-        DRIB_TELEM_PUBSUB.publisher().expect("failed to get drib telem pub for dribble task")
+        DRIB_TELEM_PUBSUB.publisher().expect("failed to get drib telem pub for dribble task"),
     )).expect("failed to spawn dribble task");
 
     /////////////////////////////////////////

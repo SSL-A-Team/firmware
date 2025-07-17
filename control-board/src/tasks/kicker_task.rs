@@ -220,6 +220,7 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
                             self.kicker_driver.set_kick_strength(bc_pkt.kick_vel);
                             self.kicker_driver.request_kick(bc_pkt.kick_request);
                             self.kicker_driver.set_drib_vel(bc_pkt.dribbler_speed);
+                            self.kicker_driver.set_drib_multiplier(bc_pkt.dribbler_multiplier());
                         },
                         DataPacket::ParameterCommand(_) => {
                             // we currently don't have any kicker parameters

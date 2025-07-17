@@ -128,6 +128,16 @@ impl<
         self.command_state.drib_speed = drib_vel;
     }
 
+    pub fn set_drib_multiplier(&mut self, drib_mult: u32) {
+        let multiplier;
+        if drib_mult == 0 || drib_mult > 100 {
+            multiplier = 100;
+        } else {
+            multiplier = drib_mult;
+        }
+        self.command_state.set_dribbler_mult(multiplier);
+    }
+
     pub fn ball_detected(&self) -> bool {
         self.telemetry_state.ball_detected() != 0
     }
