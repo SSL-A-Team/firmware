@@ -49,7 +49,7 @@ impl SharedRobotState {
             imu_inop: AtomicBool::new(true),
             kicker_inop: AtomicBool::new(true),
             power_inop: AtomicBool::new(true),
-            wheels_inop: AtomicU8::new(0x0F), 
+            wheels_inop: AtomicU8::new(0x0F),
             dribbler_inop: AtomicBool::new(true),
             last_packet_receive_time_ticks_ms: AtomicU32::new(0),
             radio_network_ok: AtomicBool::new(false), 
@@ -79,7 +79,7 @@ impl SharedRobotState {
             power_inop: self.get_power_inop(),
             wheels_inop: self.get_wheels_inop(),
             dribbler_inop: self.get_dribbler_inop(),
-        
+
             last_packet_receive_time_ticks_ms: 0,
             radio_network_ok: self.get_radio_network_ok(),
             radio_bridge_ok: self.get_radio_bridge_ok(),

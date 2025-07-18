@@ -59,7 +59,7 @@ async fn imu_task_entry(
         mut gyro_int: ExtiInput<'static>) {
 
     defmt::info!("imu start startup.");
-    let mut first_tipped_check_time = Instant::now(); 
+    let mut first_tipped_check_time = Instant::now();
     let mut first_tipped_seen = false;
 
     'imu_configuration_loop:
@@ -76,7 +76,7 @@ async fn imu_task_entry(
             Timer::after_millis(1000).await;
             continue 'imu_configuration_loop;
         }
-    
+
         // configure the gyro, map int to int pin 2
         let gyro_config_res = imu.set_gyro_config(GyroMode::ContinuousHighPerformance,
             GyroRange::PlusMinus2000DegPerSec,
@@ -89,7 +89,7 @@ async fn imu_task_entry(
             led_command_pub.publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error)).await;
             defmt::error!("gyro configration failed.");
         }
-        
+
         // configure the gyro, map int to int pin 1
         let acc_config_res = imu.set_accel_config(AccelMode::ContinuousHighPerformance,
             AccelRange::Range2g,
@@ -123,7 +123,7 @@ async fn imu_task_entry(
                     // read gyro data
                     let imu_data = imu.gyro_get_data_rads().await;
                     gyro_pub.publish_immediate(Vector3::new(imu_data[0], imu_data[1], imu_data[2]));
-            
+
                     // read accel data
                     // TODO: don't use raw data, impl conversion
                     let accel_data = imu.accel_get_data_mps().await;
@@ -146,7 +146,7 @@ async fn imu_task_entry(
                             }
                         }
                     } else {
-                        // Not tipped so clear everything. 
+                        // Not tipped so clear everything.
                         first_tipped_seen = false;
                         robot_state.set_robot_tipped(false);
                     }
@@ -234,4 +234,3 @@ pub fn start_imu_task_via_ie(
 
     imu_task_spawner.spawn(imu_task_entry(robot_state, gyro_data_publisher, accel_data_publisher, led_cmd_publisher, imu, accel_int, gyro_int)).unwrap();
 }
-

@@ -1,5 +1,5 @@
 
-use ateam_common_packets::{bindings::BasicTelemetry, radio::TelemetryPacket};
+use ateam_common_packets::{bindings::BasicTelemetry, radio::TelemetryPacket, bindings::RadioPacket };
 use ateam_lib_stm32::{idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use credentials::WifiCredential;
 use embassy_executor::{SendSpawner, Spawner};
@@ -18,7 +18,7 @@ macro_rules! create_radio_task {
         $radio_command_publisher:ident, $radio_telemetry_subscriber:ident, $led_command_pub:ident,
         $wifi_credentials:ident, $p:ident) => {
         ateam_control_board::tasks::radio_task::start_radio_task(
-            $main_spawner, $rx_uart_queue_spawner, $tx_uart_queue_spawner, 
+            $main_spawner, $rx_uart_queue_spawner, $tx_uart_queue_spawner,
             $robot_state,
             $radio_command_publisher, $radio_telemetry_subscriber, $led_command_pub,
             &$wifi_credentials,
@@ -30,9 +30,9 @@ macro_rules! create_radio_task {
 
 pub const RADIO_LOOP_RATE_MS: u64 = 10;
 
-pub const RADIO_MAX_TX_PACKET_SIZE: usize = 448;
+pub const RADIO_MAX_TX_PACKET_SIZE: usize = core::mem::size_of::<RadioPacket>();
 pub const RADIO_TX_BUF_DEPTH: usize = 4;
-pub const RADIO_MAX_RX_PACKET_SIZE: usize = 256;
+pub const RADIO_MAX_RX_PACKET_SIZE: usize = core::mem::size_of::<RadioPacket>();
 pub const RADIO_RX_BUF_DEPTH: usize = 4;
 
 static_idle_buffered_uart!(RADIO, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, DEBUG_RADIO_UART_QUEUES, #[link_section = ".axisram.buffers"]);
@@ -152,7 +152,7 @@ impl<
             if cur_robot_state != last_robot_state {
                 // we are connected to software and robot id or team was changed on hardware
                 if self.connection_state == RadioConnectionState::Connected &&
-                        (cur_robot_state.hw_robot_id != last_robot_state.hw_robot_id || 
+                        (cur_robot_state.hw_robot_id != last_robot_state.hw_robot_id ||
                         cur_robot_state.hw_robot_team_is_blue != last_robot_state.hw_robot_team_is_blue) {
                     // Enter connected network state (disconnecting)
                     self.connection_state = RadioConnectionState::ConnectedNetwork;
@@ -160,7 +160,7 @@ impl<
                 }
 
                 // We are at least connected on UART and the wifi network id changed
-                if self.connection_state >= RadioConnectionState::ConnectedUart && 
+                if self.connection_state >= RadioConnectionState::ConnectedUart &&
                     cur_robot_state.hw_wifi_network_index != last_robot_state.hw_wifi_network_index {
                     defmt::info!("dip state change triggering wifi network change");
 
@@ -200,7 +200,7 @@ impl<
                 RadioConnectionState::ConnectedPhys => {
                     if self.connect_uart().await.is_err() {
                         radio_inop_flag_local = true;
-                        // If the pin is unconnected, will be overridden out of the state. 
+                        // If the pin is unconnected, will be overridden out of the state.
                         // So just check UART again.
                         self.connection_state = RadioConnectionState::ConnectedPhys;
                         self.led_command_pub.publish(ControlBoardLedCommand::Radio(RadioStatusLedCommand::ConnectedPhys)).await;
@@ -254,19 +254,19 @@ impl<
                     let _ = self.process_packets(tx_ctr).await;
                     // if we're stably connected, process packets at 100Hz
 
-                    // If timeout have elapsed since we last got a packet, 
+                    // If timeout have elapsed since we last got a packet,
                     // reboot the robot (unless we had a shutdown request).
                     let cur_time = Instant::now();
-                    if !cur_robot_state.shutdown_requested && 
-                        Instant::checked_duration_since(&cur_time, self.last_software_packet).unwrap().as_millis() > Self::RESPONSE_FROM_PC_TIMEOUT_MS {       
-                        defmt::warn!("software timeout - rebooting...");               
-                        Timer::after_millis(100).await;  
+                    if !cur_robot_state.shutdown_requested &&
+                        Instant::checked_duration_since(&cur_time, self.last_software_packet).unwrap().as_millis() > Self::RESPONSE_FROM_PC_TIMEOUT_MS {
+                        defmt::warn!("software timeout - rebooting...");
+                        Timer::after_millis(100).await;
                         cortex_m::peripheral::SCB::sys_reset();
                     }
                 },
             }
 
-            // set global radio connected flag           
+            // set global radio connected flag
             self.shared_robot_state.set_radio_network_ok(self.connection_state >= RadioConnectionState::ConnectedNetwork);
             self.shared_robot_state.set_radio_bridge_ok(self.connection_state == RadioConnectionState::Connected);
             self.shared_robot_state.set_radio_inop(radio_inop_flag_local);
@@ -320,7 +320,7 @@ impl<
             return Err(());
         }
         defmt::info!("radio connected");
-    
+
         let res = self.radio.open_multicast().await;
         if res.is_err() {
             defmt::error!("failed to establish multicast socket to network.");
@@ -344,7 +344,7 @@ impl<
             defmt::error!("send hello failed.");
             return Err(());
         }
-        
+
         let hello = self.radio.wait_hello(Duration::from_millis(Self::RESPONSE_FROM_PC_TIMEOUT_MS)).await;
         match hello {
             Ok(hello) => {
@@ -355,7 +355,7 @@ impl<
 
                 let start_time = Instant::now();
                 self.radio.close_peer().await.unwrap();
-                
+
                 self.radio.open_unicast(hello.ipv4, hello.port).await.expect("failed to open unicast port");
                 defmt::info!("unicast open");
 
