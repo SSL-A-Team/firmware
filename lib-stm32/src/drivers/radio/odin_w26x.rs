@@ -76,10 +76,11 @@ pub struct OdinW262<
     const LEN_RX: usize,
     const DEPTH_TX: usize,
     const DEPTH_RX: usize,
+    const DEBUG_UART_QUEUES: bool,
 > {
-    reader: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
-    writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
-    uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
+    reader: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
+    writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
+    uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
     mode: RadioMode,
 }
 
@@ -89,12 +90,13 @@ impl<
         const LEN_RX: usize,
         const DEPTH_TX: usize,
         const DEPTH_RX: usize,
-    > OdinW262<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>
+        const DEBUG_UART_QUEUES: bool,
+    > OdinW262<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, DEBUG_UART_QUEUES>
 {
     pub fn new(
-        reader: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
-        writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
-        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
+        reader: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
+        writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
     ) -> Self {
         Self {
             reader,

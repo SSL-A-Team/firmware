@@ -6,6 +6,7 @@
 
 use ateam_control_board::{
     drivers::kicker::Kicker, get_system_config, include_kicker_bin,
+    DEBUG_KICKER_UART_QUEUES,
 };
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface::{self, Stm32Interface},
@@ -25,7 +26,7 @@ const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 20;
 
-static_idle_buffered_uart!(KICKER, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(KICKER, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_KICKER_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
@@ -77,7 +78,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     let kicker_firmware_image = KICKER_FW_IMG;
     let mut kicker = Kicker::new(kicker_stm32_interface, kicker_firmware_image);
-    let res = kicker.init_default_firmware_image(true).await;
+    let force_flash = true;
+    let res = kicker.init_default_firmware_image(force_flash).await;
 
     if res.is_err() {
         defmt::warn!("kicker flashing failed.");

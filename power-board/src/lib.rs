@@ -12,6 +12,8 @@ pub mod tasks;
 pub mod power_state;
 pub mod songs;
 
+const DEBUG_UART_QUEUES: bool = false;
+
 bind_interrupts!(pub struct SystemIrqs {
     USART1 => usart::InterruptHandler<peripherals::USART1>;
 });

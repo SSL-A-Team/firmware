@@ -1,7 +1,7 @@
 use ateam_lib_stm32::drivers::radio::odin_w26x::{OdinRadioError, OdinW262, PeerConnection, WifiAuth};
 use ateam_lib_stm32::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
 use ateam_common_packets::bindings::{
-    self, BasicControl, BasicTelemetry, CommandCode, ExtendedTelemetry, HelloRequest, HelloResponse, ParameterCommand, RadioPacket, RadioPacket_Data
+    self, BasicControl, BasicTelemetry, CommandCode, ErrorTelemetry, ExtendedTelemetry, HelloRequest, HelloResponse, ParameterCommand, RadioPacket, RadioPacket_Data
 };
 use ateam_common_packets::radio::DataPacket;
 use const_format::formatcp;
@@ -77,7 +77,8 @@ unsafe impl<
         const LEN_TX: usize,
         const DEPTH_TX: usize,
         const DEPTH_RX: usize,
-    > Send for RobotRadio<'a, LEN_RX, LEN_TX, DEPTH_TX, DEPTH_RX> {}
+        const DEBUG_UART_QUEUES: bool,
+    > Send for RobotRadio<'a, LEN_RX, LEN_TX, DEPTH_TX, DEPTH_RX, DEBUG_UART_QUEUES> {}
 
 
 pub struct RobotRadio<
@@ -86,6 +87,7 @@ pub struct RobotRadio<
     const LEN_RX: usize,
     const DEPTH_TX: usize,
     const DEPTH_RX: usize,
+    const DEBUG_UART_QUEUES: bool,
 > {
     odin_driver: OdinW262<
         'a,
@@ -93,8 +95,10 @@ pub struct RobotRadio<
         LEN_RX,
         DEPTH_TX,
         DEPTH_RX,
+        DEBUG_UART_QUEUES,
     >,
     reset_pin: Output<'a>,
+    use_flow_control: bool,
     peer: Option<PeerConnection>,
 }
 
@@ -104,14 +108,16 @@ impl<
         const LEN_RX: usize,
         const DEPTH_TX: usize,
         const DEPTH_RX: usize,
-    > RobotRadio<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX>
+        const DEBUG_UART_QUEUES: bool,
+    > RobotRadio<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, DEBUG_UART_QUEUES>
 {
     pub fn new(
-        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
-        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
         reset_pin: impl Pin,
-    ) -> RobotRadio<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX> {
+        use_flow_control: bool,
+    ) -> RobotRadio<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, DEBUG_UART_QUEUES> {
         let reset_pin = Output::new(reset_pin, Level::High, Speed::Medium);
         let radio = OdinW262::new(read_queue, write_queue, uart);
 
@@ -119,6 +125,7 @@ impl<
             odin_driver: radio,
             reset_pin,
             peer: None,
+            use_flow_control,
         }
     }
 
@@ -134,7 +141,8 @@ impl<
 
     pub fn get_highspeed_uart_config(&self) -> usart::Config {
         let mut highspeed_radio_uart_config = usart::Config::default();
-        highspeed_radio_uart_config.baudrate = 5_250_000;
+        // highspeed_radio_uart_config.baudrate = 3_000_000;
+        highspeed_radio_uart_config.baudrate = 921_600;
         highspeed_radio_uart_config.stop_bits = StopBits::STOP1;
         highspeed_radio_uart_config.data_bits = DataBits::DataBits8;
         highspeed_radio_uart_config.parity = usart::Parity::ParityEven;
@@ -160,13 +168,14 @@ impl<
         }
         defmt::trace!("increasing link speed");
 
-        let baudrate = 5_250_000;
+        // let baudrate = 3_000_000;
+        let baudrate = 921_600;
         if self.odin_driver.set_echo(false).await.is_err() {
             defmt::debug!("error disabling echo on radio");
             return Err(RobotRadioError::ConnectUartBadEcho);
         }
-
-        if self.odin_driver.config_uart(baudrate, true, 8, true).await.is_err() {
+        
+        if self.odin_driver.config_uart(baudrate, self.use_flow_control, 8, true).await.is_err() {
             defmt::debug!("error increasing radio baud rate.");
             return Err(RobotRadioError::ConnectUartBadRadioConfigUpdate);
         }
@@ -494,6 +503,29 @@ impl<
                 &packet as *const _ as *const u8,
                 size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
                     + size_of::<ParameterCommand>(),
+            )
+        };
+        self.send_data(packet_bytes)?;
+
+        Ok(())
+    }
+
+    pub async fn send_error_telemetry(&self, error_telemetry: ErrorTelemetry) -> Result<(), RobotRadioError> {
+        let packet = RadioPacket {
+            crc32: 0,
+            major_version: bindings::kProtocolVersionMajor,
+            minor_version: bindings::kProtocolVersionMinor,
+            command_code: CommandCode::CC_ERROR_TELEMETRY,
+            data_length: size_of::<ParameterCommand>() as u16,
+            data: RadioPacket_Data {
+                error_telemetry
+            },
+        };
+        let packet_bytes = unsafe {
+            core::slice::from_raw_parts(
+                &packet as *const _ as *const u8,
+                size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                    + size_of::<ErrorTelemetry>(),
             )
         };
         self.send_data(packet_bytes)?;

@@ -17,6 +17,7 @@
 #![feature(variant_count)]
 
 
+use ateam_common_packets::{bindings::{ErrorTelemetry, ParameterDataFormat}, radio::DataPacket};
 use embassy_stm32::{
     bind_interrupts, peripherals, rcc::{
         mux::{Adcsel, Saisel, Sdmmcsel, Spi6sel, Usart16910sel, Usart234578sel, Usbsel},
@@ -27,6 +28,7 @@ use embassy_stm32::{
         VoltageScale
     }, time::Hertz, usart, Config
 };
+use embassy_time::Instant;
 
 pub mod parameter_interface;
 pub mod pins;
@@ -50,6 +52,11 @@ bind_interrupts!(pub struct SystemIrqs {
     UART4 => usart::InterruptHandler<peripherals::UART4>;
     USART1 => usart::InterruptHandler<peripherals::USART1>;
 });
+
+pub const DEBUG_RADIO_UART_QUEUES: bool = false;
+pub const DEBUG_MOTOR_UART_QUEUES: bool = false;
+pub const DEBUG_POWER_UART_QUEUES: bool = false;
+pub const DEBUG_KICKER_UART_QUEUES: bool = false;
 
 const ROBOT_VERSION_MAJOR: u8 = 3;
 const ROBOT_VERSION_MINOR: u8 = 1;
@@ -170,3 +177,68 @@ pub fn get_system_config() -> Config {
     config
 }
 
+pub fn is_float_array_safe(arr: &[f32]) -> bool {
+    for f in arr {
+        if !is_float_safe(*f) {
+            return false;
+        }
+    }
+    return true;
+}
+
+pub const fn is_float_safe(f: f32) -> bool {
+    !f.is_nan() && f.is_finite()
+}
+
+pub fn is_command_packet_safe(cmd_pck: DataPacket) -> bool {
+    match cmd_pck {
+        DataPacket::BasicControl(basic_control) => {
+            is_float_safe(basic_control.vel_x_linear) &&
+            is_float_safe(basic_control.vel_y_linear) &&
+            is_float_safe(basic_control.vel_z_angular) &&
+            is_float_safe(basic_control.kick_vel) &&
+            is_float_safe(basic_control.dribbler_speed)
+        },
+        DataPacket::ParameterCommand(parameter_command) => {
+            match parameter_command.data_format {
+                ParameterDataFormat::F32 => {
+                    let float = unsafe { parameter_command.data.f32_ };
+                    return is_float_safe(float);
+                },
+                ParameterDataFormat::MATRIX_F32 => {
+                    let arr = unsafe { parameter_command.data.matrix_f32 };
+                    return is_float_array_safe(&arr);
+                },
+                ParameterDataFormat::PID_F32 => {
+                    let arr = unsafe { parameter_command.data.pid_f32 };
+                    return is_float_array_safe(&arr);
+                },
+                ParameterDataFormat::PID_LIMITED_INTEGRAL_F32 => {
+                    let arr = unsafe { parameter_command.data.pidii_f32 };
+                    return is_float_array_safe(&arr);
+                },
+                ParameterDataFormat::VEC3_F32 => {
+                    let arr = unsafe { parameter_command.data.vec3_f32 };
+                    return is_float_array_safe(&arr);
+                },
+                ParameterDataFormat::VEC4_F32 => {
+                    let arr = unsafe { parameter_command.data.vec4_f32 };
+                    return is_float_array_safe(&arr);
+                },
+                _ => {
+                    defmt::error!("Parameter Command data packet has an unexpected data type");
+                    return false
+                },
+            }
+        },
+    }
+}
+
+pub fn create_error_telemetry_from_string(error_message: &str) -> ErrorTelemetry {
+    let mut error_telemetry = ErrorTelemetry::default();
+    let bytes = error_message.as_bytes();
+    let copy_len = core::cmp::min(bytes.len(), 60);
+    error_telemetry.error_message[..copy_len].copy_from_slice(&bytes[..copy_len]);
+    error_telemetry.timestamp = Instant::now().as_millis() as u32;  // Overflows after ~50 days of uptime
+    error_telemetry
+}

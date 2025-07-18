@@ -35,6 +35,12 @@
 
 static int slipped_control_frame_count = 0;
 
+// Wheel image hash, saved in the wheel image
+static volatile ImgHash_t wheel_img_hash_struct = {
+    "WheelImgHashWeel",
+    {0},
+};
+
 __attribute__((optimize("O0")))
 int main() {
     uint32_t rcc_csr = RCC->CSR;
@@ -158,20 +164,20 @@ int main() {
     PidConstants_t vel_gains[3] = {
         {
             .kP = 6.0f,
-            .kI = 8.0f,
-            .kD = 0.1f,
+            .kI = 12.0f,
+            .kD = 0.4f,
             .kI_max = 20.0f,
             .kI_min = -20.0f,
         },
         {
-            .kP = 6.0f,
+            .kP = 7.0f,
             .kI = 0.0f,
             .kD = 0.5f,
             .kI_max = 0.0f,
             .kI_min = 0.0f,
         },
         {
-            .kP = 1.0f,
+            .kP = 2.0f,
             .kI = 0.0f,
             .kD = 0.1f,
             .kI_max = 0.0f,
@@ -201,10 +207,12 @@ int main() {
     turn_off_red_led();
     turn_off_yellow_led();
 
+    #ifdef UART_ENABLED
     // Initialize UART and logging status.
     uart_initialize();
     uart_logging_status_rx_t uart_logging_status_receive;
     uart_logging_status_tx_t uart_logging_status_send;
+    #endif
 
     // toggle J1-1
     while (true) {
@@ -419,6 +427,11 @@ int main() {
             // Vel_desired - Vel_measured
             vel_target_accel_rads2 = (r_motor_board - enc_vel_rads_filt) / VELOCITY_LOOP_RATE_S;
 
+            // reset integrator when commanded to stop
+            if(fabsf(r_motor_board) < 1e-3f) {
+                vel_pid.eI = 0.0f;
+            }
+
             // compute the velocity PID
             control_setpoint_vel_rads = gspid_calculate(&vel_pid, r_motor_board, enc_vel_rads_filt, VELOCITY_LOOP_RATE_S);
 
@@ -442,7 +455,6 @@ int main() {
 
             // velocity control data
             response_packet.data.motion.vel_setpoint = r_motor_board;
-            response_packet.data.motion.encoder_delta = enc_vel_rads;
             response_packet.data.motion.vel_enc_estimate = enc_vel_rads_filt;
             response_packet.data.motion.vel_computed_error = vel_pid.prev_err;
             response_packet.data.motion.vel_computed_rads = control_setpoint_vel_rads;
@@ -559,7 +571,7 @@ int main() {
                 response_packet.data.params.torque_i_max = torque_pid_constants.kI_max;
                 response_packet.data.params.cur_clamp = (uint16_t) cur_limit;
 
-                memcpy(response_packet.data.params.wheel_img_hash, get_wheel_img_hash(), sizeof(response_packet.data.params.wheel_img_hash));
+                memcpy(response_packet.data.params.firmware_img_hash, wheel_img_hash_struct.img_hash, sizeof(response_packet.data.params.firmware_img_hash));
 #ifdef UART_ENABLED
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponse));
                 // Capture the status for the response packet / LED.

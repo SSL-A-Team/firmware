@@ -5,13 +5,13 @@ use embassy_stm32::usart::{self, DataBits, Parity, StopBits, Uart};
 use ateam_lib_stm32::{audio::{songs::SongId, AudioCommand}, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use ateam_common_packets::bindings::{BatteryInfo, PowerCommand, PowerTelemetry};
 use embassy_time::{Duration, Instant, Ticker};
-use crate::{pins::*, power_state::SharedPowerState, SystemIrqs};
+use crate::{pins::*, power_state::SharedPowerState, SystemIrqs, DEBUG_UART_QUEUES};
 
 const MAX_RX_PACKET_SIZE: usize = core::mem::size_of::<PowerCommand>();
 const MAX_TX_PACKET_SIZE: usize = core::mem::size_of::<PowerTelemetry>();
 const RX_BUF_DEPTH: usize = 3;
 const TX_BUF_DEPTH: usize = 2;
-static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH);
+static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_UART_QUEUES);
 
 const POWER_TELEM_PERIOD_MS: u64 = 100;
 
@@ -29,9 +29,9 @@ macro_rules! create_coms_task {
 
 #[embassy_executor::task]
 async fn coms_task_entry(
-    _uart: &'static IdleBufferedUart<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>,
-    read_queue: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>,
-    write_queue: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>,
+    _uart: &'static IdleBufferedUart<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_UART_QUEUES>,
+    read_queue: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, DEBUG_UART_QUEUES>,
+    write_queue: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_UART_QUEUES>,
     shared_power_state: &'static SharedPowerState,
     mut telemetry_subscriber: TelemetrySubscriber,
     audio_publisher: AudioPublisher

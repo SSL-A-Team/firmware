@@ -12,7 +12,7 @@ use nalgebra::Vector3;
 use ateam_common_packets::bindings::{
     MotionCommandType::{self, OPEN_LOOP}, MotorCommandPacket, MotorCommandType::{MCP_MOTION, MCP_PARAMS}, MotorResponse, MotorResponseType::{MRP_MOTION, MRP_PARAMS}, MotorTelemetry, ParameterMotorResponse
 };
-use crate::image_hash;
+use crate::{image_hash, DEBUG_MOTOR_UART_QUEUES};
 
 pub struct WheelMotor<
     'a,
@@ -27,6 +27,7 @@ pub struct WheelMotor<
         LEN_TX,
         DEPTH_RX,
         DEPTH_TX,
+        DEBUG_MOTOR_UART_QUEUES,
     >,
     firmware_image: &'a [u8],
     current_timestamp_ms: u32,
@@ -64,6 +65,7 @@ impl<
             LEN_TX,
             DEPTH_RX,
             DEPTH_TX,
+            DEBUG_MOTOR_UART_QUEUES
         >,
         firmware_image: &'a [u8],
     ) -> WheelMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
@@ -97,9 +99,9 @@ impl<
     }
 
     pub fn new_from_pins(
-        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
-        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_MOTOR_UART_QUEUES>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES>,
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
         firmware_image: &'a [u8],
@@ -148,88 +150,117 @@ impl<
         self.stm32_uart_interface.leave_reset().await;
     }
 
-    pub async fn check_wheel_needs_flash(&mut self) -> bool {
-        let mut wheel_needs_flash = true;
-        let wheel_img_hash_ctrl: [u8; 16] = image_hash::get_wheel_img_hash();
-        defmt::debug!("Wheel Image Hash from Control Board - {:x}", wheel_img_hash_ctrl);
+    pub fn get_latest_default_img_hash(&mut self) -> [u8; 16] {
+        image_hash::get_wheel_img_hash()
+    }
 
-        defmt::trace!("Drive Motor - Update UART config 2 MHz");
+    /// Get the first 4 bytes of the currently loaded image hash on the device, Run with timeout!
+    pub async fn get_current_device_img_hash(&mut self) -> [u8; 4] {
+        loop {
+            // defmt::trace!("Wheel Interface - Sending parameter command packet");
+            self.send_params_command();
+
+            Timer::after(Duration::from_millis(5)).await;
+
+            // defmt::debug!("Wheel Interface - Checking for parameter response");
+            // Parse incoming packets
+            self.process_packets();
+            // Check if curret_params_state has updated, assuming that the
+            // params state firmware_img_hash field is initialized as 0's
+            if self.current_params_state.firmware_img_hash != [0; 4] {
+                let current_img_hash = self.current_params_state.firmware_img_hash;
+                defmt::debug!("Wheel Interface - Received parameter response");
+                defmt::trace!("Wheel Interface - Current device image hash {:x}", current_img_hash);
+                return current_img_hash
+            };
+
+            Timer::after(Duration::from_millis(5)).await;
+        }
+    }
+
+    pub async fn check_device_has_latest_default_image(&mut self) -> Result<bool, ()> {
+        let latest_img_hash = self.get_latest_default_img_hash();
+        defmt::debug!("Wheel Interface - Latest default image hash - {:x}", latest_img_hash);
+
+        defmt::trace!("Wheel Interface - Update UART config 2 MHz");
         self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
         Timer::after(Duration::from_millis(1)).await;
 
-        let wheel_img_hash_future = async {
-            loop {
-                defmt::trace!("Drive Motor - sending parameter command packet");
-                self.send_params_command();
-
-                Timer::after(Duration::from_millis(10)).await;
-
-                defmt::debug!("Drive Motor - Checking for parameter response");
-                // Parse incoming packets
-                self.process_packets();
-                // Check if curret_params_state has updated
-                if self.current_params_state.wheel_img_hash != [0; 4] {
-                    let wheel_img_hash_motr = self.current_params_state.wheel_img_hash;
-                    defmt::debug!("Drive Motor - Received parameter response");
-                    defmt::trace!("Wheel Image Hash from Motor - {:x}", wheel_img_hash_motr);
-                    return wheel_img_hash_motr
-                };
-            }
-        };
-        let wheel_response_timeout = Duration::from_millis(100);
-
-        defmt::trace!("Drive Motor - waiting for parameter response packet");
-        match with_timeout(wheel_response_timeout, wheel_img_hash_future).await {
-            Ok(wheel_img_hash_motr) => {
-                if wheel_img_hash_motr == wheel_img_hash_ctrl[..4] {
-                    wheel_needs_flash = false;
+        let res;
+        let timeout = Duration::from_millis(100);
+        defmt::trace!("Wheel Interface - Waiting for device response");
+        match with_timeout(timeout, self.get_current_device_img_hash()).await {
+            Ok(current_img_hash) => {
+                if current_img_hash == latest_img_hash[..4] {
+                    defmt::trace!("Wheel Interface - Device has the latest default image");
+                    res = Ok(true);
+                } else {
+                    defmt::trace!("Wheel Interface - Device does not have the latest default image");
+                    res = Ok(false);
                 }
             },
             Err(_) => {
-                defmt::debug!("Drive Motor - No parameter response, motor controller needs flashing");
-                wheel_needs_flash = true;
+                defmt::debug!("Wheel Interface - No device response, image hash unknown");
+                res = Err(());
             },
         }
-        return wheel_needs_flash;
-    }
 
-    pub async fn load_firmware_image(&mut self, debug_switch: bool, fw_image_bytes: &[u8]) -> Result<(), ()> {
-        let res;
-        if debug_switch {
-            defmt::info!("Drive Motor - Flashing firmware image in debug mode");
-            res = self.stm32_uart_interface.load_motor_firmware_image(fw_image_bytes).await;
-        } else {
-            defmt::info!("Drive Motor - Will check if firmware image needs flashing");
-            let controller_needs_flash: bool = self.check_wheel_needs_flash().await;
-            defmt::debug!("Motor Controller Needs Flash - {:?}", controller_needs_flash);
-
-            if controller_needs_flash {
-                defmt::trace!("UART config updated");
-                res = self.stm32_uart_interface.load_motor_firmware_image(fw_image_bytes).await;
-            } else {
-                defmt::info!("Wheel image is up to date, skipping flash");
-                res = Ok(());
-            }
-        }
-
-        // this is safe because load firmware image call will reset the target device
-        // it will begin issueing telemetry updates
-        // these are the only packets it sends so any blocked process should get the data it now needs
-        defmt::debug!("Drive Motor - Update config");
-        self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
-        Timer::after(Duration::from_millis(1)).await;
-
+        // Make sure that the uart queue is empty of any possible parameter
+        // response packets, which may cause side effects for the flashing
+        // process
+        self.process_packets();
         return res;
     }
 
-    pub async fn load_default_firmware_image(&mut self, debug_switch: bool) -> Result<(), ()> {
-        return self.load_firmware_image(debug_switch, self.firmware_image).await;
+    pub async fn init_firmware_image(&mut self, flash: bool, fw_image_bytes: &[u8]) -> Result<(), ()> {
+        if flash {
+            defmt::info!("Wheel Interface - Flashing firmware image");
+            self.stm32_uart_interface.load_firmware_image(fw_image_bytes, true).await?;
+        } else {
+            defmt::info!("Wheel Interface - Skipping firmware flash");
+        }
+
+        self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
+
+        Timer::after(Duration::from_millis(1)).await;
+
+        // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
+        self.stm32_uart_interface.leave_reset().await;
+
+        return Ok(());
     }
 
+    pub async fn init_default_firmware_image(&mut self, force_flash: bool) -> Result<(), ()> {
+        let flash;
+        if force_flash {
+            defmt::info!("Wheel Interface - Force flash enabled");
+            flash = true
+        } else {
+            defmt::debug!("Wheel Interface - Resetting motor controller");
+            self.reset().await;
+            let res = self.check_device_has_latest_default_image().await;
+            match res {
+                Ok(has_latest) => {
+                    if has_latest {
+                        flash = false;
+                    } else {
+                        flash = true;
+                    }
+                },
+                Err(_) => {
+                    flash = true;
+                }
+            }
+        }
+        return self.init_firmware_image(flash, self.firmware_image).await;
+    }
+    
     pub async fn save_motor_current_constants(&mut self, current_constant: f32) -> Result<(), ()> {
         defmt::debug!("Drive Motor - Saving motor current constant: {:?}", current_constant);
         self.stm32_uart_interface.write_current_calibration_constants(current_constant).await
+
     }
+
 
     pub fn process_packets(&mut self) {
         while let Ok(res) = self.stm32_uart_interface.try_read_data() {

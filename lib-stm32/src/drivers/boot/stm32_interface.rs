@@ -48,10 +48,11 @@ pub struct Stm32Interface<
         const LEN_TX: usize,
         const DEPTH_RX: usize,
         const DEPTH_TX: usize,
+        const DEBUG_UART_QUEUES: bool,
 > {
-    uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
-    reader: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
-    writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
+    uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
+    reader: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
+    writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
     boot0_pin: Output<'a>,
     reset_pin: Output<'a>,
 
@@ -66,16 +67,17 @@ impl<
         const LEN_TX: usize,
         const DEPTH_RX: usize,
         const DEPTH_TX: usize,
-    > Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
+        const DEBUG_UART_QUEUES: bool,
+    > Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_UART_QUEUES>
 {
     pub fn new(
-        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
-        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
         boot0_pin: Output<'a>,
         reset_pin: Output<'a>,
         reset_polarity_high: bool,
-    ) -> Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
+    ) -> Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_UART_QUEUES> {
         Stm32Interface {
             uart,
             reader: read_queue,
@@ -88,14 +90,14 @@ impl<
     }
 
     pub fn new_from_pins(
-        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
-        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
         _reset_pin_pull: Pull,
         reset_polarity_high: bool,
-    ) -> Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
+    ) -> Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_UART_QUEUES> {
         let boot0_output = Output::new(boot0_pin, Level::Low, Speed::Medium);
 
         let initial_reset_level = if reset_polarity_high {
@@ -714,8 +716,11 @@ impl<
         Ok(())
     }
 
-    pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
-        if !self.in_bootloader {
+    pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8], leave_in_reset: bool) -> Result<(), ()> {
+        if self.in_bootloader {
+            defmt::trace!("device is already in bootloader");
+        } else {
+            defmt::trace!("resetting device into bootloader");
             if let Err(err) = self.reset_into_bootloader().await {
                 return Err(err);
             }
@@ -754,7 +759,7 @@ impl<
             return Err(err);
         }
 
-        self.reset_into_program(false).await;
+        self.reset_into_program(leave_in_reset).await;
 
         Ok(())
     }

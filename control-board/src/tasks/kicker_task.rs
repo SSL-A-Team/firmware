@@ -1,11 +1,11 @@
-use ateam_common_packets::radio::DataPacket;
+use ateam_common_packets::{bindings::KickRequest, radio::DataPacket};
 use ateam_lib_stm32::{drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::{gpio::Pin, usart::Uart};
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Ticker, Instant};
 
-use crate::{drivers::kicker::Kicker, include_kicker_bin, pins::*, robot_state::SharedRobotState, SystemIrqs};
+use crate::{drivers::kicker::Kicker, include_kicker_bin, pins::*, robot_state::SharedRobotState, SystemIrqs, DEBUG_KICKER_UART_QUEUES};
 
 include_kicker_bin! {KICKER_FW_IMG, "kicker.bin"}
 
@@ -15,7 +15,7 @@ const MAX_RX_PACKET_SIZE: usize = 64;
 const RX_BUF_DEPTH: usize = 20;
 const TELEMETRY_TIMEOUT_MS: u64 = 2000;
 
-static_idle_buffered_uart!(KICKER, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(KICKER, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_KICKER_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
 #[macro_export]
 macro_rules! create_kicker_task {
@@ -51,6 +51,7 @@ pub struct KickerTask<'a,
     kicker_task_state: KickerTaskState,
     robot_state: &'static SharedRobotState,
     commands_subscriber: CommandsSubscriber,
+    last_command_received_time: Option<Instant>,
     kicker_telemetry_publisher: KickerTelemetryPublisher,
 }
 
@@ -68,14 +69,15 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
             kicker_task_state: KickerTaskState::PoweredOff,
             robot_state: robot_state,
             commands_subscriber: command_subscriber,
+            last_command_received_time: None,
             kicker_telemetry_publisher,
         }
     }
 
     pub fn new_from_pins(
-        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX>,
-        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX>,
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_KICKER_UART_QUEUES>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_KICKER_UART_QUEUES>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_KICKER_UART_QUEUES>,
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
         firmware_image: &'a [u8],
@@ -90,21 +92,22 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
 
     pub async fn kicker_task_entry(&mut self) {
         let mut main_loop_ticker = Ticker::every(Duration::from_hz(100));
-        let mut last_packet_sent_time = Instant::now();
+        // Connection timeout start will be reset when connection is established and when a telemetry packet is received
+        let mut connection_timeout_start = Instant::now();
         loop {
             let cur_robot_state = self.robot_state.get_state();
 
             if self.kicker_driver.process_telemetry() {
-                last_packet_sent_time = Instant::now();
+                connection_timeout_start = Instant::now();
 
                 self.kicker_telemetry_publisher.publish_immediate(self.kicker_driver.get_lastest_state());
             }
 
             let cur_time = Instant::now();
-            if self.kicker_task_state == KickerTaskState::Connected && Instant::checked_duration_since(&cur_time, last_packet_sent_time).unwrap().as_millis() > TELEMETRY_TIMEOUT_MS {
-                defmt::error!("Kicker telemetry timed out! Will reset.");
+            if self.kicker_task_state == KickerTaskState::Connected && Instant::checked_duration_since(&cur_time, connection_timeout_start).unwrap().as_millis() > TELEMETRY_TIMEOUT_MS {
+                // Check if telemetry has been received in this timeout period
+                defmt::error!("Kicker Interface - Kicker telemetry timed out, resetting kicker!");
                 self.kicker_driver.reset().await;
-                last_packet_sent_time = Instant::now();
             }
 
             // TODO global state overrides of kicker state
@@ -115,13 +118,14 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
 
             match self.kicker_task_state {
                 KickerTaskState::PoweredOff => {
+                    defmt::trace!("Kicker Interface - Kicker is in power off state");
                     if cur_robot_state.hw_init_state_valid && !cur_robot_state.shutdown_requested {
                         self.kicker_task_state = KickerTaskState::PowerOn;
                     }
                 },
                 KickerTaskState::PowerOn => {
                     // lets power settle on kicker
-                    defmt::debug!("reset kicker");
+                    defmt::trace!("Kicker Interface - Reset kicker");
 
                     self.kicker_driver.enter_reset().await;
                     self.kicker_driver.leave_reset().await;
@@ -129,19 +133,20 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
                     self.kicker_task_state = KickerTaskState::ConnectUart;
                 },
                 KickerTaskState::ConnectUart => {
-                    let flash_firmware = cur_robot_state.hw_debug_mode;
-                    if self.kicker_driver.init_default_firmware_image(flash_firmware).await.is_err() {
+                    let force_flash = cur_robot_state.hw_debug_mode;
+                    if self.kicker_driver.init_default_firmware_image(force_flash).await.is_err() {
                         // attempt to power on the board again
                         // if the kicker is missing or bugged we'll stay in a power on -> attempt
                         // uart loop forever
                         self.kicker_task_state = KickerTaskState::PowerOn;
 
-                        defmt::error!("kicker firmware load failed, try power cycle");
+                        defmt::error!("Kicker Interface - Kicker firmware load failed, try power cycle");
                     } else {
                         self.kicker_task_state = KickerTaskState::Connected;
+                        connection_timeout_start = Instant::now();
                         main_loop_ticker.reset();
 
-                        defmt::info!("kicker connected!");
+                        defmt::info!("Kicker Interface - Kicker connection loop start");
                     }
                 },
                 KickerTaskState::Connected => {
@@ -149,21 +154,33 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
                     // external events will move us out of this state
                 },
                 KickerTaskState::InitiateShutdown => {
+                    defmt::trace!("Kicker Interface - Requesting shutdown.");
                     self.kicker_driver.request_shutdown();
 
                     // wait for kicker to ack shutdown
                     if self.kicker_driver.shutdown_acknowledge() {
-                        defmt::info!("kicker acknowledged shutdown request");
+                        defmt::info!("Kicker Interface - Kicker acknowledged shutdown request");
                         self.kicker_task_state = KickerTaskState::WaitShutdown;
                     }
                 },
                 KickerTaskState::WaitShutdown => {
                     if self.kicker_driver.shutdown_completed() {
-                        defmt::info!("kicker finished shutdown");
+                        defmt::info!("Kicker Interface - Kicker finished shutdown");
                         self.kicker_task_state = KickerTaskState::PoweredOff;
                         self.robot_state.set_kicker_shutdown_complete(true);
                     }
                 },
+            }
+
+            // kicker and radio loop rates are both 100Hz, so 10ms packet interval
+            // if we miss 10 in a row, something has gone quite wrong
+            // override commands to safe ones
+            if Instant::now() - self.last_command_received_time.unwrap_or(Instant::now()) > Duration::from_millis(500) {
+                // Avoid spamming logs while the system starts up
+                defmt::error!("kicker task has stopped receiving commands from the radio task and will de-arm the kicker board");
+                self.kicker_driver.set_kick_strength(0.0);
+                self.kicker_driver.request_kick(KickRequest::KR_DISABLE);
+                self.kicker_driver.set_drib_vel(0.0);
             }
 
             // if we are in any substate of connected, then send
@@ -173,7 +190,7 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
 
                 let ball_detected = self.kicker_driver.ball_detected();
                 if ball_detected {
-                    defmt::info!("ball detected!");
+                    defmt::info!("Kicker Interface - Ball detected!");
                 }
 
                 self.robot_state.set_ball_detected(ball_detected);
@@ -192,15 +209,18 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
             match pkt {
                 WaitResult::Lagged(amnt) => {
                     if amnt > 3 {
-                        defmt::warn!("kicker task lagged processing commands by {} msgs", amnt);
+                        defmt::warn!("Kicker Interface - Kicker task lagged processing commands by {} msgs", amnt);
                     }
                 },
                 WaitResult::Message(cmd) => {
                     match cmd {
                         DataPacket::BasicControl(bc_pkt) => {
+                            self.last_command_received_time = Some(Instant::now());
+
                             self.kicker_driver.set_kick_strength(bc_pkt.kick_vel);
                             self.kicker_driver.request_kick(bc_pkt.kick_request);
                             self.kicker_driver.set_drib_vel(bc_pkt.dribbler_speed);
+                            self.kicker_driver.set_drib_multiplier(bc_pkt.dribbler_multiplier());
                         },
                         DataPacket::ParameterCommand(_) => {
                             // we currently don't have any kicker parameters
@@ -216,7 +236,7 @@ const DEPTH_TX: usize> KickerTask<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
 async fn kicker_task_entry(mut kicker_task: KickerTask<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>) {
     loop {
         kicker_task.kicker_task_entry().await;
-        defmt::error!("radio task returned");
+        defmt::error!("Kicker Interface - Kicker task returned");
     }
 }
 

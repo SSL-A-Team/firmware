@@ -3,7 +3,7 @@
 
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
-    interrupt, pac::Interrupt
+    interrupt, pac::Interrupt, wdg::IndependentWatchdog
 };
 use embassy_sync::pubsub::PubSubChannel;
 
@@ -129,7 +129,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
        robot_state,
        p);
 
-    create_radio_task!(main_spawner, radio_uart_queue_spawner, uart_queue_spawner,
+    create_radio_task!(main_spawner, radio_uart_queue_spawner, radio_uart_queue_spawner,
         robot_state,
         radio_command_publisher, radio_telemetry_subscriber, radio_led_cmd_publisher,
         wifi_credentials,
@@ -158,7 +158,11 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         kicker_board_telemetry_publisher,
         p);
 
+    let mut iwdg = IndependentWatchdog::new(p.IWDG1, 1_000_000);
+    iwdg.unleash();
+
     loop {
-        Timer::after_millis(10).await;
+        Timer::after_millis(100).await;
+        iwdg.pet();
     }
 }

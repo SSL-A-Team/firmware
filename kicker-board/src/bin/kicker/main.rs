@@ -3,7 +3,10 @@
 #![feature(type_alias_impl_trait)]
 #![feature(sync_unsafe_cell)]
 
-use ateam_kicker_board::{drivers::{breakbeam::Breakbeam, DribblerMotor}, include_external_cpp_bin, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin, GreenStatusLedPin}, tasks::{get_system_config, ClkSource}};
+use core::sync::atomic::{AtomicBool, AtomicU32};
+use core::sync::atomic::Ordering::Relaxed;
+
+use ateam_kicker_board::{drivers::{breakbeam::Breakbeam, DribblerMotor}, include_external_cpp_bin, pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin, GreenStatusLedPin}, tasks::{get_system_config, ClkSource}, DEBUG_COMS_UART_QUEUES, DEBUG_DRIB_UART_QUEUES};
 
 use defmt::*;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, pubsub::{PubSubChannel, Publisher, Subscriber}};
@@ -27,12 +30,14 @@ use ateam_kicker_board::{
 
 use ateam_lib_stm32::{drivers::boot::stm32_interface::{get_bootloader_uart_config, Stm32Interface}, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl, uart::queue::{UartReadQueue, UartWriteQueue}};
 
+use ateam_kicker_board::image_hash::get_kicker_img_hash;
+
 use ateam_common_packets::bindings::{
     KickRequest::{self, KR_ARM, KR_DISABLE},
     KickerControl, KickerTelemetry, MotorTelemetry,
 };
 
-const MAX_KICK_SPEED: f32 = 5.5;
+const MAX_KICK_SPEED: f32 = 6.5;
 const SHUTDOWN_KICK_SPEED: f32 = 0.20;
 
 pub const CHARGE_TARGET_VOLTAGE: f32 = 182.0;
@@ -46,7 +51,7 @@ const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 32;
 const RX_BUF_DEPTH: usize = 3;
-static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH);
+static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES);
 
 include_external_cpp_bin! {DRIB_FW_IMG, "dribbler.bin"}
 
@@ -54,9 +59,11 @@ const DRIB_MAX_TX_PACKET_SIZE: usize = 64;
 const DRIB_TX_BUF_DEPTH: usize = 3;
 const DRIB_MAX_RX_PACKET_SIZE: usize = 64;
 const DRIB_RX_BUF_DEPTH: usize = 20;
-static_idle_buffered_uart_nl!(DRIB, DRIB_MAX_RX_PACKET_SIZE, DRIB_RX_BUF_DEPTH, DRIB_MAX_TX_PACKET_SIZE, DRIB_TX_BUF_DEPTH);
+static_idle_buffered_uart_nl!(DRIB, DRIB_MAX_RX_PACKET_SIZE, DRIB_RX_BUF_DEPTH, DRIB_MAX_TX_PACKET_SIZE, DRIB_TX_BUF_DEPTH, DEBUG_DRIB_UART_QUEUES);
 
 static DRIB_VEL_PUBSUB: PubSubChannel<CriticalSectionRawMutex, f32, 1, 1, 1> = PubSubChannel::new();
+static DRIB_MULT: AtomicU32 = AtomicU32::new(100);
+static BALL_DETECT: AtomicBool = AtomicBool::new(false);
 static DRIB_TELEM_PUBSUB: PubSubChannel<CriticalSectionRawMutex, MotorTelemetry, 1, 1, 1> = PubSubChannel::new();
 
 
@@ -65,10 +72,12 @@ async fn high_pri_kick_task(
     coms_reader: &'static UartReadQueue<
         MAX_RX_PACKET_SIZE,
         RX_BUF_DEPTH,
+        DEBUG_COMS_UART_QUEUES,
     >,
     coms_writer: &'static UartWriteQueue<
         MAX_TX_PACKET_SIZE,
         TX_BUF_DEPTH,
+        DEBUG_COMS_UART_QUEUES,
     >,
     mut adc: Adc<'static, embassy_stm32::peripherals::ADC1>,
     charge_pin: ChargePin,
@@ -88,6 +97,9 @@ async fn high_pri_kick_task(
     let kick_pin = Output::new(kick_pin, Level::Low, Speed::Medium);
     let chip_pin = Output::new(chip_pin, Level::Low, Speed::Medium);
     let mut kick_manager = KickManager::new(charge_pin, kick_pin, chip_pin);
+
+    // image hash
+    let kicker_img_hash_kicker = get_kicker_img_hash();
 
     // debug LEDs
     let mut status_led = Output::new(grn_led_pin, Level::Low, Speed::Low);
@@ -121,6 +133,7 @@ async fn high_pri_kick_task(
     // loop rate control
     let mut ticker = Ticker::every(Duration::from_millis(1));
     let mut last_packet_sent_time = Instant::now();
+    let mut last_packet_received_time = Instant::now();
 
     breakbeam.enable_tx();
 
@@ -171,6 +184,9 @@ async fn high_pri_kick_task(
             }
 
             drib_vel_pub.publish_immediate(kicker_control_packet.drib_speed);
+            DRIB_MULT.store(kicker_control_packet.dribbler_mult(), Relaxed);
+
+            last_packet_received_time = Instant::now();
         }
 
         // get latest dribbler telem from lower prio task
@@ -179,6 +195,15 @@ async fn high_pri_kick_task(
         }
 
         let ball_detected = breakbeam.read();
+        BALL_DETECT.store(ball_detected, Relaxed);
+
+        // we've missed 20 packet frames from control
+        if Instant::now() - last_packet_received_time > Duration::from_millis(200) {
+            defmt::warn!("the kicker board is not receiving commands from the control board and dearm itself");
+            kicker_control_packet.drib_speed = 0.0;
+            kicker_control_packet.kick_speed = 0.0;
+            kicker_control_packet.kick_request = KickRequest::KR_DISABLE;
+        }
 
         ///////////////////////////////////////////////
         //  manage repetitive kick commands + state  //
@@ -361,6 +386,7 @@ async fn high_pri_kick_task(
                 kicker_telemetry_packet.battery_voltage = battery_voltage;
 
                 kicker_telemetry_packet.dribbler_motor = dribbler_motor_telemetry;
+                kicker_telemetry_packet.kicker_image_hash.copy_from_slice(&kicker_img_hash_kicker[0..4]);
 
                 // raw interpretaion of a struct for wire transmission is unsafe
                 unsafe {
@@ -400,13 +426,14 @@ async fn high_pri_kick_task(
 
 #[embassy_executor::task]
 async fn low_pri_dribble_task(
-        drib_motor_interface: Stm32Interface<'static, DRIB_MAX_RX_PACKET_SIZE, DRIB_MAX_TX_PACKET_SIZE, DRIB_RX_BUF_DEPTH, DRIB_TX_BUF_DEPTH>,
+        drib_motor_interface: Stm32Interface<'static, DRIB_MAX_RX_PACKET_SIZE, DRIB_MAX_TX_PACKET_SIZE, DRIB_RX_BUF_DEPTH, DRIB_TX_BUF_DEPTH, DEBUG_DRIB_UART_QUEUES>,
         mut drib_vel_sub: Subscriber<'static, CriticalSectionRawMutex, f32, 1, 1, 1>,
         drib_telem_pub: Publisher<'static, CriticalSectionRawMutex, MotorTelemetry, 1, 1, 1>) -> ! {
     let mut drib_motor = DribblerMotor::new(drib_motor_interface, DRIB_FW_IMG, 1.0);
 
     defmt::info!("flashing dribbler motor firmware...");
-    let res = drib_motor.load_default_firmware_image().await;
+    let force_flash = false;
+    let res = drib_motor.init_default_firmware_image(force_flash).await;
     if res.is_err() {
         defmt::error!("failed to load dribbler firmware");
     } else {
@@ -424,10 +451,18 @@ async fn low_pri_dribble_task(
             lastest_drib_vel = drib_vel;
             defmt::debug!("got a dribbler velocity update {:?}", lastest_drib_vel);
         }
-
         drib_motor.process_packets();
 
-        let drib_sp = -1.0 * lastest_drib_vel / 1000.0;
+        let mut drib_mult = DRIB_MULT.load(Relaxed);
+        if drib_mult == 0 || drib_mult > 100 {
+            drib_mult = 100;
+        }
+        let drib_mult_float = (drib_mult as f32) / 100.0f32;
+
+        let mut drib_sp = -1.0 * lastest_drib_vel / 1000.0;
+        if !BALL_DETECT.load(Relaxed) {
+            drib_sp *= drib_mult_float;
+        }
         drib_motor.set_setpoint(drib_sp);
 
         drib_motor.send_motion_command();
@@ -561,7 +596,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(low_pri_dribble_task(
         drib_motor_interface,
         DRIB_VEL_PUBSUB.subscriber().expect("failed to get dribler vel subscriber for drib task"),
-        DRIB_TELEM_PUBSUB.publisher().expect("failed to get drib telem pub for dribble task")
+        DRIB_TELEM_PUBSUB.publisher().expect("failed to get drib telem pub for dribble task"),
     )).expect("failed to spawn dribble task");
 
     /////////////////////////////////////////

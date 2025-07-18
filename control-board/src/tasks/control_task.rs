@@ -2,12 +2,12 @@ use ateam_common_packets::{bindings::{BasicControl, BasicTelemetry, KickerTeleme
 use ateam_lib_stm32::{drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::Uart;
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Duration, Instant, Ticker, Timer};
 use nalgebra::{Vector3, Vector4};
 
 use crate::{include_external_cpp_bin, motion::{self, params::robot_physical_params::{
         WHEEL_ANGLES_DEG, WHEEL_DISTANCE_TO_ROBOT_CENTER_M, WHEEL_RADIUS_M
-    }, robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, parameter_interface::ParameterInterface, pins::*, robot_state::{RobotState, SharedRobotState}, stspin_motor::WheelMotor, SystemIrqs, ROBOT_VERSION_MAJOR, ROBOT_VERSION_MINOR};
+    }, robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, parameter_interface::ParameterInterface, pins::*, robot_state::{RobotState, SharedRobotState}, stspin_motor::WheelMotor, SystemIrqs, DEBUG_MOTOR_UART_QUEUES, ROBOT_VERSION_MAJOR, ROBOT_VERSION_MINOR};
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 
@@ -17,10 +17,10 @@ const MAX_RX_PACKET_SIZE: usize = 60;
 const RX_BUF_DEPTH: usize = 20;
 
 type ControlWheelMotor = WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>;
-static_idle_buffered_uart!(FRONT_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
-static_idle_buffered_uart!(BACK_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
-static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
-static_idle_buffered_uart!(FRONT_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(FRONT_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(BACK_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(FRONT_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
 const TICKS_WITHOUT_PACKET_STOP: usize = 20;
 
@@ -357,7 +357,15 @@ impl <
             let mut motor_br_last_timestamp_ms = self.motor_br.read_current_timestamp_ms();
             let mut motor_fr_last_timestamp_ms = self.motor_fr.read_current_timestamp_ms();
 
+            let mut last_loop_term_time = Instant::now();
+
             loop {
+                let loop_start_time = Instant::now();
+                let loop_invocation_dead_time = loop_start_time - last_loop_term_time;
+                if loop_start_time - last_loop_term_time > Duration::from_millis(11) {
+                    defmt::warn!("control loop scheuling lagged. Expected ~10ms between loop invocations, but got {:?}us", loop_invocation_dead_time.as_micros());
+                }
+
                 self.motor_fl.process_packets();
                 self.motor_bl.process_packets();
                 self.motor_br.process_packets();
@@ -511,6 +519,14 @@ impl <
                 // increment seq number
                 seq_number += 1;
                 seq_number &= 0xFFF;
+
+                let loop_end_time = Instant::now();
+                let loop_execution_time = loop_end_time - loop_start_time;
+                if loop_execution_time > Duration::from_millis(2) {
+                    defmt::warn!("control loop is taking >2ms to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {:?}", loop_execution_time);
+                }
+
+                last_loop_term_time = Instant::now();
 
                 loop_rate_ticker.next().await;
             }
@@ -691,30 +707,31 @@ impl <
 
         async fn flash_motor_firmware(&mut self, debug: bool) {
             defmt::info!("flashing firmware");
+            let force_flash = debug;
             if debug {
                 let mut had_motor_error = false;
-                if self.motor_fl.load_default_firmware_image(debug).await.is_err() {
+                if self.motor_fl.init_default_firmware_image(force_flash).await.is_err() {
                     defmt::error!("failed to flash FL");
                     had_motor_error = true;
                 } else {
                     defmt::info!("FL flashed");
                 }
 
-                if self.motor_bl.load_default_firmware_image(debug).await.is_err() {
+                if self.motor_bl.init_default_firmware_image(force_flash).await.is_err() {
                     defmt::error!("failed to flash BL");
                     had_motor_error = true;
                 } else {
                     defmt::info!("BL flashed");
                 }
 
-                if self.motor_br.load_default_firmware_image(debug).await.is_err() {
+                if self.motor_br.init_default_firmware_image(force_flash).await.is_err() {
                     defmt::error!("failed to flash BR");
                     had_motor_error = true;
                 } else {
                     defmt::info!("BR flashed");
                 }
 
-                if self.motor_fr.load_default_firmware_image(debug).await.is_err() {
+                if self.motor_fr.init_default_firmware_image(force_flash).await.is_err() {
                     defmt::error!("failed to flash FR");
                     had_motor_error = true;
                 } else {
@@ -728,10 +745,10 @@ impl <
                 }
             } else {
                 let res = embassy_futures::join::join4(
-                    self.motor_fl.load_default_firmware_image(debug),
-                    self.motor_bl.load_default_firmware_image(debug),
-                    self.motor_br.load_default_firmware_image(debug),
-                    self.motor_fr.load_default_firmware_image(debug),
+                    self.motor_fl.init_default_firmware_image(force_flash),
+                    self.motor_bl.init_default_firmware_image(force_flash),
+                    self.motor_br.init_default_firmware_image(force_flash),
+                    self.motor_fr.init_default_firmware_image(force_flash),
                 )
                 .await;
 
@@ -780,8 +797,8 @@ impl <
         fn stop_wheels(&self) -> bool {
             // defmt::debug!("hco: {}, sd req: {}, estop: {}", self.last_power_telemetry.high_current_operations_allowed() == 0, self.shared_robot_state.shutdown_requested(), self.last_command.emergency_stop() != 0);
 
-            self.last_power_telemetry.high_current_operations_allowed() == 0
-            || self.shared_robot_state.shutdown_requested()
+            // self.last_power_telemetry.high_current_operations_allowed() == 0
+            self.shared_robot_state.shutdown_requested()
             || self.last_command.emergency_stop() != 0
         }
     }
