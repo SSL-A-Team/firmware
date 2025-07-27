@@ -9,18 +9,15 @@ use embassy_stm32::{
 
 use defmt_rtt as _; 
 
-use ateam_control_board::{create_io_task, get_system_config, pins::BatteryVoltPubSub, robot_state::SharedRobotState, songs::TEST_SONG};
+use ateam_control_board::{create_io_task, get_system_config, robot_state::SharedRobotState, songs::TEST_SONG};
 
 
-use embassy_sync::pubsub::PubSubChannel;
 use embassy_time::Timer;
 // provide embedded panic probe
 use panic_probe as _;
 use static_cell::ConstStaticCell;
 
 static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
-
-static BATTERY_VOLT_CHANNEL: BatteryVoltPubSub = PubSubChannel::new();
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
@@ -47,9 +44,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  setup inter-task coms channels  //
     //////////////////////////////////////
 
-    let battery_volt_publisher = BATTERY_VOLT_CHANNEL.publisher().unwrap();
-
-
     ///////////////////
     //  start tasks  //
     ///////////////////
@@ -58,7 +52,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             
     create_io_task!(main_spawner,
         robot_state,
-        battery_volt_publisher,
         p);
 
     let ch2 = PwmPin::new_ch2(p.PE6, OutputType::PushPull);
@@ -72,24 +65,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     }
 
     tone_player.play_song().await;
-
-
-
-    // let max = pwm.get_max_duty();
-    // pwm.enable(Channel::Ch2);
-
-
-    // pwm.set_duty(Channel::Ch2, max / 2);
-
-    // loop {
-    //     pwm.set_frequency(hz(35));
-    //     Timer::after_millis(1000).await;
-    //     pwm.set_frequency(hz(7000));
-    //     Timer::after_millis(1000).await;
-    //     pwm.disable(Channel::Ch2);
-
-    //     break;
-    // }
 
     loop {
         Timer::after_millis(10).await;

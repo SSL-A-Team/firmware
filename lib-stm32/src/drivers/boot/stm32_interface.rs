@@ -1,16 +1,14 @@
 use core::cmp::min;
 
 use defmt_rtt as _;
-use defmt::*;
 
-use embassy_stm32::gpio::{Level, Output, OutputOpenDrain, Pin, Speed, Pull};
-use embassy_stm32::pac;
-use embassy_stm32::usart::{self, Config, Parity, StopBits};
+use embassy_stm32::gpio::{Level, Output, Pin, Speed, Pull};
+use embassy_stm32::usart::{self, Config, DataBits, Parity, StopBits};
 use embassy_time::{Duration, Timer};
 use embassy_time::with_timeout;
 
-use ateam_lib_stm32::queue::{DequeueRef, Error};
-use ateam_lib_stm32::uart::queue::{Reader, Writer, UartReadQueue, UartWriteQueue};
+use crate::queue::{DequeueRef, Error};
+use crate::uart::queue::{IdleBufferedUart, Reader, UartReadQueue, UartWriteQueue, Writer};
 
 pub const STM32_BOOTLOADER_MAX_BAUD_RATE: u32 = 115_200;
 pub const STM32_BOOTLOADER_ACK: u8 = 0x79;
@@ -41,18 +39,17 @@ pub fn get_bootloader_uart_config() -> Config {
 
 pub struct Stm32Interface<
         'a,
-        UART: usart::Instance,
-        DmaRx: usart::RxDma<UART>,
-        DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
         const LEN_TX: usize,
         const DEPTH_RX: usize,
         const DEPTH_TX: usize,
+        const DEBUG_UART_QUEUES: bool,
 > {
-    reader: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
-    writer: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+    uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
+    reader: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
+    writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
     boot0_pin: Output<'a>,
-    reset_pin: OutputOpenDrain<'a>,
+    reset_pin: Output<'a>,
 
     reset_pin_noninverted: bool,
 
@@ -61,23 +58,23 @@ pub struct Stm32Interface<
 
 impl<
         'a,
-        UART: usart::Instance,
-        DmaRx: usart::RxDma<UART>,
-        DmaTx: usart::TxDma<UART>,
         const LEN_RX: usize,
         const LEN_TX: usize,
         const DEPTH_RX: usize,
         const DEPTH_TX: usize,
-    > Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
+        const DEBUG_UART_QUEUES: bool,
+    > Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_UART_QUEUES>
 {
     pub fn new(
-        read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
         boot0_pin: Output<'a>,
-        reset_pin: OutputOpenDrain<'a>,
+        reset_pin: Output<'a>,
         reset_polarity_high: bool,
-    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
+    ) -> Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_UART_QUEUES> {
         Stm32Interface {
+            uart,
             reader: read_queue,
             writer: write_queue,
             boot0_pin,
@@ -88,13 +85,14 @@ impl<
     }
 
     pub fn new_from_pins(
-        read_queue: &'a UartReadQueue<UART, DmaRx, LEN_RX, DEPTH_RX>,
-        write_queue: &'a UartWriteQueue<UART, DmaTx, LEN_TX, DEPTH_TX>,
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
-        reset_pin_pull: Pull,
+        _reset_pin_pull: Pull,
         reset_polarity_high: bool,
-    ) -> Stm32Interface<'a, UART, DmaRx, DmaTx, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
+    ) -> Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_UART_QUEUES> {
         let boot0_output = Output::new(boot0_pin, Level::Low, Speed::Medium);
 
         let initial_reset_level = if reset_polarity_high {
@@ -102,9 +100,10 @@ impl<
         } else {
             Level::High
         };
-        let reset_output = OutputOpenDrain::new(reset_pin, initial_reset_level, Speed::Medium, reset_pin_pull);
+        let reset_output = Output::new(reset_pin, initial_reset_level, Speed::Medium);
 
         Stm32Interface {
+            uart,
             reader: read_queue,
             writer: write_queue,
             boot0_pin: boot0_output,
@@ -208,6 +207,7 @@ impl<
             self.enter_reset().await;
         } else {
             // reset the device
+            // defmt::info!("resetting device");
             self.hard_reset().await;
         }
     }
@@ -215,15 +215,12 @@ impl<
     pub async fn update_uart_config(&self, baudrate: u32, parity: Parity) {
         let mut config = usart::Config::default();
         config.baudrate = baudrate;
+        config.data_bits = DataBits::DataBits8;
         config.parity = parity;
 
-        if self.writer.update_uart_config(config).await.is_err() {
+        if self.uart.update_uart_config(config).await.is_err() {
             defmt::panic!("failed to update uart config");
         }
-    }
-
-    pub async fn read_latest_packet(&self) {
-        self.reader.read(|buf| {}).await;
     }
 
     pub fn try_read_data(&self) -> Result<DequeueRef<LEN_RX, DEPTH_RX>, Error> {
@@ -378,7 +375,7 @@ impl<
             return res;
         }
 
-        // defmt::debug!("sending the load address {:?}...", write_base_addr);
+        // defmt::debug!("sending the load address {:X}...", write_base_addr);
         self.writer
         .write(|buf| {
             let sa_bytes: [u8; 4] = write_base_addr.to_be_bytes();
@@ -388,18 +385,18 @@ impl<
             buf[2] = sa_bytes[2];
             buf[3] = sa_bytes[3];
             buf[4] = cs;
-            // defmt::debug!("send buffer {:?}", buf);
+            // defmt::trace!("send load address buffer {:X}", buf);
             5
         })
         .await?;
 
         // defmt::debug!("wait for load address reply");
         self.reader.read(|buf| {
-            // defmt::info!("load address reply {:?}", buf);
+            defmt::trace!("load address reply {:X}", buf);
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
                     res = Ok(());
-                    // defmt::info!("load address accepted.");
+                    // defmt::trace!("load address accepted.");
                 } else {
                     defmt::error!("load address rejected (NACK)");
                 }
@@ -411,21 +408,22 @@ impl<
         .write(|buf| {
             let cs = Self::bootloader_checksum_buf(data);
             let data_len = data.len();
+            // defmt::trace!("firmware data buffer len {:?}", data_len);
             buf[0] = data_len as u8 - 1;
             buf[1..(data_len + 1)].copy_from_slice(data);
             buf[data_len + 1] = cs;
-            // defmt::debug!("send data buffer {:?}", buf);
+            // defmt::trace!("send data buffer {:X}", buf);
             data.len() + 2
         })
         .await?;
 
         // defmt::debug!("wait send data reply");
         self.reader.read(|buf| {
-            // defmt::info!("send data reply {:?}", buf);
+            // defmt::trace!("send data reply {:X}", buf);
             if buf.len() >= 1 {
                 if buf[0] == STM32_BOOTLOADER_ACK {
                     res = Ok(());
-                    // defmt::info!("data accepted.");
+                    // defmt::trace!("data accepted.");
                 } else {
                     defmt::error!("data rejected (NACK)");
                 }
@@ -443,8 +441,12 @@ impl<
 
         // ensure step size is below bootlaoder supported, below transmit buffer size (incl len and cs bytes),
         // and is 4-byte aligned
-        let step_size = min(256, LEN_TX - 2) & 0xFFFF_FFFC;
-        // defmt::debug!("will use data chunk sizes of {:?}", step_size);
+        let step_size = min(256, LEN_TX - 2) & 0xFFFF_FFF8;
+        defmt::debug!("bootloader will use data chunk sizes of {:?}", step_size);
+        if step_size < 8 {
+            defmt::error!("bootloader buffer too small.");
+            return Err(());
+        }   
 
         // if user doesn't supply a start address, assume base of mapped flash
         let mut addr = write_base_addr.unwrap_or(0x0800_0000);
@@ -514,8 +516,11 @@ impl<
         Ok(())
     }
 
-    pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
-        if !self.in_bootloader {
+    pub async fn load_firmware_image(&mut self, fw_image_bytes: &[u8], leave_in_reset: bool) -> Result<(), ()> {
+        if self.in_bootloader {
+            defmt::trace!("device is already in bootloader");
+        } else {
+            defmt::trace!("resetting device into bootloader");
             if let Err(err) = self.reset_into_bootloader().await {
                 return Err(err);
             }
@@ -534,8 +539,11 @@ impl<
                 19 => {
                     defmt::trace!("found stm32f40xxx device");
                 }
+                105 => {
+                    defmt::trace!("found stm32g474xx device");
+                }
                 _ => {
-                    defmt::trace!("found unknown device id {}", device_id);
+                    defmt::error!("found unknown device id {}", device_id);
                     return Err(());
                 }
             }
@@ -551,7 +559,7 @@ impl<
             return Err(err);
         }
 
-        self.reset_into_program(false).await;
+        self.reset_into_program(leave_in_reset).await;
 
         Ok(())
     }

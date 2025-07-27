@@ -1,20 +1,21 @@
 #![no_std]
 #![no_main]
-#![feature(type_alias_impl_trait)]
-#![feature(const_mut_refs)]
 #![feature(sync_unsafe_cell)]
-
+#![feature(generic_const_exprs)]
 
 use ateam_control_board::{
-    drivers::kicker::Kicker, get_system_config, include_kicker_bin, pins::{KickerRxDma, KickerTxDma, KickerUart}, stm32_interface::{self, Stm32Interface},
+    drivers::kicker::Kicker, get_system_config, include_kicker_bin,
+    DEBUG_KICKER_UART_QUEUES
 };
-use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
+use ateam_lib_stm32::{
+    drivers::boot::stm32_interface::{self, Stm32Interface},
+    idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
 use defmt::info;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
-    gpio::{Level, Output, Speed, Pull}, interrupt, pac::Interrupt, usart::Uart
+    gpio::Pull, interrupt, pac::Interrupt, usart::Uart
 };
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Duration, Ticker};
 use panic_probe as _;
 
 include_kicker_bin! {KICKER_FW_IMG, "hwtest-coms.bin"}
@@ -24,15 +25,12 @@ const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 20;
 
-make_uart_queue_pair!(KICKER,
-    KickerUart, KickerRxDma, KickerTxDma,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(KICKER, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_KICKER_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
+#[allow(non_snake_case)]
 #[interrupt]
 unsafe fn CEC() {
     UART_QUEUE_EXECUTOR.on_interrupt();
@@ -47,26 +45,6 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CEC, embassy_stm32::interrupt::Priority::P5);
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(Interrupt::CEC);
-
-    // let kicker_det = Input::new(p.PG8, Pull::Up);
-    // if kicker_det.is_high() {
-    //     defmt::warn!("kicker appears unplugged!");
-    // }
-
-    let mut kicker_pwr_pin = Output::new(p.PG8, Level::Low, Speed::Medium);
-
-    kicker_pwr_pin.set_high();
-    defmt::info!("force power off kicker");
-    Timer::after_millis(2000).await;
-    kicker_pwr_pin.set_low();
-    defmt::info!("kicker force power off done");
-
-    defmt::info!("attempting to power on kicker.");
-    Timer::after_millis(1000).await;
-    kicker_pwr_pin.set_high();
-    Timer::after_millis(200).await;
-    kicker_pwr_pin.set_low();
-    defmt::info!("power on attempt done");
 
     // loop {
     //     Timer::after_millis(1000).await;
@@ -84,14 +62,15 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     defmt::info!("init uart");
 
-    let (kicker_tx, kicker_rx) = Uart::split(kicker_usart);
-    queue_pair_register_and_spawn!(uart_queue_spawner, KICKER, kicker_rx, kicker_tx);
+    KICKER_IDLE_BUFFERED_UART.init();
+    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, KICKER, kicker_usart);
 
     defmt::info!("start qs");
 
     let kicker_stm32_interface = Stm32Interface::new_from_pins(
-        &KICKER_RX_UART_QUEUE,
-        &KICKER_TX_UART_QUEUE,
+        &KICKER_IDLE_BUFFERED_UART,
+        KICKER_IDLE_BUFFERED_UART.get_uart_read_queue(),
+        KICKER_IDLE_BUFFERED_UART.get_uart_write_queue(),
         p.PA8,
         p.PA9,
         Pull::Up,
@@ -102,7 +81,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     let kicker_firmware_image = KICKER_FW_IMG;
     let mut kicker = Kicker::new(kicker_stm32_interface, kicker_firmware_image);
-    let res = kicker.init_default_firmware_image(true).await;
+    let force_flash = true;
+    let res = kicker.init_default_firmware_image(force_flash).await;
 
     if res.is_err() {
         defmt::warn!("kicker flashing failed.");

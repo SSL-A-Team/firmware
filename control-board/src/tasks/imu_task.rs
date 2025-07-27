@@ -1,38 +1,48 @@
-use embassy_executor::Spawner;
+use embassy_executor::{SendSpawner, Spawner};
 use embassy_futures::select::{select, Either};
 use embassy_stm32::Peripheral;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Pull;
 use embassy_stm32::spi::{SckPin, MisoPin, MosiPin};
 
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{Instant, Timer};
 use nalgebra::Vector3;
-
-use static_cell::ConstStaticCell;
 
 use ateam_lib_stm32::drivers::imu::bmi323::{self, *};
 
 use crate::pins::*;
 use crate::robot_state::SharedRobotState;
+use crate::tasks::dotstar_task::{ControlBoardLedCommand, ImuStatusLedCommand};
 
 const TIPPED_MIN_DURATION_MS: u64 = 1000;
 
 #[macro_export]
 macro_rules! create_imu_task {
-    ($main_spawner:ident, $robot_state:ident, $imu_gyro_data_publisher:ident, $imu_accel_data_publisher:ident, $p:ident) => {
+    ($main_spawner:ident, $robot_state:ident, $imu_gyro_data_publisher:ident, $imu_accel_data_publisher:ident, $imu_led_cmd_pub:ident, $p:ident) => {
         ateam_control_board::tasks::imu_task::start_imu_task(&$main_spawner,
             $robot_state,
-            $imu_gyro_data_publisher, $imu_accel_data_publisher,
+            $imu_gyro_data_publisher, $imu_accel_data_publisher, $imu_led_cmd_pub,
             $p.SPI1, $p.PA5, $p.PA7, $p.PA6,
             $p.DMA2_CH7, $p.DMA2_CH6,
-            $p.PA4, $p.PC4, $p.PC5,
-            $p.PB1, $p.PB2, $p.EXTI1, $p.EXTI2,
-            $p.PF11);
+            $p.PA4, $p.PA3, $p.PC4,
+            $p.PB0, $p.PB1, $p.EXTI0, $p.EXTI1,
+            $p.PB2);
     };
 }
 
-// #[link_section = ".axisram.buffers"]
-// static IMU_BUFFER_CELL: ConstStaticCell<[u8; bmi323::SPI_MIN_BUF_LEN]> = ConstStaticCell::new([0; bmi323::SPI_MIN_BUF_LEN]);
+#[macro_export]
+macro_rules! create_imu_task_ie {
+    ($main_spawner:ident, $robot_state:ident, $imu_gyro_data_publisher:ident, $imu_accel_data_publisher:ident, $imu_led_cmd_pub:ident, $p:ident) => {
+        ateam_control_board::tasks::imu_task::start_imu_task_ie(&$main_spawner,
+            $robot_state,
+            $imu_gyro_data_publisher, $imu_accel_data_publisher, $imu_led_cmd_pub,
+            $p.SPI1, $p.PA5, $p.PA7, $p.PA6,
+            $p.DMA2_CH7, $p.DMA2_CH6,
+            $p.PA4, $p.PA3, $p.PC4,
+            $p.PB0, $p.PB1, $p.EXTI0, $p.EXTI1,
+            $p.PB2);
+    };
+}
 
 #[link_section = ".axisram.buffers"]
 static mut IMU_BUFFER_CELL: [u8; bmi323::SPI_MIN_BUF_LEN] = [0; bmi323::SPI_MIN_BUF_LEN];
@@ -43,6 +53,7 @@ async fn imu_task_entry(
         robot_state: &'static SharedRobotState,
         gyro_pub: GyroDataPublisher,
         accel_pub: AccelDataPublisher,
+        led_command_pub: LedCommandPublisher,
         mut imu: Bmi323<'static, 'static>,
         mut _accel_int: ExtiInput<'static>,
         mut gyro_int: ExtiInput<'static>) {
@@ -53,12 +64,15 @@ async fn imu_task_entry(
 
     'imu_configuration_loop:
     loop {
+        led_command_pub.publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Configuring)).await;
+
         // At the beginning, assume IMU is not working yet.
         robot_state.set_imu_inop(true);
         imu.init().await;
         let self_test_res = imu.self_test().await;
         if self_test_res.is_err() {
             defmt::error!("IMU self test failed");
+            led_command_pub.publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error)).await;
             Timer::after_millis(1000).await;
             continue 'imu_configuration_loop;
         }
@@ -72,6 +86,7 @@ async fn imu_task_entry(
         imu.set_gyro_interrupt_mode(InterruptMode::MappedToInt2).await;
 
         if gyro_config_res.is_err() {
+            led_command_pub.publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error)).await;
             defmt::error!("gyro configration failed.");
         }
         
@@ -84,6 +99,7 @@ async fn imu_task_entry(
         imu.set_accel_interrupt_mode(InterruptMode::MappedToInt1).await;
 
         if acc_config_res.is_err() {
+            led_command_pub.publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error)).await;
             defmt::error!("accel configration failed.");
         }
 
@@ -93,6 +109,8 @@ async fn imu_task_entry(
 
         // enable gyro int
         imu.set_int2_enabled(true).await;
+
+        led_command_pub.publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Ok)).await;
 
         'imu_data_loop:
         loop {
@@ -150,6 +168,7 @@ pub fn start_imu_task(
         robot_state: &'static SharedRobotState,
         gyro_data_publisher: GyroDataPublisher,
         accel_data_publisher: AccelDataPublisher,
+        led_cmd_publisher: LedCommandPublisher,
         peri: impl Peripheral<P = ImuSpi> + 'static,
         sck: impl Peripheral<P = impl SckPin<ImuSpi>> + 'static,
         mosi: impl Peripheral<P = impl MosiPin<ImuSpi>> + 'static,
@@ -167,8 +186,8 @@ pub fn start_imu_task(
     defmt::debug!("starting imu task...");
 
     // let imu_buf = IMU_BUFFER_CELL.take();
-
-    let imu_buf: &'static mut [u8; 14] = unsafe { &mut IMU_BUFFER_CELL };
+    // let imu_buf: &'static mut [u8; 14] = unsafe { & mut IMU_BUFFER_CELL };
+    let imu_buf: & mut [u8; bmi323::SPI_MIN_BUF_LEN] = unsafe { &mut (*(&raw mut IMU_BUFFER_CELL)) };
 
     let imu = Bmi323::new_from_pins(peri, sck, mosi, miso, txdma, rxdma, bmi323_nss, imu_buf);
 
@@ -177,6 +196,42 @@ pub fn start_imu_task(
     let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::None);
     let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::None);
 
-    imu_task_spawner.spawn(imu_task_entry(robot_state, gyro_data_publisher, accel_data_publisher, imu, accel_int, gyro_int)).unwrap();
+    imu_task_spawner.spawn(imu_task_entry(robot_state, gyro_data_publisher, accel_data_publisher, led_cmd_publisher, imu, accel_int, gyro_int)).unwrap();
+}
+
+pub fn start_imu_task_via_ie(
+    imu_task_spawner: &SendSpawner,
+    robot_state: &'static SharedRobotState,
+    gyro_data_publisher: GyroDataPublisher,
+    accel_data_publisher: AccelDataPublisher,
+    led_cmd_publisher: LedCommandPublisher,
+    peri: impl Peripheral<P = ImuSpi> + 'static,
+    sck: impl Peripheral<P = impl SckPin<ImuSpi>> + 'static,
+    mosi: impl Peripheral<P = impl MosiPin<ImuSpi>> + 'static,
+    miso: impl Peripheral<P = impl MisoPin<ImuSpi>> + 'static,
+    txdma: impl Peripheral<P = ImuSpiTxDma> + 'static,
+    rxdma: impl Peripheral<P = ImuSpiRxDma> + 'static,
+    bmi323_nss: ImuSpiNss0Pin,
+    _ext_nss1_pin: ExtImuSpiNss1Pin,
+    _ext_nss2_pin: ExtImuSpiNss2Pin,
+    accel_int_pin: impl Peripheral<P = ImuSpiInt1Pin> + 'static,
+    gyro_int_pin: impl Peripheral<P = ImuSpiInt2Pin> + 'static,
+    accel_int: impl Peripheral<P = <ImuSpiInt1Pin as embassy_stm32::gpio::Pin>::ExtiChannel> + 'static,
+    gyro_int: impl Peripheral<P = <ImuSpiInt2Pin as embassy_stm32::gpio::Pin>::ExtiChannel> + 'static,
+    _ext_imu_det_pin: ExtImuNDetPin) {
+    defmt::debug!("starting imu task...");
+
+    // let imu_buf = IMU_BUFFER_CELL.take();
+    // let imu_buf: &'static mut [u8; 14] = unsafe { & mut IMU_BUFFER_CELL };
+    let imu_buf: & mut [u8; bmi323::SPI_MIN_BUF_LEN] = unsafe { &mut (*(&raw mut IMU_BUFFER_CELL)) };
+
+    let imu = Bmi323::new_from_pins(peri, sck, mosi, miso, txdma, rxdma, bmi323_nss, imu_buf);
+
+    // IMU breakout INT2 is directly connected to the MCU with no hardware PU/PD. Select software Pull::Up and
+    // imu open drain
+    let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::None);
+    let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::None);
+
+    imu_task_spawner.spawn(imu_task_entry(robot_state, gyro_data_publisher, accel_data_publisher, led_cmd_publisher, imu, accel_int, gyro_int)).unwrap();
 }
 

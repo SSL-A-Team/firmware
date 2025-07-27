@@ -6,11 +6,13 @@ pub struct SharedRobotState {
     hw_robot_id: AtomicU8,
     hw_robot_team_is_blue: AtomicBool,
     hw_wifi_network_index: AtomicU8,
+    hw_wifi_driver_use_flow_control: AtomicBool,
     hw_debug_mode: AtomicBool,
 
     radio_inop: AtomicBool,
     imu_inop: AtomicBool,
     kicker_inop: AtomicBool,
+    power_inop: AtomicBool,
     wheels_inop: AtomicU8,
     dribbler_inop: AtomicBool,
 
@@ -20,6 +22,7 @@ pub struct SharedRobotState {
     last_packet_receive_time_ticks_ms: AtomicU32,
     radio_network_ok: AtomicBool,
     radio_bridge_ok: AtomicBool,
+    radio_send_extended_telem: AtomicBool,
 
 
     battery_low: AtomicBool,
@@ -40,15 +43,18 @@ impl SharedRobotState {
             hw_robot_id: AtomicU8::new(0),
             hw_robot_team_is_blue: AtomicBool::new(false),
             hw_wifi_network_index: AtomicU8::new(0),
+            hw_wifi_driver_use_flow_control: AtomicBool::new(true),
             hw_debug_mode: AtomicBool::new(true),
             radio_inop: AtomicBool::new(true),
             imu_inop: AtomicBool::new(true),
             kicker_inop: AtomicBool::new(true),
+            power_inop: AtomicBool::new(true),
             wheels_inop: AtomicU8::new(0x0F), 
             dribbler_inop: AtomicBool::new(true),
             last_packet_receive_time_ticks_ms: AtomicU32::new(0),
             radio_network_ok: AtomicBool::new(false), 
-            radio_bridge_ok: AtomicBool::new(false), 
+            radio_bridge_ok: AtomicBool::new(false),
+            radio_send_extended_telem: AtomicBool::new(false),
             battery_low: AtomicBool::new(false),
             battery_crit: AtomicBool::new(false),
             robot_tipped: AtomicBool::new(false),
@@ -64,25 +70,28 @@ impl SharedRobotState {
             hw_robot_id: self.get_hw_robot_id(),
             hw_robot_team_is_blue: self.hw_robot_team_is_blue(),
             hw_wifi_network_index: self.hw_wifi_network_index(),
+            hw_wifi_driver_use_flow_control: self.hw_wifi_driver_use_flow_control(),
             hw_debug_mode: self.hw_in_debug_mode(),
 
             radio_inop: self.get_radio_inop(),
             imu_inop: self.get_imu_inop(),
             kicker_inop: self.get_kicker_inop(),
+            power_inop: self.get_power_inop(),
             wheels_inop: self.get_wheels_inop(),
             dribbler_inop: self.get_dribbler_inop(),
         
             last_packet_receive_time_ticks_ms: 0,
             radio_network_ok: self.get_radio_network_ok(),
             radio_bridge_ok: self.get_radio_bridge_ok(),
+            radio_send_extended_telem: self.get_radio_send_extended_telem(),
 
             battery_low: self.get_battery_low(),
             battery_crit: self.get_battery_crit(),
 
             robot_tipped: self.robot_tipped(),
 
-            shutdown_requested: self.shutdown_requested(),
             ball_detected: self.ball_detected(),
+            shutdown_requested: self.shutdown_requested(),
             kicker_shutdown_complete: self.kicker_shutdown_complete(),
         }
     }
@@ -117,6 +126,14 @@ impl SharedRobotState {
 
     pub fn set_hw_network_index(&self, ind: u8) {
         self.hw_wifi_network_index.store(ind, Ordering::Relaxed);
+    }
+
+    pub fn hw_wifi_driver_use_flow_control(&self) -> bool {
+        self.hw_wifi_driver_use_flow_control.load(Ordering::SeqCst)
+    }
+
+    pub fn set_hw_wifi_driver_use_flow_control(&self, use_flow_control: bool) {
+        self.hw_wifi_driver_use_flow_control.store(use_flow_control, Ordering::SeqCst);
     }
  
     pub fn hw_in_debug_mode(&self) -> bool {
@@ -175,6 +192,14 @@ impl SharedRobotState {
         self.kicker_inop.store(kicker_inop, Ordering::Relaxed);
     }
 
+    pub fn get_power_inop(&self) -> bool {
+        self.power_inop.load(Ordering::Relaxed)
+    }
+
+    pub fn set_power_inop(&self, power_inop: bool) {
+        self.power_inop.store(power_inop, Ordering::Relaxed);
+    }
+
     pub fn shutdown_requested(&self) -> bool {
         self.shutdown_requested.load(Ordering::Relaxed)
     }
@@ -215,6 +240,14 @@ impl SharedRobotState {
         self.radio_bridge_ok.store(bridge_ok, Ordering::Relaxed);
     }
 
+    pub fn get_radio_send_extended_telem(&self) -> bool {
+        self.radio_send_extended_telem.load(Ordering::SeqCst)
+    }
+
+    pub fn set_radio_send_extended_telem(&self, send_extended_telem: bool) {
+        self.radio_send_extended_telem.store(send_extended_telem, Ordering::SeqCst);
+    }
+
     pub fn ball_detected(&self) -> bool {
         self.ball_detected.load(Ordering::Relaxed)
     }
@@ -239,24 +272,27 @@ pub struct RobotState {
     pub hw_robot_id: u8,
     pub hw_robot_team_is_blue: bool,
     pub hw_wifi_network_index: usize,
+    pub hw_wifi_driver_use_flow_control: bool,
     pub hw_debug_mode: bool,
 
     pub radio_inop: bool,
     pub imu_inop: bool,
     pub kicker_inop: bool,
+    pub power_inop: bool,
     pub wheels_inop: u8,
     pub dribbler_inop: bool,
 
     pub last_packet_receive_time_ticks_ms: u32,
     pub radio_network_ok: bool,
     pub radio_bridge_ok: bool,
+    pub radio_send_extended_telem: bool,
 
     pub battery_low: bool,
     pub battery_crit: bool,
 
     pub robot_tipped: bool,
 
-    pub shutdown_requested: bool,
     pub ball_detected: bool,
+    pub shutdown_requested: bool,
     pub kicker_shutdown_complete: bool,
 }

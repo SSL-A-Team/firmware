@@ -53,6 +53,6 @@
 //  FILTERING/TUNING  //
 ////////////////////////
 
-#define ENCODER_IIR_TF_MS 0.20f
+#define ENCODER_IIR_TF_MS 190.0f
 #define TORQUE_IIR_TF_MS 0.40f
 // #define DC_IIR_TF_MS 0.20f

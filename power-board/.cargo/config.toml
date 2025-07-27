@@ -1,0 +1,8 @@
+[build]
+target = "thumbv6m-none-eabi"
+
+[target.thumbv6m-none-eabi]
+runner = 'probe-rs run --chip STM32G030C8Tx --connect-under-reset'
+
+[env]
+DEFMT_LOG = "debug"

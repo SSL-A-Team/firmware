@@ -1,4 +1,4 @@
-use embassy_stm32::{time::hz, timer::{simple_pwm::SimplePwm, Channel, GeneralInstance4Channel}};
+use embassy_stm32::{time::hz, timer::{simple_pwm::{SimplePwm, SimplePwmChannel}, Channel, GeneralInstance4Channel}};
 use num_traits::clamp;
 
 use super::PlayTone;
@@ -16,40 +16,44 @@ pub struct Buzzer<'d, T: GeneralInstance4Channel> {
 
 impl<'d, T: GeneralInstance4Channel> Buzzer<'d, T> {
     pub fn new(pwm: SimplePwm<'d, T>, channel: Channel) -> Self {
-        Buzzer {
-            pwm: pwm,
+        Self::new_with_fcontrs(pwm, channel, BUZZER_MIN_FREQ, BUZZER_MAX_FREQ)
+    }
+
+    pub fn new_with_fcontrs(pwm: SimplePwm<'d, T>, channel: Channel, min_freq: u16, max_freq: u16) -> Self {        
+        Self {
+            pwm,
             channel: channel,
-            min_freq: BUZZER_MIN_FREQ,
-            max_freq: BUZZER_MAX_FREQ,
+            min_freq,
+            max_freq,
         }
     }
 
-    pub fn new_with_fcontrs(pwm: SimplePwm<'d, T>, channel: Channel, min_freq: u16, max_freq: u16) -> Self {
-        Buzzer {
-            pwm: pwm,
-            channel: channel,
-            min_freq: min_freq,
-            max_freq: max_freq,
+    fn get_channel(&mut self) -> SimplePwmChannel<'_, T> {
+        match self.channel {
+            Channel::Ch1 => self.pwm.ch1(),
+            Channel::Ch2 => self.pwm.ch2(),
+            Channel::Ch3 => self.pwm.ch3(),
+            Channel::Ch4 => self.pwm.ch4(),
         }
     }
 
     pub fn init(&mut self) {
-        let max_duty = self.pwm.get_max_duty();
-        self.pwm.set_duty(self.channel, max_duty / 2);
-        self.pwm.enable(self.channel);
+        let max_duty = self.pwm.max_duty_cycle();
+        self.get_channel().set_duty_cycle(max_duty / 2);
+        self.get_channel().enable();
     }
 }
 
-impl<'d, T: GeneralInstance4Channel> PlayTone for Buzzer<'d, T> {
+impl<T: GeneralInstance4Channel> PlayTone for Buzzer<'_, T> {
     fn play_tone(&mut self, freq: u16) {
         if freq == 0 {
-            self.pwm.disable(self.channel);
+            self.get_channel().disable();
         } else {
             let freq = clamp(freq, self.min_freq, self.max_freq);
             self.pwm.set_frequency(hz(freq.into()));
-            let max_duty = self.pwm.get_max_duty();
-            self.pwm.set_duty(self.channel, max_duty / 2);
-            self.pwm.enable(self.channel);
+            let max_duty = self.pwm.max_duty_cycle();
+            self.get_channel().set_duty_cycle(max_duty / 2);
+            self.get_channel().enable();
         }
     }
 
