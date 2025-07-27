@@ -3,7 +3,7 @@
 use ateam_common_packets::{bindings::{KickerTelemetry, PowerTelemetry}, radio::{DataPacket, TelemetryPacket}};
 use embassy_stm32::{dma::NoDma, peripherals::*};
 use embassy_sync::{
-    blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex},
+    blocking_mutex::raw::ThreadModeRawMutex,
     pubsub::{PubSubChannel, Publisher, Subscriber}};
 
 use crate::tasks::dotstar_task::ControlBoardLedCommand;

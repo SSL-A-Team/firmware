@@ -3,7 +3,7 @@ use embassy_executor::Spawner;
 use embassy_stm32::{gpio::OutputType, time::hz, timer::{simple_pwm::{PwmPin, SimplePwm}, Channel}};
 use embassy_time::{Duration, Ticker};
 
-use crate::{pins::{BuzzerPin, BuzzerTimer}, robot_state::SharedRobotState, songs::{BATTERY_CRITICAL_SONG, BATTERY_WARNING_SONG, TIPPED_WARNING_SONG}};
+use crate::{pins::{BuzzerPin, BuzzerTimer}, robot_state::SharedRobotState, songs::TIPPED_WARNING_SONG};
 
 #[macro_export]
 macro_rules! create_audio_task {

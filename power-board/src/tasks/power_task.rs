@@ -1,5 +1,3 @@
-use core::mem::MaybeUninit;
-
 use ateam_common_packets::bindings::BatteryInfo;
 use ateam_lib_stm32::{audio::{songs::SongId, AudioCommand}, drivers::adc::AdcConverter, filter::WindowAvergingFilter, math::range::Range, power::{battery::LipoModel, model::lipo_model::{lipo_pct_interp, LIPO_6S_VOLTAGE_PERCENT}, PowerRail}};
 use embassy_executor::Spawner;

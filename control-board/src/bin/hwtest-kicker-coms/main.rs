@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(sync_unsafe_cell)]
+#![feature(generic_const_exprs)]
 
 use ateam_control_board::{
     drivers::kicker::Kicker, get_system_config, include_kicker_bin,

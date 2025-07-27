@@ -30,12 +30,14 @@ type LedRedPin = PB14;
 type UserBtnPin = PC13;
 type UserBtnExti = EXTI13;
 
+const DEBUG_QUEUE: bool = false;
+
 const MAX_TX_PACKET_SIZE: usize = 64;
 const TX_BUF_DEPTH: usize = 5;
 const MAX_RX_PACKET_SIZE: usize = 64;
 const RX_BUF_DEPTH: usize = 200;
 
-static_idle_buffered_uart!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_QUEUE, #[link_section = ".axisram.buffers"]);
 
 static LOOP_RATE_MS: AtomicU16 = AtomicU16::new(100);
 
@@ -45,7 +47,7 @@ struct StupidPacket {
 }
 
 #[embassy_executor::task]
-async fn rx_task(coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>) {
+async fn rx_task(coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, DEBUG_QUEUE>) {
     let mut rx_packet: StupidPacket = StupidPacket {
         fields_of_minimal_intelligence: [0x55AA55AA; 16]
     };
@@ -75,7 +77,7 @@ async fn rx_task(coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_
 }
 
 #[embassy_executor::task]
-async fn tx_task(coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>) {
+async fn tx_task(coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_QUEUE>) {
     let tx_packet: StupidPacket = StupidPacket {
         fields_of_minimal_intelligence: [0x55AA55AA; 16]
     };

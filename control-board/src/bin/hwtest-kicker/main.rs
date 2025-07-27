@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 #![feature(sync_unsafe_cell)]
+#![feature(generic_const_exprs)]
 
 
 use ateam_control_board::{
