@@ -393,7 +393,7 @@ impl <
                     &mut robot_controller, cur_state);
 
                 // increment seq number
-                ctrl_seq_number += 1;
+                ctrl_seq_number = (ctrl_seq_number + 1) & 0x00FF;
                 ctrl_seq_number &= 0x00FF;
 
                 loop_rate_ticker.next().await;
