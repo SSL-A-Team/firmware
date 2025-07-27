@@ -65,6 +65,7 @@ pub struct RadioTask<
 
     last_software_packet: Instant,
     last_basic_telemetry: BasicTelemetry,
+    seq_number: u16,
 }
 
 impl<
@@ -98,6 +99,7 @@ impl<
             wifi_credentials: wifi_credentials,
             last_software_packet: Instant::now(),
             last_basic_telemetry: Default::default(),
+            seq_number: Default::default(),
         }
     }
 
@@ -427,8 +429,12 @@ impl<
         }
 
         // always send the latest telemetry
-        defmt::info!("RadioTask - sending basic telemetry");
         if tx_ctr == 0 {
+            defmt::info!("RadioTask - sending basic telemetry");
+
+            self.last_basic_telemetry.transmission_sequence_number = self.seq_number as u8;
+            self.seq_number = (self.seq_number + 1) & 0x00FF;
+
             if let Err(e) = self.radio.send_telemetry(self.last_basic_telemetry) {
                 defmt::warn!("RadioTask - failed to send basic telem packet {:?}", e);
             }
