@@ -64,8 +64,6 @@ if ! command -v nix > /dev/null; then
 	fi
 fi
 
-nix-env -iA nixpkgs.nixFlakes
-
 # check for or create a Nix config file
 if [ ! -f ~/.config/nix/nix.conf ]; then
 	echo "Creaing nix config file..."
