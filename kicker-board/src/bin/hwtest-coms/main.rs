@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 #![feature(type_alias_impl_trait)]
-#![feature(const_mut_refs)]
 #![feature(sync_unsafe_cell)]
 
 use static_cell::StaticCell;
@@ -16,7 +15,6 @@ use embassy_stm32::{
     interrupt,
     interrupt::InterruptExt,
     pac::Interrupt,
-    rcc::{AHBPrescaler, APBPrescaler, Pll, PllMul, PllPDiv, PllPreDiv, PllQDiv, PllSource, Sysclk},
     usart::{Config, Parity, StopBits, Uart}
 };
 use embassy_stm32::{bind_interrupts, peripherals, usart};
@@ -26,39 +24,33 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 use ateam_kicker_board::{
     adc_200v_to_rail_voltage, adc_raw_to_v,
     kick_manager::{
-        KickManager, 
-        KickType}, 
-    pins::*
+        KickManager,
+        KickType},
+    pins::*, tasks::{get_system_config, ClkSource}, DEBUG_COMS_UART_QUEUES
 };
 
-use ateam_lib_stm32::{make_uart_queue_pair, queue_pair_register_and_spawn};
-use ateam_lib_stm32::uart::queue::{UartReadQueue, UartWriteQueue};
+use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl, uart::queue::{UartReadQueue, UartWriteQueue}};
 
-use ateam_common_packets::bindings::{KickerControl, KickerTelemetry, KickRequest};
+use ateam_common_packets::bindings::{KickerControl, KickerTelemetry};
 
 const MAX_TX_PACKET_SIZE: usize = 16;
 const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 3;
 
-make_uart_queue_pair!(COMS,
-    ComsUartModule, ComsUartRxDma, ComsUartTxDma,
-    MAX_RX_PACKET_SIZE, RX_BUF_DEPTH,
-    MAX_TX_PACKET_SIZE, TX_BUF_DEPTH,
-    #[link_section = ".bss"]);
+static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES);
 
 #[embassy_executor::task]
 async fn high_pri_kick_task(
-        coms_reader: &'static UartReadQueue<ComsUartModule, ComsUartRxDma, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH>,
-        coms_writer: &'static UartWriteQueue<ComsUartModule, ComsUartTxDma, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH>,
+        coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES>,
+        coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES>,
         mut adc: Adc<'static, embassy_stm32::peripherals::ADC1>,
         charge_pin: ChargePin,
         kick_pin: KickPin,
         chip_pin: ChipPin,
         mut rail_pin: PowerRail200vReadPin,
         err_led_pin: RedStatusLedPin,
-        ball_detected_led1_pin: BlueStatusLed1Pin,
-        ball_detected_led2_pin: BlueStatusLed2Pin) -> ! {
+        ball_detected_led_pin: BlueStatusLedPin) -> ! {
 
     // pins/safety management
     let charge_pin = Output::new(charge_pin, Level::Low, Speed::Medium);
@@ -68,8 +60,7 @@ async fn high_pri_kick_task(
 
     // debug LEDs
     let mut err_led = Output::new(err_led_pin, Level::Low, Speed::Low);
-    let mut ball_detected_led1 = Output::new(ball_detected_led1_pin, Level::Low, Speed::Low);
-    let mut ball_detected_led2 = Output::new(ball_detected_led2_pin, Level::Low, Speed::Low);
+    let mut ball_detected_led = Output::new(ball_detected_led_pin, Level::Low, Speed::Low);
 
     // TODO dotstars
 
@@ -84,15 +75,15 @@ async fn high_pri_kick_task(
 
     loop {
         let mut vrefint = adc.enable_vrefint();
-        let vrefint_sample = adc.read(&mut vrefint) as f32;
+        let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
 
-        let rail_voltage = adc_200v_to_rail_voltage(adc_raw_to_v(adc.read(&mut rail_pin) as f32, vrefint_sample));
-        // optionally pre-flag errors? 
+        let rail_voltage = adc_200v_to_rail_voltage(adc_raw_to_v(adc.blocking_read(&mut rail_pin) as f32, vrefint_sample));
+        // optionally pre-flag errors?
 
         /////////////////////////////////////
         //  process any available packets  //
         /////////////////////////////////////
-        
+
         while let Ok(res) = coms_reader.try_dequeue() {
             let buf = res.data();
 
@@ -107,7 +98,7 @@ async fn high_pri_kick_task(
                 let state = &mut kicker_control_packet as *mut _ as *mut u8;
                 for i in 0..core::mem::size_of::<KickerControl>() {
                     *state.offset(i as isize) = buf[i];
-                }                
+                }
             }
         }
 
@@ -139,21 +130,15 @@ async fn high_pri_kick_task(
                         (&kicker_telemetry_packet as *const KickerTelemetry) as *const u8,
                         core::mem::size_of::<KickerTelemetry>(),
                     );
-        
+
                     // send the packet
                     let _res = coms_writer.enqueue_copy(struct_bytes);
                 }
 
-                if ball_detected_led1.is_set_high() {
-                    ball_detected_led1.set_low();
+                if ball_detected_led.is_set_high() {
+                    ball_detected_led.set_low();
                 } else {
-                    ball_detected_led1.set_high();
-                }
-
-                if ball_detected_led2.is_set_high() {
-                    ball_detected_led2.set_low();
-                } else {
-                    ball_detected_led2.set_high();
+                    ball_detected_led.set_high();
                 }
 
                 last_packet_sent_time = cur_time;
@@ -168,12 +153,9 @@ async fn high_pri_kick_task(
         }
 
         if ball_detected {
-            ball_detected_led1.set_high();
-            ball_detected_led2.set_high();
+            ball_detected_led.set_high();
         } else {
-            ball_detected_led1.set_low();
-            ball_detected_led2.set_low();
-
+            ball_detected_led.set_low();
         }
         // TODO Dotstar
 
@@ -184,7 +166,7 @@ async fn high_pri_kick_task(
 }
 
 static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
-static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
+static _EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
 #[interrupt]
 unsafe fn TIM2() {
@@ -197,21 +179,7 @@ bind_interrupts!(struct Irqs {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) -> ! {
-    let mut stm32_config: embassy_stm32::Config = Default::default();
-    stm32_config.rcc.hsi = true;
-    stm32_config.rcc.pll_src = PllSource::HSI; // internal 16Mhz source
-    stm32_config.rcc.pll = Some(Pll {
-        prediv: PllPreDiv::DIV8, // base 2MHz 
-        mul: PllMul::MUL168, // mul up to 336 MHz
-        divp: Some(PllPDiv::DIV2), // div down to 168 MHz, AHB (max)
-        divq: Some(PllQDiv::DIV7), // div down to 48 Mhz for dedicated 48MHz clk (exact)
-        divr: None, // turn off I2S clk
-    });
-    stm32_config.rcc.ahb_pre = AHBPrescaler::DIV1; // AHB 168 MHz (max)
-    stm32_config.rcc.apb1_pre = APBPrescaler::DIV4; // APB1 42 MHz (max)
-    stm32_config.rcc.apb2_pre = APBPrescaler::DIV2; // APB2 84 MHz (max)
-    stm32_config.rcc.sys = Sysclk::PLL1_P; // enable the system
-
+    let stm32_config = get_system_config(ClkSource::InternalOscillator);
     let p = embassy_stm32::init(stm32_config);
 
     info!("kicker startup!");
@@ -220,7 +188,7 @@ async fn main(spawner: Spawner) -> ! {
 
     let mut adc = Adc::new(p.ADC1);
     adc.set_resolution(Resolution::BITS12);
-    adc.set_sample_time(SampleTime::CYCLES480);
+    adc.set_sample_time(SampleTime::CYCLES247_5);
 
     // high priority executor handles kicking system
     // High-priority executor: I2C1, priority level 6
@@ -247,10 +215,17 @@ async fn main(spawner: Spawner) -> ! {
         coms_uart_config,
     ).unwrap();
 
-    let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
-    queue_pair_register_and_spawn!(spawner, COMS, coms_uart_rx, coms_uart_tx);
+    COMS_IDLE_BUFFERED_UART.init();
+    idle_buffered_uart_spawn_tasks!(spawner, COMS, coms_usart);
 
-    hp_spawner.spawn(high_pri_kick_task(&COMS_RX_UART_QUEUE, &COMS_TX_UART_QUEUE, adc, p.PE4, p.PE5, p.PE6, p.PC0, p.PE1, p.PE2, p.PE3)).unwrap();
+
+    hp_spawner.spawn(high_pri_kick_task(
+        COMS_IDLE_BUFFERED_UART.get_uart_read_queue(),
+        COMS_IDLE_BUFFERED_UART.get_uart_write_queue(),
+        adc,
+        p.PB15, p.PD9,
+        p.PD8, p.PC3,
+        p.PE0, p.PE1)).unwrap();
 
 
     loop {

@@ -108,7 +108,7 @@ kicker_binaries := ${shell cd kicker-board/src/bin && ls -d * && cd ../../..}
 kicker_openocd_cfg_file := board/st_nucleo_f0.cfg
 
 define create-kicker-board-rust-targets
-$1--$2:
+$1--$2: motor-controller--all
 	cd $1 && \
 	cargo build --release --bin $2 && \
 	arm-none-eabi-objcopy -Obinary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin
@@ -141,16 +141,16 @@ define create-control-board-rust-targets
 $1--$2: kicker-board--all motor-controller--all
 	cd $1 && \
 	cargo build $(additional_control_cargo_flags) --release --bin $2 && \
-	arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin
+	arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin && \
+	python ../util/embed_img_hash.py
 control-board--all:: $1--$2
 
-$1--$2--run: kicker-board--all motor-controller--all
+$1--$2--run: $1--$2
 	cd $1 && \
 	cargo run $(additional_control_cargo_flags) --release --bin $2
 
-$1--$2--debug: kicker-board--all motor-controller--all
+$1--$2--debug: $1--$2
 	cd $1 && \
-	cargo build $(additional_control_cargo_flags) --release --bin $2 && \
 	../util/program.sh $3 target/thumbv7em-none-eabihf/release/$2
 endef
 $(foreach element,$(control_binaries),$(eval $(call create-control-board-rust-targets,control-board,$(element),$(control_openocd_cfg_file))))

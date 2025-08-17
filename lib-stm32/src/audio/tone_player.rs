@@ -2,7 +2,7 @@
 use embassy_time::Timer;
 
 use crate::drivers::audio::PlayTone;
-use super::note::{Beat, Song};
+use super::{note::{Beat, Song}, AudioError};
 
 
 pub struct TonePlayer<'a, D: PlayTone> {
@@ -13,12 +13,12 @@ pub struct TonePlayer<'a, D: PlayTone> {
 impl<'a, D: PlayTone> TonePlayer<'a, D> {
     pub fn new(audio_driver: D) -> Self {
         TonePlayer {
-            audio_driver: audio_driver,
+            audio_driver,
             song: None,
         }
     }
 
-    pub fn load_song(&mut self, song: &'a Song) -> Result<(), ()> {
+    pub fn load_song(&mut self, song: &'a Song) -> Result<(), AudioError> {
         let mut can_play = true;
 
         'note_loop:
@@ -35,7 +35,7 @@ impl<'a, D: PlayTone> TonePlayer<'a, D> {
         }
 
         if !can_play {
-            return Err(());
+            return Err(AudioError::UnplayablePitch);
         }
 
         self.song = Some(song);

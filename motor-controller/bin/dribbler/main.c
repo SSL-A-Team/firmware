@@ -19,8 +19,15 @@
 #include "system.h"
 #include "time.h"
 #include "uart.h"
+#include "image_hash.h"
 
 static int slipped_control_frame_count = 0;
+
+// Dribbler image hash, saved in the dribbler image
+static volatile ImgHash_t dribbler_img_hash_struct = {
+    "DrblrImgHashDrbl",
+    {0},
+};
 
 __attribute__((optimize("O0")))
 int main() {
@@ -98,10 +105,13 @@ int main() {
     turn_off_red_led();
     turn_off_yellow_led();
 
+    #ifdef UART_ENABLED
     // Initialize UART and logging status.
     uart_initialize();
     uart_logging_status_rx_t uart_logging_status_receive;
     uart_logging_status_tx_t uart_logging_status_send;
+    #endif
+
     // toggle J1-1
     while (true) {
         IWDG->KR = 0x0000AAAA; // feed the watchdog
@@ -315,6 +325,8 @@ int main() {
                 response_packet.data.params.cur_d = torque_pid_constants.kD;
                 response_packet.data.params.torque_i_max = torque_pid_constants.kI_max;
                 response_packet.data.params.cur_clamp = (uint16_t) cur_limit;
+
+                memcpy(response_packet.data.params.firmware_img_hash, dribbler_img_hash_struct.img_hash, sizeof(response_packet.data.params.firmware_img_hash));
 
 #ifdef UART_ENABLED
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponse));

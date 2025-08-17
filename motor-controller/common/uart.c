@@ -46,6 +46,107 @@ void uart_initialize() {
     ioq_initialize(&uart_tx_queue);
     ioq_initialize(&uart_rx_queue);
 
+    /////////////////
+    //  Pin Setup  //
+    /////////////////
+
+    // PA14 USART1_TX
+    // PA15 USART1_RX
+
+    // clear PA13 and PA14 mode which start in AF for SWD
+    GPIOA->MODER &= ~(GPIO_MODER_MODER13_0 | GPIO_MODER_MODER13_1 | GPIO_MODER_MODER14_0 | GPIO_MODER_MODER14_1);
+    // clear PA13 speed mode which starts at 50Mhz (0b11) for SWD
+    GPIOA->OSPEEDR &= ~(GPIO_OSPEEDR_OSPEEDR13_0 | GPIO_OSPEEDR_OSPEEDR13_1);
+    // clear PA13 and PA14 pull up status
+    GPIOA->PUPDR &= !(GPIO_PUPDR_PUPDR13_0 | GPIO_PUPDR_PUPDR13_1 | GPIO_PUPDR_PUPDR14_0 | GPIO_PUPDR_PUPDR14_1);
+
+    // configure PA14 and PA15 AF mode
+    GPIOA->MODER |= (GPIO_MODER_MODER14_1 | GPIO_MODER_MODER15_1);
+    // configure PA14 and PA15 pin speed to 10Mhz
+    GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEEDR14_0 | GPIO_OSPEEDR_OSPEEDR15_0);
+    // configure PA14 and PA15 pin pullup to UP
+    GPIOA->PUPDR |= (GPIO_PUPDR_PUPDR14_0 | GPIO_PUPDR_PUPDR15_0);
+    // configure PA14 and PA15 alternate function
+    GPIOA->AFR[1] |= (1 << GPIO_AFRH_AFSEL14_Pos);
+    GPIOA->AFR[1] |= (1 << GPIO_AFRH_AFSEL15_Pos);
+
+    // enable bus clock to the UART
+    RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
+
+    /////////////////////////////
+    //  UART Peripheral Setup  //
+    /////////////////////////////
+
+    // make sure USART1 is disabled while configuring.
+    USART1->CR1 &= ~(USART_CR1_UE);
+    // 9-bits with parity (PCE) insert parity bit at the 9th bit
+    // defaults to even parity
+    USART1->CR1 |= (USART_CR1_M | USART_CR1_PCE);
+    // Enable transmit and receive functionality.
+    USART1->CR1 |= (USART_CR1_TE | USART_CR1_RE);
+    // we don't need anything here
+    USART1->CR2 = 0;
+    // enable DMA for transmission and receive
+    USART1->CR3 = USART_CR3_DMAT | USART_CR3_DMAR;
+    // set baud rate
+    USART1->BRR = 0x18; // => 2 Mbaud/s
+
+    // Enable the module now that configuration is finished.
+    USART1->CR1 |= USART_CR1_UE;
+
+    // Clear idle line interrupt
+    USART1->ICR |= USART_ICR_IDLECF;
+    // FUTURE: We can probably enable the idle line interrupt here
+    // and leave it enabled after we add pullups to the bus.
+    // USART1->CR1 |= USART_CR1_IDLEIE;
+
+    //////////////////////////////////////
+    //  Transmission DMA Channel Setup  //
+    //////////////////////////////////////
+
+    // Memory increment, memory to peripheral
+    DMA1_Channel2->CCR = DMA_CCR_MINC | DMA_CCR_DIR;
+    // DMA set to Medium Priority
+    DMA1_Channel2->CCR |= DMA_CCR_PL_0;
+    // clear buffer base addr
+    DMA1_Channel2->CMAR = 0; // transmit buffer base addr, set at transmission time
+    // clear transmission length
+    DMA1_Channel2->CNDTR = 0; // transmit length, set at transmission time
+    // set destination address as UART periperal transmission shift register
+    DMA1_Channel2->CPAR = (uint32_t) &USART1->TDR; // USART1 data transmit register address
+    // Enable the transfer complete (TCIE) and transfer error (TEIE) interrupts
+    DMA1_Channel2->CCR |= (DMA_CCR_TEIE | DMA_CCR_TCIE);
+    // Clear the Global Ch2 interrupt flag.
+    DMA1->IFCR |= DMA_IFCR_CGIF2;
+
+    /////////////////////////////////
+    //  Receive DMA Channel Setup  //
+    /////////////////////////////////
+
+    // USART1_RX memory increment, peripheral to memory
+    // Sets memory increment mode.
+    DMA1_Channel3->CCR = DMA_CCR_MINC;
+    // DMA set to High Priority
+    DMA1_Channel3->CCR |= DMA_CCR_PL_1;
+    // clear buffer base addr
+    DMA1_Channel3->CMAR = (uint32_t) 0 ;
+    // Set destination address as UART periperal receive register
+    DMA1_Channel3->CPAR = (uint32_t) &USART1->RDR;
+    // clear transmission length
+    DMA1_Channel3->CNDTR = 0;
+    // Clear the Global Ch3 interrupt flag.
+    DMA1->IFCR |= DMA_IFCR_CGIF3;
+
+    /////////////////
+    //  DMA Setup  //
+    /////////////////
+
+    NVIC_SetPriority(USART1_IRQn, 10);
+    NVIC_EnableIRQ(USART1_IRQn);
+
+    NVIC_SetPriority(DMA1_Channel2_3_IRQn, 10);
+    NVIC_EnableIRQ(DMA1_Channel2_3_IRQn);
+
     // Make sure SYSCFG bit(s) are cleared for USART TX and RX
     // to be on DMA Ch2 and Ch3, respectively.
     SYSCFG->CFGR1 &= ~(SYSCFG_CFGR1_USART1TX_DMA_RMP);

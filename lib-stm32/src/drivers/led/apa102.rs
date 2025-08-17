@@ -6,11 +6,16 @@ use smart_leds::RGB8;
 
 use crate::anim::{AnimInterface, CompositeAnimation};
 
+use super::LedChainError;
+
 const START_FRAME_SIZE: usize = 4;
 const COLOR_FRAME_SIZE: usize = 4;
 const END_FRAME_SIZE: usize = 4;
 const HEADER_FRAME_SIZE: usize = START_FRAME_SIZE + END_FRAME_SIZE;
 
+pub const fn apa102_buf_len(num_leds: usize) -> usize {
+    8 + (num_leds * 4)
+}
 
 pub struct Apa102<'a, 'buf, const NUM_LEDS: usize>
 where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
@@ -38,8 +43,8 @@ where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
         spi_buf[HEADER_FRAME_SIZE + (NUM_LEDS * COLOR_FRAME_SIZE) - 1] = 0xFF;
 
         Apa102 { 
-            spi: spi,
-            spi_buf: spi_buf,
+            spi,
+            spi_buf,
             needs_update: false,
         }
     }
@@ -66,7 +71,7 @@ where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
     }
 
     const fn l2d(led_index: usize) -> usize {
-        START_FRAME_SIZE + (led_index * COLOR_FRAME_SIZE) + 0
+        START_FRAME_SIZE + (led_index * COLOR_FRAME_SIZE)
     }
 
     // Calculates the frame index for red based on LED index.
@@ -224,9 +229,9 @@ where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
         self.apa102_driver.update().await;
     }
 
-    fn set_animation_enabled(&mut self, led_index: usize, anim_id: usize, enable: bool) -> Result<(), ()> {
+    fn set_animation_enabled(&mut self, led_index: usize, anim_id: usize, enable: bool) -> Result<(), LedChainError> {
         if led_index >= NUM_LEDS {
-            return Err(())
+            return Err(LedChainError::InvalidLedIndex)
         }
 
         if let Some(animation_playbook) = self.animation_playbook_buf[led_index].as_deref_mut() {
@@ -249,12 +254,36 @@ where [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]: {
         Ok(())
     }
 
-    pub fn enable_animation(&mut self, led_index: usize, anim_id: usize) -> Result<(), ()>  {
+    pub fn enable_animation(&mut self, led_index: usize, anim_id: usize) -> Result<(), LedChainError>  {
         self.set_animation_enabled(led_index, anim_id, true)
     }
 
-    pub fn disable_animation(&mut self, led_index: usize, anim_id: usize) -> Result<(), ()>  {
+    pub fn disable_animation(&mut self, led_index: usize, anim_id: usize) -> Result<(), LedChainError>  {
         self.set_animation_enabled(led_index, anim_id, false)
+    }
+
+    pub fn set_drv_str(&mut self, strength: u8, led_index: usize) {
+        self.apa102_driver.set_drv_str(strength, led_index);
+    }
+
+    pub fn set_drv_str_range(&mut self, str: u8, led_index_range: Range<usize>) {
+        self.apa102_driver.set_drv_str_range(str, led_index_range);
+    }
+
+    pub fn set_drv_str_all(&mut self, str: u8) {
+        self.apa102_driver.set_drv_str_all(str);
+    }
+
+    pub fn set_color(&mut self, color: RGB8, led_index: usize) {
+        self.apa102_driver.set_color(color, led_index);
+    }
+
+    pub fn set_color_range(&mut self, color: RGB8, led_index_range: Range<usize>) {
+        self.apa102_driver.set_color_range(color, led_index_range);
+    }
+
+    pub fn set_color_all(&mut self, color: RGB8) {
+        self.apa102_driver.set_color_all(color);
     }
 }
 
