@@ -1,0 +1,31 @@
+    name: Rustfmt Check
+
+    on:
+      push:
+        branches: [ main ]
+      pull_request:
+        branches: [ main ]
+
+    jobs:
+      format:
+        runs-on: ubuntu-latest
+        steps:
+          - uses: actions/checkout@v4
+          - uses: actions-rust-lang/setup-rust-toolchain@v1
+            with:
+              toolchain: nightly
+              components: rustfmt
+          - name: Common
+            run: cargo fmt --check --manifest-path common
+          - name: Library
+            run: cargo fmt --check --manifest-path lib-stm32
+          - name: LIbrary Test Images
+            run: cargo fmt --check --manifest-path lib-stm32-test
+          - name: Credentials
+            run: cargo fmt --check --manifest-path credentials
+          - name: Power Board
+            run: cargo fmt --check --manifest-path power-board
+          - name: Kicker Board
+            run: cargo fmt --check --manifest-path kicker-board
+          - name: Control Board
+            run: cargo fmt --check --manifest-path control-board
