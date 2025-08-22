@@ -1,4 +1,11 @@
-use embassy_stm32::{rcc::{mux::Adcsel, AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllMul, PllPDiv, PllPreDiv, PllQDiv, PllRDiv, PllSource, Sysclk}, time::Hertz, Config};
+use embassy_stm32::{
+    rcc::{
+        mux::Adcsel, AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllMul, PllPDiv, PllPreDiv,
+        PllQDiv, PllRDiv, PllSource, Sysclk,
+    },
+    time::Hertz,
+    Config,
+};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ClkSource {
@@ -20,7 +27,7 @@ pub fn get_system_config(clk_src: ClkSource) -> Config {
         config.rcc.pll = Some(Pll {
             source: PllSource::HSE,
             prediv: PllPreDiv::DIV2, // root frequency to PLL will be 4MHz after pre_div regardless of source
-            mul: PllMul::MUL85, // multiply up by 85 to get 340 MHz
+            mul: PllMul::MUL85,      // multiply up by 85 to get 340 MHz
             divp: Some(PllPDiv::DIV2), // 340 MHz / 2 = 170 MHz p which is feeds sysclk
             divq: Some(PllQDiv::DIV2), // 340 MHz / 2 = 170 MHz
             divr: Some(PllRDiv::DIV2), // 340 MHz / 2 = 170 MHz
@@ -30,7 +37,7 @@ pub fn get_system_config(clk_src: ClkSource) -> Config {
         config.rcc.pll = Some(Pll {
             source: PllSource::HSI,
             prediv: PllPreDiv::DIV4, // root frequency to PLL will be 4MHz after pre_div regardless of source
-            mul: PllMul::MUL85, // multiply up by 85 to get 340 MHz
+            mul: PllMul::MUL85,      // multiply up by 85 to get 340 MHz
             divp: Some(PllPDiv::DIV2), // 340 MHz / 2 = 170MHz p which is feeds sysclk
             divq: Some(PllQDiv::DIV2), // 340 MHz / 2 = 170MHz
             divr: Some(PllRDiv::DIV2), // 340 MHz / 2 = 170MHz

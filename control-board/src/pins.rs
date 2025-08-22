@@ -1,10 +1,14 @@
 #![allow(dead_code)]
 
-use ateam_common_packets::{bindings::{KickerTelemetry, PowerTelemetry}, radio::{DataPacket, TelemetryPacket}};
+use ateam_common_packets::{
+    bindings::{KickerTelemetry, PowerTelemetry},
+    radio::{DataPacket, TelemetryPacket},
+};
 use embassy_stm32::{dma::NoDma, peripherals::*};
 use embassy_sync::{
     blocking_mutex::raw::ThreadModeRawMutex,
-    pubsub::{PubSubChannel, Publisher, Subscriber}};
+    pubsub::{PubSubChannel, Publisher, Subscriber},
+};
 
 use crate::tasks::dotstar_task::ControlBoardLedCommand;
 
@@ -23,41 +27,114 @@ const LED_COMMAND_PUBSUB_DEPTH: usize = 5;
 
 type PubSubMutexType = ThreadModeRawMutex;
 pub type CommandsPubSub = PubSubChannel<PubSubMutexType, DataPacket, COMMANDS_PUBSUB_DEPTH, 2, 1>;
-pub type CommandsPublisher = Publisher<'static, PubSubMutexType, DataPacket, COMMANDS_PUBSUB_DEPTH, 2, 1>;
-pub type CommandsSubscriber = Subscriber<'static, PubSubMutexType, DataPacket, COMMANDS_PUBSUB_DEPTH, 2, 1>;
+pub type CommandsPublisher =
+    Publisher<'static, PubSubMutexType, DataPacket, COMMANDS_PUBSUB_DEPTH, 2, 1>;
+pub type CommandsSubscriber =
+    Subscriber<'static, PubSubMutexType, DataPacket, COMMANDS_PUBSUB_DEPTH, 2, 1>;
 
-pub type TelemetryPubSub = PubSubChannel<PubSubMutexType, TelemetryPacket, TELEMETRY_PUBSUB_DEPTH, 1, 1>;
-pub type TelemetryPublisher = Publisher<'static, PubSubMutexType, TelemetryPacket, COMMANDS_PUBSUB_DEPTH, 1, 1>;
-pub type TelemetrySubcriber = Subscriber<'static, PubSubMutexType, TelemetryPacket, TELEMETRY_PUBSUB_DEPTH, 1, 1>;
+pub type TelemetryPubSub =
+    PubSubChannel<PubSubMutexType, TelemetryPacket, TELEMETRY_PUBSUB_DEPTH, 1, 1>;
+pub type TelemetryPublisher =
+    Publisher<'static, PubSubMutexType, TelemetryPacket, COMMANDS_PUBSUB_DEPTH, 1, 1>;
+pub type TelemetrySubcriber =
+    Subscriber<'static, PubSubMutexType, TelemetryPacket, TELEMETRY_PUBSUB_DEPTH, 1, 1>;
 
-pub type GyroDataPubSub = PubSubChannel<PubSubMutexType, nalgebra::Vector3<f32>, GYRO_DATA_PUBSUB_DEPTH, 1, 1>;
-pub type GyroDataPublisher = Publisher<'static, PubSubMutexType, nalgebra::Vector3<f32>, GYRO_DATA_PUBSUB_DEPTH, 1, 1>;
-pub type GyroDataSubscriber = Subscriber<'static, PubSubMutexType, nalgebra::Vector3<f32>, GYRO_DATA_PUBSUB_DEPTH, 1, 1>;
-pub type AccelDataPubSub = PubSubChannel<PubSubMutexType, nalgebra::Vector3<f32>, ACCEL_DATA_PUBSUB_DEPTH, 1, 1>;
-pub type AccelDataPublisher = Publisher<'static, PubSubMutexType, nalgebra::Vector3<f32>, ACCEL_DATA_PUBSUB_DEPTH, 1, 1>;
-pub type AccelDataSubscriber = Subscriber<'static, PubSubMutexType, nalgebra::Vector3<f32>, ACCEL_DATA_PUBSUB_DEPTH, 1, 1>;
+pub type GyroDataPubSub =
+    PubSubChannel<PubSubMutexType, nalgebra::Vector3<f32>, GYRO_DATA_PUBSUB_DEPTH, 1, 1>;
+pub type GyroDataPublisher =
+    Publisher<'static, PubSubMutexType, nalgebra::Vector3<f32>, GYRO_DATA_PUBSUB_DEPTH, 1, 1>;
+pub type GyroDataSubscriber =
+    Subscriber<'static, PubSubMutexType, nalgebra::Vector3<f32>, GYRO_DATA_PUBSUB_DEPTH, 1, 1>;
+pub type AccelDataPubSub =
+    PubSubChannel<PubSubMutexType, nalgebra::Vector3<f32>, ACCEL_DATA_PUBSUB_DEPTH, 1, 1>;
+pub type AccelDataPublisher =
+    Publisher<'static, PubSubMutexType, nalgebra::Vector3<f32>, ACCEL_DATA_PUBSUB_DEPTH, 1, 1>;
+pub type AccelDataSubscriber =
+    Subscriber<'static, PubSubMutexType, nalgebra::Vector3<f32>, ACCEL_DATA_PUBSUB_DEPTH, 1, 1>;
 
 const POWER_TELEM_PUBSUB_NUM_PUBS: usize = 1;
 const POWER_TELEM_PUBSUB_NUM_SUBS: usize = 1;
-pub type PowerTelemetryPubSub = PubSubChannel<PubSubMutexType, PowerTelemetry, POWER_TELEMETRY_PUBSUB_DEPTH, POWER_TELEM_PUBSUB_NUM_SUBS, POWER_TELEM_PUBSUB_NUM_PUBS>;
-pub type PowerTelemetryPublisher = Publisher<'static, PubSubMutexType, PowerTelemetry, POWER_TELEMETRY_PUBSUB_DEPTH, POWER_TELEM_PUBSUB_NUM_SUBS, POWER_TELEM_PUBSUB_NUM_PUBS>;
-pub type PowerTelemetrySubscriber = Subscriber<'static, PubSubMutexType, PowerTelemetry, POWER_TELEMETRY_PUBSUB_DEPTH, POWER_TELEM_PUBSUB_NUM_SUBS, POWER_TELEM_PUBSUB_NUM_PUBS>;
+pub type PowerTelemetryPubSub = PubSubChannel<
+    PubSubMutexType,
+    PowerTelemetry,
+    POWER_TELEMETRY_PUBSUB_DEPTH,
+    POWER_TELEM_PUBSUB_NUM_SUBS,
+    POWER_TELEM_PUBSUB_NUM_PUBS,
+>;
+pub type PowerTelemetryPublisher = Publisher<
+    'static,
+    PubSubMutexType,
+    PowerTelemetry,
+    POWER_TELEMETRY_PUBSUB_DEPTH,
+    POWER_TELEM_PUBSUB_NUM_SUBS,
+    POWER_TELEM_PUBSUB_NUM_PUBS,
+>;
+pub type PowerTelemetrySubscriber = Subscriber<
+    'static,
+    PubSubMutexType,
+    PowerTelemetry,
+    POWER_TELEMETRY_PUBSUB_DEPTH,
+    POWER_TELEM_PUBSUB_NUM_SUBS,
+    POWER_TELEM_PUBSUB_NUM_PUBS,
+>;
 
 const KICKER_TELEM_PUBSUB_NUM_PUBS: usize = 1;
 const KICKER_TELEM_PUBSUB_NUM_SUBS: usize = 1;
-pub type KickerTelemetryPubSub = PubSubChannel<PubSubMutexType, KickerTelemetry, KICKER_TELEMETRY_PUBSUB_DEPTH, KICKER_TELEM_PUBSUB_NUM_SUBS, KICKER_TELEM_PUBSUB_NUM_PUBS>;
-pub type KickerTelemetryPublisher = Publisher<'static, PubSubMutexType, KickerTelemetry, KICKER_TELEMETRY_PUBSUB_DEPTH, KICKER_TELEM_PUBSUB_NUM_SUBS, KICKER_TELEM_PUBSUB_NUM_PUBS>;
-pub type KickerTelemetrySubscriber = Subscriber<'static, PubSubMutexType, KickerTelemetry, KICKER_TELEMETRY_PUBSUB_DEPTH, KICKER_TELEM_PUBSUB_NUM_SUBS, KICKER_TELEM_PUBSUB_NUM_PUBS>;
+pub type KickerTelemetryPubSub = PubSubChannel<
+    PubSubMutexType,
+    KickerTelemetry,
+    KICKER_TELEMETRY_PUBSUB_DEPTH,
+    KICKER_TELEM_PUBSUB_NUM_SUBS,
+    KICKER_TELEM_PUBSUB_NUM_PUBS,
+>;
+pub type KickerTelemetryPublisher = Publisher<
+    'static,
+    PubSubMutexType,
+    KickerTelemetry,
+    KICKER_TELEMETRY_PUBSUB_DEPTH,
+    KICKER_TELEM_PUBSUB_NUM_SUBS,
+    KICKER_TELEM_PUBSUB_NUM_PUBS,
+>;
+pub type KickerTelemetrySubscriber = Subscriber<
+    'static,
+    PubSubMutexType,
+    KickerTelemetry,
+    KICKER_TELEMETRY_PUBSUB_DEPTH,
+    KICKER_TELEM_PUBSUB_NUM_SUBS,
+    KICKER_TELEM_PUBSUB_NUM_PUBS,
+>;
 
 pub type BatteryVoltPubSub = PubSubChannel<PubSubMutexType, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
-pub type BatteryVoltPublisher = Publisher<'static, PubSubMutexType, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
-pub type BatteryVoltSubscriber = Subscriber<'static, PubSubMutexType, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
+pub type BatteryVoltPublisher =
+    Publisher<'static, PubSubMutexType, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
+pub type BatteryVoltSubscriber =
+    Subscriber<'static, PubSubMutexType, f32, BATTERY_VOLT_PUBSUB_DEPTH, 1, 1>;
 
 const LED_COMMAND_PUBSUB_NUM_PUBS: usize = 3;
 const LED_COMMAND_PUBSUB_NUM_SUBS: usize = 1;
-pub type LedCommandPubSub = PubSubChannel<PubSubMutexType, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, LED_COMMAND_PUBSUB_NUM_SUBS, LED_COMMAND_PUBSUB_NUM_PUBS>;
-pub type LedCommandPublisher = Publisher<'static, PubSubMutexType, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, LED_COMMAND_PUBSUB_NUM_SUBS, LED_COMMAND_PUBSUB_NUM_PUBS>;
-pub type LedCommandSubscriber = Subscriber<'static, PubSubMutexType, ControlBoardLedCommand, LED_COMMAND_PUBSUB_DEPTH, LED_COMMAND_PUBSUB_NUM_SUBS, LED_COMMAND_PUBSUB_NUM_PUBS>;
+pub type LedCommandPubSub = PubSubChannel<
+    PubSubMutexType,
+    ControlBoardLedCommand,
+    LED_COMMAND_PUBSUB_DEPTH,
+    LED_COMMAND_PUBSUB_NUM_SUBS,
+    LED_COMMAND_PUBSUB_NUM_PUBS,
+>;
+pub type LedCommandPublisher = Publisher<
+    'static,
+    PubSubMutexType,
+    ControlBoardLedCommand,
+    LED_COMMAND_PUBSUB_DEPTH,
+    LED_COMMAND_PUBSUB_NUM_SUBS,
+    LED_COMMAND_PUBSUB_NUM_PUBS,
+>;
+pub type LedCommandSubscriber = Subscriber<
+    'static,
+    PubSubMutexType,
+    ControlBoardLedCommand,
+    LED_COMMAND_PUBSUB_DEPTH,
+    LED_COMMAND_PUBSUB_NUM_SUBS,
+    LED_COMMAND_PUBSUB_NUM_PUBS,
+>;
 
 /////////////
 //  Radio  //
@@ -73,7 +150,6 @@ pub type RadioRxDMA = DMA2_CH1;
 pub type RadioResetPin = PD7;
 pub type RadioBoot0Pin = PG9;
 pub type RadioNDetectPin = PA15;
-
 
 //////////////
 //  Motors  //
@@ -119,7 +195,6 @@ pub type MotorFRDmaRx = DMA1_CH7;
 pub type MotorFRBootPin = PB12;
 pub type MotorFRResetPin = PB13;
 
-
 //////////////
 //  Kicker  //
 //////////////
@@ -134,7 +209,6 @@ pub type KickerTxDma = DMA2_CH3;
 pub type KickerBootPin = PG2;
 pub type KickerResetPin = PG3;
 
-
 ///////////////////
 //  Power Board  //
 ///////////////////
@@ -146,7 +220,6 @@ pub type PowerUartTxPin = PG1;
 // pub type PowerUartRtsPin = None;
 pub type PowerRxDma = DMA2_CH4;
 pub type PowerTxDma = DMA2_CH5;
-
 
 ////////////////////
 //  Optical Flow  //
@@ -162,7 +235,6 @@ pub type OpticalFlowDmaTx = NoDma;
 pub type OpticalFlowBootPin = PB7;
 pub type OpticalFlowResetPin = PB6;
 
-
 //////////////////
 //  LCD Screen  //
 //////////////////
@@ -173,7 +245,6 @@ pub type ScreenUartTxPin = PA9;
 pub type ScreenDmaRx = NoDma;
 pub type ScreenDmaTx = NoDma;
 pub type ScreenResetPin = PA8;
-
 
 ///////////
 //  USB  //
@@ -225,7 +296,6 @@ pub type VoltageMon5v0Pin = PA1;
 pub type VoltageMon3v3Pin = PA2;
 pub type BatteryAdc = ADC1;
 pub type VrefIntAdc = ADC3;
-
 
 ///////////////
 //  User IO  //
@@ -281,4 +351,4 @@ pub type DotstarSpiMosi = PB5;
 pub type DotstarTxDma = BDMA_CH0;
 
 pub type BuzzerPin = PE6;
-pub type BuzzerTimer = TIM15; // ch2 
+pub type BuzzerTimer = TIM15; // ch2

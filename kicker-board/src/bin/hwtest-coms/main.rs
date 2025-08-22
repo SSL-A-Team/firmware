@@ -15,7 +15,7 @@ use embassy_stm32::{
     interrupt,
     interrupt::InterruptExt,
     pac::Interrupt,
-    usart::{Config, Parity, StopBits, Uart}
+    usart::{Config, Parity, StopBits, Uart},
 };
 use embassy_stm32::{bind_interrupts, peripherals, usart};
 
@@ -23,13 +23,16 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use ateam_kicker_board::{
     adc_200v_to_rail_voltage, adc_raw_to_v,
-    kick_manager::{
-        KickManager,
-        KickType},
-    pins::*, tasks::{get_system_config, ClkSource}, DEBUG_COMS_UART_QUEUES
+    kick_manager::{KickManager, KickType},
+    pins::*,
+    tasks::{get_system_config, ClkSource},
+    DEBUG_COMS_UART_QUEUES,
 };
 
-use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl, uart::queue::{UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{
+    idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl,
+    uart::queue::{UartReadQueue, UartWriteQueue},
+};
 
 use ateam_common_packets::bindings::{KickerControl, KickerTelemetry};
 
@@ -38,20 +41,27 @@ const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 3;
 
-static_idle_buffered_uart_nl!(COMS, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES);
+static_idle_buffered_uart_nl!(
+    COMS,
+    MAX_RX_PACKET_SIZE,
+    RX_BUF_DEPTH,
+    MAX_TX_PACKET_SIZE,
+    TX_BUF_DEPTH,
+    DEBUG_COMS_UART_QUEUES
+);
 
 #[embassy_executor::task]
 async fn high_pri_kick_task(
-        coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES>,
-        coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES>,
-        mut adc: Adc<'static, embassy_stm32::peripherals::ADC1>,
-        charge_pin: ChargePin,
-        kick_pin: KickPin,
-        chip_pin: ChipPin,
-        mut rail_pin: PowerRail200vReadPin,
-        err_led_pin: RedStatusLedPin,
-        ball_detected_led_pin: BlueStatusLedPin) -> ! {
-
+    coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES>,
+    coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES>,
+    mut adc: Adc<'static, embassy_stm32::peripherals::ADC1>,
+    charge_pin: ChargePin,
+    kick_pin: KickPin,
+    chip_pin: ChipPin,
+    mut rail_pin: PowerRail200vReadPin,
+    err_led_pin: RedStatusLedPin,
+    ball_detected_led_pin: BlueStatusLedPin,
+) -> ! {
     // pins/safety management
     let charge_pin = Output::new(charge_pin, Level::Low, Speed::Medium);
     let kick_pin = Output::new(kick_pin, Level::Low, Speed::Medium);
@@ -77,7 +87,10 @@ async fn high_pri_kick_task(
         let mut vrefint = adc.enable_vrefint();
         let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
 
-        let rail_voltage = adc_200v_to_rail_voltage(adc_raw_to_v(adc.blocking_read(&mut rail_pin) as f32, vrefint_sample));
+        let rail_voltage = adc_200v_to_rail_voltage(adc_raw_to_v(
+            adc.blocking_read(&mut rail_pin) as f32,
+            vrefint_sample,
+        ));
         // optionally pre-flag errors?
 
         /////////////////////////////////////
@@ -113,13 +126,27 @@ async fn high_pri_kick_task(
         telemetry_enabled = kicker_control_packet.telemetry_enabled() != 0;
 
         // no charge/kick in coms test
-        let res = kick_manager.command(22.5, rail_voltage, false, KickType::None, 0.0).await;
+        let res = kick_manager
+            .command(22.5, rail_voltage, false, KickType::None, 0.0)
+            .await;
 
         // send telemetry packet
         if telemetry_enabled {
             let cur_time = Instant::now();
-            if Instant::checked_duration_since(&cur_time, last_packet_sent_time).unwrap().as_millis() > 20 {
-                kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(res.is_err() as u16, 0, 0, 0, ball_detected as u16, 0, Default::default());
+            if Instant::checked_duration_since(&cur_time, last_packet_sent_time)
+                .unwrap()
+                .as_millis()
+                > 20
+            {
+                kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(
+                    res.is_err() as u16,
+                    0,
+                    0,
+                    0,
+                    ball_detected as u16,
+                    0,
+                    Default::default(),
+                );
                 kicker_telemetry_packet.rail_voltage = rail_voltage;
                 kicker_telemetry_packet.battery_voltage = 22.5;
 
@@ -162,7 +189,6 @@ async fn high_pri_kick_task(
         // loop rate control @1KHz
         ticker.next().await;
     }
-
 }
 
 static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
@@ -213,20 +239,25 @@ async fn main(spawner: Spawner) -> ! {
         p.DMA2_CH7,
         p.DMA2_CH2,
         coms_uart_config,
-    ).unwrap();
+    )
+    .unwrap();
 
     COMS_IDLE_BUFFERED_UART.init();
     idle_buffered_uart_spawn_tasks!(spawner, COMS, coms_usart);
 
-
-    hp_spawner.spawn(high_pri_kick_task(
-        COMS_IDLE_BUFFERED_UART.get_uart_read_queue(),
-        COMS_IDLE_BUFFERED_UART.get_uart_write_queue(),
-        adc,
-        p.PB15, p.PD9,
-        p.PD8, p.PC3,
-        p.PE0, p.PE1)).unwrap();
-
+    hp_spawner
+        .spawn(high_pri_kick_task(
+            COMS_IDLE_BUFFERED_UART.get_uart_read_queue(),
+            COMS_IDLE_BUFFERED_UART.get_uart_write_queue(),
+            adc,
+            p.PB15,
+            p.PD9,
+            p.PD8,
+            p.PC3,
+            p.PE0,
+            p.PE1,
+        ))
+        .unwrap();
 
     loop {
         Timer::after_millis(1000).await;

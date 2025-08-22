@@ -34,14 +34,12 @@ pub struct Limiter<T> {
 
 impl<T: PartialEq> Limiter<T> {
     pub const fn new() -> Self {
-        Limiter {
-            prev_val: None
-        }
+        Limiter { prev_val: None }
     }
 
     pub const fn new_with_value(val: T) -> Self {
         Limiter {
-            prev_val: Some(val)
+            prev_val: Some(val),
         }
     }
 

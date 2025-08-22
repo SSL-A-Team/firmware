@@ -8,5 +8,5 @@ pub enum SongId {
     BatteryCritical,
     BatteryUhOh,
     BalanceConnected,
-    BalanceDisconnected
+    BalanceDisconnected,
 }

@@ -19,7 +19,13 @@ impl<'a> ShellIndicator<'a> {
     ];
 
     // TODO: refactor pin ordering
-    pub fn new(fr_pin0: impl Pin, fl_pin1: impl Pin, br_pin2: impl Pin, bl_pin3: impl Pin, team_pin4: Option<impl Pin>) -> Self {
+    pub fn new(
+        fr_pin0: impl Pin,
+        fl_pin1: impl Pin,
+        br_pin2: impl Pin,
+        bl_pin3: impl Pin,
+        team_pin4: Option<impl Pin>,
+    ) -> Self {
         let team_pin4: Option<Output<'a>> = if let Some(pin4) = team_pin4 {
             Some(Output::new(pin4, Level::Low, Speed::Low))
         } else {

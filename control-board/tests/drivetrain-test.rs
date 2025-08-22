@@ -3,20 +3,20 @@
 #![feature(const_mut_refs)]
 #![feature(async_closure)]
 
+use ateam_control_board::{
+    queue::{self, Buffer},
+    stm32_interface::Stm32Interface,
+    uart_queue::{UartReadQueue, UartWriteQueue},
+};
 use defmt_rtt as _;
 use embassy_stm32::{
     self,
     executor::InterruptExecutor,
-    interrupt::{self, InterruptExt},
     gpio::{Level, OutputOpenDrain, Pin, Pull, Speed},
+    interrupt::{self, InterruptExt},
     peripherals::{DMA1_CH0, DMA1_CH1, DMA1_CH2, DMA1_CH3, DMA1_CH4, DMA1_CH5, DMA1_CH6, DMA1_CH7},
-    peripherals::{USART3, UART4, UART5, UART7},
+    peripherals::{UART4, UART5, UART7, USART3},
     usart::{self, Uart},
-};
-use ateam_control_board::{
-    stm32_interface::Stm32Interface,
-    queue::{self, Buffer},
-    uart_queue::{UartReadQueue, UartWriteQueue},
 };
 use panic_probe as _;
 use static_cell::StaticCell;

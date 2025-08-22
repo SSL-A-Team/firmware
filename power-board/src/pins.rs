@@ -1,7 +1,10 @@
 use ateam_common_packets::bindings::BatteryInfo;
 use ateam_lib_stm32::audio::AudioCommand;
 use embassy_stm32::peripherals::*;
-use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, pubsub::{PubSubChannel, Publisher, Subscriber}};
+use embassy_sync::{
+    blocking_mutex::raw::ThreadModeRawMutex,
+    pubsub::{PubSubChannel, Publisher, Subscriber},
+};
 
 /////////////////////
 //  power control  //
@@ -80,9 +83,49 @@ const AUDIO_CHANNEL_NUM_PUBS: usize = 3;
 const TELEMETRY_CHANNEL_DEPTH: usize = 3;
 const TELEMETRY_CHANNEL_NUM_SUBS: usize = 1;
 const TELEMETRY_CHANNEL_NUM_PUBS: usize = 1;
-pub type AudioPubSub = PubSubChannel<ThreadModeRawMutex, AudioCommand, AUDIO_CHANNEL_DEPTH, AUDIO_CHANNEL_NUM_SUBS, AUDIO_CHANNEL_NUM_PUBS>;
-pub type AudioPublisher = Publisher<'static, ThreadModeRawMutex, AudioCommand, AUDIO_CHANNEL_DEPTH, AUDIO_CHANNEL_NUM_SUBS, AUDIO_CHANNEL_NUM_PUBS>;
-pub type AudioSubscriber = Subscriber<'static, ThreadModeRawMutex, AudioCommand, AUDIO_CHANNEL_DEPTH, AUDIO_CHANNEL_NUM_SUBS, AUDIO_CHANNEL_NUM_PUBS>;
-pub type TelemetryPubSub = PubSubChannel<ThreadModeRawMutex, BatteryInfo, TELEMETRY_CHANNEL_DEPTH, TELEMETRY_CHANNEL_NUM_SUBS, TELEMETRY_CHANNEL_NUM_PUBS>;
-pub type TelemetryPublisher = Publisher<'static, ThreadModeRawMutex, BatteryInfo, TELEMETRY_CHANNEL_DEPTH, TELEMETRY_CHANNEL_NUM_SUBS, TELEMETRY_CHANNEL_NUM_PUBS>;
-pub type TelemetrySubscriber = Subscriber<'static, ThreadModeRawMutex, BatteryInfo, TELEMETRY_CHANNEL_DEPTH, TELEMETRY_CHANNEL_NUM_SUBS, TELEMETRY_CHANNEL_NUM_PUBS>;
+pub type AudioPubSub = PubSubChannel<
+    ThreadModeRawMutex,
+    AudioCommand,
+    AUDIO_CHANNEL_DEPTH,
+    AUDIO_CHANNEL_NUM_SUBS,
+    AUDIO_CHANNEL_NUM_PUBS,
+>;
+pub type AudioPublisher = Publisher<
+    'static,
+    ThreadModeRawMutex,
+    AudioCommand,
+    AUDIO_CHANNEL_DEPTH,
+    AUDIO_CHANNEL_NUM_SUBS,
+    AUDIO_CHANNEL_NUM_PUBS,
+>;
+pub type AudioSubscriber = Subscriber<
+    'static,
+    ThreadModeRawMutex,
+    AudioCommand,
+    AUDIO_CHANNEL_DEPTH,
+    AUDIO_CHANNEL_NUM_SUBS,
+    AUDIO_CHANNEL_NUM_PUBS,
+>;
+pub type TelemetryPubSub = PubSubChannel<
+    ThreadModeRawMutex,
+    BatteryInfo,
+    TELEMETRY_CHANNEL_DEPTH,
+    TELEMETRY_CHANNEL_NUM_SUBS,
+    TELEMETRY_CHANNEL_NUM_PUBS,
+>;
+pub type TelemetryPublisher = Publisher<
+    'static,
+    ThreadModeRawMutex,
+    BatteryInfo,
+    TELEMETRY_CHANNEL_DEPTH,
+    TELEMETRY_CHANNEL_NUM_SUBS,
+    TELEMETRY_CHANNEL_NUM_PUBS,
+>;
+pub type TelemetrySubscriber = Subscriber<
+    'static,
+    ThreadModeRawMutex,
+    BatteryInfo,
+    TELEMETRY_CHANNEL_DEPTH,
+    TELEMETRY_CHANNEL_NUM_SUBS,
+    TELEMETRY_CHANNEL_NUM_PUBS,
+>;

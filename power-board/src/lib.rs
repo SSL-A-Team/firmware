@@ -8,9 +8,9 @@ use embassy_stm32::{bind_interrupts, peripherals, usart};
 
 pub mod config;
 pub mod pins;
-pub mod tasks;
 pub mod power_state;
 pub mod songs;
+pub mod tasks;
 
 const DEBUG_UART_QUEUES: bool = false;
 

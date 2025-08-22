@@ -4,6 +4,7 @@
 
 use core::sync::atomic::AtomicU16;
 
+use embassy_executor::{Executor, InterruptExecutor};
 use embassy_stm32::{
     bind_interrupts,
     exti::ExtiInput,
@@ -11,18 +12,20 @@ use embassy_stm32::{
     interrupt,
     pac::Interrupt,
     peripherals::{self, *},
-    usart::{self, *}
+    usart::{self, *},
 };
-use embassy_executor::{Executor, InterruptExecutor};
 use embassy_time::Timer;
 
 use defmt::*;
-use defmt_rtt as _; 
+use defmt_rtt as _;
 use panic_probe as _;
 
 use static_cell::StaticCell;
 
-use ateam_lib_stm32::{idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart, uart::queue::{UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{
+    idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart,
+    uart::queue::{UartReadQueue, UartWriteQueue},
+};
 
 type LedGreenPin = PB0;
 type LedYellowPin = PE1;
@@ -47,11 +50,13 @@ struct StupidPacket {
 }
 
 #[embassy_executor::task]
-async fn rx_task(coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, DEBUG_QUEUE>) {
+async fn rx_task(
+    coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, DEBUG_QUEUE>,
+) {
     let mut rx_packet: StupidPacket = StupidPacket {
-        fields_of_minimal_intelligence: [0x55AA55AA; 16]
+        fields_of_minimal_intelligence: [0x55AA55AA; 16],
     };
-    
+
     loop {
         while let Ok(res) = coms_reader.try_dequeue() {
             let buf = res.data();
@@ -65,9 +70,13 @@ async fn rx_task(coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_
             unsafe {
                 // copy receieved uart bytes into packet
                 let state = &mut rx_packet as *mut _ as *mut u8;
-                for (i, val) in buf.iter().enumerate().take(core::mem::size_of::<StupidPacket>()) {
+                for (i, val) in buf
+                    .iter()
+                    .enumerate()
+                    .take(core::mem::size_of::<StupidPacket>())
+                {
                     *state.add(i) = *val;
-                }       
+                }
             }
         }
 
@@ -77,9 +86,11 @@ async fn rx_task(coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_
 }
 
 #[embassy_executor::task]
-async fn tx_task(coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_QUEUE>) {
+async fn tx_task(
+    coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_QUEUE>,
+) {
     let tx_packet: StupidPacket = StupidPacket {
-        fields_of_minimal_intelligence: [0x55AA55AA; 16]
+        fields_of_minimal_intelligence: [0x55AA55AA; 16],
     };
 
     loop {
@@ -101,18 +112,18 @@ async fn tx_task(coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF
 }
 
 #[embassy_executor::task]
-async fn handle_btn_press(usr_btn_pin: UserBtnPin,
+async fn handle_btn_press(
+    usr_btn_pin: UserBtnPin,
     usr_btn_exti: UserBtnExti,
     led_green_pin: LedGreenPin,
     led_yellow_pin: LedYellowPin,
-    led_red_pin: LedRedPin) {
-
+    led_red_pin: LedRedPin,
+) {
     let mut usr_btn = ExtiInput::new(usr_btn_pin, usr_btn_exti, Pull::Down);
 
     let mut green_led = Output::new(led_green_pin, Level::High, Speed::Medium);
     let mut yellow_led = Output::new(led_yellow_pin, Level::Low, Speed::Medium);
     let mut red_led = Output::new(led_red_pin, Level::Low, Speed::Medium);
-
 
     loop {
         usr_btn.wait_for_rising_edge().await;
@@ -153,15 +164,18 @@ bind_interrupts!(struct Irqs {
 });
 
 #[embassy_executor::main]
-async fn main(_spawner: embassy_executor::Spawner) -> !{
+async fn main(_spawner: embassy_executor::Spawner) -> ! {
     // this actually gets us 64MHz peripheral bus clock
     let stm32_config: embassy_stm32::Config = Default::default();
     let p = embassy_stm32::init(stm32_config);
-    
+
     // high priority executor handles kicking system
     // High-priority executor: I2C1, priority level 6
     // TODO CHECK THIS IS THE HIGHEST PRIORITY
-    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::TIM2, embassy_stm32::interrupt::Priority::P6);
+    interrupt::InterruptExt::set_priority(
+        embassy_stm32::interrupt::TIM2,
+        embassy_stm32::interrupt::Priority::P6,
+    );
     let _high_pri_spawner = EXECUTOR_HIGH.start(Interrupt::TIM2);
 
     //////////////////////////////////
@@ -181,7 +195,8 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
         p.DMA1_CH1,
         p.DMA1_CH2,
         coms_uart_config,
-    ).unwrap();
+    )
+    .unwrap();
 
     let (coms_uart_tx, coms_uart_rx) = Uart::split(coms_usart);
 
@@ -194,7 +209,11 @@ async fn main(_spawner: embassy_executor::Spawner) -> !{
         unwrap!(spawner.spawn(handle_btn_press(p.PC13, p.EXTI13, p.PB0, p.PE1, p.PB14)));
         unwrap!(spawner.spawn(rx_task(COMS_IDLE_BUFFERED_UART.get_uart_read_queue())));
         unwrap!(spawner.spawn(tx_task(COMS_IDLE_BUFFERED_UART.get_uart_write_queue())));
-        spawner.spawn(idle_buffered_uart_read_task!(coms, coms_uart_rx)).unwrap();
-        spawner.spawn(idle_buffered_uart_write_task!(coms, coms_uart_tx)).unwrap();
+        spawner
+            .spawn(idle_buffered_uart_read_task!(coms, coms_uart_rx))
+            .unwrap();
+        spawner
+            .spawn(idle_buffered_uart_write_task!(coms, coms_uart_tx))
+            .unwrap();
     });
 }

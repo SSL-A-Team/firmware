@@ -1,6 +1,5 @@
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 
-
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct PowerState {
     // power status packet flags
@@ -21,28 +20,26 @@ pub struct PowerState {
 }
 
 pub struct SharedPowerState {
-    inner: Mutex<CriticalSectionRawMutex, PowerState>,  // STM32G0 doesn't have atomic instruction support, use mutex
+    inner: Mutex<CriticalSectionRawMutex, PowerState>, // STM32G0 doesn't have atomic instruction support, use mutex
 }
 
 impl SharedPowerState {
     pub const fn new() -> Self {
         Self {
-            inner: Mutex::new(
-                PowerState { 
-                    power_ok: false,
-                    power_rail_3v3_ok: false,
-                    power_rail_5v0_ok: false,
-                    power_rail_12v0_ok: false,
-                    battery_low_warn: false,
-                    battery_low_crit: false,
-                    high_current_operations_allowed: true,
-                    shutdown_requested: false,
-                    shutdown_force: false,
-                    shutdown_ready: false,
-                    balance_connected: false,
-                    coms_established: false,
-                }
-            )
+            inner: Mutex::new(PowerState {
+                power_ok: false,
+                power_rail_3v3_ok: false,
+                power_rail_5v0_ok: false,
+                power_rail_12v0_ok: false,
+                battery_low_warn: false,
+                battery_low_crit: false,
+                high_current_operations_allowed: true,
+                shutdown_requested: false,
+                shutdown_force: false,
+                shutdown_ready: false,
+                balance_connected: false,
+                coms_established: false,
+            }),
         }
     }
 

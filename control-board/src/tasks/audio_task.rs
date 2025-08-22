@@ -1,15 +1,29 @@
 use ateam_lib_stm32::{audio::tone_player::TonePlayer, drivers::audio::buzzer::Buzzer};
 use embassy_executor::Spawner;
-use embassy_stm32::{gpio::OutputType, time::hz, timer::{simple_pwm::{PwmPin, SimplePwm}, Channel}};
+use embassy_stm32::{
+    gpio::OutputType,
+    time::hz,
+    timer::{
+        simple_pwm::{PwmPin, SimplePwm},
+        Channel,
+    },
+};
 use embassy_time::{Duration, Ticker};
 
-use crate::{pins::{BuzzerPin, BuzzerTimer}, robot_state::SharedRobotState, songs::TIPPED_WARNING_SONG};
+use crate::{
+    pins::{BuzzerPin, BuzzerTimer},
+    robot_state::SharedRobotState,
+    songs::TIPPED_WARNING_SONG,
+};
 
 #[macro_export]
 macro_rules! create_audio_task {
     ($main_spawner:ident, $robot_state:ident, $p:ident) => {
         ateam_control_board::tasks::audio_task::start_audio_task(
-            &$main_spawner, $robot_state, $p.TIM15, $p.PE6
+            &$main_spawner,
+            $robot_state,
+            $p.TIM15,
+            $p.PE6,
         );
     };
 }
@@ -24,7 +38,7 @@ async fn audio_task_entry(
     loop {
         let cur_robot_state = robot_state.get_state();
 
-        // Structure so only one song can play per 
+        // Structure so only one song can play per
         if cur_robot_state.battery_crit {
             // defmt::warn!("battery critical");
             // let _ = tone_player.load_song(&BATTERY_CRITICAL_SONG);
@@ -50,10 +64,20 @@ pub fn start_audio_task(
     buzzer_pin: BuzzerPin,
 ) {
     let ch2 = PwmPin::new_ch2(buzzer_pin, OutputType::PushPull);
-    let pwm = SimplePwm::new(buzzer_timer, None, Some(ch2), None, None, hz(1), Default::default());
-    
+    let pwm = SimplePwm::new(
+        buzzer_timer,
+        None,
+        Some(ch2),
+        None,
+        None,
+        hz(1),
+        Default::default(),
+    );
+
     let audio_driver = Buzzer::new(pwm, Channel::Ch2);
     let tone_player = TonePlayer::new(audio_driver);
 
-    task_spawner.spawn(audio_task_entry(robot_state, tone_player)).unwrap();
+    task_spawner
+        .spawn(audio_task_entry(robot_state, tone_player))
+        .unwrap();
 }

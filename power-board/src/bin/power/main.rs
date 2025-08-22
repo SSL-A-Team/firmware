@@ -8,12 +8,12 @@ use ateam_lib_stm32::audio::songs::SongId;
 use ateam_lib_stm32::audio::AudioCommand;
 use ateam_power_board::pins::{AudioPubSub, TelemetryPubSub};
 use ateam_power_board::power_state::SharedPowerState;
-use ateam_power_board::{create_power_task, create_coms_task, create_audio_task};
+use ateam_power_board::{create_audio_task, create_coms_task, create_power_task};
 use defmt::*;
 use embassy_executor::{InterruptExecutor, Spawner};
+use embassy_stm32::gpio::{Input, Level, Output, OutputOpenDrain, Pull, Speed};
 use embassy_stm32::interrupt;
 use embassy_stm32::interrupt::{InterruptExt, Priority};
-use embassy_stm32::gpio::{Input, Level, Output, OutputOpenDrain, Pull, Speed};
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_time::{Duration, Instant, Ticker, Timer};
 use {defmt_rtt as _, panic_probe as _};
@@ -30,7 +30,6 @@ static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 unsafe fn USART2() {
     UART_QUEUE_EXECUTOR.on_interrupt();
 }
-
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -67,48 +66,67 @@ async fn main(spawner: Spawner) {
     let power_audio_subscriber = AUDIO_PUBSUB.subscriber().unwrap();
 
     // start power task
-    create_power_task!(spawner, shared_power_state, power_telemetry_publisher, power_audio_publisher, p);
+    create_power_task!(
+        spawner,
+        shared_power_state,
+        power_telemetry_publisher,
+        power_audio_publisher,
+        p
+    );
 
     // start coms task
-    create_coms_task!(spawner, uart_queue_spawner, shared_power_state, coms_telemetry_subscriber, coms_audio_publisher, p);
+    create_coms_task!(
+        spawner,
+        uart_queue_spawner,
+        shared_power_state,
+        coms_telemetry_subscriber,
+        coms_audio_publisher,
+        p
+    );
 
     // start audio task
     create_audio_task!(spawner, power_audio_subscriber, p);
-    main_audio_publisher.publish(AudioCommand::PlaySong(SongId::PowerOn)).await;
+    main_audio_publisher
+        .publish(AudioCommand::PlaySong(SongId::PowerOn))
+        .await;
 
     // TODO: start LED animation task
-
 
     let mut main_loop_ticker = Ticker::every(Duration::from_millis(10));
     loop {
         // read pwr button
         // shortest possible interrupt from pwr btn controller is 32ms
         if pwr_btn.get_level() == Level::Low || SHARED_POWER_STATE.get_shutdown_requested().await {
-            main_audio_publisher.publish(AudioCommand::PlaySong(SongId::ShutdownRequested)).await;
+            main_audio_publisher
+                .publish(AudioCommand::PlaySong(SongId::ShutdownRequested))
+                .await;
             Timer::after_millis(250).await;
-            shutdown_ind.set_low();  // indicate shutdown request
+            shutdown_ind.set_low(); // indicate shutdown request
             let shutdown_requested_time = Instant::now();
-            SHARED_POWER_STATE.set_shutdown_requested(true).await;  // update power board state
+            SHARED_POWER_STATE.set_shutdown_requested(true).await; // update power board state
             loop {
                 let cur_robot_state = shared_power_state.get_state().await;
-                
+
                 if !SHARED_POWER_STATE.get_shutdown_requested().await {
                     defmt::info!("MAIN TASK: Shutdown cancelled");
                     shutdown_ind.set_high();
-                    break
+                    break;
                 }
 
-                if SHARED_POWER_STATE.get_shutdown_ready().await 
-                    || Instant::now() > shutdown_requested_time + Duration::from_secs(30) 
-                    || !cur_robot_state.coms_established {
-                    main_audio_publisher.publish(AudioCommand::PlaySong(SongId::PowerOff)).await;
+                if SHARED_POWER_STATE.get_shutdown_ready().await
+                    || Instant::now() > shutdown_requested_time + Duration::from_secs(30)
+                    || !cur_robot_state.coms_established
+                {
+                    main_audio_publisher
+                        .publish(AudioCommand::PlaySong(SongId::PowerOff))
+                        .await;
                     // Wait long enough for the song to play :)
                     Timer::after_millis(500).await;
                     defmt::info!("MAIN TASK: Shutdown acknowledged, turning off power");
                     Timer::after_millis(500).await;
                     sequence_power_off(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
                     kill_sig.set_low();
-                    break
+                    break;
                 }
 
                 Timer::after_millis(10).await;
@@ -119,7 +137,11 @@ async fn main(spawner: Spawner) {
     }
 }
 
-async fn sequence_power_on(en_3v3: &mut Output<'static>, en_5v0: &mut Output<'static>, en_12v0: &mut Output<'static>) {
+async fn sequence_power_on(
+    en_3v3: &mut Output<'static>,
+    en_5v0: &mut Output<'static>,
+    en_12v0: &mut Output<'static>,
+) {
     Timer::after_millis(20).await;
     en_3v3.set_high();
 
@@ -130,7 +152,11 @@ async fn sequence_power_on(en_3v3: &mut Output<'static>, en_5v0: &mut Output<'st
     en_12v0.set_high();
 }
 
-async fn sequence_power_off(en_3v3: &mut Output<'static>, en_5v0: &mut Output<'static>, en_12v0: &mut Output<'static>) {
+async fn sequence_power_off(
+    en_3v3: &mut Output<'static>,
+    en_5v0: &mut Output<'static>,
+    en_12v0: &mut Output<'static>,
+) {
     en_12v0.set_low();
     Timer::after_millis(100).await;
 

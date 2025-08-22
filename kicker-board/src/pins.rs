@@ -8,7 +8,6 @@ pub type ChargePin = PB15;
 pub type KickPin = PD9;
 pub type ChipPin = PD8;
 
-
 ////////////////////////////
 //  Voltage Measurements  //
 ////////////////////////////
@@ -20,7 +19,6 @@ pub type PowerRailVswReadPin = PA1;
 pub type PowerRail5v0ReadPin = PA2;
 pub type PowerRail3v3ReadPin = PA3;
 pub type PowerRailAdcDma = DMA1_CH7;
-
 
 //////////////////////
 //  Breakbeam Pins  //
@@ -45,7 +43,6 @@ pub type BreakbeamRightRstPin = PC12;
 pub type BreakbeamRightIntPin = PD10;
 pub type BreakbeamRightI2cRxDma = DMA2_CH3;
 pub type BreakbeamRightI2cTxDma = DMA2_CH4;
-
 
 ///////////////
 //  User IO  //
@@ -72,8 +69,7 @@ pub type TrimPot0Pin = PE8;
 pub type TrimPot1Pin = PE9;
 
 pub type SwdSwclkPin = PA14;
-pub type SwdSwdioPin = PA13; 
-
+pub type SwdSwdioPin = PA13;
 
 //////////////////////////////
 //  Control Communications  //
@@ -86,7 +82,6 @@ pub type ComsUartCtsPin = PA11;
 pub type ComsUartRtsPin = PA12;
 pub type ComsUartTxDma = DMA1_CH1;
 pub type ComsUartRxDma = DMA1_CH2;
-
 
 ///////////////////
 //  Peripherals  //
@@ -119,4 +114,3 @@ pub type DribblerUartRxDma = DMA1_CH5;
 pub type DribblerUartTxDma = DMA1_CH6;
 
 pub type TempProbeReadPin = PC4;
-

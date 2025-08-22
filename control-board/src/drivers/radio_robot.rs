@@ -1,16 +1,19 @@
-use ateam_lib_stm32::drivers::radio::odin_w26x::{OdinRadioError, OdinW262, PeerConnection, WifiAuth};
-use ateam_lib_stm32::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
 use ateam_common_packets::bindings::{
-    self, BasicControl, BasicTelemetry, CommandCode, ErrorTelemetry, ExtendedTelemetry, HelloRequest, HelloResponse, ParameterCommand, RadioPacket, RadioPacket_Data
+    self, BasicControl, BasicTelemetry, CommandCode, ErrorTelemetry, ExtendedTelemetry,
+    HelloRequest, HelloResponse, ParameterCommand, RadioPacket, RadioPacket_Data,
 };
 use ateam_common_packets::radio::DataPacket;
+use ateam_lib_stm32::drivers::radio::odin_w26x::{
+    OdinRadioError, OdinW262, PeerConnection, WifiAuth,
+};
+use ateam_lib_stm32::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
 use const_format::formatcp;
-use credentials::WifiCredential;
-use embassy_stm32::uid;
 use core::fmt::Write;
 use core::mem::size_of;
+use credentials::WifiCredential;
 use embassy_futures::select::{select, Either};
-use embassy_stm32::gpio::{Level, Pin, Speed, Output};
+use embassy_stm32::gpio::{Level, Output, Pin, Speed};
+use embassy_stm32::uid;
 use embassy_stm32::usart::{self, DataBits, Parity, StopBits};
 use embassy_time::{Duration, Timer};
 use heapless::String;
@@ -25,7 +28,7 @@ const LOCAL_PORT: u16 = 42069;
 pub enum WifiNetwork {
     Team,
     CompMain,
-    CompPractice
+    CompPractice,
 }
 
 #[derive(Copy, Clone)]
@@ -78,8 +81,9 @@ unsafe impl<
         const DEPTH_TX: usize,
         const DEPTH_RX: usize,
         const DEBUG_UART_QUEUES: bool,
-    > Send for RobotRadio<'a, LEN_RX, LEN_TX, DEPTH_TX, DEPTH_RX, DEBUG_UART_QUEUES> {}
-
+    > Send for RobotRadio<'a, LEN_RX, LEN_TX, DEPTH_TX, DEPTH_RX, DEBUG_UART_QUEUES>
+{
+}
 
 pub struct RobotRadio<
     'a,
@@ -89,14 +93,7 @@ pub struct RobotRadio<
     const DEPTH_RX: usize,
     const DEBUG_UART_QUEUES: bool,
 > {
-    odin_driver: OdinW262<
-        'a,
-        LEN_TX,
-        LEN_RX,
-        DEPTH_TX,
-        DEPTH_RX,
-        DEBUG_UART_QUEUES,
-    >,
+    odin_driver: OdinW262<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, DEBUG_UART_QUEUES>,
     reset_pin: Output<'a>,
     use_flow_control: bool,
     peer: Option<PeerConnection>,
@@ -152,7 +149,12 @@ impl<
 
     pub async fn connect_uart(&mut self) -> Result<(), RobotRadioError> {
         // were about to reset the radio, so we also need to reset the uart queue config to match the startup config
-        if self.odin_driver.update_host_uart_config(self.get_startup_uart_config()).await.is_err() {
+        if self
+            .odin_driver
+            .update_host_uart_config(self.get_startup_uart_config())
+            .await
+            .is_err()
+        {
             defmt::debug!("failed to reset host uart to startup config.");
         }
 
@@ -174,20 +176,28 @@ impl<
             defmt::debug!("error disabling echo on radio");
             return Err(RobotRadioError::ConnectUartBadEcho);
         }
-        
-        if self.odin_driver.config_uart(baudrate, self.use_flow_control, 8, true).await.is_err() {
+
+        if self
+            .odin_driver
+            .config_uart(baudrate, self.use_flow_control, 8, true)
+            .await
+            .is_err()
+        {
             defmt::debug!("error increasing radio baud rate.");
             return Err(RobotRadioError::ConnectUartBadRadioConfigUpdate);
         }
         defmt::trace!("configured radio link speed");
 
-
-        if self.odin_driver.update_host_uart_config(self.get_highspeed_uart_config()).await.is_err() {
+        if self
+            .odin_driver
+            .update_host_uart_config(self.get_highspeed_uart_config())
+            .await
+            .is_err()
+        {
             defmt::debug!("error increasing host baud rate.");
             return Err(RobotRadioError::ConnectUartBadHostConfigUpdate);
         }
         defmt::trace!("configured host link speed");
-
 
         // Datasheet says wait at least 40ms after UART config change
         Timer::after(Duration::from_millis(50)).await;
@@ -196,7 +206,7 @@ impl<
         if let Ok(got_edm_startup) = self.odin_driver.enter_edm().await {
             defmt::trace!("entered edm at high link speed");
 
-            if ! got_edm_startup {
+            if !got_edm_startup {
                 if self.odin_driver.wait_edm_startup().await.is_err() {
                     defmt::debug!("error waiting for EDM startup after uart baudrate increase");
                     return Err(RobotRadioError::ConnectUartNoEdmStartup);
@@ -206,7 +216,7 @@ impl<
             }
         } else {
             defmt::debug!("error entering EDM mode after uart baudrate increase");
-            return Err(RobotRadioError::ConnectUartCannotEnterEdm)
+            return Err(RobotRadioError::ConnectUartCannotEnterEdm);
         }
 
         Timer::after(Duration::from_millis(50)).await;
@@ -241,13 +251,23 @@ impl<
         }
     }
 
-    pub async fn connect_to_network(&mut self, wifi_credential: WifiCredential, robot_number: u8) -> Result<(), RobotRadioError> {
+    pub async fn connect_to_network(
+        &mut self,
+        wifi_credential: WifiCredential,
+        robot_number: u8,
+    ) -> Result<(), RobotRadioError> {
         // set radio hardware name enumeration
         let uid = uid::uid();
         let uid_u16 = (uid[1] as u16) << 8 | uid[0] as u16;
 
         let mut s = String::<25>::new();
-        core::write!(&mut s, "A-Team Robot #{:02X} ({:04X})", robot_number, uid_u16).unwrap();
+        core::write!(
+            &mut s,
+            "A-Team Robot #{:02X} ({:04X})",
+            robot_number,
+            uid_u16
+        )
+        .unwrap();
         // let mut s = String::<16>::new();
         // core::write!(&mut s, "A-Team Robot {:02X}", robot_number).unwrap();
         if self.odin_driver.set_host_name(s.as_str()).await.is_err() {
@@ -260,7 +280,12 @@ impl<
         let wifi_pass = WifiAuth::WPA {
             passphrase: wifi_credential.get_password(),
         };
-        if self.odin_driver.config_wifi(1, wifi_ssid, wifi_pass).await.is_err() {
+        if self
+            .odin_driver
+            .config_wifi(1, wifi_ssid, wifi_pass)
+            .await
+            .is_err()
+        {
             defmt::trace!("could not configure wifi profile");
             return Err(RobotRadioError::ConnectWifiBadConfig);
         }
@@ -282,7 +307,9 @@ impl<
     }
 
     pub async fn open_multicast(&mut self) -> Result<(), RobotRadioError> {
-        let peer = self.odin_driver.connect_peer(formatcp!(
+        let peer = self
+            .odin_driver
+            .connect_peer(formatcp!(
                 "udp://{MULTICAST_IP}:{MULTICAST_PORT}/?flags=1&local_port={LOCAL_PORT}"
             ))
             .await;
@@ -352,13 +379,13 @@ impl<
         if self.peer.is_some() {
             if self.odin_driver.can_read_data() {
                 match self.odin_driver.try_read_data(fn_read) {
-                    Ok(ret) => {
-                        Ok(Some(ret))
-                    },
+                    Ok(ret) => Ok(Some(ret)),
                     Err(e) => {
-                        defmt::trace!("try read data failed after can read data reported data ready");
+                        defmt::trace!(
+                            "try read data failed after can read data reported data ready"
+                        );
                         Err(RobotRadioError::DriverError(e))
-                    },
+                    }
                 }
             } else {
                 Ok(None)
@@ -449,7 +476,7 @@ impl<
             command_code: CommandCode::CC_TELEMETRY,
             data_length: size_of::<BasicTelemetry>() as u16,
             data: RadioPacket_Data {
-                telemetry: telemetry
+                telemetry: telemetry,
             },
         };
         let packet_bytes = unsafe {
@@ -464,7 +491,10 @@ impl<
         Ok(())
     }
 
-    pub async fn send_control_debug_telemetry(&self, telemetry: ExtendedTelemetry) -> Result<(), RobotRadioError> {
+    pub async fn send_control_debug_telemetry(
+        &self,
+        telemetry: ExtendedTelemetry,
+    ) -> Result<(), RobotRadioError> {
         let packet = RadioPacket {
             crc32: 0,
             major_version: bindings::kProtocolVersionMajor,
@@ -472,7 +502,7 @@ impl<
             command_code: CommandCode::CC_CONTROL_DEBUG_TELEMETRY,
             data_length: size_of::<ExtendedTelemetry>() as u16,
             data: RadioPacket_Data {
-                control_debug_telemetry: telemetry
+                control_debug_telemetry: telemetry,
             },
         };
         let packet_bytes = unsafe {
@@ -487,7 +517,10 @@ impl<
         Ok(())
     }
 
-    pub async fn send_parameter_response(&self, parameter_cmd: ParameterCommand) -> Result<(), RobotRadioError> {
+    pub async fn send_parameter_response(
+        &self,
+        parameter_cmd: ParameterCommand,
+    ) -> Result<(), RobotRadioError> {
         let packet = RadioPacket {
             crc32: 0,
             major_version: bindings::kProtocolVersionMajor,
@@ -495,7 +528,7 @@ impl<
             command_code: CommandCode::CC_ROBOT_PARAMETER_COMMAND,
             data_length: size_of::<ParameterCommand>() as u16,
             data: RadioPacket_Data {
-                robot_parameter_command: parameter_cmd
+                robot_parameter_command: parameter_cmd,
             },
         };
         let packet_bytes = unsafe {
@@ -510,16 +543,17 @@ impl<
         Ok(())
     }
 
-    pub async fn send_error_telemetry(&self, error_telemetry: ErrorTelemetry) -> Result<(), RobotRadioError> {
+    pub async fn send_error_telemetry(
+        &self,
+        error_telemetry: ErrorTelemetry,
+    ) -> Result<(), RobotRadioError> {
         let packet = RadioPacket {
             crc32: 0,
             major_version: bindings::kProtocolVersionMajor,
             minor_version: bindings::kProtocolVersionMinor,
             command_code: CommandCode::CC_ERROR_TELEMETRY,
             data_length: size_of::<ParameterCommand>() as u16,
-            data: RadioPacket_Data {
-                error_telemetry
-            },
+            data: RadioPacket_Data { error_telemetry },
         };
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
@@ -561,9 +595,10 @@ impl<
     }
 
     pub fn parse_data_packet(&self, data: &[u8]) -> Result<DataPacket, RobotRadioError> {
-        const CONTROL_PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
-            + size_of::<BasicControl>();
-        const PARAMERTER_PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+        const CONTROL_PACKET_SIZE: usize =
+            size_of::<RadioPacket>() - size_of::<RadioPacket_Data>() + size_of::<BasicControl>();
+        const PARAMERTER_PACKET_SIZE: usize = size_of::<RadioPacket>()
+            - size_of::<RadioPacket_Data>()
             + size_of::<ParameterCommand>();
 
         if data.len() == CONTROL_PACKET_SIZE {
@@ -594,16 +629,11 @@ impl<
     }
 
     pub async fn read_packet(&self) -> Result<DataPacket, RobotRadioError> {
-        self.read_data(|data| {
-            self.parse_data_packet(data)
-        })
-        .await?
+        self.read_data(|data| self.parse_data_packet(data)).await?
     }
 
     pub fn read_packet_nonblocking(&self) -> Result<Option<DataPacket>, ()> {
-        let res = self.read_data_nonblocking(|data| {
-            self.parse_data_packet(data)
-        });
+        let res = self.read_data_nonblocking(|data| self.parse_data_packet(data));
 
         match res {
             Ok(res) => {
@@ -612,25 +642,23 @@ impl<
                         match pkt {
                             Ok(pkt) => {
                                 return Ok(Some(pkt));
-                            },
+                            }
                             Err(_) => {
                                 // we got data that was a valid EDM DataPacket, but couldn't parse it
                                 // into any known A-Team packet format
                                 defmt::debug!("got EDM packet but wasn't A-Team");
                                 return Err(());
-                            },
+                            }
                         }
-                    },
-                    None => {
-                        return Ok(None)
-                    },
+                    }
+                    None => return Ok(None),
                 }
-            },
+            }
             Err(err_res) => {
                 defmt::debug!("radio in invalid state {:?}", err_res);
                 // read_data_nonblocking failed because the radio was in an invalid state
-                return Err(())
-            },
+                return Err(());
+            }
         }
     }
 }

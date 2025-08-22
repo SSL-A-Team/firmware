@@ -2,10 +2,9 @@
 #![no_main]
 #![feature(generic_const_exprs)]
 
-
+use ateam_control_board::get_system_config;
 use ateam_lib_stm32::drivers::led::apa102::Apa102;
 use embassy_stm32::gpio::{Level, Output, Speed};
-use ateam_control_board::get_system_config;
 
 const DOTSTAR_BUF_SIZE: usize = 8 + (11 * 4);
 
@@ -29,10 +28,12 @@ async fn main(_main_spawner: embassy_executor::Spawner) {
     let mut led2 = Output::new(p.PG5, Level::Low, Speed::Low);
     let mut led1 = Output::new(p.PG6, Level::Low, Speed::Low);
 
-    // Get the pins from the schematic 
-    let dotstar_spi_buf: &'static mut [u8; DOTSTAR_BUF_SIZE] = unsafe { &mut DOTSTAR_SPI_BUFFER_CELL };
+    // Get the pins from the schematic
+    let dotstar_spi_buf: &'static mut [u8; DOTSTAR_BUF_SIZE] =
+        unsafe { &mut DOTSTAR_SPI_BUFFER_CELL };
     // Dotstar SPI, SCK, MOSI, and TX_DMA
-    let mut dotstars = Apa102::<11>::new_from_pins(p.SPI6, p.PB3, p.PB5, p.BDMA_CH0, dotstar_spi_buf.into());
+    let mut dotstars =
+        Apa102::<11>::new_from_pins(p.SPI6, p.PB3, p.PB5, p.BDMA_CH0, dotstar_spi_buf.into());
     dotstars.set_drv_str_all(32);
 
     loop {

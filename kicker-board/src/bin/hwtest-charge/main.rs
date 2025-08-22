@@ -11,25 +11,26 @@ use cortex_m_rt::entry;
 use embassy_executor::Executor;
 use embassy_stm32::{
     adc::Adc,
-    gpio::{Level, Output, Speed},
     adc::SampleTime,
+    gpio::{Level, Output, Speed},
 };
-use embassy_time::{Duration, Timer, Ticker};
+use embassy_time::{Duration, Ticker, Timer};
 
 use static_cell::StaticCell;
 
-use ateam_kicker_board::*;
 use ateam_kicker_board::pins::*;
+use ateam_kicker_board::*;
 
 #[embassy_executor::task]
-async fn run_kick(mut adc: Adc<'static, PowerRailAdc>, 
-        mut hv_pin: PowerRail200vReadPin, 
-        mut rail_vsw_pin: PowerRailVswReadPin,
-        reg_charge: ChargePin,
-        status_led_red: RedStatusLedPin,
-        status_led_green: GreenStatusLedPin,
-        kick_pin: KickPin) -> ! {
-
+async fn run_kick(
+    mut adc: Adc<'static, PowerRailAdc>,
+    mut hv_pin: PowerRail200vReadPin,
+    mut rail_vsw_pin: PowerRailVswReadPin,
+    reg_charge: ChargePin,
+    status_led_red: RedStatusLedPin,
+    status_led_green: GreenStatusLedPin,
+    kick_pin: KickPin,
+) -> ! {
     let mut ticker = Ticker::every(Duration::from_millis(1));
 
     let mut kick = Output::new(kick_pin, Level::Low, Speed::Medium);
@@ -48,12 +49,19 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
 
     let mut hv = adc.blocking_read(&mut hv_pin) as f32;
     let mut regv = adc.blocking_read(&mut rail_vsw_pin) as f32;
-    info!("hv V: {}, vsw reg mv: {}", adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)), adc_12v_to_rail_voltage(adc_raw_to_v(regv, vrefint_sample)));
+    info!(
+        "hv V: {}, vsw reg mv: {}",
+        adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)),
+        adc_12v_to_rail_voltage(adc_raw_to_v(regv, vrefint_sample))
+    );
 
     let start_up_battery_voltage = adc_v_to_battery_voltage(adc_raw_to_v(regv, vrefint_sample));
     if start_up_battery_voltage < 11.5 {
         status_led_red.set_high();
-        warn!("regulator voltage is below 18.0 ({}), is the battery low or disconnected?", start_up_battery_voltage);
+        warn!(
+            "regulator voltage is below 18.0 ({}), is the battery low or disconnected?",
+            start_up_battery_voltage
+        );
         warn!("refusing to continue");
         loop {
             reg_charge.set_low();
@@ -61,7 +69,7 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
             kick.set_high();
             Timer::after(Duration::from_micros(500)).await;
             kick.set_low();
-        
+
             Timer::after(Duration::from_millis(1000)).await;
         }
     }
@@ -75,7 +83,11 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
 
     hv = adc.blocking_read(&mut hv_pin) as f32;
     regv = adc.blocking_read(&mut rail_vsw_pin) as f32;
-    info!("hv V: {}, batt mv: {}", adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)), adc_12v_to_rail_voltage(adc_raw_to_v(regv, vrefint_sample)));
+    info!(
+        "hv V: {}, batt mv: {}",
+        adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)),
+        adc_12v_to_rail_voltage(adc_raw_to_v(regv, vrefint_sample))
+    );
 
     Timer::after(Duration::from_millis(1000)).await;
 
@@ -86,7 +98,11 @@ async fn run_kick(mut adc: Adc<'static, PowerRailAdc>,
         hv = adc.blocking_read(&mut hv_pin) as f32;
         regv = adc.blocking_read(&mut rail_vsw_pin) as f32;
 
-        info!("hv V: {}, batt mv: {}", adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)), adc_12v_to_rail_voltage(adc_raw_to_v(regv, vrefint_sample)));
+        info!(
+            "hv V: {}, batt mv: {}",
+            adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)),
+            adc_12v_to_rail_voltage(adc_raw_to_v(regv, vrefint_sample))
+        );
 
         reg_charge.set_low();
         kick.set_low();

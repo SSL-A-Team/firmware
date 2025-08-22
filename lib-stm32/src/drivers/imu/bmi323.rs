@@ -1,7 +1,7 @@
 /*
  * Driver for the Bosch BMI323 IMU.
- * 
- * https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bmi323-ds000.pdf * 
+ *
+ * https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bmi323-ds000.pdf *
  */
 
 use core::{cmp::min, f32::consts::PI};
@@ -11,7 +11,7 @@ use embassy_stm32::{
     mode::Async,
     spi::{self, MisoPin, MosiPin, SckPin},
     time::hz,
-    Peripheral
+    Peripheral,
 };
 
 pub const SPI_MIN_BUF_LEN: usize = 14;
@@ -170,7 +170,6 @@ pub enum IntPinDriveMode {
     OpenDrain = 0x1,
 }
 
-
 #[repr(u8)]
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
@@ -201,7 +200,6 @@ pub enum InterruptMode {
     MappedToI3cIbi = 0x3,
 }
 
-
 #[repr(u8)]
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
@@ -224,16 +222,14 @@ pub enum GyroMode {
     ContinuousHighPerformance = 0x7,
 }
 
-
 const BMI323_CHIP_ID: u16 = 0x0043;
 const READ_BIT: u8 = 0x80;
 
-impl<'a, 'buf> 
-    Bmi323<'a, 'buf> {
+impl<'a, 'buf> Bmi323<'a, 'buf> {
     /// creates a new BMI323 instance from a pre-existing Spi peripheral
     pub fn new_from_spi(
-        spi: spi::Spi<'a, Async>, 
-        spi_cs: Output<'a>, 
+        spi: spi::Spi<'a, Async>,
+        spi_cs: Output<'a>,
         spi_buf: &'buf mut [u8; SPI_MIN_BUF_LEN],
     ) -> Self {
         Bmi323 {
@@ -269,18 +265,12 @@ impl<'a, 'buf>
         spi_config.frequency = hz(1_000_000);
 
         let imu_spi = spi::Spi::new(
-            peri,
-            sck_pin,
-            mosi_pin,
-            miso_pin,
-            tx_dma,
-            rx_dma,
-            spi_config
+            peri, sck_pin, mosi_pin, miso_pin, tx_dma, rx_dma, spi_config,
         );
 
         let spi_cs = Output::new(spi_cs_pin, Level::High, Speed::VeryHigh);
 
-        Bmi323 { 
+        Bmi323 {
             spi: imu_spi,
             spi_cs,
             spi_buf,
@@ -321,14 +311,17 @@ impl<'a, 'buf>
 
     async fn burst_read(&mut self, reg: ImuRegisters, dest: &mut [u16]) {
         self.select();
-        // the transaction length is either the dest buf size * 2 + 2 
+        // the transaction length is either the dest buf size * 2 + 2
         // (the start addr + N data bytes) + 1 spurious byte for data to settle (or something)
         // OR upper bounded by internal length of the buffer.
         let trx_len = min((dest.len() * 2) + 2, self.spi_buf.len());
 
         self.spi_buf[0] = reg as u8 | READ_BIT;
         self.spi_buf[1] = 0x00;
-        let _ = self.spi.transfer_in_place(&mut self.spi_buf[..trx_len]).await;
+        let _ = self
+            .spi
+            .transfer_in_place(&mut self.spi_buf[..trx_len])
+            .await;
 
         for (i, dword) in dest.iter_mut().enumerate() {
             *dword = (self.spi_buf[(i * 2) + 2 + 1] as u16) << 8 | self.spi_buf[(i * 2) + 2] as u16;
@@ -352,7 +345,7 @@ impl<'a, 'buf>
     async fn burst_write(&mut self, reg: ImuRegisters, data: &[u16]) {
         self.select();
 
-        // the transaction length is either the dest buf size * 2 + 2 
+        // the transaction length is either the dest buf size * 2 + 2
         // (the start addr + N data bytes) + 1 spurious byte for data to settle (or something)
         // OR upper bounded by internal length of the buffer.
         let trx_len = min((data.len() * 2) + 1, self.spi_buf.len());
@@ -364,7 +357,10 @@ impl<'a, 'buf>
             self.spi_buf[(i * 2) + 1 + 1] = ((*word & 0xFF00_u16) >> 8) as u8;
         }
 
-        let _ = self.spi.transfer_in_place(&mut self.spi_buf[..trx_len]).await;
+        let _ = self
+            .spi
+            .transfer_in_place(&mut self.spi_buf[..trx_len])
+            .await;
 
         self.deselect();
     }
@@ -399,12 +395,16 @@ impl<'a, 'buf>
         let _ = self.read(ImuRegisters::CHIP_ID).await;
         let chip_id = self.read(ImuRegisters::CHIP_ID).await & 0x00FF;
         if chip_id != BMI323_CHIP_ID {
-            defmt::warn!("read IMU ID (0x{:x}) does not match expected BMI323 ID (0x{:x})", chip_id, BMI323_CHIP_ID);
+            defmt::warn!(
+                "read IMU ID (0x{:x}) does not match expected BMI323 ID (0x{:x})",
+                chip_id,
+                BMI323_CHIP_ID
+            );
             has_self_test_error = Err(());
         } else {
             defmt::debug!("BMI323 id verified: 0x{:x}", chip_id);
         }
-        
+
         if (self.accel_self_test().await).is_err() {
             has_self_test_error = Err(());
         }
@@ -415,7 +415,7 @@ impl<'a, 'buf>
 
         has_self_test_error
     }
-    
+
     pub async fn accel_get_raw_data(&mut self) -> [i16; 3] {
         let mut buf: [u16; 3] = [0; 3];
         self.burst_read(ImuRegisters::ACC_DATA_X, &mut buf).await;
@@ -443,17 +443,21 @@ impl<'a, 'buf>
     pub async fn accel_get_data_g(&mut self) -> [f32; 3] {
         let raw_data = self.accel_get_raw_data().await;
 
-        [self.convert_accel_raw_sample_g(raw_data[0]),
+        [
+            self.convert_accel_raw_sample_g(raw_data[0]),
             self.convert_accel_raw_sample_g(raw_data[1]),
-            self.convert_accel_raw_sample_g(raw_data[2])]
+            self.convert_accel_raw_sample_g(raw_data[2]),
+        ]
     }
 
     pub async fn accel_get_data_mps(&mut self) -> [f32; 3] {
         let raw_data = self.accel_get_raw_data().await;
 
-        [self.convert_accel_raw_sample_mps(raw_data[0]),
+        [
+            self.convert_accel_raw_sample_mps(raw_data[0]),
             self.convert_accel_raw_sample_mps(raw_data[1]),
-            self.convert_accel_raw_sample_mps(raw_data[2])]
+            self.convert_accel_raw_sample_mps(raw_data[2]),
+        ]
     }
 
     pub async fn apply_accel_config(&mut self) -> Result<(), ()> {
@@ -464,23 +468,26 @@ impl<'a, 'buf>
         new_acc_conf_reg_val |= (self.accel_range as u16 & 0x07) << 4;
         new_acc_conf_reg_val |= self.accel_odr as u16 & 0x0F;
 
-        self.write(ImuRegisters::ACC_CONF, new_acc_conf_reg_val).await;
+        self.write(ImuRegisters::ACC_CONF, new_acc_conf_reg_val)
+            .await;
 
         let err_reg_val = self.read(ImuRegisters::ERR_REG).await;
         if err_reg_val & 0x0020 != 0 {
             defmt::error!("BMI323 accel config is invalid. Accel may be inop.");
-            return Err(())
+            return Err(());
         }
 
         Ok(())
     }
 
-    pub async fn set_accel_config(&mut self,
+    pub async fn set_accel_config(
+        &mut self,
         accel_mode: AccelMode,
         accel_range: AccelRange,
         accel_bw_mode: Bandwidth3DbCutoffFreq,
         accel_odr: OutputDataRate,
-        accel_avg_window: DataAveragingWindow) -> Result<(), ()> {
+        accel_avg_window: DataAveragingWindow,
+    ) -> Result<(), ()> {
         self.accel_mode = accel_mode;
         self.accel_range = accel_range;
         self.accel_bw_mode = accel_bw_mode;
@@ -532,17 +539,21 @@ impl<'a, 'buf>
     pub async fn gyro_get_data_dps(&mut self) -> [f32; 3] {
         let raw_data = self.gyro_get_raw_data().await;
 
-        [self.convert_raw_gyro_sample_dps(raw_data[0]),
+        [
+            self.convert_raw_gyro_sample_dps(raw_data[0]),
             self.convert_raw_gyro_sample_dps(raw_data[1]),
-            self.convert_raw_gyro_sample_dps(raw_data[2])]
+            self.convert_raw_gyro_sample_dps(raw_data[2]),
+        ]
     }
 
     pub async fn gyro_get_data_rads(&mut self) -> [f32; 3] {
         let raw_data = self.gyro_get_raw_data().await;
 
-        [self.convert_raw_gyro_sample_rads(raw_data[0]),
+        [
+            self.convert_raw_gyro_sample_rads(raw_data[0]),
             self.convert_raw_gyro_sample_rads(raw_data[1]),
-            self.convert_raw_gyro_sample_rads(raw_data[2])]
+            self.convert_raw_gyro_sample_rads(raw_data[2]),
+        ]
     }
 
     pub async fn apply_gyro_config(&mut self) -> Result<(), ()> {
@@ -553,23 +564,26 @@ impl<'a, 'buf>
         new_gyr_conf_reg_val |= (self.gyro_range as u16 & 0x07) << 4;
         new_gyr_conf_reg_val |= self.gyro_odr as u16 & 0x0F;
 
-        self.write(ImuRegisters::GYR_CONF, new_gyr_conf_reg_val).await;
+        self.write(ImuRegisters::GYR_CONF, new_gyr_conf_reg_val)
+            .await;
 
         let err_reg_val = self.read(ImuRegisters::ERR_REG).await;
         if err_reg_val & 0x0040 != 0 {
             defmt::error!("BMI323 gyro config is invalid. Gyro may be inop.");
-            return Err(())
+            return Err(());
         }
 
         Ok(())
     }
 
-    pub async fn set_gyro_config(&mut self,
+    pub async fn set_gyro_config(
+        &mut self,
         gyro_mode: GyroMode,
         gyro_range: GyroRange,
         gyro_bw_mode: Bandwidth3DbCutoffFreq,
         gyro_odr: OutputDataRate,
-        gyro_avg_window: DataAveragingWindow) -> Result<(), ()> {
+        gyro_avg_window: DataAveragingWindow,
+    ) -> Result<(), ()> {
         self.gyro_mode = gyro_mode;
         self.gyro_range = gyro_range;
         self.gyro_bw_mode = gyro_bw_mode;
@@ -605,7 +619,11 @@ impl<'a, 'buf>
         self.write(ImuRegisters::INT_MAP2, int_map2_reg_val).await;
     }
 
-    pub async fn set_int1_pin_config(&mut self, pin_level: IntPinLevel, pin_drive_mode: IntPinDriveMode) {
+    pub async fn set_int1_pin_config(
+        &mut self,
+        pin_level: IntPinLevel,
+        pin_drive_mode: IntPinDriveMode,
+    ) {
         let mut io_int_ctrl_reg_val: u16 = self.read(ImuRegisters::IO_INT_CTRL).await;
 
         // clear the config for int1 pin
@@ -614,10 +632,15 @@ impl<'a, 'buf>
         io_int_ctrl_reg_val |= pin_level as u16 & 0x1;
         io_int_ctrl_reg_val |= (pin_drive_mode as u16 & 0x1) << 1;
 
-        self.write(ImuRegisters::IO_INT_CTRL, io_int_ctrl_reg_val).await;
+        self.write(ImuRegisters::IO_INT_CTRL, io_int_ctrl_reg_val)
+            .await;
     }
 
-    pub async fn set_int2_pin_config(&mut self, pin_level: IntPinLevel, pin_drive_mode: IntPinDriveMode) {
+    pub async fn set_int2_pin_config(
+        &mut self,
+        pin_level: IntPinLevel,
+        pin_drive_mode: IntPinDriveMode,
+    ) {
         let mut io_int_ctrl_reg_val: u16 = self.read(ImuRegisters::IO_INT_CTRL).await;
 
         // clear the config for int1 pin
@@ -626,7 +649,8 @@ impl<'a, 'buf>
         io_int_ctrl_reg_val |= (pin_level as u16 & 0x1) << 8;
         io_int_ctrl_reg_val |= (pin_drive_mode as u16 & 0x1) << 9;
 
-        self.write(ImuRegisters::IO_INT_CTRL, io_int_ctrl_reg_val).await;
+        self.write(ImuRegisters::IO_INT_CTRL, io_int_ctrl_reg_val)
+            .await;
     }
 
     pub async fn set_int1_enabled(&mut self, enabled: bool) {
@@ -637,7 +661,8 @@ impl<'a, 'buf>
         // set the new mapping for accel
         io_int_ctrl_reg_val |= (enabled as u16 & 0x1) << 2;
 
-        self.write(ImuRegisters::IO_INT_CTRL, io_int_ctrl_reg_val).await;
+        self.write(ImuRegisters::IO_INT_CTRL, io_int_ctrl_reg_val)
+            .await;
     }
 
     pub async fn set_int2_enabled(&mut self, enabled: bool) {
@@ -648,6 +673,7 @@ impl<'a, 'buf>
         // set the new mapping for accel
         io_int_ctrl_reg_val |= (enabled as u16 & 0x1) << 10;
 
-        self.write(ImuRegisters::IO_INT_CTRL, io_int_ctrl_reg_val).await;
+        self.write(ImuRegisters::IO_INT_CTRL, io_int_ctrl_reg_val)
+            .await;
     }
 }

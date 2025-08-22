@@ -4,17 +4,17 @@
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::interrupt;
 
-use defmt_rtt as _; 
+use defmt_rtt as _;
 
 use ateam_control_board::{create_io_task, get_system_config, robot_state::SharedRobotState};
-
 
 use embassy_time::Timer;
 // provide embedded panic probe
 use panic_probe as _;
 use static_cell::ConstStaticCell;
 
-static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
+static ROBOT_STATE: ConstStaticCell<SharedRobotState> =
+    ConstStaticCell::new(SharedRobotState::new());
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 

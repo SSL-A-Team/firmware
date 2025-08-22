@@ -1,34 +1,38 @@
+use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::{
     ParameterCommandCode::*,
-    ParameterName,
     ParameterDataFormat::{PID_LIMITED_INTEGRAL_F32, VEC3_F32, VEC4_F32},
-    ParameterName::{VEL_PID_X, RC_BODY_VEL_LIMIT, RC_BODY_ACC_LIMIT, VEL_PID_Y, ANGULAR_VEL_PID_Z, VEL_CGKF_ENCODER_NOISE, VEL_CGKF_PROCESS_NOISE, VEL_CGKF_GYRO_NOISE, VEL_CGFK_INITIAL_COVARIANCE, VEL_CGKF_K_MATRIX, RC_WHEEL_ACC_LIMIT}};
+    ParameterName,
+    ParameterName::{
+        ANGULAR_VEL_PID_Z, RC_BODY_ACC_LIMIT, RC_BODY_VEL_LIMIT, RC_WHEEL_ACC_LIMIT,
+        VEL_CGFK_INITIAL_COVARIANCE, VEL_CGKF_ENCODER_NOISE, VEL_CGKF_GYRO_NOISE,
+        VEL_CGKF_K_MATRIX, VEL_CGKF_PROCESS_NOISE, VEL_PID_X, VEL_PID_Y,
+    },
+};
 use embassy_stm32::pac::adc::vals::Exten;
 use nalgebra::{SVector, Vector3, Vector4, Vector5};
-use crate::parameter_interface::ParameterInterface;
 
 use super::constant_gain_kalman_filter::CgKalmanFilter;
 use super::pid::PidController;
 use super::robot_model::RobotModel;
 
 use super::params::body_vel_filter_params::{
-    KF_NUM_STATES, KF_NUM_CONTROL_INPUTS, KF_NUM_OBSERVATIONS,
-    STATE_TRANSITION, CONTROL_INPUT, OBSERVATION_MODEL, PROCESS_COV, INIT_ESTIMATE_COV, KALMAN_GAIN,
+    CONTROL_INPUT, INIT_ESTIMATE_COV, KALMAN_GAIN, KF_NUM_CONTROL_INPUTS, KF_NUM_OBSERVATIONS,
+    KF_NUM_STATES, OBSERVATION_MODEL, PROCESS_COV, STATE_TRANSITION,
 };
 
 use super::params::body_vel_pid_params::{
-    PID_GAIN,
-    BODY_VEL_LIM, BODY_ACC_LIM, BODY_DEACC_LIM, WHEEL_ACC_LIM
+    BODY_ACC_LIM, BODY_DEACC_LIM, BODY_VEL_LIM, PID_GAIN, WHEEL_ACC_LIM,
 };
 
-use ateam_common_packets::bindings::{
-    ExtendedTelemetry,
-    ParameterCommand
-};
+use ateam_common_packets::bindings::{ExtendedTelemetry, ParameterCommand};
 
 // TODO find some general numeric type trait(s) for D
 // Clamp the vector, but keep the direction consistent.
-pub fn clamp_vector_keep_dir<const D: usize>(vec: &SVector<f32, D>, limits_abs: &SVector<f32, D>) -> SVector<f32, D> {
+pub fn clamp_vector_keep_dir<const D: usize>(
+    vec: &SVector<f32, D>,
+    limits_abs: &SVector<f32, D>,
+) -> SVector<f32, D> {
     // Applies the clamping in a sign-less way by getting the scale of the vector compared to absolute value clamp region.
     let scales: SVector<f32, D> = vec.abs().component_div(limits_abs);
     // To maintain direction, do a scalar divison of the max of the scales. Limit to make sure to only scale down.
@@ -50,9 +54,22 @@ pub struct BodyVelocityController<'a> {
 }
 
 impl<'a> BodyVelocityController<'a> {
-    pub fn new_from_global_params(loop_dt_s: f32, robot_model: RobotModel) -> BodyVelocityController<'a> {
-        let body_vel_filter: CgKalmanFilter<KF_NUM_STATES, KF_NUM_CONTROL_INPUTS, KF_NUM_OBSERVATIONS> =
-            CgKalmanFilter::new(&STATE_TRANSITION, &CONTROL_INPUT, &OBSERVATION_MODEL, &PROCESS_COV, &KALMAN_GAIN, &INIT_ESTIMATE_COV);
+    pub fn new_from_global_params(
+        loop_dt_s: f32,
+        robot_model: RobotModel,
+    ) -> BodyVelocityController<'a> {
+        let body_vel_filter: CgKalmanFilter<
+            KF_NUM_STATES,
+            KF_NUM_CONTROL_INPUTS,
+            KF_NUM_OBSERVATIONS,
+        > = CgKalmanFilter::new(
+            &STATE_TRANSITION,
+            &CONTROL_INPUT,
+            &OBSERVATION_MODEL,
+            &PROCESS_COV,
+            &KALMAN_GAIN,
+            &INIT_ESTIMATE_COV,
+        );
 
         let body_vel_controller: PidController<KF_NUM_STATES> =
             PidController::from_gains_matrix(&PID_GAIN);
@@ -79,14 +96,15 @@ impl<'a> BodyVelocityController<'a> {
         bvc
     }
 
-    pub fn new(loop_dt_s: f32,
-            robot_model: RobotModel,
-            body_vel_filter: CgKalmanFilter<'a, 3, 4, 5>,
-            pid_controller: PidController<3>,
-            bv_limit: Vector3<f32>,
-            ba_limit: Vector3<f32>,
-            bda_limit: Vector3<f32>,
-            wa_limit: Vector4<f32>
+    pub fn new(
+        loop_dt_s: f32,
+        robot_model: RobotModel,
+        body_vel_filter: CgKalmanFilter<'a, 3, 4, 5>,
+        pid_controller: PidController<3>,
+        bv_limit: Vector3<f32>,
+        ba_limit: Vector3<f32>,
+        bda_limit: Vector3<f32>,
+        wa_limit: Vector4<f32>,
     ) -> BodyVelocityController<'a> {
         BodyVelocityController {
             loop_dt_s: loop_dt_s,
@@ -103,14 +121,29 @@ impl<'a> BodyVelocityController<'a> {
         }
     }
 
-    pub fn control_update(&mut self, body_vel_setpoint: &Vector3<f32>, wheel_velocities: &Vector4<f32>, _wheel_torques: &Vector4<f32>, gyro_theta: f32, controls_enabled: bool) {
+    pub fn control_update(
+        &mut self,
+        body_vel_setpoint: &Vector3<f32>,
+        wheel_velocities: &Vector4<f32>,
+        _wheel_torques: &Vector4<f32>,
+        gyro_theta: f32,
+        controls_enabled: bool,
+    ) {
         // Assign telemetry data
         // TODO pass all of the gyro data up, not just theta
         self.debug_telemetry.imu_gyro[2] = gyro_theta;
 
-        self.debug_telemetry.commanded_body_velocity.copy_from_slice(body_vel_setpoint.as_slice());
+        self.debug_telemetry
+            .commanded_body_velocity
+            .copy_from_slice(body_vel_setpoint.as_slice());
 
-        let measurement: Vector5<f32> = Vector5::new(wheel_velocities[0], wheel_velocities[1], wheel_velocities[2], wheel_velocities[3], gyro_theta);
+        let measurement: Vector5<f32> = Vector5::new(
+            wheel_velocities[0],
+            wheel_velocities[1],
+            wheel_velocities[2],
+            wheel_velocities[3],
+            gyro_theta,
+        );
 
         // Update measurements process observation input into CGKF.
         self.body_vel_filter.update(&measurement);
@@ -131,16 +164,24 @@ impl<'a> BodyVelocityController<'a> {
             body_vel_estimate[2] = 0.0;
         }
 
-        self.debug_telemetry.cgkf_body_velocity_state_estimate.copy_from_slice(body_vel_estimate.as_slice());
+        self.debug_telemetry
+            .cgkf_body_velocity_state_estimate
+            .copy_from_slice(body_vel_estimate.as_slice());
 
         // Apply control policy.
-        let body_vel_control_pid = self.body_vel_controller.calculate(&body_vel_setpoint, &body_vel_estimate, self.loop_dt_s);
+        let body_vel_control_pid = self.body_vel_controller.calculate(
+            &body_vel_setpoint,
+            &body_vel_estimate,
+            self.loop_dt_s,
+        );
 
         // Add the commanded setpoint as a feedforward component.
         let body_vel_output = body_vel_control_pid + body_vel_setpoint;
         // let body_vel_output = body_vel_setpoint;
 
-        self.debug_telemetry.body_velocity_u.copy_from_slice(body_vel_output.as_slice());
+        self.debug_telemetry
+            .body_velocity_u
+            .copy_from_slice(body_vel_output.as_slice());
 
         // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
         // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
@@ -161,19 +202,28 @@ impl<'a> BodyVelocityController<'a> {
             temp_accel_decel_holder[2] = self.body_deceleration_limit[2];
         }
 
-        let body_acc_output_clamp = clamp_vector_keep_dir(&body_acc_output, &temp_accel_decel_holder);
+        let body_acc_output_clamp =
+            clamp_vector_keep_dir(&body_acc_output, &temp_accel_decel_holder);
 
         // Convert back to body velocity
         let body_vel_output_acc_clamp = self.prev_output + (body_acc_output_clamp * self.loop_dt_s);
 
         // Clamp and maintain direction of control body velocity.
-        let body_vel_output_full_clamp = clamp_vector_keep_dir(&body_vel_output_acc_clamp, &self.body_velocity_limit);
-        self.prev_output.copy_from_slice(body_vel_output_full_clamp.as_slice());
-        self.debug_telemetry.clamped_commanded_body_velocity.copy_from_slice(body_vel_output_full_clamp.as_slice());
+        let body_vel_output_full_clamp =
+            clamp_vector_keep_dir(&body_vel_output_acc_clamp, &self.body_velocity_limit);
+        self.prev_output
+            .copy_from_slice(body_vel_output_full_clamp.as_slice());
+        self.debug_telemetry
+            .clamped_commanded_body_velocity
+            .copy_from_slice(body_vel_output_full_clamp.as_slice());
 
         // Transform body velocity commands into the wheel velocity domain.
-        let wheel_vel_output = self.robot_model.robot_vel_to_wheel_vel(&body_vel_output_full_clamp);
-        self.debug_telemetry.wheel_velocity_u.copy_from_slice(wheel_vel_output.as_slice());
+        let wheel_vel_output = self
+            .robot_model
+            .robot_vel_to_wheel_vel(&body_vel_output_full_clamp);
+        self.debug_telemetry
+            .wheel_velocity_u
+            .copy_from_slice(wheel_vel_output.as_slice());
 
         // Use control law adjusted value to predict the next cycle's state.
         self.body_vel_filter.predict(&wheel_vel_output);
@@ -193,7 +243,9 @@ impl<'a> BodyVelocityController<'a> {
             self.cmd_wheel_velocities = wheel_vel_output;
         } else {
             self.cmd_wheel_velocities = self.robot_model.robot_vel_to_wheel_vel(&body_vel_setpoint);
-            self.debug_telemetry.wheel_velocity_u.copy_from_slice(wheel_vel_output.as_slice());
+            self.debug_telemetry
+                .wheel_velocity_u
+                .copy_from_slice(wheel_vel_output.as_slice());
         }
     }
 
@@ -215,13 +267,19 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
         return match param_name {
             RC_BODY_VEL_LIMIT | RC_BODY_ACC_LIMIT | RC_WHEEL_ACC_LIMIT => true,
             VEL_PID_X | VEL_PID_Y | ANGULAR_VEL_PID_Z => true,
-            VEL_CGKF_ENCODER_NOISE | VEL_CGKF_PROCESS_NOISE | VEL_CGKF_GYRO_NOISE | VEL_CGFK_INITIAL_COVARIANCE | VEL_CGKF_K_MATRIX => true,
+            VEL_CGKF_ENCODER_NOISE
+            | VEL_CGKF_PROCESS_NOISE
+            | VEL_CGKF_GYRO_NOISE
+            | VEL_CGFK_INITIAL_COVARIANCE
+            | VEL_CGKF_K_MATRIX => true,
             _ => false,
-        }
+        };
     }
 
-
-    fn apply_command(&mut self, param_cmd: &ParameterCommand) -> Result<ParameterCommand, ParameterCommand> {
+    fn apply_command(
+        &mut self,
+        param_cmd: &ParameterCommand,
+    ) -> Result<ParameterCommand, ParameterCommand> {
         let mut reply_cmd = param_cmd.clone();
 
         // if we haven't been given an actionable command code, ignore the call
@@ -233,7 +291,9 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
         // if we've been asked to apply a command we don't have a key for it
         // error out
         if !self.has_name(param_cmd.parameter_name) {
-            defmt::warn!("asked to apply a command with a parameter name not managed by this module");
+            defmt::warn!(
+                "asked to apply a command with a parameter name not managed by this module"
+            );
             reply_cmd.command_code = PCC_NACK_INVALID_NAME;
             return Err(*param_cmd);
         }
@@ -259,7 +319,7 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                     }
 
                     reply_cmd.command_code = PCC_ACK;
-                },
+                }
                 VEL_PID_Y => {
                     reply_cmd.data_format = PID_LIMITED_INTEGRAL_F32;
 
@@ -273,7 +333,7 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                     }
 
                     reply_cmd.command_code = PCC_ACK;
-                },
+                }
                 ANGULAR_VEL_PID_Z => {
                     reply_cmd.data_format = PID_LIMITED_INTEGRAL_F32;
 
@@ -287,7 +347,7 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                     }
 
                     reply_cmd.command_code = PCC_ACK;
-                },
+                }
                 // VEL_CGKF_ENCODER_NOISE => {
 
                 // },
@@ -307,20 +367,35 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                     // set the type
                     reply_cmd.data_format = VEC3_F32;
                     // read back the data
-                    unsafe { reply_cmd.data.vec3_f32.copy_from_slice(self.body_velocity_limit.as_slice()); }
+                    unsafe {
+                        reply_cmd
+                            .data
+                            .vec3_f32
+                            .copy_from_slice(self.body_velocity_limit.as_slice());
+                    }
 
                     reply_cmd.command_code = PCC_ACK;
-                },
+                }
                 RC_BODY_ACC_LIMIT => {
                     reply_cmd.data_format = VEC3_F32;
-                    unsafe { reply_cmd.data.vec3_f32.copy_from_slice(self.body_acceleration_limit.as_slice()); }
+                    unsafe {
+                        reply_cmd
+                            .data
+                            .vec3_f32
+                            .copy_from_slice(self.body_acceleration_limit.as_slice());
+                    }
                     reply_cmd.command_code = PCC_ACK;
-                },
+                }
                 RC_WHEEL_ACC_LIMIT => {
                     reply_cmd.data_format = VEC4_F32;
-                    unsafe { reply_cmd.data.vec4_f32.copy_from_slice(self.wheel_acceleration_limits.as_slice()); }
+                    unsafe {
+                        reply_cmd
+                            .data
+                            .vec4_f32
+                            .copy_from_slice(self.wheel_acceleration_limits.as_slice());
+                    }
                     reply_cmd.command_code = PCC_ACK;
-                },
+                }
                 _ => {
                     defmt::debug!("unimplemented key read in RobotController");
                     reply_cmd.command_code = PCC_NACK_INVALID_NAME;
@@ -333,9 +408,10 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                     if param_cmd.data_format == PID_LIMITED_INTEGRAL_F32 {
                         // read data into matrix, modify the matrix row, then write the whole thing back
                         let mut current_pid_gain = self.body_vel_controller.get_gain();
-                        current_pid_gain.row_mut(0).copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
+                        current_pid_gain
+                            .row_mut(0)
+                            .copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
                         self.body_vel_controller.set_gain(current_pid_gain);
-
 
                         // can't slice copy b/c backing storage is column-major
                         // so a row slice isn't contiguous in backing memory and
@@ -354,11 +430,13 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                         reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
                         return Err(reply_cmd);
                     }
-                },
+                }
                 VEL_PID_Y => {
                     if param_cmd.data_format == PID_LIMITED_INTEGRAL_F32 {
                         let mut current_pid_gain = self.body_vel_controller.get_gain();
-                        current_pid_gain.row_mut(1).copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
+                        current_pid_gain
+                            .row_mut(1)
+                            .copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
                         self.body_vel_controller.set_gain(current_pid_gain);
 
                         let updated_pid_gain = self.body_vel_controller.get_gain();
@@ -375,11 +453,13 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                         reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
                         return Err(reply_cmd);
                     }
-                },
+                }
                 ANGULAR_VEL_PID_Z => {
                     if param_cmd.data_format == PID_LIMITED_INTEGRAL_F32 {
                         let mut current_pid_gain = self.body_vel_controller.get_gain();
-                        current_pid_gain.row_mut(2).copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
+                        current_pid_gain
+                            .row_mut(2)
+                            .copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
                         self.body_vel_controller.set_gain(current_pid_gain);
 
                         let updated_pid_gain = self.body_vel_controller.get_gain();
@@ -396,7 +476,7 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                         reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
                         return Err(reply_cmd);
                     }
-                },
+                }
                 // VEL_CGKF_ENCODER_NOISE => {
 
                 // },
@@ -415,39 +495,60 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                 RC_BODY_VEL_LIMIT => {
                     if param_cmd.data_format == VEC3_F32 {
                         // write the new data, then read it back into the reply
-                        self.body_velocity_limit.as_mut_slice().copy_from_slice(unsafe { &param_cmd.data.vec3_f32 });
-                        unsafe { reply_cmd.data.vec3_f32.copy_from_slice(self.body_velocity_limit.as_slice()); }
+                        self.body_velocity_limit
+                            .as_mut_slice()
+                            .copy_from_slice(unsafe { &param_cmd.data.vec3_f32 });
+                        unsafe {
+                            reply_cmd
+                                .data
+                                .vec3_f32
+                                .copy_from_slice(self.body_velocity_limit.as_slice());
+                        }
 
                         reply_cmd.command_code = PCC_ACK;
                     } else {
                         reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
                         return Err(reply_cmd);
                     }
-                },
+                }
                 RC_BODY_ACC_LIMIT => {
                     if param_cmd.data_format == VEC3_F32 {
                         // write the new data, then read it back into the reply
-                        self.body_acceleration_limit.as_mut_slice().copy_from_slice(unsafe { &param_cmd.data.vec3_f32 });
-                        unsafe { reply_cmd.data.vec3_f32.copy_from_slice(self.body_acceleration_limit.as_slice()); }
+                        self.body_acceleration_limit
+                            .as_mut_slice()
+                            .copy_from_slice(unsafe { &param_cmd.data.vec3_f32 });
+                        unsafe {
+                            reply_cmd
+                                .data
+                                .vec3_f32
+                                .copy_from_slice(self.body_acceleration_limit.as_slice());
+                        }
 
                         reply_cmd.command_code = PCC_ACK;
                     } else {
                         reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
                         return Err(reply_cmd);
                     }
-                },
+                }
                 RC_WHEEL_ACC_LIMIT => {
                     if param_cmd.data_format == VEC4_F32 {
                         // write the new data, then read it back into the reply
-                        self.wheel_acceleration_limits.as_mut_slice().copy_from_slice(unsafe { &param_cmd.data.vec4_f32 });
-                        unsafe { reply_cmd.data.vec4_f32.copy_from_slice(self.wheel_acceleration_limits.as_slice()); }
+                        self.wheel_acceleration_limits
+                            .as_mut_slice()
+                            .copy_from_slice(unsafe { &param_cmd.data.vec4_f32 });
+                        unsafe {
+                            reply_cmd
+                                .data
+                                .vec4_f32
+                                .copy_from_slice(self.wheel_acceleration_limits.as_slice());
+                        }
 
                         reply_cmd.command_code = PCC_ACK;
                     } else {
                         reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
                         return Err(reply_cmd);
                     }
-                },
+                }
                 _ => {
                     defmt::debug!("unimplemented key write in RobotController");
                     reply_cmd.command_code = PCC_NACK_INVALID_NAME;

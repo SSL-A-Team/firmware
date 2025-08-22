@@ -1,8 +1,6 @@
 #![no_std]
-
 #![allow(incomplete_features)]
-#![allow(clippy::too_many_arguments)]  // too many functions passing pins to device drivers exceed the bound
-
+#![allow(clippy::too_many_arguments)] // too many functions passing pins to device drivers exceed the bound
 #![feature(generic_const_exprs)]
 #![feature(const_precise_live_drops)]
 #![feature(maybe_uninit_uninit_array)]
@@ -21,13 +19,12 @@ pub mod audio;
 pub mod drivers;
 pub mod filter;
 pub mod math;
-pub mod uart;
-pub mod units;
 pub mod power;
 pub mod time;
+pub mod uart;
+pub mod units;
 
 pub mod queue;
 
 // required for exported queue macros
 pub extern crate paste;
-

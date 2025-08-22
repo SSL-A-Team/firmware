@@ -1,9 +1,9 @@
 #![no_std]
 #![allow(non_upper_case_globals)]
 
-pub mod public_credentials;
 #[cfg(not(feature = "no-private-credentials"))]
 pub mod private_credentials;
+pub mod public_credentials;
 
 #[derive(Clone, Copy)]
 pub struct WifiCredential {
@@ -20,5 +20,3 @@ impl WifiCredential {
         self.password
     }
 }
-
-

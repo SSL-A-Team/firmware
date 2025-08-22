@@ -1,4 +1,10 @@
-use embassy_stm32::{time::hz, timer::{simple_pwm::{SimplePwm, SimplePwmChannel}, Channel, GeneralInstance4Channel}};
+use embassy_stm32::{
+    time::hz,
+    timer::{
+        simple_pwm::{SimplePwm, SimplePwmChannel},
+        Channel, GeneralInstance4Channel,
+    },
+};
 use num_traits::clamp;
 
 use super::PlayTone;
@@ -19,7 +25,12 @@ impl<'d, T: GeneralInstance4Channel> Buzzer<'d, T> {
         Self::new_with_fcontrs(pwm, channel, BUZZER_MIN_FREQ, BUZZER_MAX_FREQ)
     }
 
-    pub fn new_with_fcontrs(pwm: SimplePwm<'d, T>, channel: Channel, min_freq: u16, max_freq: u16) -> Self {        
+    pub fn new_with_fcontrs(
+        pwm: SimplePwm<'d, T>,
+        channel: Channel,
+        min_freq: u16,
+        max_freq: u16,
+    ) -> Self {
         Self {
             pwm,
             channel: channel,

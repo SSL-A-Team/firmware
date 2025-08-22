@@ -4,6 +4,6 @@ pub mod boot;
 pub mod flash;
 pub mod imu;
 pub mod led;
+pub mod other;
 pub mod radio;
 pub mod switches;
-pub mod other;

@@ -1,29 +1,37 @@
-use core::{cmp::{max, min}, ops::Range};
+use core::{
+    cmp::{max, min},
+    ops::Range,
+};
 
 use embassy_stm32::gpio::{AnyPin, Input, Pull};
 
-
-
 pub struct DipSwitch<'a, const PIN_CT: usize> {
     inputs: [Input<'a>; PIN_CT],
-    inversion_map: [bool; PIN_CT]
+    inversion_map: [bool; PIN_CT],
 }
 
 impl<'a, const PIN_CT: usize> DipSwitch<'a, PIN_CT> {
-    pub const fn new_from_inputs(inputs: [Input<'a>; PIN_CT], inversion_map: Option<[bool; PIN_CT]>) -> DipSwitch<'a, PIN_CT> {
+    pub const fn new_from_inputs(
+        inputs: [Input<'a>; PIN_CT],
+        inversion_map: Option<[bool; PIN_CT]>,
+    ) -> DipSwitch<'a, PIN_CT> {
         let inversion_map = if let Some(map) = inversion_map {
             map
-        } else { 
+        } else {
             [false; PIN_CT]
         };
 
         DipSwitch {
             inputs,
-            inversion_map
+            inversion_map,
         }
     }
 
-    pub fn new_from_pins(pins: [AnyPin; PIN_CT], pull: Pull, inversion_map: Option<[bool; PIN_CT]>) -> DipSwitch<'a, PIN_CT> {
+    pub fn new_from_pins(
+        pins: [AnyPin; PIN_CT],
+        pull: Pull,
+        inversion_map: Option<[bool; PIN_CT]>,
+    ) -> DipSwitch<'a, PIN_CT> {
         let inputs = pins.map(|pin| Input::new(pin, pull));
         DipSwitch::new_from_inputs(inputs, inversion_map)
     }
@@ -46,7 +54,7 @@ impl<'a, const PIN_CT: usize> DipSwitch<'a, PIN_CT> {
 
         // since pins are physical, we'll use an inclusive range
         let start_pin = min(pin_range.start, pin_range.end);
-        let end_pin = max(pin_range.start, pin_range.end) + 1; 
+        let end_pin = max(pin_range.start, pin_range.end) + 1;
 
         let mut val: u8 = 0;
         for i in (start_pin..end_pin).enumerate() {

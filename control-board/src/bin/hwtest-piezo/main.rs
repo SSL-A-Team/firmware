@@ -4,20 +4,28 @@
 use ateam_lib_stm32::{audio::tone_player::TonePlayer, drivers::audio::buzzer::Buzzer};
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
-    gpio::OutputType, interrupt, time::khz, timer::{simple_pwm::{PwmPin, SimplePwm}, Channel}
+    gpio::OutputType,
+    interrupt,
+    time::khz,
+    timer::{
+        simple_pwm::{PwmPin, SimplePwm},
+        Channel,
+    },
 };
 
-use defmt_rtt as _; 
+use defmt_rtt as _;
 
-use ateam_control_board::{create_io_task, get_system_config, robot_state::SharedRobotState, songs::TEST_SONG};
-
+use ateam_control_board::{
+    create_io_task, get_system_config, robot_state::SharedRobotState, songs::TEST_SONG,
+};
 
 use embassy_time::Timer;
 // provide embedded panic probe
 use panic_probe as _;
 use static_cell::ConstStaticCell;
 
-static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
+static ROBOT_STATE: ConstStaticCell<SharedRobotState> =
+    ConstStaticCell::new(SharedRobotState::new());
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
@@ -48,15 +56,19 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  start tasks  //
     ///////////////////
 
-
-            
-    create_io_task!(main_spawner,
-        robot_state,
-        p);
+    create_io_task!(main_spawner, robot_state, p);
 
     let ch2 = PwmPin::new_ch2(p.PE6, OutputType::PushPull);
-    let pwm = SimplePwm::new(p.TIM15, None, Some(ch2), None, None, khz(2), Default::default());
-    
+    let pwm = SimplePwm::new(
+        p.TIM15,
+        None,
+        Some(ch2),
+        None,
+        None,
+        khz(2),
+        Default::default(),
+    );
+
     let audio_driver = Buzzer::new(pwm, Channel::Ch2);
     let mut tone_player = TonePlayer::new(audio_driver);
 
