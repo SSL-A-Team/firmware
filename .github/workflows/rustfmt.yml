@@ -11,6 +11,14 @@
         runs-on: ubuntu-latest
         steps:
           - uses: actions/checkout@v4
+          - name: Fetch Submodules
+            uses: webfactory/ssh-agent@v0.7.0
+            with:
+              ssh-private-key: |
+                ${{ secrets.ROBOT_PRIVATE_DATA_PRIVATE_SSH_KEY }}
+          - run: |
+                git submodule update --init --recursive
+                ./util/ateam-credentials-setup.bash
           - uses: actions-rust-lang/setup-rust-toolchain@v1
             with:
               toolchain: nightly
