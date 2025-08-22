@@ -138,7 +138,8 @@ impl EdmPacketRaw {
                 })
             }
             Self::AT_REQUEST => Ok(EdmPacket::ATRequest(
-                core::str::from_utf8(&self.payload).or(Err(EdmPacketError::AtRequestEventDecodeError))?,
+                core::str::from_utf8(&self.payload)
+                    .or(Err(EdmPacketError::AtRequestEventDecodeError))?,
             )),
             Self::AT_RESPONSE => Ok(EdmPacket::ATResponse(ATResponse::new(&self.payload)?)),
             Self::AT_EVENT => Ok(EdmPacket::ATEvent(ATEvent::new(&self.payload)?)),

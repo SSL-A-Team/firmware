@@ -15,17 +15,19 @@ pub trait LerpNumeric = Copy + Bounded + FromPrimitive;
 //     return N::from_f32(lerp_f(a.to_f32().unwrap(), b.to_f32().unwrap(), t_pct)).unwrap();
 // }
 
-pub fn lerp<N>(a: N, b: N, t: N) -> N 
-where N: FromPrimitive + Copy + Bounded,
-      f32: core::convert::From<N>
+pub fn lerp<N>(a: N, b: N, t: N) -> N
+where
+    N: FromPrimitive + Copy + Bounded,
+    f32: core::convert::From<N>,
 {
     let t_pct = Into::<f32>::into(t) / Into::<f32>::into(N::max_value());
     N::from_f32(f_lerp_f(Into::<f32>::into(a), Into::<f32>::into(b), t_pct)).unwrap()
 }
 
-pub fn lerp_f<N>(a: N, b: N, t: f32) -> N 
-where N: FromPrimitive + Copy + Bounded,
-      f32: core::convert::From<N>
+pub fn lerp_f<N>(a: N, b: N, t: f32) -> N
+where
+    N: FromPrimitive + Copy + Bounded,
+    f32: core::convert::From<N>,
 {
     N::from_f32(f_lerp_f(Into::<f32>::into(a), Into::<f32>::into(b), t)).unwrap()
 }
@@ -36,8 +38,9 @@ pub fn f_lerp_f(a: f32, b: f32, t: f32) -> f32 {
 }
 
 pub trait Lerp<N>: Clone + Copy
-where N: FromPrimitive + Copy + Bounded,
-      f32: core::convert::From<N> 
+where
+    N: FromPrimitive + Copy + Bounded,
+    f32: core::convert::From<N>,
 {
     fn lerp(a: Self, b: Self, t: N) -> Self;
     fn lerp_f(a: Self, b: Self, t: f32) -> Self;
@@ -61,9 +64,10 @@ impl Lerp<u8> for RGB8 {
     }
 }
 
-pub struct TimeLerp<'a, N, L: Lerp<N>> 
-where N: FromPrimitive + Copy + Bounded,
-      f32: core::convert::From<N> 
+pub struct TimeLerp<'a, N, L: Lerp<N>>
+where
+    N: FromPrimitive + Copy + Bounded,
+    f32: core::convert::From<N>,
 {
     a: L,
     b: L,
@@ -74,10 +78,11 @@ where N: FromPrimitive + Copy + Bounded,
     pd2: PhantomData<&'a N>,
 }
 
-impl<'a, N, L> TimeLerp<'a, N, L> 
-where N: FromPrimitive + Copy + Bounded,
-f32: core::convert::From<N>,
-L: Lerp<N> 
+impl<'a, N, L> TimeLerp<'a, N, L>
+where
+    N: FromPrimitive + Copy + Bounded,
+    f32: core::convert::From<N>,
+    L: Lerp<N>,
 {
     pub const fn new(a: L, b: L, duration: Duration) -> TimeLerp<'a, N, L> {
         TimeLerp {

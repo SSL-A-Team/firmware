@@ -9,12 +9,17 @@ pub struct AdcConverter {
 }
 
 impl AdcConverter {
-    pub const fn new(vref_ext_mv: u16, vref_int_mv: u16, use_vref_int: bool, use_temp: bool) -> Self {
+    pub const fn new(
+        vref_ext_mv: u16,
+        vref_int_mv: u16,
+        use_vref_int: bool,
+        use_temp: bool,
+    ) -> Self {
         AdcConverter {
             use_vref_int,
             use_temp,
-            vref_ext_mv, 
-            vref_int_mv, 
+            vref_ext_mv,
+            vref_int_mv,
             last_vrefint: 0,
         }
     }
@@ -27,7 +32,7 @@ impl AdcConverter {
         ((sample as u32 / 4096) * (self.vref_ext_mv as u32) * (MV_PER_V as u32)) as u16
     }
 
-    fn raw_sample_to_mv_vrefint_comp(&self, sample: u16) -> u16 {    
+    fn raw_sample_to_mv_vrefint_comp(&self, sample: u16) -> u16 {
         (u32::from(sample) * u32::from(self.vref_int_mv) / u32::from(self.last_vrefint)) as u16
     }
 

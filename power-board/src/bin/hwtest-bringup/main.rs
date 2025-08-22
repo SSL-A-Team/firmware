@@ -5,22 +5,35 @@
 
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_stm32::{adc::{Adc, AdcChannel, SampleTime},
-    gpio::{Input, Level, Output, OutputOpenDrain, Pull, Speed, OutputType},
-    timer::{simple_pwm::{SimplePwm, PwmPin}, Channel}, 
-    time::hz};
+use embassy_stm32::{
+    adc::{Adc, AdcChannel, SampleTime},
+    gpio::{Input, Level, Output, OutputOpenDrain, OutputType, Pull, Speed},
+    time::hz,
+    timer::{
+        simple_pwm::{PwmPin, SimplePwm},
+        Channel,
+    },
+};
 use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _};
 
-use ateam_lib_stm32::{drivers::{led::apa102::Apa102,
-    audio::buzzer::Buzzer}, audio::{note::Beat, tone_player::TonePlayer}};
-use smart_leds::colors::{BLUE, WHITE, BLACK};
+use ateam_lib_stm32::{
+    audio::{note::Beat, tone_player::TonePlayer},
+    drivers::{audio::buzzer::Buzzer, led::apa102::Apa102},
+};
+use smart_leds::colors::{BLACK, BLUE, WHITE};
 
 static mut DOTSTAR_SPI_BUFFER_CELL: [u8; 16] = [0; 16];
 
 pub const TEST_SONG: [Beat; 2] = [
-    Beat::Note { tone: 440, duration: 250_000 },
-    Beat::Note { tone: 587, duration: 250_000 },
+    Beat::Note {
+        tone: 440,
+        duration: 250_000,
+    },
+    Beat::Note {
+        tone: 587,
+        duration: 250_000,
+    },
 ];
 
 #[embassy_executor::main]
@@ -57,10 +70,11 @@ async fn main(_spawner: Spawner) {
     let mut vrefint_channel = adc.enable_vrefint().degrade_adc();
 
     // Use the pin constant directly
-    // Get the pins from the schematic 
+    // Get the pins from the schematic
     let dotstar_spi_buf: &'static mut [u8; 16] = unsafe { &mut DOTSTAR_SPI_BUFFER_CELL };
     // Dotstar SPI, SCK, MOSI, and TX_DMA
-    let mut dotstars = Apa102::<2>::new_from_pins(p.SPI1, p.PB3, p.PB5, p.DMA1_CH2, dotstar_spi_buf.into());
+    let mut dotstars =
+        Apa102::<2>::new_from_pins(p.SPI1, p.PB3, p.PB5, p.DMA1_CH2, dotstar_spi_buf.into());
     dotstars.set_drv_str_all(32);
 
     let mut adc_buf: [u16; 7] = [0; 7];
@@ -68,8 +82,16 @@ async fn main(_spawner: Spawner) {
     // p.PC6 - Buzzer io pin
     let ch1 = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
     // p.TIM3 - Buzzer timer
-    let pwm = SimplePwm::new(p.TIM3, Some(ch1), None, None, None, hz(1), Default::default());
-    
+    let pwm = SimplePwm::new(
+        p.TIM3,
+        Some(ch1),
+        None,
+        None,
+        None,
+        hz(1),
+        Default::default(),
+    );
+
     let audio_driver = Buzzer::new(pwm, Channel::Ch1);
     let mut tone_player = TonePlayer::new(audio_driver);
 
@@ -84,21 +106,23 @@ async fn main(_spawner: Spawner) {
                 (&mut cell4_adc_pin, SampleTime::CYCLES160_5),
                 (&mut cell5_adc_pin, SampleTime::CYCLES160_5),
                 (&mut vrefint_channel, SampleTime::CYCLES160_5),
-
-            ].into_iter(),
-            &mut adc_buf
-        ).await;
+            ]
+            .into_iter(),
+            &mut adc_buf,
+        )
+        .await;
 
         let vrefint_sample = adc_buf[6];
         let convert_to_millivolts = |sample: u16| {
             // From https://www.st.com/resource/en/datasheet/stm32g031g8.pdf
             // 6.3.3 Embedded internal reference voltage
             const VREFINT_MV: u32 = 1212; // mV
-    
+
             (u32::from(sample) * VREFINT_MV / u32::from(vrefint_sample)) as u16
         };
 
-        info!("cell0: {}, cell1: {}, cell2: {}, cell3: {}, cell4: {}, cell5: {}", 
+        info!(
+            "cell0: {}, cell1: {}, cell2: {}, cell3: {}, cell4: {}, cell5: {}",
             convert_to_millivolts(adc_buf[0]),
             convert_to_millivolts(adc_buf[1]),
             convert_to_millivolts(adc_buf[2]),
@@ -118,7 +142,7 @@ async fn main(_spawner: Spawner) {
         // en_3v3.set_high();
         // en_5v0.set_high();
         Timer::after_millis(1000).await;
-        
+
         let _ = tone_player.load_song(&TEST_SONG);
         // tone_player.play_song().await;
 

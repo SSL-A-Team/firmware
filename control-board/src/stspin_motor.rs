@@ -1,6 +1,9 @@
-use core::{mem::MaybeUninit, f32::consts::PI};
+use core::{f32::consts::PI, mem::MaybeUninit};
 
-use ateam_lib_stm32::{drivers::boot::stm32_interface::Stm32Interface, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{
+    drivers::boot::stm32_interface::Stm32Interface,
+    uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue},
+};
 use defmt::*;
 use embassy_stm32::{
     gpio::{Pin, Pull},
@@ -9,10 +12,15 @@ use embassy_stm32::{
 use embassy_time::{with_timeout, Duration, Timer};
 use nalgebra::Vector3;
 
-use ateam_common_packets::bindings::{
-    MotionCommandType::{self, OPEN_LOOP}, MotorCommandPacket, MotorCommandType::{MCP_MOTION, MCP_PARAMS}, MotorResponse, MotorResponseType::{MRP_MOTION, MRP_PARAMS}, MotorTelemetry, ParameterMotorResponse
-};
 use crate::{image_hash, DEBUG_MOTOR_UART_QUEUES};
+use ateam_common_packets::bindings::{
+    MotionCommandType::{self, OPEN_LOOP},
+    MotorCommandPacket,
+    MotorCommandType::{MCP_MOTION, MCP_PARAMS},
+    MotorResponse,
+    MotorResponseType::{MRP_MOTION, MRP_PARAMS},
+    MotorTelemetry, ParameterMotorResponse,
+};
 
 pub struct WheelMotor<
     'a,
@@ -21,14 +29,8 @@ pub struct WheelMotor<
     const DEPTH_RX: usize,
     const DEPTH_TX: usize,
 > {
-    stm32_uart_interface: Stm32Interface<
-        'a,
-        LEN_RX,
-        LEN_TX,
-        DEPTH_RX,
-        DEPTH_TX,
-        DEBUG_MOTOR_UART_QUEUES,
-    >,
+    stm32_uart_interface:
+        Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES>,
     firmware_image: &'a [u8],
 
     current_state: MotorTelemetry,
@@ -64,11 +66,10 @@ impl<
             LEN_TX,
             DEPTH_RX,
             DEPTH_TX,
-            DEBUG_MOTOR_UART_QUEUES
+            DEBUG_MOTOR_UART_QUEUES,
         >,
         firmware_image: &'a [u8],
-    ) -> WheelMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
-    {
+    ) -> WheelMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         let start_state: MotorTelemetry = Default::default();
         let start_params_state: ParameterMotorResponse = Default::default();
 
@@ -101,10 +102,17 @@ impl<
         boot0_pin: impl Pin,
         reset_pin: impl Pin,
         firmware_image: &'a [u8],
-    ) -> WheelMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
-    {
+    ) -> WheelMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         // Need a Pull None to allow for STSPIN watchdog usage.
-        let stm32_interface = Stm32Interface::new_from_pins(uart, read_queue, write_queue, boot0_pin, reset_pin, Pull::None, true);
+        let stm32_interface = Stm32Interface::new_from_pins(
+            uart,
+            read_queue,
+            write_queue,
+            boot0_pin,
+            reset_pin,
+            Pull::None,
+            true,
+        );
 
         let start_state: MotorTelemetry = Default::default();
         let start_params_state: ParameterMotorResponse = Default::default();
@@ -163,8 +171,11 @@ impl<
             if self.current_params_state.firmware_img_hash != [0; 4] {
                 let current_img_hash = self.current_params_state.firmware_img_hash;
                 defmt::debug!("Wheel Interface - Received parameter response");
-                defmt::trace!("Wheel Interface - Current device image hash {:x}", current_img_hash);
-                return current_img_hash
+                defmt::trace!(
+                    "Wheel Interface - Current device image hash {:x}",
+                    current_img_hash
+                );
+                return current_img_hash;
             };
 
             Timer::after(Duration::from_millis(5)).await;
@@ -173,10 +184,15 @@ impl<
 
     pub async fn check_device_has_latest_default_image(&mut self) -> Result<bool, ()> {
         let latest_img_hash = self.get_latest_default_img_hash();
-        defmt::debug!("Wheel Interface - Latest default image hash - {:x}", latest_img_hash);
+        defmt::debug!(
+            "Wheel Interface - Latest default image hash - {:x}",
+            latest_img_hash
+        );
 
         defmt::trace!("Wheel Interface - Update UART config 2 MHz");
-        self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
+        self.stm32_uart_interface
+            .update_uart_config(2_000_000, Parity::ParityEven)
+            .await;
         Timer::after(Duration::from_millis(1)).await;
 
         let res;
@@ -188,14 +204,16 @@ impl<
                     defmt::trace!("Wheel Interface - Device has the latest default image");
                     res = Ok(true);
                 } else {
-                    defmt::trace!("Wheel Interface - Device does not have the latest default image");
+                    defmt::trace!(
+                        "Wheel Interface - Device does not have the latest default image"
+                    );
                     res = Ok(false);
                 }
-            },
+            }
             Err(_) => {
                 defmt::debug!("Wheel Interface - No device response, image hash unknown");
                 res = Err(());
-            },
+            }
         }
         // Make sure that the uart queue is empty of any possible parameter
         // response packets, which may cause side effects for the flashing
@@ -204,15 +222,23 @@ impl<
         return res;
     }
 
-    pub async fn init_firmware_image(&mut self, flash: bool, fw_image_bytes: &[u8]) -> Result<(), ()> {
+    pub async fn init_firmware_image(
+        &mut self,
+        flash: bool,
+        fw_image_bytes: &[u8],
+    ) -> Result<(), ()> {
         if flash {
             defmt::info!("Wheel Interface - Flashing firmware image");
-            self.stm32_uart_interface.load_firmware_image(fw_image_bytes, true).await?;
+            self.stm32_uart_interface
+                .load_firmware_image(fw_image_bytes, true)
+                .await?;
         } else {
             defmt::info!("Wheel Interface - Skipping firmware flash");
         }
 
-        self.stm32_uart_interface.update_uart_config(2_000_000, Parity::ParityEven).await;
+        self.stm32_uart_interface
+            .update_uart_config(2_000_000, Parity::ParityEven)
+            .await;
 
         Timer::after(Duration::from_millis(1)).await;
 
@@ -238,7 +264,7 @@ impl<
                     } else {
                         flash = true;
                     }
-                },
+                }
                 Err(_) => {
                     flash = true;
                 }
@@ -252,7 +278,12 @@ impl<
             let buf = res.data();
 
             if buf.len() != core::mem::size_of::<MotorResponse>() {
-                defmt::warn!("Drive Motor - Got invalid packet of len {:?} (expected {:?}) data: {:?}", buf.len(), core::mem::size_of::<MotorResponse>(), buf);
+                defmt::warn!(
+                    "Drive Motor - Got invalid packet of len {:?} (expected {:?}) data: {:?}",
+                    buf.len(),
+                    core::mem::size_of::<MotorResponse>(),
+                    buf
+                );
                 continue;
             }
 
@@ -267,7 +298,6 @@ impl<
                     *state.offset(i as isize) = buf[i];
                 }
 
-
                 // TODO probably do some checksum stuff eventually
 
                 // decode union type, and reinterpret subtype
@@ -279,7 +309,10 @@ impl<
                     // info!("vel enc {:?}", mrp.data.motion.vel_enc_estimate + 0.);
                     // // // info!("vel hall {:?}", mrp.data.motion.vel_hall_estimate + 0.);
                     if mrp.data.motion.master_error() != 0 {
-                        error!("Drive Motor - Error: {:?}", &mrp.data.motion._bitfield_1.get(0, 32));
+                        error!(
+                            "Drive Motor - Error: {:?}",
+                            &mrp.data.motion._bitfield_1.get(0, 32)
+                        );
                     }
                     // info!("hall_power_error {:?}", mrp.data.motion.hall_power_error());
                     // info!("hall_disconnected_error {:?}", mrp.data.motion.hall_disconnected_error());
@@ -352,7 +385,9 @@ impl<
             cmd.type_ = MCP_MOTION;
             cmd.crc32 = 0;
             cmd.data.motion.set_reset(self.reset_flagged as u32);
-            cmd.data.motion.set_enable_telemetry(self.telemetry_enabled as u32);
+            cmd.data
+                .motion
+                .set_enable_telemetry(self.telemetry_enabled as u32);
             cmd.data.motion.motion_control_type = self.motion_type;
             cmd.data.motion.setpoint = self.setpoint;
             //info!("setpoint: {:?}", cmd.data.motion.setpoint);
@@ -393,7 +428,9 @@ impl<
     }
 
     pub fn check_hall_error(&self) -> bool {
-        return self.current_state.hall_power_error() != 0 || self.current_state.hall_disconnected_error() != 0 || self.current_state.hall_enc_vel_disagreement_error() != 0;
+        return self.current_state.hall_power_error() != 0
+            || self.current_state.hall_disconnected_error() != 0
+            || self.current_state.hall_enc_vel_disagreement_error() != 0;
     }
 
     pub fn read_current(&self) -> f32 {

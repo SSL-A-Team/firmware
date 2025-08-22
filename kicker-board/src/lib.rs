@@ -7,9 +7,9 @@
 pub mod drivers;
 pub mod tasks;
 
+pub mod image_hash;
 pub mod kick_manager;
 pub mod pins;
-pub mod image_hash;
 // pub mod queue;
 // pub mod uart_queue;
 
@@ -19,9 +19,17 @@ pub const DEBUG_DRIB_UART_QUEUES: bool = false;
 #[macro_export]
 macro_rules! include_external_cpp_bin {
     ($var_name:ident, $bin_file:literal) => {
-        pub static $var_name: &[u8; include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../motor-controller/build/bin/", $bin_file)).len()]
-            = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../motor-controller/build/bin/", $bin_file));
-    }
+        pub static $var_name: &[u8; include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../motor-controller/build/bin/",
+            $bin_file
+        ))
+         .len()] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../motor-controller/build/bin/",
+            $bin_file
+        ));
+    };
 }
 
 pub const ADC_VREFINT_NOMINAL: f32 = 1230.0; // mV
@@ -43,7 +51,7 @@ pub const fn adc_12v_to_rail_voltage(adc_mv: f32) -> f32 {
 }
 
 pub const fn adc_5v0_to_rail_voltage(adc_mv: f32) -> f32 {
-    adc_mv  / 2.0 * 5.0
+    adc_mv / 2.0 * 5.0
 }
 
 pub const fn adc_3v3_to_rail_voltage(adc_mv: f32) -> f32 {

@@ -24,7 +24,6 @@ static FLASH_RX_BUF: StaticCell<[u8; 256]> = StaticCell::new();
 #[link_section = ".bss"]
 static FLASH_TX_BUF: StaticCell<[u8; 256]> = StaticCell::new();
 
-
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) -> ! {
     let sys_config = get_system_config(tasks::ClkSource::InternalOscillator);
@@ -35,11 +34,12 @@ async fn main(_spawner: Spawner) -> ! {
     let mut spi_config = Config::default();
     spi_config.frequency = Hertz(1_000_000);
 
-    let spi = Spi::new(p.SPI2, p.PB13, p.PB15, p.PB14, p.DMA1_CH4, p.DMA1_CH3, spi_config);
+    let spi = Spi::new(
+        p.SPI2, p.PB13, p.PB15, p.PB14, p.DMA1_CH4, p.DMA1_CH3, spi_config,
+    );
 
     let rx_buf = FLASH_RX_BUF.init([0; 256]);
     let tx_buf = FLASH_TX_BUF.init([0; 256]);
-
 
     let mut flash: AT25DF041B<'static, true> = AT25DF041B::new(spi, p.PB12, rx_buf, tx_buf);
     let res = flash.verify_chip_id().await;

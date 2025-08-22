@@ -1,20 +1,36 @@
 use core::mem::MaybeUninit;
 
 use ateam_common_packets::bindings::{PowerCommand, PowerTelemetry};
-use ateam_lib_stm32::{idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}};
+use ateam_lib_stm32::{
+    idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
+    uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue},
+};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::usart::{self, DataBits, Parity, StopBits, Uart};
 use embassy_time::{Duration, Instant, Ticker, Timer};
 
-use crate::{pins::*, robot_state::SharedRobotState, tasks::dotstar_task::{ControlBoardLedCommand, ControlGeneralLedCommand}, SystemIrqs, DEBUG_POWER_UART_QUEUES};
+use crate::{
+    pins::*,
+    robot_state::SharedRobotState,
+    tasks::dotstar_task::{ControlBoardLedCommand, ControlGeneralLedCommand},
+    SystemIrqs, DEBUG_POWER_UART_QUEUES,
+};
 
 #[macro_export]
 macro_rules! create_power_task {
     ($main_spawner:ident, $uart_queue_spawner:ident, $robot_state:ident, $power_telemetry_publisher:ident, $led_cmd_pub:ident, $p:ident) => {
         ateam_control_board::tasks::power_task::start_power_task(
-            $main_spawner, $uart_queue_spawner,
-            $robot_state, $power_telemetry_publisher, $led_cmd_pub,
-            $p.UART9, $p.PG0, $p.PG1, $p.DMA2_CH4, $p.DMA2_CH5);
+            $main_spawner,
+            $uart_queue_spawner,
+            $robot_state,
+            $power_telemetry_publisher,
+            $led_cmd_pub,
+            $p.UART9,
+            $p.PG0,
+            $p.PG1,
+            $p.DMA2_CH4,
+            $p.DMA2_CH5,
+        );
     };
 }
 
@@ -27,18 +43,32 @@ pub const POWER_RX_BUF_DEPTH: usize = 4;
 
 static_idle_buffered_uart!(POWER, POWER_MAX_RX_PACKET_SIZE, POWER_RX_BUF_DEPTH, POWER_MAX_TX_PACKET_SIZE, POWER_TX_BUF_DEPTH, DEBUG_POWER_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
-
 pub struct PowerTask<
-        const POWER_MAX_TX_PACKET_SIZE: usize,
-        const POWER_MAX_RX_PACKET_SIZE: usize,
-        const POWER_TX_BUF_DEPTH: usize,
-        const POWER_RX_BUF_DEPTH: usize> {
+    const POWER_MAX_TX_PACKET_SIZE: usize,
+    const POWER_MAX_RX_PACKET_SIZE: usize,
+    const POWER_TX_BUF_DEPTH: usize,
+    const POWER_RX_BUF_DEPTH: usize,
+> {
     shared_robot_state: &'static SharedRobotState,
     power_telemetry_publisher: PowerTelemetryPublisher,
     led_cmd_publisher: LedCommandPublisher,
-    _power_uart: &'static IdleBufferedUart<POWER_MAX_RX_PACKET_SIZE, POWER_RX_BUF_DEPTH, POWER_MAX_TX_PACKET_SIZE, POWER_TX_BUF_DEPTH, DEBUG_POWER_UART_QUEUES>,
-    power_rx_uart_queue: &'static UartReadQueue<POWER_MAX_RX_PACKET_SIZE, POWER_RX_BUF_DEPTH, DEBUG_POWER_UART_QUEUES>,
-    power_tx_uart_queue: &'static UartWriteQueue<POWER_MAX_TX_PACKET_SIZE, POWER_TX_BUF_DEPTH, DEBUG_POWER_UART_QUEUES>,
+    _power_uart: &'static IdleBufferedUart<
+        POWER_MAX_RX_PACKET_SIZE,
+        POWER_RX_BUF_DEPTH,
+        POWER_MAX_TX_PACKET_SIZE,
+        POWER_TX_BUF_DEPTH,
+        DEBUG_POWER_UART_QUEUES,
+    >,
+    power_rx_uart_queue: &'static UartReadQueue<
+        POWER_MAX_RX_PACKET_SIZE,
+        POWER_RX_BUF_DEPTH,
+        DEBUG_POWER_UART_QUEUES,
+    >,
+    power_tx_uart_queue: &'static UartWriteQueue<
+        POWER_MAX_TX_PACKET_SIZE,
+        POWER_TX_BUF_DEPTH,
+        DEBUG_POWER_UART_QUEUES,
+    >,
     last_power_status_time: Option<Instant>,
     last_power_status: PowerTelemetry,
 }
@@ -47,9 +77,15 @@ impl<
         const POWER_MAX_TX_PACKET_SIZE: usize,
         const POWER_MAX_RX_PACKET_SIZE: usize,
         const POWER_TX_BUF_DEPTH: usize,
-        const POWER_RX_BUF_DEPTH: usize> 
-    PowerTask<POWER_MAX_TX_PACKET_SIZE, POWER_MAX_RX_PACKET_SIZE, POWER_TX_BUF_DEPTH, POWER_RX_BUF_DEPTH> {
-
+        const POWER_RX_BUF_DEPTH: usize,
+    >
+    PowerTask<
+        POWER_MAX_TX_PACKET_SIZE,
+        POWER_MAX_RX_PACKET_SIZE,
+        POWER_TX_BUF_DEPTH,
+        POWER_RX_BUF_DEPTH,
+    >
+{
     async fn power_task_entry(&mut self) {
         defmt::info!("power task startup");
 
@@ -60,19 +96,24 @@ impl<
         // let mut next_connection_state = self.connection_state;
         loop {
             self.process_packets();
-            if self.last_power_status_time.is_some() && self.last_power_status_time.unwrap().elapsed() < Duration::from_millis(1000) {
+            if self.last_power_status_time.is_some()
+                && self.last_power_status_time.unwrap().elapsed() < Duration::from_millis(1000)
+            {
                 self.shared_robot_state.set_power_inop(false);
             } else {
                 self.shared_robot_state.set_power_inop(true);
             }
 
-            if (self.last_power_status_time.is_some() && self.last_power_status.shutdown_requested() == 1) || self.shared_robot_state.shutdown_requested() {
+            if (self.last_power_status_time.is_some()
+                && self.last_power_status.shutdown_requested() == 1)
+                || self.shared_robot_state.shutdown_requested()
+            {
                 self.try_shutdown().await;
             }
 
             let mut cmd: PowerCommand = Default::default();
             cmd.set_request_shutdown(self.shared_robot_state.shutdown_requested() as u32);
-            
+
             // load any items into command
             self.send_command(cmd).await;
 
@@ -85,9 +126,12 @@ impl<
 
         self.shared_robot_state.flag_shutdown_requested();
 
-        self.led_cmd_publisher.publish(ControlBoardLedCommand::General(ControlGeneralLedCommand::ShutdownRequested)).await;
+        self.led_cmd_publisher
+            .publish(ControlBoardLedCommand::General(
+                ControlGeneralLedCommand::ShutdownRequested,
+            ))
+            .await;
 
-    
         // wait for tasks to flag shutdown complete, power board will
         // hard temrinate after hard after 30s shutdown time
         loop {
@@ -98,13 +142,15 @@ impl<
             self.send_command(cmd).await;
 
             defmt::info!("waiting for kicker board to complete discharge");
-            if self.shared_robot_state.kicker_shutdown_complete() || self.shared_robot_state.get_kicker_inop() {
+            if self.shared_robot_state.kicker_shutdown_complete()
+                || self.shared_robot_state.get_kicker_inop()
+            {
                 break;
             }
 
             Timer::after_millis(100).await;
         }
-    
+
         Timer::after_millis(100).await;
 
         loop {
@@ -126,7 +172,12 @@ impl<
             let buf = res.data();
 
             if buf.len() != core::mem::size_of::<PowerTelemetry>() {
-                defmt::warn!("Power - Got invalid packet of len {:?} (expected {:?}) data: {:?}", buf.len(), core::mem::size_of::<PowerTelemetry>(), buf);
+                defmt::warn!(
+                    "Power - Got invalid packet of len {:?} (expected {:?}) data: {:?}",
+                    buf.len(),
+                    core::mem::size_of::<PowerTelemetry>(),
+                    buf
+                );
                 continue;
             }
 
@@ -141,7 +192,8 @@ impl<
             }
 
             self.last_power_status = status_packet;
-            self.power_telemetry_publisher.publish_immediate(self.last_power_status);
+            self.power_telemetry_publisher
+                .publish_immediate(self.last_power_status);
             self.last_power_status_time = Some(Instant::now());
         }
     }
@@ -169,28 +221,43 @@ pub fn power_uart_config() -> usart::Config {
 }
 
 #[embassy_executor::task]
-async fn power_task_entry(mut power_task: PowerTask<POWER_MAX_TX_PACKET_SIZE, POWER_MAX_RX_PACKET_SIZE, POWER_TX_BUF_DEPTH, POWER_RX_BUF_DEPTH>) {
+async fn power_task_entry(
+    mut power_task: PowerTask<
+        POWER_MAX_TX_PACKET_SIZE,
+        POWER_MAX_RX_PACKET_SIZE,
+        POWER_TX_BUF_DEPTH,
+        POWER_RX_BUF_DEPTH,
+    >,
+) {
     loop {
         power_task.power_task_entry().await;
         defmt::error!("power task returned");
     }
 }
 
-pub fn start_power_task(power_task_spawner: Spawner,
-        uart_queue_spawner: SendSpawner,
-        robot_state: &'static SharedRobotState,
-        power_telemetry_publisher: PowerTelemetryPublisher,
-        led_command_publisher: LedCommandPublisher,
-        power_uart: PowerUart,
-        power_uart_rx_pin: PowerUartRxPin,
-        power_uart_tx_pin: PowerUartTxPin,
-        power_uart_rx_dma: PowerRxDma,
-        power_uart_tx_dma: PowerTxDma,
-        ) {
-
-
+pub fn start_power_task(
+    power_task_spawner: Spawner,
+    uart_queue_spawner: SendSpawner,
+    robot_state: &'static SharedRobotState,
+    power_telemetry_publisher: PowerTelemetryPublisher,
+    led_command_publisher: LedCommandPublisher,
+    power_uart: PowerUart,
+    power_uart_rx_pin: PowerUartRxPin,
+    power_uart_tx_pin: PowerUartTxPin,
+    power_uart_rx_dma: PowerRxDma,
+    power_uart_tx_dma: PowerTxDma,
+) {
     let uart_config = power_uart_config();
-    let power_uart = Uart::new(power_uart, power_uart_rx_pin, power_uart_tx_pin, SystemIrqs, power_uart_tx_dma, power_uart_rx_dma, uart_config).unwrap();
+    let power_uart = Uart::new(
+        power_uart,
+        power_uart_rx_pin,
+        power_uart_tx_pin,
+        SystemIrqs,
+        power_uart_tx_dma,
+        power_uart_rx_dma,
+        uart_config,
+    )
+    .unwrap();
 
     defmt::trace!("Power UART initialized");
 
@@ -211,6 +278,8 @@ pub fn start_power_task(power_task_spawner: Spawner,
         last_power_status: unsafe { MaybeUninit::zeroed().assume_init() },
     };
 
-    power_task_spawner.spawn(power_task_entry(power_task)).unwrap();
+    power_task_spawner
+        .spawn(power_task_entry(power_task))
+        .unwrap();
     defmt::info!("power task online");
 }

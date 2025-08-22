@@ -3,6 +3,10 @@
 #![feature(const_mut_refs)]
 #![feature(async_closure)]
 
+use ateam_control_board::{
+    queue::{self, Buffer},
+    uart_queue::{UartReadQueue, UartWriteQueue},
+};
 use defmt_rtt as _;
 use embassy_stm32::{
     self,
@@ -10,10 +14,6 @@ use embassy_stm32::{
     interrupt::{self, InterruptExt},
     peripherals::{DMA1_CH0, DMA1_CH1, UART7},
     usart::{self, Uart},
-};
-use ateam_control_board::{
-    queue::{self, Buffer},
-    uart_queue::{UartReadQueue, UartWriteQueue},
 };
 use panic_probe as _;
 use static_cell::StaticCell;

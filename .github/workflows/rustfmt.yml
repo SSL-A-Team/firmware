@@ -1,0 +1,39 @@
+    name: Rustfmt Check
+
+    on:
+      push:
+        branches: [ main ]
+      pull_request:
+        branches: [ main ]
+
+    jobs:
+      format:
+        runs-on: ubuntu-latest
+        steps:
+          - uses: actions/checkout@v4
+          - name: Fetch Submodules
+            uses: webfactory/ssh-agent@v0.7.0
+            with:
+              ssh-private-key: |
+                ${{ secrets.ROBOT_PRIVATE_DATA_PRIVATE_SSH_KEY }}
+          - run: |
+                git submodule update --init --recursive
+                ./util/ateam-credentials-setup.bash
+          - uses: actions-rust-lang/setup-rust-toolchain@v1
+            with:
+              toolchain: nightly
+              components: rustfmt
+          - name: Common
+            run: cargo fmt --check --manifest-path common/Cargo.toml
+          - name: Library
+            run: cargo fmt --check --manifest-path lib-stm32/Cargo.toml
+          - name: LIbrary Test Images
+            run: cargo fmt --check --manifest-path lib-stm32-test/Cargo.toml
+          - name: Credentials
+            run: cargo fmt --check --manifest-path credentials/Cargo.toml
+          - name: Power Board
+            run: cargo fmt --check --manifest-path power-board/Cargo.toml
+          - name: Kicker Board
+            run: cargo fmt --check --manifest-path kicker-board/Cargo.toml
+          - name: Control Board
+            run: cargo fmt --check --manifest-path control-board/Cargo.toml

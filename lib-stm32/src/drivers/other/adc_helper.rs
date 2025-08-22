@@ -1,4 +1,3 @@
-
 use embassy_stm32::adc::{self, Adc, AdcChannel, Resolution, SampleTime};
 use embassy_stm32::Peripheral;
 
@@ -12,24 +11,18 @@ pub struct AdcHelper<'a, T: adc::Instance, Ch: AdcChannel<T>> {
     adc_bins: u32,
 }
 
-impl<
-    'a, 
-    T: adc::Instance, 
-    Ch: AdcChannel<T>> 
-    AdcHelper<'a, T, Ch> {
-    
-    // NOTE: vref_int_peri is not checked by compiler and needs to 
+impl<'a, T: adc::Instance, Ch: AdcChannel<T>> AdcHelper<'a, T, Ch> {
+    // NOTE: vref_int_peri is not checked by compiler and needs to
     // be the peripheral connected to Vref_int.
     pub fn new(
         peri: impl Peripheral<P = T> + 'a,
         pin: Ch,
         sample_time: SampleTime,
-        resolution: Resolution
-        ) -> Self {
-
+        resolution: Resolution,
+    ) -> Self {
         let mut adc_inst = Adc::new(peri);
 
-        adc_inst.set_sample_time(sample_time); 
+        adc_inst.set_sample_time(sample_time);
         adc_inst.set_resolution(resolution);
 
         // Use resolution to calculate the max ADC min quantity.'
@@ -43,7 +36,7 @@ impl<
         AdcHelper {
             inst: adc_inst,
             pin,
-            adc_bins
+            adc_bins,
         }
     }
 
@@ -59,6 +52,7 @@ impl<
         // defmt::info!("vref_int_cal: {}", vref_int_cal);
         // defmt::info!("vref_int_read_mv: {}", vref_int_read_mv);
 
-        V_CAL_V * (self.inst.blocking_read(&mut self.pin) as f32) / (self.adc_bins as f32)// * vref_int_cal / vref_int_read_mv;
+        V_CAL_V * (self.inst.blocking_read(&mut self.pin) as f32) / (self.adc_bins as f32)
+        // * vref_int_cal / vref_int_read_mv;
     }
 }

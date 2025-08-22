@@ -39,60 +39,46 @@ pub trait AnimInterface<T>: Sized {
 /////////////////////////////////
 
 pub enum Animation<N, L>
-where N: LerpNumeric,
-f32: core::convert::From<N>,
-L: crate::math::lerp::Lerp<N> 
+where
+    N: LerpNumeric,
+    f32: core::convert::From<N>,
+    L: crate::math::lerp::Lerp<N>,
 {
     Blink(BlinkAnimation<L>),
     Lerp(LerpAnimation<N, L>),
 }
 
 impl<N, L> AnimInterface<L> for Animation<N, L>
-where N: LerpNumeric,
-f32: core::convert::From<N>,
-L: crate::math::lerp::Lerp<N> 
+where
+    N: LerpNumeric,
+    f32: core::convert::From<N>,
+    L: crate::math::lerp::Lerp<N>,
 {
     fn get_id(&self) -> usize {
         match self {
-            Animation::Blink(a) => {
-                a.get_id()
-            },
-            Animation::Lerp(a) => {
-                a.get_id()
-            },
+            Animation::Blink(a) => a.get_id(),
+            Animation::Lerp(a) => a.get_id(),
         }
     }
 
     fn enable(&mut self) {
         match self {
-            Animation::Blink(a) => {
-                a.enable()
-            },
-            Animation::Lerp(a) => {
-                a.enable()
-            },
+            Animation::Blink(a) => a.enable(),
+            Animation::Lerp(a) => a.enable(),
         }
     }
 
     fn disable(&mut self) {
         match self {
-            Animation::Blink(a) => {
-                a.disable()
-            },
-            Animation::Lerp(a) => {
-                a.disable()
-            },
+            Animation::Blink(a) => a.disable(),
+            Animation::Lerp(a) => a.disable(),
         }
     }
-    
+
     fn enabled(&self) -> bool {
         match self {
-            Animation::Blink(a) => {
-                a.enabled()
-            },
-            Animation::Lerp(a) => {
-                a.enabled()
-            },
+            Animation::Blink(a) => a.enabled(),
+            Animation::Lerp(a) => a.enabled(),
         }
     }
 
@@ -100,10 +86,10 @@ L: crate::math::lerp::Lerp<N>
         match self {
             Animation::Blink(a) => {
                 a.start_animation();
-            },
+            }
             Animation::Lerp(a) => {
                 a.start_animation();
-            },
+            }
         }
     }
 
@@ -111,32 +97,24 @@ L: crate::math::lerp::Lerp<N>
         match self {
             Animation::Blink(a) => {
                 a.reset_animation();
-            },
+            }
             Animation::Lerp(a) => {
                 a.reset_animation();
-            },
+            }
         }
     }
 
     fn animation_running(&self) -> bool {
         match self {
-            Animation::Blink(a) => {
-                a.animation_running()
-            },
-            Animation::Lerp(a) => {
-                a.animation_running()
-            },
+            Animation::Blink(a) => a.animation_running(),
+            Animation::Lerp(a) => a.animation_running(),
         }
     }
 
     fn animation_completed(&self) -> bool {
         match self {
-            Animation::Blink(a) => {
-                a.animation_completed()
-            },
-            Animation::Lerp(a) => {
-                a.animation_completed()
-            },
+            Animation::Blink(a) => a.animation_completed(),
+            Animation::Lerp(a) => a.animation_completed(),
         }
     }
 
@@ -144,29 +122,27 @@ L: crate::math::lerp::Lerp<N>
         match self {
             Animation::Blink(a) => {
                 a.update();
-            },
+            }
             Animation::Lerp(a) => {
                 a.update();
-            },
+            }
         }
     }
 
     fn get_value(&self) -> L {
         match self {
-            Animation::Blink(a) => {
-                a.get_value()
-            },
-            Animation::Lerp(a) => {
-                a.get_value()
-            },
+            Animation::Blink(a) => a.get_value(),
+            Animation::Lerp(a) => a.get_value(),
         }
     }
 }
 
-pub struct CompositeAnimation<'a, N, L> 
-where N: LerpNumeric,
-f32: core::convert::From<N>,
-L: crate::math::lerp::Lerp<N> {
+pub struct CompositeAnimation<'a, N, L>
+where
+    N: LerpNumeric,
+    f32: core::convert::From<N>,
+    L: crate::math::lerp::Lerp<N>,
+{
     id: usize,
 
     animations: &'a mut [Animation<N, L>],
@@ -179,12 +155,17 @@ L: crate::math::lerp::Lerp<N> {
     last_value: L,
 }
 
-impl<'a, N, L> CompositeAnimation<'a, N, L> 
-where N: LerpNumeric,
-f32: core::convert::From<N>,
-L: crate::math::lerp::Lerp<N>
+impl<'a, N, L> CompositeAnimation<'a, N, L>
+where
+    N: LerpNumeric,
+    f32: core::convert::From<N>,
+    L: crate::math::lerp::Lerp<N>,
 {
-    pub fn new(id: usize, animations: &'a mut [Animation<N, L>], repeat_mode: AnimRepeatMode) -> Self {
+    pub fn new(
+        id: usize,
+        animations: &'a mut [Animation<N, L>],
+        repeat_mode: AnimRepeatMode,
+    ) -> Self {
         let first_val = animations[0].get_value();
         CompositeAnimation {
             id,
@@ -198,10 +179,11 @@ L: crate::math::lerp::Lerp<N>
     }
 }
 
-impl<N, L> AnimInterface<L> for CompositeAnimation<'_, N, L> 
-where N: LerpNumeric,
-f32: core::convert::From<N>,
-L: crate::math::lerp::Lerp<N>
+impl<N, L> AnimInterface<L> for CompositeAnimation<'_, N, L>
+where
+    N: LerpNumeric,
+    f32: core::convert::From<N>,
+    L: crate::math::lerp::Lerp<N>,
 {
     fn get_id(&self) -> usize {
         self.id
@@ -270,17 +252,17 @@ L: crate::math::lerp::Lerp<N>
                 match self.repeat_mode {
                     AnimRepeatMode::None => {
                         self.anim_state = AnimState::Completed;
-                    },
+                    }
                     AnimRepeatMode::Fixed(_) => {
                         if self.repeat_counter == 0 {
                             self.anim_state = AnimState::Completed;
                         } else {
                             self.repeat_counter -= 1;
                         }
-                    },
+                    }
                     AnimRepeatMode::Forever => {
                         // we've already reset the animation index so it'll loop around
-                    },
+                    }
                 }
             }
 
@@ -316,8 +298,15 @@ pub struct BlinkAnimation<T> {
 }
 
 impl<T: Clone + Copy + Sized> BlinkAnimation<T> {
-    pub fn new(id: usize, val_one: T, val_two: T, v1_time: Duration, v2_time: Duration, repeat_style: AnimRepeatMode) -> Self {
-        BlinkAnimation { 
+    pub fn new(
+        id: usize,
+        val_one: T,
+        val_two: T,
+        v1_time: Duration,
+        v2_time: Duration,
+        repeat_style: AnimRepeatMode,
+    ) -> Self {
+        BlinkAnimation {
             id,
 
             val_one,
@@ -396,11 +385,11 @@ impl<T: Clone + Copy + Sized> AnimInterface<T> for BlinkAnimation<T> {
             match self.repeat_style {
                 AnimRepeatMode::None => {
                     self.anim_state = AnimState::Completed;
-                },
+                }
                 AnimRepeatMode::Forever => {
                     self.start_time = now;
                     self.last_value = self.val_one;
-                },
+                }
                 AnimRepeatMode::Fixed(_) => {
                     if self.repeat_counter == 0 {
                         self.anim_state = AnimState::Completed;
@@ -409,21 +398,23 @@ impl<T: Clone + Copy + Sized> AnimInterface<T> for BlinkAnimation<T> {
                         self.start_time = now;
                         self.last_value = self.val_one;
                     }
-                },
+                }
             }
         }
     }
-    
+
     fn get_value(&self) -> T {
         self.last_value
     }
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct LerpAnimation<N, L> 
-where N: LerpNumeric,
-f32: core::convert::From<N>,
-L: crate::math::lerp::Lerp<N> {
+pub struct LerpAnimation<N, L>
+where
+    N: LerpNumeric,
+    f32: core::convert::From<N>,
+    L: crate::math::lerp::Lerp<N>,
+{
     id: usize,
 
     val_one: L,
@@ -439,13 +430,20 @@ L: crate::math::lerp::Lerp<N> {
     pd: PhantomData<N>,
 }
 
-impl<N, L> LerpAnimation<N, L> 
-where N: LerpNumeric,
-f32: core::convert::From<N>,
-L: crate::math::lerp::Lerp<N> 
+impl<N, L> LerpAnimation<N, L>
+where
+    N: LerpNumeric,
+    f32: core::convert::From<N>,
+    L: crate::math::lerp::Lerp<N>,
 {
-    pub fn new(id: usize, val_one: L, val_two: L, lerp_duration_ms: Duration, repeat_style: AnimRepeatMode) -> Self {
-        LerpAnimation { 
+    pub fn new(
+        id: usize,
+        val_one: L,
+        val_two: L,
+        lerp_duration_ms: Duration,
+        repeat_style: AnimRepeatMode,
+    ) -> Self {
+        LerpAnimation {
             id,
 
             val_one,
@@ -463,10 +461,11 @@ L: crate::math::lerp::Lerp<N>
     }
 }
 
-impl<N, L> AnimInterface<L> for LerpAnimation<N, L> 
-where N: LerpNumeric,
-f32: core::convert::From<N>,
-L: crate::math::lerp::Lerp<N> 
+impl<N, L> AnimInterface<L> for LerpAnimation<N, L>
+where
+    N: LerpNumeric,
+    f32: core::convert::From<N>,
+    L: crate::math::lerp::Lerp<N>,
 {
     fn get_id(&self) -> usize {
         self.id
@@ -528,11 +527,11 @@ L: crate::math::lerp::Lerp<N>
             match self.repeat_style {
                 AnimRepeatMode::None => {
                     self.anim_state = AnimState::Completed;
-                },
+                }
                 AnimRepeatMode::Forever => {
                     self.start_time = now;
                     self.last_value = self.val_one;
-                },
+                }
                 AnimRepeatMode::Fixed(_) => {
                     if self.repeat_counter == 0 {
                         self.anim_state = AnimState::Completed;
@@ -541,11 +540,11 @@ L: crate::math::lerp::Lerp<N>
                         self.start_time = now;
                         self.last_value = self.val_one;
                     }
-                },
+                }
             }
         }
     }
-    
+
     fn get_value(&self) -> L {
         self.last_value
     }

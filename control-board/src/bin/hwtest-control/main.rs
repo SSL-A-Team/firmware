@@ -1,17 +1,22 @@
 #![no_std]
 #![no_main]
 
-use ateam_common_packets::{bindings::KickRequest, bindings::BasicControl, radio::DataPacket};
+use ateam_common_packets::{bindings::BasicControl, bindings::KickRequest, radio::DataPacket};
 use embassy_executor::InterruptExecutor;
-use embassy_stm32::{
-    interrupt, pac::Interrupt
-};
+use embassy_stm32::{interrupt, pac::Interrupt};
 use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _;
 
 use ateam_control_board::{
-    create_audio_task, create_control_task, create_dotstar_task, create_imu_task, create_io_task, create_kicker_task, create_radio_task, get_system_config, pins::{AccelDataPubSub, CommandsPubSub, GyroDataPubSub, KickerTelemetryPubSub, LedCommandPubSub, PowerTelemetryPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
+    create_audio_task, create_control_task, create_dotstar_task, create_imu_task, create_io_task,
+    create_kicker_task, create_radio_task, get_system_config,
+    pins::{
+        AccelDataPubSub, CommandsPubSub, GyroDataPubSub, KickerTelemetryPubSub, LedCommandPubSub,
+        PowerTelemetryPubSub, TelemetryPubSub,
+    },
+    robot_state::SharedRobotState,
+};
 
 // load credentials from correct crate
 #[cfg(not(feature = "no-private-credentials"))]
@@ -32,7 +37,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     cortex_m::peripheral::SCB::sys_reset();
 }
 
-static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
+static ROBOT_STATE: ConstStaticCell<SharedRobotState> =
+    ConstStaticCell::new(SharedRobotState::new());
 
 static RADIO_DUMMY_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
 static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
@@ -72,12 +78,18 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  setup task pools  //
     ////////////////////////
 
-    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CORDIC, embassy_stm32::interrupt::Priority::P6);
+    interrupt::InterruptExt::set_priority(
+        embassy_stm32::interrupt::CORDIC,
+        embassy_stm32::interrupt::Priority::P6,
+    );
     let radio_uart_queue_spawner = RADIO_UART_QUEUE_EXECUTOR.start(Interrupt::CORDIC);
 
     // uart queue executor should be highest priority
     // NOTE: maybe this should be all DMA tasks? No computation tasks here
-    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CEC, embassy_stm32::interrupt::Priority::P7);
+    interrupt::InterruptExt::set_priority(
+        embassy_stm32::interrupt::CEC,
+        embassy_stm32::interrupt::Priority::P7,
+    );
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(Interrupt::CEC);
 
     //////////////////////////////////////
@@ -116,42 +128,55 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  start tasks  //
     ///////////////////
 
-    create_io_task!(main_spawner,
-        robot_state,
-        p);
+    create_io_task!(main_spawner, robot_state, p);
 
-    create_dotstar_task!(main_spawner,
-        led_command_subscriber,
-        p);
+    create_dotstar_task!(main_spawner, led_command_subscriber, p);
 
-    create_audio_task!(main_spawner,
-        robot_state,
-        p);
+    create_audio_task!(main_spawner, robot_state, p);
 
-    create_radio_task!(main_spawner, radio_uart_queue_spawner, uart_queue_spawner,
-    // create_radio_task!(main_spawner, uart_queue_spawner,
+    create_radio_task!(
+        main_spawner,
+        radio_uart_queue_spawner,
+        uart_queue_spawner,
+        // create_radio_task!(main_spawner, uart_queue_spawner,
         robot_state,
-        radio_dummy_command_publisher, radio_telemetry_subscriber, radio_led_cmd_publisher,
+        radio_dummy_command_publisher,
+        radio_telemetry_subscriber,
+        radio_led_cmd_publisher,
         wifi_credentials,
-        p);
+        p
+    );
 
-    create_imu_task!(main_spawner,
+    create_imu_task!(
+        main_spawner,
         robot_state,
-        imu_gyro_data_publisher, imu_accel_data_publisher, imu_led_cmd_publisher,
-        p);
+        imu_gyro_data_publisher,
+        imu_accel_data_publisher,
+        imu_led_cmd_publisher,
+        p
+    );
 
-    create_control_task!(main_spawner, uart_queue_spawner,
+    create_control_task!(
+        main_spawner,
+        uart_queue_spawner,
         robot_state,
-        control_command_subscriber, control_telemetry_publisher,
-        control_task_power_telemetry_subscriber, control_task_kicker_telemetry_subscriber,
-        control_gyro_data_subscriber, control_accel_data_subscriber,
-        p);
+        control_command_subscriber,
+        control_telemetry_publisher,
+        control_task_power_telemetry_subscriber,
+        control_task_kicker_telemetry_subscriber,
+        control_gyro_data_subscriber,
+        control_accel_data_subscriber,
+        p
+    );
 
     create_kicker_task!(
-        main_spawner, uart_queue_spawner,
+        main_spawner,
+        uart_queue_spawner,
         robot_state,
-        kicker_command_subscriber, kicker_board_telemetry_publisher,
-        p);
+        kicker_command_subscriber,
+        kicker_board_telemetry_publisher,
+        p
+    );
 
     loop {
         Timer::after_millis(10).await;
@@ -166,7 +191,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             vel_z_angular: 0.0,
             kick_vel: 0.0,
             dribbler_speed: -0.1,
-            kick_request: KickRequest::KR_ARM
+            kick_request: KickRequest::KR_ARM,
         }));
     }
 }
