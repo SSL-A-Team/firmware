@@ -24,16 +24,16 @@
               toolchain: nightly
               components: rustfmt
           - name: Common
-            run: cargo fmt --quiet --check --manifest-path common/Cargo.toml
+            run: cargo fmt --check --manifest-path common/Cargo.toml
           - name: Library
-            run: cargo fmt --quiet --check --manifest-path lib-stm32/Cargo.toml
+            run: cargo fmt --check --manifest-path lib-stm32/Cargo.toml
           - name: LIbrary Test Images
-            run: cargo fmt --quiet --check --manifest-path lib-stm32-test/Cargo.toml
+            run: cargo fmt --check --manifest-path lib-stm32-test/Cargo.toml
           - name: Credentials
-            run: cargo fmt --quiet --check --manifest-path credentials/Cargo.toml
+            run: cargo fmt --check --manifest-path credentials/Cargo.toml
           - name: Power Board
-            run: cargo fmt --quiet --check --manifest-path power-board/Cargo.toml
+            run: cargo fmt --check --manifest-path power-board/Cargo.toml
           - name: Kicker Board
-            run: cargo fmt --quiet --check --manifest-path kicker-board/Cargo.toml
+            run: cargo fmt --check --manifest-path kicker-board/Cargo.toml
           - name: Control Board
-            run: cargo fmt --quiet --check --manifest-path control-board/Cargo.toml
+            run: cargo fmt --check --manifest-path control-board/Cargo.toml
