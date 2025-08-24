@@ -5,7 +5,7 @@ use ateam_lib_stm32::{
     uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue},
 };
 use embassy_executor::{SendSpawner, Spawner};
-use embassy_stm32::{gpio::Pin, usart::Uart};
+use embassy_stm32::{gpio::AnyPin, usart::Uart, Peri};
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Instant, Ticker};
 
@@ -101,8 +101,8 @@ impl<
         uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_KICKER_UART_QUEUES>,
         read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_KICKER_UART_QUEUES>,
         write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_KICKER_UART_QUEUES>,
-        boot0_pin: impl Pin,
-        reset_pin: impl Pin,
+        boot0_pin: Peri<'static, AnyPin>,
+        reset_pin: Peri<'static, AnyPin>,
         firmware_image: &'a [u8],
         robot_state: &'static SharedRobotState,
         command_subscriber: CommandsSubscriber,
@@ -352,13 +352,13 @@ pub async fn start_kicker_task(
     robot_state: &'static SharedRobotState,
     command_subscriber: CommandsSubscriber,
     kicker_telemetry_publisher: KickerTelemetryPublisher,
-    kicker_uart: KickerUart,
-    kicker_uart_rx_pin: KickerUartRxPin,
-    kicker_uart_tx_pin: KickerUartTxPin,
-    kicker_uart_rx_dma: KickerRxDma,
-    kicker_uart_tx_dma: KickerTxDma,
-    kicker_boot0_pin: KickerBootPin,
-    kicker_reset_pin: KickerResetPin,
+    kicker_uart: Peri<'static, KickerUart>,
+    kicker_uart_rx_pin: Peri<'static, KickerUartRxPin>,
+    kicker_uart_tx_pin: Peri<'static, KickerUartTxPin>,
+    kicker_uart_rx_dma: Peri<'static, KickerRxDma>,
+    kicker_uart_tx_dma: Peri<'static, KickerTxDma>,
+    kicker_boot0_pin: Peri<'static, KickerBootPin>,
+    kicker_reset_pin: Peri<'static, KickerResetPin>,
 ) {
     let initial_kicker_uart_conifg = stm32_interface::get_bootloader_uart_config();
 
@@ -380,8 +380,8 @@ pub async fn start_kicker_task(
         &KICKER_IDLE_BUFFERED_UART,
         KICKER_IDLE_BUFFERED_UART.get_uart_read_queue(),
         KICKER_IDLE_BUFFERED_UART.get_uart_write_queue(),
-        kicker_boot0_pin,
-        kicker_reset_pin,
+        kicker_boot0_pin.into(),
+        kicker_reset_pin.into(),
         KICKER_FW_IMG,
         robot_state,
         command_subscriber,

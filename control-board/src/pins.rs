@@ -4,7 +4,7 @@ use ateam_common_packets::{
     bindings::{KickerTelemetry, PowerTelemetry},
     radio::{DataPacket, TelemetryPacket},
 };
-use embassy_stm32::{dma::NoDma, peripherals::*};
+use embassy_stm32::{mode::Blocking, peripherals::*};
 use embassy_sync::{
     blocking_mutex::raw::ThreadModeRawMutex,
     pubsub::{PubSubChannel, Publisher, Subscriber},
@@ -230,8 +230,8 @@ pub type OpticalFlowUartRxPin = PB8;
 pub type OpticalFlowUartTxPin = PB9;
 pub type OpticalFlowUartCtsPin = PB15;
 pub type OpticalFlowUartRtsPin = PB14;
-pub type OpticalFlowDmaRx = NoDma;
-pub type OpticalFlowDmaTx = NoDma;
+pub type OpticalFlowDmaRx = Blocking;
+pub type OpticalFlowDmaTx = Blocking;
 pub type OpticalFlowBootPin = PB7;
 pub type OpticalFlowResetPin = PB6;
 
@@ -242,8 +242,8 @@ pub type OpticalFlowResetPin = PB6;
 pub type ScreenUart = USART1;
 pub type ScreenUartRxPin = PA10;
 pub type ScreenUartTxPin = PA9;
-pub type ScreenDmaRx = NoDma;
-pub type ScreenDmaTx = NoDma;
+pub type ScreenDmaRx = Blocking;
+pub type ScreenDmaTx = Blocking;
 pub type ScreenResetPin = PA8;
 
 ///////////
@@ -288,8 +288,8 @@ pub type ExtImuNDetPin = PB2;
 pub type ShellDetectI2c = I2C2;
 pub type ShellDetectSdaPin = PF0;
 pub type ShellDetectSclPin = PF1;
-pub type ShellDetectDmaRx = NoDma;
-pub type ShellDetectDmaTx = NoDma;
+pub type ShellDetectDmaRx = Blocking;
+pub type ShellDetectDmaTx = Blocking;
 
 pub type BatteryAdcPin = PA0;
 pub type VoltageMon5v0Pin = PA1;

@@ -80,7 +80,7 @@ async fn main(_spawner: Spawner) {
     let mut adc_buf: [u16; 7] = [0; 7];
 
     // p.PC6 - Buzzer io pin
-    let ch1 = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
+    let ch1 = PwmPin::new(p.PC6, OutputType::PushPull);
     // p.TIM3 - Buzzer timer
     let pwm = SimplePwm::new(
         p.TIM3,
@@ -97,7 +97,7 @@ async fn main(_spawner: Spawner) {
 
     loop {
         adc.read(
-            &mut adc_dma,
+            adc_dma.reborrow(),
             [
                 (&mut cell0_adc_pin, SampleTime::CYCLES160_5),
                 (&mut cell1_adc_pin, SampleTime::CYCLES160_5),

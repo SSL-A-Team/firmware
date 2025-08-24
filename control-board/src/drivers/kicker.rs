@@ -3,8 +3,8 @@ use ateam_lib_stm32::{
     uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue},
 };
 use embassy_stm32::{
-    gpio::{Pin, Pull},
-    usart::Parity,
+    gpio::{AnyPin, Pull},
+    usart::Parity, Peri,
 };
 use embassy_time::{with_timeout, Duration, Timer};
 
@@ -63,8 +63,8 @@ impl<
         uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_KICKER_UART_QUEUES>,
         read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_KICKER_UART_QUEUES>,
         write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_KICKER_UART_QUEUES>,
-        boot0_pin: impl Pin,
-        reset_pin: impl Pin,
+        boot0_pin: Peri<'static, AnyPin>,
+        reset_pin: Peri<'static, AnyPin>,
         firmware_image: &'a [u8],
     ) -> Self {
         let stm32_interface = Stm32Interface::new_from_pins(

@@ -1,6 +1,5 @@
 use embassy_stm32::{
-    gpio::{Input, Level, Output, Pin, Pull, Speed},
-    Peripheral,
+    gpio::{AnyPin, Input, Level, Output, Pull, Speed}, Peri,
 };
 
 pub struct Breakbeam<'a> {
@@ -10,8 +9,8 @@ pub struct Breakbeam<'a> {
 
 impl<'a> Breakbeam<'a> {
     pub fn new(
-        pin_tx: impl Peripheral<P = impl Pin> + 'a,
-        pin_rx: impl Peripheral<P = impl Pin> + 'a,
+        pin_tx: Peri<'a, AnyPin>,
+        pin_rx: Peri<'a, AnyPin>,
     ) -> Self {
         let pin_tx = Output::new(pin_tx, Level::High, Speed::Low);
         let pin_rx = Input::new(pin_rx, Pull::Down);

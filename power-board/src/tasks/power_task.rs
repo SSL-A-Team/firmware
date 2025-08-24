@@ -13,7 +13,7 @@ use ateam_lib_stm32::{
 use embassy_executor::Spawner;
 use embassy_stm32::{
     adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime},
-    peripherals::ADC1,
+    peripherals::ADC1, Peri,
 };
 use embassy_time::{Duration, Instant, Ticker, Timer};
 
@@ -60,19 +60,19 @@ async fn power_task_entry(
     shared_power_state: &'static SharedPowerState,
     telemetry_publisher: TelemetryPublisher,
     audio_publisher: AudioPublisher,
-    adc: PowerAdc,
-    mut adc_dma: PowerAdcDma,
-    cell1_adc_pin: BatteryCell1VoltageMonitorPin,
-    cell2_adc_pin: BatteryCell2VoltageMonitorPin,
-    cell3_adc_pin: BatteryCell3VoltageMonitorPin,
-    cell4_adc_pin: BatteryCell4VoltageMonitorPin,
-    cell5_adc_pin: BatteryCell5VoltageMonitorPin,
-    cell6_adc_pin: BatteryCell6VoltageMonitorPin,
-    power_rail_12v0_adc_pin: Power12v0VoltageMonitorPin,
-    power_rail_5v0_adc_pin: Power5v0VoltageMonitorPin,
-    power_rail_3v3_adc_pin: Power3v3VoltageMonitorPin,
-    power_rail_vbatt_before_lsw_adc_pin: BatteryPreLoadSwitchVoltageMonitorPin,
-    power_rail_vbatt_adc_pin: BatteryVoltageMonitorPin,
+    adc: Peri<'static, PowerAdc>,
+    mut adc_dma: Peri<'static, PowerAdcDma>,
+    cell1_adc_pin: Peri<'static, BatteryCell1VoltageMonitorPin>,
+    cell2_adc_pin: Peri<'static, BatteryCell2VoltageMonitorPin>,
+    cell3_adc_pin: Peri<'static, BatteryCell3VoltageMonitorPin>,
+    cell4_adc_pin: Peri<'static, BatteryCell4VoltageMonitorPin>,
+    cell5_adc_pin: Peri<'static, BatteryCell5VoltageMonitorPin>,
+    cell6_adc_pin: Peri<'static, BatteryCell6VoltageMonitorPin>,
+    power_rail_12v0_adc_pin: Peri<'static, Power12v0VoltageMonitorPin>,
+    power_rail_5v0_adc_pin: Peri<'static, Power5v0VoltageMonitorPin>,
+    power_rail_3v3_adc_pin: Peri<'static, Power3v3VoltageMonitorPin>,
+    power_rail_vbatt_before_lsw_adc_pin: Peri<'static, BatteryPreLoadSwitchVoltageMonitorPin>,
+    power_rail_vbatt_adc_pin: Peri<'static, BatteryVoltageMonitorPin>,
 ) {
     // give time for the power on sequence to happen
     Timer::after_millis(500).await;
@@ -174,7 +174,7 @@ async fn power_task_entry(
         ]
         .into_iter();
         adc.read(
-            &mut adc_dma,
+            adc_dma.reborrow(),
             power_rail_read_seq,
             &mut power_rail_adc_raw_samples,
         )
@@ -241,7 +241,7 @@ async fn power_task_entry(
             ]
             .into_iter();
             adc.read(
-                &mut adc_dma,
+                adc_dma.reborrow(),
                 battery_cell_read_seq,
                 &mut battery_cell_adc_raw_samples,
             )
@@ -395,19 +395,19 @@ pub async fn start_power_task(
     shared_power_state: &'static SharedPowerState,
     telemetry_publisher: TelemetryPublisher,
     audio_publisher: AudioPublisher,
-    adc: PowerAdc,
-    adc_dma: PowerAdcDma,
-    cell1_adc_pin: BatteryCell1VoltageMonitorPin,
-    cell2_adc_pin: BatteryCell2VoltageMonitorPin,
-    cell3_adc_pin: BatteryCell3VoltageMonitorPin,
-    cell4_adc_pin: BatteryCell4VoltageMonitorPin,
-    cell5_adc_pin: BatteryCell5VoltageMonitorPin,
-    cell6_adc_pin: BatteryCell6VoltageMonitorPin,
-    power_rail_12v0_adc_pin: Power12v0VoltageMonitorPin,
-    power_rail_5v0_adc_pin: Power5v0VoltageMonitorPin,
-    power_rail_3v3_adc_pin: Power3v3VoltageMonitorPin,
-    power_rail_vbatt_before_lsw_adc_pin: BatteryPreLoadSwitchVoltageMonitorPin,
-    power_rail_vbatt_adc_pin: BatteryVoltageMonitorPin,
+    adc: Peri<'static, PowerAdc>,
+    adc_dma: Peri<'static, PowerAdcDma>,
+    cell1_adc_pin: Peri<'static, BatteryCell1VoltageMonitorPin>,
+    cell2_adc_pin: Peri<'static, BatteryCell2VoltageMonitorPin>,
+    cell3_adc_pin: Peri<'static, BatteryCell3VoltageMonitorPin>,
+    cell4_adc_pin: Peri<'static, BatteryCell4VoltageMonitorPin>,
+    cell5_adc_pin: Peri<'static, BatteryCell5VoltageMonitorPin>,
+    cell6_adc_pin: Peri<'static, BatteryCell6VoltageMonitorPin>,
+    power_rail_12v0_adc_pin: Peri<'static, Power12v0VoltageMonitorPin>,
+    power_rail_5v0_adc_pin: Peri<'static, Power5v0VoltageMonitorPin>,
+    power_rail_3v3_adc_pin: Peri<'static, Power3v3VoltageMonitorPin>,
+    power_rail_vbatt_before_lsw_adc_pin: Peri<'static, BatteryPreLoadSwitchVoltageMonitorPin>,
+    power_rail_vbatt_adc_pin: Peri<'static, BatteryVoltageMonitorPin>,
 ) {
     spawner
         .spawn(power_task_entry(

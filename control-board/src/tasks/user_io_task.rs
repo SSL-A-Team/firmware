@@ -2,6 +2,7 @@ use ateam_lib_stm32::filter::{Filter, IirFilter};
 use ateam_lib_stm32::time::SyncTicker;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{AnyPin, Level, Output, Pull, Speed};
+use embassy_stm32::Peri;
 use embassy_time::{Duration, Ticker};
 
 use ateam_lib_stm32::drivers::other::adc_helper::AdcHelper;
@@ -66,7 +67,7 @@ macro_rules! create_io_task {
 #[embassy_executor::task]
 async fn user_io_task_entry(
     robot_state: &'static SharedRobotState,
-    mut battery_volt_adc: AdcHelper<'static, BatteryAdc, BatteryAdcPin>,
+    mut battery_volt_adc: AdcHelper<'static, BatteryAdc, Peri<'static, BatteryAdcPin>>,
     vref_int_adc: Adc<'static, VrefIntAdc>,
     dip_switch: DipSwitch<'static, 8>,
     debug_mode_dip_switch: DipSwitch<'static, 1>,
@@ -245,36 +246,36 @@ async fn user_io_task_entry(
 pub async fn start_io_task(
     spawner: &Spawner,
     robot_state: &'static SharedRobotState,
-    battery_adc_peri: BatteryAdc,
-    battery_adc_pin: BatteryAdcPin,
-    vref_int_adc_peri: VrefIntAdc,
-    usr_dip7_pin: UsrDip7Pin,
-    usr_dip6_pin: UsrDip6Pin,
-    usr_dip5_pin: UsrDip5Pin,
-    usr_dip4_pin: UsrDip4Pin,
-    usr_dip3_pin: UsrDip3Pin,
-    usr_dip2_pin: UsrDip2Pin,
-    usr_dip1_pin: UsrDip1Pin,
-    usr_dip0_pin: UsrDip0Pin,
-    debug_mode_pin: UsrDipDebugMode,
-    robot_id_team_is_blue_pin: UsrDipTeamIsBluePin,
-    robot_id_src_select_pin: UsrDipBotIdSrcSelect,
-    robot_id_selector3_pin: RobotIdSelector3Pin,
-    robot_id_selector2_pin: RobotIdSelector2Pin,
-    robot_id_selector1_pin: RobotIdSelector1Pin,
-    robot_id_selector0_pin: RobotIdSelector0Pin,
-    usr_led0_pin: UsrLed0Pin,
-    usr_led1_pin: UsrLed1Pin,
-    usr_led2_pin: UsrLed2Pin,
-    usr_led3_pin: UsrLed3Pin,
-    robot_id_src_disagree_led_pin: RobotIdSrcDisagree,
-    robot_id_indicator_fl: RobotIdIndicator0FlPin,
-    robot_id_indicator_bl: RobotIdIndicator1BlPin,
-    robot_id_indicator_br: RobotIdIndicator2BrPin,
-    robot_id_indicator_fr: RobotIdIndicator3FrPin,
-    robot_id_indicator_isblue: RobotIdIndicator4TeamIsBluePin,
+    battery_adc_peri: Peri<'static, BatteryAdc>,
+    battery_adc_pin: Peri<'static, BatteryAdcPin>,
+    vref_int_adc_peri: Peri<'static, VrefIntAdc>,
+    usr_dip7_pin: Peri<'static, UsrDip7Pin>,
+    usr_dip6_pin: Peri<'static, UsrDip6Pin>,
+    usr_dip5_pin: Peri<'static, UsrDip5Pin>,
+    usr_dip4_pin: Peri<'static, UsrDip4Pin>,
+    usr_dip3_pin: Peri<'static, UsrDip3Pin>,
+    usr_dip2_pin: Peri<'static, UsrDip2Pin>,
+    usr_dip1_pin: Peri<'static, UsrDip1Pin>,
+    usr_dip0_pin: Peri<'static, UsrDip0Pin>,
+    debug_mode_pin: Peri<'static, UsrDipDebugMode>,
+    robot_id_team_is_blue_pin: Peri<'static, UsrDipTeamIsBluePin>,
+    robot_id_src_select_pin: Peri<'static, UsrDipBotIdSrcSelect>,
+    robot_id_selector3_pin: Peri<'static, RobotIdSelector3Pin>,
+    robot_id_selector2_pin: Peri<'static, RobotIdSelector2Pin>,
+    robot_id_selector1_pin: Peri<'static, RobotIdSelector1Pin>,
+    robot_id_selector0_pin: Peri<'static, RobotIdSelector0Pin>,
+    usr_led0_pin: Peri<'static, UsrLed0Pin>,
+    usr_led1_pin: Peri<'static, UsrLed1Pin>,
+    usr_led2_pin: Peri<'static, UsrLed2Pin>,
+    usr_led3_pin: Peri<'static, UsrLed3Pin>,
+    robot_id_src_disagree_led_pin: Peri<'static, RobotIdSrcDisagree>,
+    robot_id_indicator_fl: Peri<'static, RobotIdIndicator0FlPin>,
+    robot_id_indicator_bl: Peri<'static, RobotIdIndicator1BlPin>,
+    robot_id_indicator_br: Peri<'static, RobotIdIndicator2BrPin>,
+    robot_id_indicator_fr: Peri<'static, RobotIdIndicator3FrPin>,
+    robot_id_indicator_isblue: Peri<'static, RobotIdIndicator4TeamIsBluePin>,
 ) {
-    let dip_sw_pins: [AnyPin; 8] = [
+    let dip_sw_pins: [Peri<'static, AnyPin>; 8] = [
         usr_dip7_pin.into(),
         usr_dip6_pin.into(),
         usr_dip5_pin.into(),
@@ -286,16 +287,16 @@ pub async fn start_io_task(
     ];
     let dip_switch = DipSwitch::new_from_pins(dip_sw_pins, Pull::None, None);
 
-    let debug_mode_pins: [AnyPin; 1] = [debug_mode_pin.into()];
+    let debug_mode_pins: [Peri<'static, AnyPin>; 1] = [debug_mode_pin.into()];
     let debug_mode_dip = DipSwitch::new_from_pins(debug_mode_pins, Pull::None, Some([true]));
 
-    let team_color_pins: [AnyPin; 2] = [
+    let team_color_pins: [Peri<'static, AnyPin>; 2] = [
         robot_id_src_select_pin.into(),
         robot_id_team_is_blue_pin.into(),
     ];
     let team_color_dip = DipSwitch::new_from_pins(team_color_pins, Pull::None, Some([false, true]));
 
-    let robot_id_selector_pins: [AnyPin; 4] = [
+    let robot_id_selector_pins: [Peri<'static, AnyPin>; 4] = [
         robot_id_selector3_pin.into(),
         robot_id_selector2_pin.into(),
         robot_id_selector1_pin.into(),
@@ -311,11 +312,11 @@ pub async fn start_io_task(
     let robot_id_src_disagree_led =
         Output::new(robot_id_src_disagree_led_pin, Level::Low, Speed::Low);
     let robot_id_indicator = ShellIndicator::new(
-        robot_id_indicator_fr,
-        robot_id_indicator_fl,
-        robot_id_indicator_bl,
-        robot_id_indicator_br,
-        Some(robot_id_indicator_isblue),
+        robot_id_indicator_fr.into(),
+        robot_id_indicator_fl.into(),
+        robot_id_indicator_bl.into(),
+        robot_id_indicator_br.into(),
+        Some(robot_id_indicator_isblue.into()),
     );
 
     let battery_volt_adc = AdcHelper::new(
