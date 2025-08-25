@@ -3,8 +3,7 @@ use core::ops::Range;
 use embassy_stm32::{
     mode::Async,
     spi::{self, Config, MosiPin, SckPin, Spi},
-    time::mhz,
-    Peripheral,
+    time::mhz, Peri,
 };
 use smart_leds::RGB8;
 
@@ -58,10 +57,10 @@ where
     }
 
     pub fn new_from_pins<SpiPeri: spi::Instance>(
-        peri: impl Peripheral<P = SpiPeri> + 'a,
-        sck_pin: impl Peripheral<P = impl SckPin<SpiPeri>> + 'a,
-        mosi_pin: impl Peripheral<P = impl MosiPin<SpiPeri>> + 'a,
-        tx_dma: impl Peripheral<P = impl spi::TxDma<SpiPeri>> + 'a,
+        peri: Peri<'static, SpiPeri>,
+        sck_pin: Peri<'static, impl SckPin<SpiPeri>>,
+        mosi_pin: Peri<'static, impl MosiPin<SpiPeri>>,
+        tx_dma: Peri<'static, impl spi::TxDma<SpiPeri>>,
         spi_buf: &'buf mut [u8; (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE],
     ) -> Self {
         let mut dotstar_spi_config = Config::default();

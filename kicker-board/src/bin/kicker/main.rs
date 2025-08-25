@@ -15,6 +15,7 @@ use ateam_kicker_board::{
 };
 
 use defmt::*;
+use embassy_stm32::Peri;
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex,
     pubsub::{PubSubChannel, Publisher, Subscriber},
@@ -104,15 +105,15 @@ async fn high_pri_kick_task(
     coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES>,
     coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES>,
     mut adc: Adc<'static, embassy_stm32::peripherals::ADC1>,
-    charge_pin: ChargePin,
-    kick_pin: KickPin,
-    chip_pin: ChipPin,
-    breakbeam_tx: BreakbeamRightAgpioPin,
-    breakbeam_rx: BreakbeamLeftAgpioPin,
-    mut rail_pin: PowerRail200vReadPin,
-    grn_led_pin: GreenStatusLedPin,
-    err_led_pin: RedStatusLedPin,
-    ball_detected_led1_pin: BlueStatusLedPin,
+    charge_pin: Peri<'static, ChargePin>,
+    kick_pin: Peri<'static, KickPin>,
+    chip_pin: Peri<'static, ChipPin>,
+    breakbeam_tx: Peri<'static, BreakbeamRightAgpioPin>,
+    breakbeam_rx: Peri<'static, BreakbeamLeftAgpioPin>,
+    mut rail_pin: Peri<'static, PowerRail200vReadPin>,
+    grn_led_pin: Peri<'static, GreenStatusLedPin>,
+    err_led_pin: Peri<'static, RedStatusLedPin>,
+    ball_detected_led1_pin: Peri<'static, BlueStatusLedPin>,
     drib_vel_pub: Publisher<'static, CriticalSectionRawMutex, f32, 1, 1, 1>,
     mut drib_telem_sub: Subscriber<'static, CriticalSectionRawMutex, MotorTelemetry, 1, 1, 1>,
 ) -> ! {
@@ -132,7 +133,7 @@ async fn high_pri_kick_task(
 
     // TODO dotstars
 
-    let mut breakbeam = Breakbeam::new(breakbeam_tx, breakbeam_rx);
+    let mut breakbeam = Breakbeam::new(breakbeam_tx.into(), breakbeam_rx.into());
 
     // coms buffers
     let mut telemetry_enabled: bool; //  = false;
@@ -555,7 +556,7 @@ async fn main(spawner: Spawner) -> ! {
 
     // enable opamp for hv measurement
     let mut hv_opamp_inst = OpAmp::new(p.OPAMP3, OpAmpSpeed::HighSpeed);
-    let _hv_opamp = hv_opamp_inst.buffer_ext(p.PB0, p.PB1, OpAmpGain::Mul2);
+    let _hv_opamp = hv_opamp_inst.pga_ext(p.PB0, p.PB1, OpAmpGain::Mul2);
 
     // config ADC
     let mut adc = Adc::new(p.ADC1);
@@ -643,8 +644,8 @@ async fn main(spawner: Spawner) -> ! {
         &DRIB_IDLE_BUFFERED_UART,
         DRIB_IDLE_BUFFERED_UART.get_uart_read_queue(),
         DRIB_IDLE_BUFFERED_UART.get_uart_write_queue(),
-        p.PE13,
-        p.PE14,
+        p.PE13.into(),
+        p.PE14.into(),
         Pull::None,
         true,
     );

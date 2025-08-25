@@ -1,6 +1,5 @@
 #![no_std]
 #![no_main]
-#![feature(generic_arg_infer)]
 
 use ateam_lib_stm32::drivers::switches::button::AdvExtiButton;
 

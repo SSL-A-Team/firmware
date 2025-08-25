@@ -194,6 +194,7 @@ impl<
         &self.uart_read_queue
     }
 
+    #[define_opaque(IdleBufferedUartReadFuture)]
     pub fn read_task(
         &'static self,
         rx: UartRx<'static, Async>,
@@ -217,6 +218,7 @@ impl<
         &self.uart_write_queue
     }
 
+    #[define_opaque(IdleBufferedUartWriteFuture)]
     pub fn write_task(
         &'static self,
         tx: UartTx<'static, Async>,
@@ -466,6 +468,7 @@ impl<const LENGTH: usize, const DEPTH: usize, const DEBUG: bool>
         Self { queue_rx: queue }
     }
 
+    #[define_opaque(ReadTaskFuture)]
     fn read_task(
         &'static self,
         // queue_rx: &'static Queue<LENGTH, DEPTH>,
@@ -623,6 +626,7 @@ impl<const LENGTH: usize, const DEPTH: usize, const DEBUG: bool>
         Self { queue_tx: queue }
     }
 
+    #[define_opaque(WriteTaskFuture)]
     fn write_task(
         &'static self,
         mut tx: UartTx<'static, Async>,

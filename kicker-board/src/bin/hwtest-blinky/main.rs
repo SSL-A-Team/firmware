@@ -11,7 +11,7 @@ use embassy_stm32::{
     adc::{Adc, SampleTime},
     gpio::{Input, Level, Output, Pull, Speed},
     spi::{Config, Spi},
-    time::mhz,
+    time::mhz, Peri,
 };
 use embassy_time::{Duration, Timer};
 
@@ -25,16 +25,16 @@ use panic_probe as _;
 
 #[embassy_executor::task]
 async fn blink(
-    reg_charge: ChargePin,
-    status_led_red: RedStatusLedPin,
-    status_led_green: GreenStatusLedPin,
-    status_led_blue1: BlueStatusLedPin,
-    usr_btn_pin: UserBtnPin,
+    reg_charge: Peri<'static, ChargePin>,
+    status_led_red: Peri<'static, RedStatusLedPin>,
+    status_led_green: Peri<'static, GreenStatusLedPin>,
+    status_led_blue1: Peri<'static, BlueStatusLedPin>,
+    usr_btn_pin: Peri<'static, UserBtnPin>,
     mut adc: Adc<'static, PowerRailAdc>,
-    mut rail_200v_pin: PowerRail200vReadPin,
-    mut rail_12v0_pin: PowerRailVswReadPin,
-    mut rail_5v0_pin: PowerRail5v0ReadPin,
-    mut rail_3v3_pin: PowerRail3v3ReadPin,
+    mut rail_200v_pin: Peri<'static, PowerRail200vReadPin>,
+    mut rail_12v0_pin: Peri<'static, PowerRailVswReadPin>,
+    mut rail_5v0_pin: Peri<'static, PowerRail5v0ReadPin>,
+    mut rail_3v3_pin: Peri<'static, PowerRail3v3ReadPin>,
 ) -> ! {
     let mut reg_charge = Output::new(reg_charge, Level::Low, Speed::Medium);
     let mut status_led_green = Output::new(status_led_green, Level::High, Speed::Medium);
@@ -94,10 +94,10 @@ async fn blink(
 
 #[embassy_executor::task]
 async fn dotstar_lerp_task(
-    dotstar_spi: DotstarSpi,
-    dotstar_mosi_pin: DotstarSpiMosiPin,
-    dotstar_sck_pin: DotstarSpiSckPin,
-    dotstar_tx_dma: DotstarSpiTxDma,
+    dotstar_spi: Peri<'static, DotstarSpi>,
+    dotstar_mosi_pin: Peri<'static, DotstarSpiMosiPin>,
+    dotstar_sck_pin: Peri<'static, DotstarSpiSckPin>,
+    dotstar_tx_dma: Peri<'static, DotstarSpiTxDma>,
 ) {
     let mut dotstar_spi_config = Config::default();
     dotstar_spi_config.frequency = mhz(1);

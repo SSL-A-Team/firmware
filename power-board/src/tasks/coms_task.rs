@@ -1,6 +1,6 @@
 use core::mem::MaybeUninit;
 use embassy_executor::{SendSpawner, Spawner};
-use embassy_stm32::usart::{self, DataBits, Parity, StopBits, Uart};
+use embassy_stm32::{usart::{self, DataBits, Parity, StopBits, Uart}, Peri};
 
 use crate::{pins::*, power_state::SharedPowerState, SystemIrqs, DEBUG_UART_QUEUES};
 use ateam_common_packets::bindings::{BatteryInfo, PowerCommand, PowerTelemetry};
@@ -191,11 +191,11 @@ pub async fn start_coms_task(
     shared_power_state: &'static SharedPowerState,
     telemetry_subscriber: TelemetrySubscriber,
     audio_publisher: AudioPublisher,
-    uart: ComsUart,
-    uart_rx_pin: ComsUartRxPin,
-    uart_tx_pin: ComsUartTxPin,
-    uart_rx_dma: ComsDmaRx,
-    uart_tx_dma: ComsDmaTx,
+    uart: Peri<'static, ComsUart>,
+    uart_rx_pin: Peri<'static, ComsUartRxPin>,
+    uart_tx_pin: Peri<'static, ComsUartTxPin>,
+    uart_rx_dma: Peri<'static, ComsDmaRx>,
+    uart_tx_dma: Peri<'static, ComsDmaTx>,
 ) {
     let uart_config = power_uart_config();
     let coms_uart = Uart::new(

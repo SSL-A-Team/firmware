@@ -2,8 +2,7 @@ use defmt::Format;
 use embassy_futures::select;
 use embassy_stm32::{
     exti::ExtiInput,
-    gpio::{Pin, Pull},
-    Peripheral,
+    gpio::{Pin, Pull}, Peri,
 };
 use embassy_time::{Instant, Timer};
 
@@ -59,8 +58,8 @@ impl<
     }
 
     pub fn new_from_pins<PIN: Pin>(
-        input_pin: PIN,
-        input_pin_exti: impl Peripheral<P = <PIN as Pin>::ExtiChannel> + 'static,
+        input_pin: Peri<'static, PIN>,
+        input_pin_exti: Peri<'static, <PIN as Pin>::ExtiChannel>,
         input_inverted: bool,
     ) -> Self {
         let input = ExtiInput::new(input_pin, input_pin_exti, Pull::None);

@@ -12,8 +12,8 @@ use core::fmt::Write;
 use core::mem::size_of;
 use credentials::WifiCredential;
 use embassy_futures::select::{select, Either};
-use embassy_stm32::gpio::{Level, Output, Pin, Speed};
-use embassy_stm32::uid;
+use embassy_stm32::gpio::{AnyPin, Level, Output, Speed};
+use embassy_stm32::{uid, Peri};
 use embassy_stm32::usart::{self, DataBits, Parity, StopBits};
 use embassy_time::{Duration, Timer};
 use heapless::String;
@@ -112,7 +112,7 @@ impl<
         uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
         read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
         write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
-        reset_pin: impl Pin,
+        reset_pin: Peri<'static, AnyPin>,
         use_flow_control: bool,
     ) -> RobotRadio<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, DEBUG_UART_QUEUES> {
         let reset_pin = Output::new(reset_pin, Level::High, Speed::Medium);

@@ -6,7 +6,7 @@ use ateam_lib_stm32::{
     uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue},
 };
 use embassy_executor::{SendSpawner, Spawner};
-use embassy_stm32::usart::{self, DataBits, Parity, StopBits, Uart};
+use embassy_stm32::{usart::{self, DataBits, Parity, StopBits, Uart}, Peri};
 use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{
@@ -241,11 +241,11 @@ pub fn start_power_task(
     robot_state: &'static SharedRobotState,
     power_telemetry_publisher: PowerTelemetryPublisher,
     led_command_publisher: LedCommandPublisher,
-    power_uart: PowerUart,
-    power_uart_rx_pin: PowerUartRxPin,
-    power_uart_tx_pin: PowerUartTxPin,
-    power_uart_rx_dma: PowerRxDma,
-    power_uart_tx_dma: PowerTxDma,
+    power_uart: Peri<'static, PowerUart>,
+    power_uart_rx_pin: Peri<'static, PowerUartRxPin>,
+    power_uart_tx_pin: Peri<'static, PowerUartTxPin>,
+    power_uart_rx_dma: Peri<'static, PowerRxDma>,
+    power_uart_tx_dma: Peri<'static, PowerTxDma>,
 ) {
     let uart_config = power_uart_config();
     let power_uart = Uart::new(

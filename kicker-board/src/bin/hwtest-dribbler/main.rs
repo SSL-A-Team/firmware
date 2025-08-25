@@ -77,8 +77,8 @@ async fn main(_spawner: Spawner) -> ! {
         &DRIB_IDLE_BUFFERED_UART,
         DRIB_IDLE_BUFFERED_UART.get_uart_read_queue(),
         DRIB_IDLE_BUFFERED_UART.get_uart_write_queue(),
-        p.PE13,
-        p.PE14,
+        p.PE13.into(),
+        p.PE14.into(),
         Pull::None,
         true,
     );

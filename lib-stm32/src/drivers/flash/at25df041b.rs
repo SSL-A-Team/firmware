@@ -1,7 +1,7 @@
 use embassy_stm32::{
-    gpio::{Level, Output, Pin, Speed},
+    gpio::{AnyPin, Level, Output, Speed},
     mode::Async,
-    spi::{self, Error},
+    spi::{self, Error}, Peri,
 };
 
 pub struct AT25DF041B<'buf, const CS_POL_N: bool> {
@@ -14,7 +14,7 @@ pub struct AT25DF041B<'buf, const CS_POL_N: bool> {
 impl<'buf, const CS_POL_N: bool> AT25DF041B<'buf, CS_POL_N> {
     pub fn new(
         spi: spi::Spi<'static, Async>,
-        chip_select: impl Pin,
+        chip_select: Peri<'static, AnyPin>,
         tx_buf: &'buf mut [u8; 256],
         rx_buf: &'buf mut [u8; 256],
     ) -> AT25DF041B<'buf, CS_POL_N> {
