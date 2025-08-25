@@ -209,6 +209,8 @@ impl<
                         // Rate limit the retry loop
                         // Timer::after_millis(10).await;
                     }
+
+                    main_loop_ticker.reset();
                 }
                 KickerTaskState::Reset => {
                     defmt::trace!(
@@ -219,7 +221,7 @@ impl<
                     // Reset the connection timeout period
                     connection_timeout_start = Instant::now();
                     // Move on to ConnectUart state
-                    self.kicker_task_state = KickerTaskState::ConnectUart;
+                    self.kicker_task_state = KickerTaskState::Connected;
                 }
                 KickerTaskState::ConnectUart => {
                     if telemetry_received {
