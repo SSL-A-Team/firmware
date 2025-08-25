@@ -1,12 +1,12 @@
-name: A-Team Firmware
+name: Rust Linter Checks
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
 jobs:
-  test-firmware-build:
-    runs-on: ubuntu-24.04
+  lint:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - name: Fetch Submodules
@@ -29,7 +29,11 @@ jobs:
           nix flake check
           nix develop -c cargo --version
           nix develop -c arm-none-eabi-gcc --version
-      - name: Lint Common Libraries
+      - name: Common Libraries No Warnings
+        shell: bash
+        run: |
+          nix develop -c cargo build --features strict --manifest-path lib-stm32/Cargo.toml
+      - name: Common Libraries No Warnings
         shell: bash
         run: |
           nix develop -c cargo build --features strict --manifest-path lib-stm32/Cargo.toml

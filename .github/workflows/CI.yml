@@ -1,4 +1,4 @@
-name: A-Team Firmware
+name: A-Team Firmware Compile
 on:
   push:
     branches: [ main ]
@@ -7,7 +7,7 @@ on:
       - '**'
 jobs:
   test-firmware-build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - name: Fetch Submodules

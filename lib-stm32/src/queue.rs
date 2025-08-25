@@ -304,7 +304,7 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
         })
     }
 
-    pub async fn enqueue(&self) -> Result<EnqueueRef<LENGTH, DEPTH>, Error> {
+    pub async fn enqueue(&'_ self) -> Result<EnqueueRef<'_, LENGTH, DEPTH>, Error> {
         /* Safety: this raw pointer access is safe because the underlying memory is statically allocated
          * and the total read operation is atomic across tasks because of the critical_section closure
          */
