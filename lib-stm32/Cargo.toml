@@ -25,6 +25,7 @@ smart-leds = "0.4.0"
 
 [features]
 default = ["embassy-stm32/stm32h723zg"]
+strict = ["embassy-stm32/stm32h723zg"]
 # stm32h723zg = []
 
 [patch.crates-io]
