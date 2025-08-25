@@ -9,20 +9,21 @@ jobs:
   test-firmware-build:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
       - name: Fetch Submodules
-        uses: webfactory/ssh-agent@v0.7.0
+        uses: webfactory/ssh-agent@v0.9.1
         with:
           ssh-private-key: |
             ${{ secrets.ROBOT_PRIVATE_DATA_PRIVATE_SSH_KEY }}
       - run: |
           git submodule update --init --recursive
           ./util/ateam-credentials-setup.bash
-      - uses: cachix/install-nix-action@v16
+      - uses: cachix/install-nix-action@v31
         with:
           extra_nix_config:
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
-
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= mycache.example.org:somePublicKeyString=
+            substituters = https://cache.nixos.org https://mycache.example.org
       - name: Validate Nix Environment
         shell: bash
         run: |

@@ -605,7 +605,7 @@ impl<const LENGTH: usize, const DEPTH: usize, const DEBUG: bool>
         self.queue_rx.can_dequeue()
     }
 
-    pub fn try_dequeue(&self) -> Result<DequeueRef<LENGTH, DEPTH>, Error> {
+    pub fn try_dequeue(&'_ self) -> Result<DequeueRef<'_, LENGTH, DEPTH>, Error> {
         self.queue_rx.try_dequeue()
     }
 

@@ -229,7 +229,7 @@ impl<
         }
     }
 
-    pub fn try_read_data(&self) -> Result<DequeueRef<LEN_RX, DEPTH_RX>, Error> {
+    pub fn try_read_data(&'_ self) -> Result<DequeueRef<'_, LEN_RX, DEPTH_RX>, Error> {
         return self.reader.try_dequeue();
     }
 
@@ -600,10 +600,8 @@ impl<
     }
 
     pub async fn execute_code(&mut self, start_address: Option<u32>) -> Result<(), ()> {
-        defmt::debug!("firmware jump/go command implementation not working. will reset part.");
-        self.reset_into_program(false).await;
-        return Ok(());
-
+        defmt::warn!("firmware jump/go command implementation does not work on some parts. If this appears not to work, consider simply resetting the device.");
+        
         if !self.in_bootloader {
             defmt::error!("called bootloader operation when not in bootloader context.");
             return Err(());
