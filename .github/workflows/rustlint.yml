@@ -33,10 +33,6 @@ jobs:
         shell: bash
         run: |
           nix develop -c cargo build --features strict --manifest-path lib-stm32/Cargo.toml
-      - name: Common Libraries No Warnings
-        shell: bash
-        run: |
-          nix develop -c cargo build --features strict --manifest-path lib-stm32/Cargo.toml
       - name: Common Libraries Clippy Default
         shell: bash
         run: |
