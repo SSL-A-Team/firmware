@@ -341,6 +341,8 @@ impl<
                             ))
                             .await;
                     }
+
+                    radio_loop_rate_ticker.reset();
                 }
                 RadioConnectionState::ConnectedNetwork => {
                     if let Ok(connected) = self
@@ -354,7 +356,6 @@ impl<
                             // Refresh last software packet on first connect.
                             self.last_software_packet = Instant::now();
                             self.connection_state = RadioConnectionState::Connected;
-                            radio_loop_rate_ticker.reset();
                             self.led_command_pub
                                 .publish(ControlBoardLedCommand::Radio(
                                     RadioStatusLedCommand::ConnectedSoftware,
@@ -380,6 +381,8 @@ impl<
                             ))
                             .await;
                     }
+
+                    radio_loop_rate_ticker.reset();
                 }
                 RadioConnectionState::Connected => {
                     let _ = self.process_packets(tx_ctr).await;
@@ -607,8 +610,6 @@ impl<
 
         // always send the latest telemetry
         if tx_ctr == 0 {
-            defmt::info!("RadioTask - sending basic telemetry");
-
             self.last_basic_telemetry.transmission_sequence_number = self.seq_number as u8;
             self.seq_number = (self.seq_number + 1) & 0x00FF;
 
