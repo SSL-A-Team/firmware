@@ -274,10 +274,7 @@ impl<
                         .dequeue(|buf| {
                             // defmt::warn!("buf {}", buf);
                             let packet = self.to_packet(buf);
-                            if packet.is_err() {
-                                defmt::warn!("parsed invalid packet");
-                            } else {
-                                let packet = packet.unwrap();
+                            if let Ok(packet) = packet {
                                 if let EdmPacket::ATEvent(ATEvent::NetworkDown {
                                     interface_id: 0,
                                 }) = packet
@@ -295,6 +292,8 @@ impl<
                                 } else {
                                     defmt::warn!("got edm packet: {}", packet);
                                 }
+                            } else {
+                                defmt::warn!("parsed invalid packet");
                             }
                         })
                         .await;
@@ -528,7 +527,7 @@ impl<
             }
             Err(queue::Error::QueueFull) => {
                 // nothing to read
-                return Err(OdinRadioError::ReadLowLevelBufferEmpty);
+                Err(OdinRadioError::ReadLowLevelBufferEmpty)
             }
             Err(queue::Error::QueueEmpty) => {
                 // nothing to read

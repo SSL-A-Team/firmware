@@ -265,7 +265,7 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                 if write_index == 0 {
                     write_index = DEPTH - 1;
                 } else {
-                    write_index = write_index - 1;
+                    write_index -= 1;
                 }
 
                 // write back decremented write index. Write index is incremented to the next buffer
