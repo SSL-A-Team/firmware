@@ -13,6 +13,7 @@ use embassy_stm32::{
     pac::Interrupt,
     peripherals::{self, *},
     usart::{self, *},
+    Peri,
 };
 use embassy_time::Timer;
 
@@ -113,11 +114,11 @@ async fn tx_task(
 
 #[embassy_executor::task]
 async fn handle_btn_press(
-    usr_btn_pin: UserBtnPin,
-    usr_btn_exti: UserBtnExti,
-    led_green_pin: LedGreenPin,
-    led_yellow_pin: LedYellowPin,
-    led_red_pin: LedRedPin,
+    usr_btn_pin: Peri<'static, UserBtnPin>,
+    usr_btn_exti: Peri<'static, UserBtnExti>,
+    led_green_pin: Peri<'static, LedGreenPin>,
+    led_yellow_pin: Peri<'static, LedYellowPin>,
+    led_red_pin: Peri<'static, LedRedPin>,
 ) {
     let mut usr_btn = ExtiInput::new(usr_btn_pin, usr_btn_exti, Pull::Down);
 

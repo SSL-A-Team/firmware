@@ -13,6 +13,7 @@ use embassy_stm32::{
     adc::{Adc, SampleTime},
     gpio::{Input, Level, Output, Pull, Speed},
     opamp::{OpAmp, OpAmpGain, OpAmpSpeed},
+    Peri,
 };
 use embassy_time::{Duration, Ticker, Timer};
 
@@ -24,14 +25,14 @@ use ateam_kicker_board::*;
 #[embassy_executor::task]
 async fn run_kick(
     mut adc: Adc<'static, PowerRailAdc>,
-    mut hv_pin: PowerRail200vReadPin,
-    mut rail_12v0_pin: PowerRailVswReadPin,
-    reg_charge: ChargePin,
-    status_led_red: RedStatusLedPin,
-    status_led_green: GreenStatusLedPin,
-    usr_btn_pin: UserBtnPin,
+    mut hv_pin: Peri<'static, PowerRail200vReadPin>,
+    mut rail_12v0_pin: Peri<'static, PowerRailVswReadPin>,
+    reg_charge: Peri<'static, ChargePin>,
+    status_led_red: Peri<'static, RedStatusLedPin>,
+    status_led_green: Peri<'static, GreenStatusLedPin>,
+    usr_btn_pin: Peri<'static, UserBtnPin>,
     // chip_pin: ChipPin,
-    kick_pin: KickPin,
+    kick_pin: Peri<'static, KickPin>,
 ) -> ! {
     let mut ticker = Ticker::every(Duration::from_millis(1));
 
@@ -145,7 +146,7 @@ fn main() -> ! {
     let _vsw_en = Output::new(p.PE10, Level::High, Speed::Medium);
 
     let mut hv_opamp_inst = OpAmp::new(p.OPAMP3, OpAmpSpeed::HighSpeed);
-    let _hv_opamp = hv_opamp_inst.buffer_ext(p.PB0, p.PB1, OpAmpGain::Mul2);
+    let _hv_opamp = hv_opamp_inst.pga_ext(p.PB0, p.PB1, OpAmpGain::Mul2);
 
     let mut adc = Adc::new(p.ADC1);
     adc.set_resolution(embassy_stm32::adc::Resolution::BITS12);

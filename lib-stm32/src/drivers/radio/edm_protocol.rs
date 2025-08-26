@@ -103,7 +103,7 @@ impl EdmPacketRaw {
         Ok(total_len)
     }
 
-    fn get_payload(&self) -> Result<EdmPacket, EdmPacketError> {
+    fn get_payload(&'_ self) -> Result<EdmPacket<'_>, EdmPacketError> {
         match u16::from_be(self.identifier) {
             Self::CONNECT_EVENT => {
                 let event = data_to_ref::<ConnectEvent, ConnectEvent<()>>(&self.payload)?;
@@ -176,7 +176,7 @@ pub enum EdmPacket<'a> {
 }
 
 impl EdmPacket<'_> {
-    pub fn new(data: &[u8]) -> Result<EdmPacket, EdmPacketError> {
+    pub fn new(data: &'_ [u8]) -> Result<EdmPacket<'_>, EdmPacketError> {
         EdmPacketRaw::new(data)?.get_payload()
     }
 

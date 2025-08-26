@@ -7,6 +7,7 @@ use embassy_stm32::{
         simple_pwm::{PwmPin, SimplePwm},
         Channel,
     },
+    Peri,
 };
 use embassy_time::{Duration, Ticker};
 
@@ -60,10 +61,10 @@ async fn audio_task_entry(
 pub fn start_audio_task(
     task_spawner: &Spawner,
     robot_state: &'static SharedRobotState,
-    buzzer_timer: BuzzerTimer,
-    buzzer_pin: BuzzerPin,
+    buzzer_timer: Peri<'static, BuzzerTimer>,
+    buzzer_pin: Peri<'static, BuzzerPin>,
 ) {
-    let ch2 = PwmPin::new_ch2(buzzer_pin, OutputType::PushPull);
+    let ch2 = PwmPin::new(buzzer_pin, OutputType::PushPull);
     let pwm = SimplePwm::new(
         buzzer_timer,
         None,

@@ -10,9 +10,9 @@ use cortex_m_rt::entry;
 
 use embassy_executor::Executor;
 use embassy_stm32::{
-    adc::Adc,
-    adc::SampleTime,
+    adc::{Adc, SampleTime},
     gpio::{Level, Output, Speed},
+    Peri,
 };
 use embassy_time::{Duration, Ticker, Timer};
 
@@ -24,12 +24,12 @@ use ateam_kicker_board::*;
 #[embassy_executor::task]
 async fn run_kick(
     mut adc: Adc<'static, PowerRailAdc>,
-    mut hv_pin: PowerRail200vReadPin,
-    mut rail_vsw_pin: PowerRailVswReadPin,
-    reg_charge: ChargePin,
-    status_led_red: RedStatusLedPin,
-    status_led_green: GreenStatusLedPin,
-    kick_pin: KickPin,
+    mut hv_pin: Peri<'static, PowerRail200vReadPin>,
+    mut rail_vsw_pin: Peri<'static, PowerRailVswReadPin>,
+    reg_charge: Peri<'static, ChargePin>,
+    status_led_red: Peri<'static, RedStatusLedPin>,
+    status_led_green: Peri<'static, GreenStatusLedPin>,
+    kick_pin: Peri<'static, KickPin>,
 ) -> ! {
     let mut ticker = Ticker::every(Duration::from_millis(1));
 

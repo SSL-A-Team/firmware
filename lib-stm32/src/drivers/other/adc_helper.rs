@@ -1,5 +1,7 @@
-use embassy_stm32::adc::{self, Adc, AdcChannel, Resolution, SampleTime};
-use embassy_stm32::Peripheral;
+use embassy_stm32::{
+    adc::{self, Adc, AdcChannel, Resolution, SampleTime},
+    Peri,
+};
 
 // The voltage which the internal ADC were calibrated at.
 // For the H743 and F407
@@ -15,7 +17,7 @@ impl<'a, T: adc::Instance, Ch: AdcChannel<T>> AdcHelper<'a, T, Ch> {
     // NOTE: vref_int_peri is not checked by compiler and needs to
     // be the peripheral connected to Vref_int.
     pub fn new(
-        peri: impl Peripheral<P = T> + 'a,
+        peri: Peri<'static, T>,
         pin: Ch,
         sample_time: SampleTime,
         resolution: Resolution,

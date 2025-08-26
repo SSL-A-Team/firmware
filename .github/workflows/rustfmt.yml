@@ -12,7 +12,7 @@
         steps:
           - uses: actions/checkout@v4
           - name: Fetch Submodules
-            uses: webfactory/ssh-agent@v0.7.0
+            uses: webfactory/ssh-agent@v0.9.1
             with:
               ssh-private-key: |
                 ${{ secrets.ROBOT_PRIVATE_DATA_PRIVATE_SSH_KEY }}

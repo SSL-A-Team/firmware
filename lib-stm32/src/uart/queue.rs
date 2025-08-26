@@ -194,6 +194,7 @@ impl<
         &self.uart_read_queue
     }
 
+    #[define_opaque(IdleBufferedUartReadFuture)]
     pub fn read_task(
         &'static self,
         rx: UartRx<'static, Async>,
@@ -217,6 +218,7 @@ impl<
         &self.uart_write_queue
     }
 
+    #[define_opaque(IdleBufferedUartWriteFuture)]
     pub fn write_task(
         &'static self,
         tx: UartTx<'static, Async>,
@@ -254,12 +256,11 @@ impl<
 
     pub async fn update_uart_config(&self, config: usart::Config) -> Result<(), ()> {
         #[cfg(target_has_atomic)]
-        if let Err(_) = self.uart_config_update_in_progress.compare_exchange(
-            false,
-            true,
-            Ordering::Acquire,
-            Ordering::Relaxed,
-        ) {
+        if self
+            .uart_config_update_in_progress
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
             return Err(());
         }
 
@@ -375,12 +376,11 @@ impl<
         }
 
         #[cfg(target_has_atomic)]
-        if let Err(_) = self.uart_config_update_in_progress.compare_exchange(
-            true,
-            false,
-            Ordering::SeqCst,
-            Ordering::Acquire,
-        ) {
+        if self
+            .uart_config_update_in_progress
+            .compare_exchange(true, false, Ordering::SeqCst, Ordering::Acquire)
+            .is_err()
+        {
             defmt::error!(
                 "uart config update state became inchoerant. This should not be possible."
             );
@@ -466,6 +466,7 @@ impl<const LENGTH: usize, const DEPTH: usize, const DEBUG: bool>
         Self { queue_rx: queue }
     }
 
+    #[define_opaque(ReadTaskFuture)]
     fn read_task(
         &'static self,
         // queue_rx: &'static Queue<LENGTH, DEPTH>,
@@ -602,7 +603,7 @@ impl<const LENGTH: usize, const DEPTH: usize, const DEBUG: bool>
         self.queue_rx.can_dequeue()
     }
 
-    pub fn try_dequeue(&self) -> Result<DequeueRef<LENGTH, DEPTH>, Error> {
+    pub fn try_dequeue(&'_ self) -> Result<DequeueRef<'_, LENGTH, DEPTH>, Error> {
         self.queue_rx.try_dequeue()
     }
 
@@ -623,6 +624,7 @@ impl<const LENGTH: usize, const DEPTH: usize, const DEBUG: bool>
         Self { queue_tx: queue }
     }
 
+    #[define_opaque(WriteTaskFuture)]
     fn write_task(
         &'static self,
         mut tx: UartTx<'static, Async>,

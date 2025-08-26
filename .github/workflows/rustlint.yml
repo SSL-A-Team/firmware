@@ -1,0 +1,39 @@
+name: Rust Linter Checks
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Fetch Submodules
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: |
+            ${{ secrets.ROBOT_PRIVATE_DATA_PRIVATE_SSH_KEY }}
+      - run: |
+          git submodule update --init --recursive
+          ./util/ateam-credentials-setup.bash
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config:
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= mycache.example.org:somePublicKeyString=
+            substituters = https://cache.nixos.org https://mycache.example.org
+      - name: Validate Nix Environment
+        shell: bash
+        run: |
+          nix flake check
+          nix develop -c cargo --version
+          nix develop -c arm-none-eabi-gcc --version
+      - name: Common Libraries No Warnings
+        shell: bash
+        run: |
+          nix develop -c cargo build --features strict --manifest-path lib-stm32/Cargo.toml
+      - name: Common Libraries Clippy Default
+        shell: bash
+        run: |
+          nix develop -c cargo clippy --all-features --manifest-path lib-stm32/Cargo.toml     

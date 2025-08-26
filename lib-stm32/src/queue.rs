@@ -122,7 +122,7 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
         !self.read_in_progress.load(Ordering::Relaxed) && self.size.load(Ordering::Relaxed) > 0
     }
 
-    pub fn try_dequeue(&self) -> Result<DequeueRef<LENGTH, DEPTH>, Error> {
+    pub fn try_dequeue(&'_ self) -> Result<DequeueRef<'_, LENGTH, DEPTH>, Error> {
         critical_section::with(|_| {
             if self.read_in_progress.load(Ordering::SeqCst) {
                 return Err(Error::InProgress);
@@ -152,7 +152,7 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
         })
     }
 
-    pub async fn dequeue(&self) -> Result<DequeueRef<LENGTH, DEPTH>, Error> {
+    pub async fn dequeue(&'_ self) -> Result<DequeueRef<'_, LENGTH, DEPTH>, Error> {
         // TODO: look at this (when uncommented causes issue cancelling dequeue)
         // if critical_section::with(|_| unsafe { (*self.dequeue_waker.get()).is_some() }) {
         //     return Err(Error::InProgress);
@@ -204,7 +204,7 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
         });
     }
 
-    pub fn try_enqueue(&self) -> Result<EnqueueRef<LENGTH, DEPTH>, Error> {
+    pub fn try_enqueue(&'_ self) -> Result<EnqueueRef<'_, LENGTH, DEPTH>, Error> {
         critical_section::with(|_| {
             if self.write_in_progress.load(Ordering::SeqCst) {
                 return Err(Error::InProgress);
@@ -242,7 +242,7 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
         })
     }
 
-    pub fn try_enqueue_override(&self) -> Result<EnqueueRef<LENGTH, DEPTH>, Error> {
+    pub fn try_enqueue_override(&'_ self) -> Result<EnqueueRef<'_, LENGTH, DEPTH>, Error> {
         critical_section::with(|_| {
             if self.write_in_progress.load(Ordering::SeqCst) {
                 return Err(Error::InProgress);
@@ -265,7 +265,7 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                 if write_index == 0 {
                     write_index = DEPTH - 1;
                 } else {
-                    write_index = write_index - 1;
+                    write_index -= 1;
                 }
 
                 // write back decremented write index. Write index is incremented to the next buffer
@@ -304,7 +304,7 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
         })
     }
 
-    pub async fn enqueue(&self) -> Result<EnqueueRef<LENGTH, DEPTH>, Error> {
+    pub async fn enqueue(&'_ self) -> Result<EnqueueRef<'_, LENGTH, DEPTH>, Error> {
         /* Safety: this raw pointer access is safe because the underlying memory is statically allocated
          * and the total read operation is atomic across tasks because of the critical_section closure
          */

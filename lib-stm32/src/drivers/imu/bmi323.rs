@@ -7,11 +7,11 @@
 use core::{cmp::min, f32::consts::PI};
 
 use embassy_stm32::{
-    gpio::{Level, Output, Pin, Speed},
+    gpio::{AnyPin, Level, Output, Speed},
     mode::Async,
     spi::{self, MisoPin, MosiPin, SckPin},
     time::hz,
-    Peripheral,
+    Peri,
 };
 
 pub const SPI_MIN_BUF_LEN: usize = 14;
@@ -251,13 +251,13 @@ impl<'a, 'buf> Bmi323<'a, 'buf> {
 
     ///t creates a new BMI085 instance from uninitialized pins
     pub fn new_from_pins<SpiPeri: spi::Instance>(
-        peri: impl Peripheral<P = SpiPeri> + 'a,
-        sck_pin: impl Peripheral<P = impl SckPin<SpiPeri>> + 'a,
-        mosi_pin: impl Peripheral<P = impl MosiPin<SpiPeri>> + 'a,
-        miso_pin: impl Peripheral<P = impl MisoPin<SpiPeri>> + 'a,
-        tx_dma: impl Peripheral<P = impl spi::TxDma<SpiPeri>> + 'a,
-        rx_dma: impl Peripheral<P = impl spi::RxDma<SpiPeri>> + 'a,
-        spi_cs_pin: impl Pin,
+        peri: Peri<'a, SpiPeri>,
+        sck_pin: Peri<'a, impl SckPin<SpiPeri>>,
+        mosi_pin: Peri<'a, impl MosiPin<SpiPeri>>,
+        miso_pin: Peri<'a, impl MisoPin<SpiPeri>>,
+        tx_dma: Peri<'a, impl spi::TxDma<SpiPeri>>,
+        rx_dma: Peri<'a, impl spi::RxDma<SpiPeri>>,
+        spi_cs_pin: Peri<'a, AnyPin>,
         spi_buf: &'buf mut [u8; SPI_MIN_BUF_LEN],
     ) -> Self {
         let mut spi_config = spi::Config::default();

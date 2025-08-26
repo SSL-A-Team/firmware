@@ -1,6 +1,7 @@
 use ateam_lib_stm32::drivers::led::apa102::{apa102_buf_len, Apa102};
 use embassy_executor::Spawner;
 
+use embassy_stm32::Peri;
 use smart_leds::colors::{BLACK, BLUE, CYAN, GREEN, ORANGE_RED, PURPLE, RED, VIOLET, YELLOW};
 
 use crate::{pins::*, MotorIndex};
@@ -209,10 +210,10 @@ static mut DOTSTAR_SPI_BUFFER_CELL: Apa102Buf = [0; LED_BUF_LEN];
 pub async fn start_dotstar_task(
     spawner: &Spawner,
     led_command_subscriber: LedCommandSubscriber,
-    dotstar_peri: DotstarSpi,
-    dotstar_sck_pin: DotstarSpiSck,
-    dotstar_mosi_pin: DotstarSpiMosi,
-    dotstar_tx_dma: DotstarTxDma,
+    dotstar_peri: Peri<'static, DotstarSpi>,
+    dotstar_sck_pin: Peri<'static, DotstarSpiSck>,
+    dotstar_mosi_pin: Peri<'static, DotstarSpiMosi>,
+    dotstar_tx_dma: Peri<'static, DotstarTxDma>,
 ) {
     let dotstar_spi_buf: &'static mut Apa102Buf =
         unsafe { &mut *(&raw mut DOTSTAR_SPI_BUFFER_CELL) };

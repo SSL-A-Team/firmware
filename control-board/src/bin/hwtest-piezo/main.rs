@@ -58,7 +58,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     create_io_task!(main_spawner, robot_state, p);
 
-    let ch2 = PwmPin::new_ch2(p.PE6, OutputType::PushPull);
+    let ch2 = PwmPin::new(p.PE6, OutputType::PushPull);
     let pwm = SimplePwm::new(
         p.TIM15,
         None,

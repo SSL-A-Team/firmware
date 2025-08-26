@@ -1,4 +1,7 @@
-use embassy_stm32::gpio::{Level, Output, Pin, Speed};
+use embassy_stm32::{
+    gpio::{AnyPin, Level, Output, Speed},
+    Peri,
+};
 
 pub struct ShellIndicator<'a> {
     fr_pin0: Output<'a>,
@@ -20,11 +23,11 @@ impl<'a> ShellIndicator<'a> {
 
     // TODO: refactor pin ordering
     pub fn new(
-        fr_pin0: impl Pin,
-        fl_pin1: impl Pin,
-        br_pin2: impl Pin,
-        bl_pin3: impl Pin,
-        team_pin4: Option<impl Pin>,
+        fr_pin0: Peri<'static, AnyPin>,
+        fl_pin1: Peri<'static, AnyPin>,
+        br_pin2: Peri<'static, AnyPin>,
+        bl_pin3: Peri<'static, AnyPin>,
+        team_pin4: Option<Peri<'static, AnyPin>>,
     ) -> Self {
         let team_pin4: Option<Output<'a>> = if let Some(pin4) = team_pin4 {
             Some(Output::new(pin4, Level::Low, Speed::Low))

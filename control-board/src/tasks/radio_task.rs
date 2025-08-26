@@ -7,8 +7,9 @@ use credentials::WifiCredential;
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_futures::select::{select, Either};
 use embassy_stm32::{
-    gpio::{Input, Pin, Pull},
+    gpio::{AnyPin, Input, Pull},
     usart::{self, DataBits, Parity, StopBits, Uart},
+    Peri,
 };
 use embassy_time::{Duration, Instant, Ticker, Timer};
 
@@ -171,8 +172,8 @@ impl<
             RADIO_TX_BUF_DEPTH,
             DEBUG_UART_QUEUES,
         >,
-        radio_reset_pin: impl Pin,
-        radio_ndet_pin: impl Pin,
+        radio_reset_pin: Peri<'static, AnyPin>,
+        radio_ndet_pin: Peri<'static, AnyPin>,
         wifi_credentials: &'static [WifiCredential],
     ) -> Self {
         let radio = RobotRadio::new(
@@ -340,6 +341,8 @@ impl<
                             ))
                             .await;
                     }
+
+                    radio_loop_rate_ticker.reset();
                 }
                 RadioConnectionState::ConnectedNetwork => {
                     if let Ok(connected) = self
@@ -353,7 +356,6 @@ impl<
                             // Refresh last software packet on first connect.
                             self.last_software_packet = Instant::now();
                             self.connection_state = RadioConnectionState::Connected;
-                            radio_loop_rate_ticker.reset();
                             self.led_command_pub
                                 .publish(ControlBoardLedCommand::Radio(
                                     RadioStatusLedCommand::ConnectedSoftware,
@@ -379,6 +381,8 @@ impl<
                             ))
                             .await;
                     }
+
+                    radio_loop_rate_ticker.reset();
                 }
                 RadioConnectionState::Connected => {
                     let _ = self.process_packets(tx_ctr).await;
@@ -606,8 +610,6 @@ impl<
 
         // always send the latest telemetry
         if tx_ctr == 0 {
-            defmt::info!("RadioTask - sending basic telemetry");
-
             self.last_basic_telemetry.transmission_sequence_number = self.seq_number as u8;
             self.seq_number = (self.seq_number + 1) & 0x00FF;
 
@@ -655,15 +657,15 @@ pub async fn start_radio_task(
     telemetry_subscriber: TelemetrySubcriber,
     led_command_pub: LedCommandPublisher,
     wifi_credentials: &'static [WifiCredential],
-    radio_uart: RadioUART,
-    radio_uart_rx_pin: RadioUartRxPin,
-    radio_uart_tx_pin: RadioUartTxPin,
-    _radio_uart_cts_pin: RadioUartCtsPin,
-    _radio_uart_rts_pin: RadioUartRtsPin,
-    radio_uart_rx_dma: RadioRxDMA,
-    radio_uart_tx_dma: RadioTxDMA,
-    radio_reset_pin: RadioResetPin,
-    radio_ndet_pin: RadioNDetectPin,
+    radio_uart: Peri<'static, RadioUART>,
+    radio_uart_rx_pin: Peri<'static, RadioUartRxPin>,
+    radio_uart_tx_pin: Peri<'static, RadioUartTxPin>,
+    _radio_uart_cts_pin: Peri<'static, RadioUartCtsPin>,
+    _radio_uart_rts_pin: Peri<'static, RadioUartRtsPin>,
+    radio_uart_rx_dma: Peri<'static, RadioRxDMA>,
+    radio_uart_tx_dma: Peri<'static, RadioTxDMA>,
+    radio_reset_pin: Peri<'static, RadioResetPin>,
+    radio_ndet_pin: Peri<'static, RadioNDetectPin>,
 ) {
     let uart_conifg = startup_uart_config();
 
@@ -728,8 +730,8 @@ pub async fn start_radio_task(
         &RADIO_IDLE_BUFFERED_UART,
         RADIO_IDLE_BUFFERED_UART.get_uart_read_queue(),
         RADIO_IDLE_BUFFERED_UART.get_uart_write_queue(),
-        radio_reset_pin,
-        radio_ndet_pin,
+        radio_reset_pin.into(),
+        radio_ndet_pin.into(),
         wifi_credentials,
     );
 

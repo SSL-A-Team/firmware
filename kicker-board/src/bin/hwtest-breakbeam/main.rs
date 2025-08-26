@@ -29,7 +29,7 @@ async fn main(_spawner: Spawner) {
 
     // Breakbeam
     // nets on schematic are inverted to silkscreen, sorry :/ -Will
-    let mut breakbeam = Breakbeam::new(p.PA1, p.PA0);
+    let mut breakbeam = Breakbeam::new(p.PA1.into(), p.PA0.into());
 
     status_led_green.set_high();
     Timer::after(Duration::from_millis(250)).await;

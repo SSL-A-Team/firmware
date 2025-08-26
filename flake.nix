@@ -37,7 +37,7 @@
             # C/C++ build utils
             gnumake
             cmake
-            gcc-arm-embedded-12
+            gcc-arm-embedded-14
 
             # programmers
             dfu-util
@@ -48,10 +48,10 @@
             clang
 
             # Rust Embedded
-            (rust-bin.nightly."2024-12-10".default.override {
+            (rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override {
               extensions = [ "rust-src" "rust-analyzer" ];
               targets = [ "thumbv7em-none-eabihf" "thumbv6m-none-eabi" ];
-            })
+            }))
 
             # Python
             (pkgs.${python}.withPackages

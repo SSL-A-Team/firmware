@@ -33,7 +33,7 @@ impl<'d, T: GeneralInstance4Channel> Buzzer<'d, T> {
     ) -> Self {
         Self {
             pwm,
-            channel: channel,
+            channel,
             min_freq,
             max_freq,
         }

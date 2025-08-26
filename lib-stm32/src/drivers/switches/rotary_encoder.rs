@@ -1,4 +1,7 @@
-use embassy_stm32::gpio::{AnyPin, Input, Pull};
+use embassy_stm32::{
+    gpio::{AnyPin, Input, Pull},
+    Peri,
+};
 
 pub struct RotaryEncoder<'a, const PIN_CT: usize> {
     pins: [Input<'a>; PIN_CT],
@@ -26,7 +29,7 @@ impl<'a, const PIN_CT: usize> RotaryEncoder<'a, PIN_CT> {
     }
 
     pub fn new_from_pins(
-        pins: [AnyPin; PIN_CT],
+        pins: [Peri<'static, AnyPin>; PIN_CT],
         pull: Pull,
         inversion_map: Option<[bool; PIN_CT]>,
     ) -> RotaryEncoder<'a, PIN_CT> {
