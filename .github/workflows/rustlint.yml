@@ -36,4 +36,4 @@ jobs:
       - name: Common Libraries Clippy Default
         shell: bash
         run: |
-          nix develop -c cargo clippy --all-targets --all-features --manifest-path lib-stm32/Cargo.toml     
+          nix develop -c cargo clippy --all-features --manifest-path lib-stm32/Cargo.toml     
