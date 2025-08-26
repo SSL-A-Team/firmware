@@ -13,8 +13,8 @@ use core::mem::size_of;
 use credentials::WifiCredential;
 use embassy_futures::select::{select, Either};
 use embassy_stm32::gpio::{AnyPin, Level, Output, Speed};
-use embassy_stm32::{uid, Peri};
 use embassy_stm32::usart::{self, DataBits, Parity, StopBits};
+use embassy_stm32::{uid, Peri};
 use embassy_time::{Duration, Timer};
 use heapless::String;
 

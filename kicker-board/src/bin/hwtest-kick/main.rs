@@ -12,7 +12,8 @@ use embassy_executor::Executor;
 use embassy_stm32::{
     adc::{Adc, SampleTime},
     gpio::{Input, Level, Output, Pull, Speed},
-    opamp::{OpAmp, OpAmpGain, OpAmpSpeed}, Peri,
+    opamp::{OpAmp, OpAmpGain, OpAmpSpeed},
+    Peri,
 };
 use embassy_time::{Duration, Ticker, Timer};
 

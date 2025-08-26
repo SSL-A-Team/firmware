@@ -10,7 +10,8 @@ use embassy_stm32::{
     gpio::{AnyPin, Level, Output, Speed},
     mode::Async,
     spi::{self, MisoPin, MosiPin, SckPin},
-    time::hz, Peri,
+    time::hz,
+    Peri,
 };
 
 pub const SPI_MIN_BUF_LEN: usize = 14;

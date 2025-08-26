@@ -12,7 +12,8 @@ use embassy_stm32::{
     interrupt,
     pac::Interrupt,
     peripherals::{self, *},
-    usart::{self, *}, Peri,
+    usart::{self, *},
+    Peri,
 };
 use embassy_time::Timer;
 

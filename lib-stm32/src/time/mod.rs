@@ -17,7 +17,7 @@ impl SyncTicker {
         self.ready_at = Instant::now() + self.duration;
     }
 
-    #[allow(clippy::should_implement_trait)]  // this is mimicking the embassy ticker
+    #[allow(clippy::should_implement_trait)] // this is mimicking the embassy ticker
     pub fn next(&mut self) -> bool {
         let cur_time = Instant::now();
         if cur_time >= self.ready_at {

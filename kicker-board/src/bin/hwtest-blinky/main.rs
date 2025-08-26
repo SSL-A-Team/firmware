@@ -11,7 +11,8 @@ use embassy_stm32::{
     adc::{Adc, SampleTime},
     gpio::{Input, Level, Output, Pull, Speed},
     spi::{Config, Spi},
-    time::mhz, Peri,
+    time::mhz,
+    Peri,
 };
 use embassy_time::{Duration, Timer};
 

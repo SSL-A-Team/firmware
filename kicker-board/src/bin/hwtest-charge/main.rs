@@ -11,7 +11,8 @@ use cortex_m_rt::entry;
 use embassy_executor::Executor;
 use embassy_stm32::{
     adc::{Adc, SampleTime},
-    gpio::{Level, Output, Speed}, Peri,
+    gpio::{Level, Output, Speed},
+    Peri,
 };
 use embassy_time::{Duration, Ticker, Timer};
 

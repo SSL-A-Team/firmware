@@ -10,7 +10,8 @@ use embassy_stm32::{
     timer::{
         simple_pwm::{PwmPin, SimplePwm},
         Channel,
-    }, Peri,
+    },
+    Peri,
 };
 use embassy_time::{Duration, Ticker, Timer};
 

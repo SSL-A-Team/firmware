@@ -243,7 +243,16 @@ pub fn start_imu_task(
     // let imu_buf: &'static mut [u8; 14] = unsafe { & mut IMU_BUFFER_CELL };
     let imu_buf: &mut [u8; bmi323::SPI_MIN_BUF_LEN] = unsafe { &mut (*(&raw mut IMU_BUFFER_CELL)) };
 
-    let imu = Bmi323::new_from_pins(peri, sck, mosi, miso, txdma, rxdma, bmi323_nss.into(), imu_buf);
+    let imu = Bmi323::new_from_pins(
+        peri,
+        sck,
+        mosi,
+        miso,
+        txdma,
+        rxdma,
+        bmi323_nss.into(),
+        imu_buf,
+    );
 
     // IMU breakout INT2 is directly connected to the MCU with no hardware PU/PD. Select software Pull::Up and
     // imu open drain
@@ -290,7 +299,16 @@ pub fn start_imu_task_via_ie(
     // let imu_buf: &'static mut [u8; 14] = unsafe { & mut IMU_BUFFER_CELL };
     let imu_buf: &mut [u8; bmi323::SPI_MIN_BUF_LEN] = unsafe { &mut (*(&raw mut IMU_BUFFER_CELL)) };
 
-    let imu = Bmi323::new_from_pins(peri, sck, mosi, miso, txdma, rxdma, bmi323_nss.into(), imu_buf);
+    let imu = Bmi323::new_from_pins(
+        peri,
+        sck,
+        mosi,
+        miso,
+        txdma,
+        rxdma,
+        bmi323_nss.into(),
+        imu_buf,
+    );
 
     // IMU breakout INT2 is directly connected to the MCU with no hardware PU/PD. Select software Pull::Up and
     // imu open drain

@@ -6,7 +6,10 @@ use ateam_lib_stm32::{
     uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue},
 };
 use embassy_executor::{SendSpawner, Spawner};
-use embassy_stm32::{usart::{self, DataBits, Parity, StopBits, Uart}, Peri};
+use embassy_stm32::{
+    usart::{self, DataBits, Parity, StopBits, Uart},
+    Peri,
+};
 use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{

@@ -14,7 +14,8 @@ use embassy_stm32::{
     gpio::{Level, Output, Speed},
     interrupt::{self, InterruptExt},
     pac::Interrupt,
-    usart::{Config, Parity, StopBits, Uart}, Peri,
+    usart::{Config, Parity, StopBits, Uart},
+    Peri,
 };
 use embassy_stm32::{bind_interrupts, peripherals, usart};
 

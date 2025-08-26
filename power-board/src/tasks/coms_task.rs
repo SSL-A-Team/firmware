@@ -1,6 +1,9 @@
 use core::mem::MaybeUninit;
 use embassy_executor::{SendSpawner, Spawner};
-use embassy_stm32::{usart::{self, DataBits, Parity, StopBits, Uart}, Peri};
+use embassy_stm32::{
+    usart::{self, DataBits, Parity, StopBits, Uart},
+    Peri,
+};
 
 use crate::{pins::*, power_state::SharedPowerState, SystemIrqs, DEBUG_UART_QUEUES};
 use ateam_common_packets::bindings::{BatteryInfo, PowerCommand, PowerTelemetry};

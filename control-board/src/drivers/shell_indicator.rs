@@ -1,4 +1,7 @@
-use embassy_stm32::{gpio::{AnyPin, Level, Output, Speed}, Peri};
+use embassy_stm32::{
+    gpio::{AnyPin, Level, Output, Speed},
+    Peri,
+};
 
 pub struct ShellIndicator<'a> {
     fr_pin0: Output<'a>,

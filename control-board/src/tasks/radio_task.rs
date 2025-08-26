@@ -8,7 +8,8 @@ use embassy_executor::{SendSpawner, Spawner};
 use embassy_futures::select::{select, Either};
 use embassy_stm32::{
     gpio::{AnyPin, Input, Pull},
-    usart::{self, DataBits, Parity, StopBits, Uart}, Peri,
+    usart::{self, DataBits, Parity, StopBits, Uart},
+    Peri,
 };
 use embassy_time::{Duration, Instant, Ticker, Timer};
 

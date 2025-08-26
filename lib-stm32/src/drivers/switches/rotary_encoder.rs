@@ -1,4 +1,7 @@
-use embassy_stm32::{gpio::{AnyPin, Input, Pull}, Peri};
+use embassy_stm32::{
+    gpio::{AnyPin, Input, Pull},
+    Peri,
+};
 
 pub struct RotaryEncoder<'a, const PIN_CT: usize> {
     pins: [Input<'a>; PIN_CT],

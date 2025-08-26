@@ -1,4 +1,7 @@
-use embassy_stm32::{adc::{self, Adc, AdcChannel, Resolution, SampleTime}, Peri};
+use embassy_stm32::{
+    adc::{self, Adc, AdcChannel, Resolution, SampleTime},
+    Peri,
+};
 
 // The voltage which the internal ADC were calibrated at.
 // For the H743 and F407

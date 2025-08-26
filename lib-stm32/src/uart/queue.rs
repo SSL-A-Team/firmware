@@ -256,12 +256,11 @@ impl<
 
     pub async fn update_uart_config(&self, config: usart::Config) -> Result<(), ()> {
         #[cfg(target_has_atomic)]
-        if self.uart_config_update_in_progress.compare_exchange(
-            false,
-            true,
-            Ordering::Acquire,
-            Ordering::Relaxed,
-        ).is_err() {
+        if self
+            .uart_config_update_in_progress
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
             return Err(());
         }
 
@@ -377,12 +376,11 @@ impl<
         }
 
         #[cfg(target_has_atomic)]
-        if self.uart_config_update_in_progress.compare_exchange(
-            true,
-            false,
-            Ordering::SeqCst,
-            Ordering::Acquire,
-        ).is_err() {
+        if self
+            .uart_config_update_in_progress
+            .compare_exchange(true, false, Ordering::SeqCst, Ordering::Acquire)
+            .is_err()
+        {
             defmt::error!(
                 "uart config update state became inchoerant. This should not be possible."
             );

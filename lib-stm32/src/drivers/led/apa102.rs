@@ -3,7 +3,8 @@ use core::ops::Range;
 use embassy_stm32::{
     mode::Async,
     spi::{self, Config, MosiPin, SckPin, Spi},
-    time::mhz, Peri,
+    time::mhz,
+    Peri,
 };
 use smart_leds::RGB8;
 

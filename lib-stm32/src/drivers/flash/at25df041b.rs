@@ -1,7 +1,8 @@
 use embassy_stm32::{
     gpio::{AnyPin, Level, Output, Speed},
     mode::Async,
-    spi::{self, Error}, Peri,
+    spi::{self, Error},
+    Peri,
 };
 
 pub struct AT25DF041B<'buf, const CS_POL_N: bool> {

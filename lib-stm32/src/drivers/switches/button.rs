@@ -2,7 +2,8 @@ use defmt::Format;
 use embassy_futures::select;
 use embassy_stm32::{
     exti::ExtiInput,
-    gpio::{Pin, Pull}, Peri,
+    gpio::{Pin, Pull},
+    Peri,
 };
 use embassy_time::{Instant, Timer};
 

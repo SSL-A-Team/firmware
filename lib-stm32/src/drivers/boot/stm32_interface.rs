@@ -252,7 +252,7 @@ impl<
 
     fn bootloader_checksum_u32(word: u32) -> u8 {
         let word_b: [u8; 4] = word.to_be_bytes();
-        
+
         word_b[0] ^ word_b[1] ^ word_b[2] ^ word_b[3]
     }
 
@@ -591,7 +591,7 @@ impl<
 
     pub async fn execute_code(&mut self, start_address: Option<u32>) -> Result<(), ()> {
         defmt::warn!("firmware jump/go command implementation does not work on some parts. If this appears not to work, consider simply resetting the device.");
-        
+
         if !self.in_bootloader {
             defmt::error!("called bootloader operation when not in bootloader context.");
             return Err(());

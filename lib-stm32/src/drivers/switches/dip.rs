@@ -3,7 +3,10 @@ use core::{
     ops::Range,
 };
 
-use embassy_stm32::{gpio::{AnyPin, Input, Pull}, Peri};
+use embassy_stm32::{
+    gpio::{AnyPin, Input, Pull},
+    Peri,
+};
 
 pub struct DipSwitch<'a, const PIN_CT: usize> {
     inputs: [Input<'a>; PIN_CT],

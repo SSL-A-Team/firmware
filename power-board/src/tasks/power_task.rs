@@ -13,7 +13,8 @@ use ateam_lib_stm32::{
 use embassy_executor::Spawner;
 use embassy_stm32::{
     adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime},
-    peripherals::ADC1, Peri,
+    peripherals::ADC1,
+    Peri,
 };
 use embassy_time::{Duration, Instant, Ticker, Timer};
 

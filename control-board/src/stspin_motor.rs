@@ -7,7 +7,8 @@ use ateam_lib_stm32::{
 use defmt::*;
 use embassy_stm32::{
     gpio::{AnyPin, Pull},
-    usart::Parity, Peri,
+    usart::Parity,
+    Peri,
 };
 use embassy_time::{with_timeout, Duration, Timer};
 use nalgebra::Vector3;

@@ -11,7 +11,8 @@ use embassy_stm32::{
     gpio::{Level, Output, Pull, Speed},
     interrupt,
     peripherals::{self, *},
-    usart::{self, *}, Peri,
+    usart::{self, *},
+    Peri,
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::Timer;
