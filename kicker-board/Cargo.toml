@@ -31,7 +31,7 @@ embassy-stm32 = { version = "0.3.0", features = [
 embassy-futures = { version = "0.1.0" }
 embassy-sync = { version = "0.7.1" }
 
-defmt = "1.0.1" # pin this for now, probe run doesn't support wire version 4, which dropped in 3.4 (3.3 recalled)
+defmt = "1.0.1"
 defmt-rtt = "1.0.0"
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 
