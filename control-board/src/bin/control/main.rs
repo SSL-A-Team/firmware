@@ -2,15 +2,20 @@
 #![no_main]
 
 use embassy_executor::InterruptExecutor;
-use embassy_stm32::{
-    interrupt, pac::Interrupt, wdg::IndependentWatchdog
-};
+use embassy_stm32::{interrupt, pac::Interrupt, wdg::IndependentWatchdog};
 use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _;
 
 use ateam_control_board::{
-    create_audio_task, create_control_task, create_dotstar_task, create_imu_task, create_io_task, create_kicker_task, create_power_task, create_radio_task, get_system_config, pins::{AccelDataPubSub, CommandsPubSub, GyroDataPubSub, KickerTelemetryPubSub, LedCommandPubSub, PowerTelemetryPubSub, TelemetryPubSub}, robot_state::SharedRobotState};
+    create_audio_task, create_control_task, create_dotstar_task, create_imu_task, create_io_task,
+    create_kicker_task, create_power_task, create_radio_task, get_system_config,
+    pins::{
+        AccelDataPubSub, CommandsPubSub, GyroDataPubSub, KickerTelemetryPubSub, LedCommandPubSub,
+        PowerTelemetryPubSub, TelemetryPubSub,
+    },
+    robot_state::SharedRobotState,
+};
 
 // load credentials from correct crate
 #[cfg(not(feature = "no-private-credentials"))]
@@ -31,7 +36,8 @@ use static_cell::ConstStaticCell;
 //     cortex_m::peripheral::SCB::sys_reset();
 // }
 
-static ROBOT_STATE: ConstStaticCell<SharedRobotState> = ConstStaticCell::new(SharedRobotState::new());
+static ROBOT_STATE: ConstStaticCell<SharedRobotState> =
+    ConstStaticCell::new(SharedRobotState::new());
 
 static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
 static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
@@ -70,12 +76,18 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  setup task pools  //
     ////////////////////////
 
-    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CORDIC, embassy_stm32::interrupt::Priority::P6);
+    interrupt::InterruptExt::set_priority(
+        embassy_stm32::interrupt::CORDIC,
+        embassy_stm32::interrupt::Priority::P6,
+    );
     let radio_uart_queue_spawner = RADIO_UART_QUEUE_EXECUTOR.start(Interrupt::CORDIC);
 
     // uart queue executor should be highest priority
     // NOTE: maybe this should be all DMA tasks? No computation tasks here
-    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CEC, embassy_stm32::interrupt::Priority::P7);
+    interrupt::InterruptExt::set_priority(
+        embassy_stm32::interrupt::CEC,
+        embassy_stm32::interrupt::Priority::P7,
+    );
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(Interrupt::CEC);
 
     //////////////////////////////////////
@@ -117,46 +129,63 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  start tasks  //
     ///////////////////
 
-    create_io_task!(main_spawner,
+    create_io_task!(main_spawner, robot_state, p);
+
+    create_dotstar_task!(main_spawner, led_command_subscriber, p);
+
+    create_audio_task!(main_spawner, robot_state, p);
+
+    create_radio_task!(
+        main_spawner,
+        radio_uart_queue_spawner,
+        radio_uart_queue_spawner,
         robot_state,
-        p);
-
-    create_dotstar_task!(main_spawner,
-        led_command_subscriber,
-        p);
-
-    create_audio_task!(main_spawner,
-       robot_state,
-       p);
-
-    create_radio_task!(main_spawner, radio_uart_queue_spawner, radio_uart_queue_spawner,
-        robot_state,
-        radio_command_publisher, radio_telemetry_subscriber, radio_led_cmd_publisher,
+        radio_command_publisher,
+        radio_telemetry_subscriber,
+        radio_led_cmd_publisher,
         wifi_credentials,
-        p);
+        p
+    );
 
-    create_power_task!(main_spawner, uart_queue_spawner,
-        robot_state, power_board_telemetry_publisher, power_led_cmd_publisher,
-        p);
-
-    create_imu_task!(main_spawner,
+    create_power_task!(
+        main_spawner,
+        uart_queue_spawner,
         robot_state,
-        imu_gyro_data_publisher, imu_accel_data_publisher, imu_led_cmd_publisher,
-        p);
+        power_board_telemetry_publisher,
+        power_led_cmd_publisher,
+        p
+    );
 
-    create_control_task!(main_spawner, uart_queue_spawner,
+    create_imu_task!(
+        main_spawner,
         robot_state,
-        control_command_subscriber, control_telemetry_publisher,
-        control_task_power_telemetry_subscriber, control_task_kicker_telemetry_subscriber,
-        control_gyro_data_subscriber, control_accel_data_subscriber,
-        p);
+        imu_gyro_data_publisher,
+        imu_accel_data_publisher,
+        imu_led_cmd_publisher,
+        p
+    );
+
+    create_control_task!(
+        main_spawner,
+        uart_queue_spawner,
+        robot_state,
+        control_command_subscriber,
+        control_telemetry_publisher,
+        control_task_power_telemetry_subscriber,
+        control_task_kicker_telemetry_subscriber,
+        control_gyro_data_subscriber,
+        control_accel_data_subscriber,
+        p
+    );
 
     create_kicker_task!(
-        main_spawner, uart_queue_spawner,
+        main_spawner,
+        uart_queue_spawner,
         robot_state,
         kicker_command_subscriber,
         kicker_board_telemetry_publisher,
-        p);
+        p
+    );
 
     let mut iwdg = IndependentWatchdog::new(p.IWDG1, 1_000_000);
     iwdg.unleash();

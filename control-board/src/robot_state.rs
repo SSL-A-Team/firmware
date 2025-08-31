@@ -24,7 +24,6 @@ pub struct SharedRobotState {
     radio_bridge_ok: AtomicBool,
     radio_send_extended_telem: AtomicBool,
 
-
     battery_low: AtomicBool,
     battery_crit: AtomicBool,
 
@@ -52,7 +51,7 @@ impl SharedRobotState {
             wheels_inop: AtomicU8::new(0x0F),
             dribbler_inop: AtomicBool::new(true),
             last_packet_receive_time_ticks_ms: AtomicU32::new(0),
-            radio_network_ok: AtomicBool::new(false), 
+            radio_network_ok: AtomicBool::new(false),
             radio_bridge_ok: AtomicBool::new(false),
             radio_send_extended_telem: AtomicBool::new(false),
             battery_low: AtomicBool::new(false),
@@ -101,7 +100,8 @@ impl SharedRobotState {
     }
 
     pub fn set_hw_init_state_valid(&self, hw_init_state_valid: bool) {
-        self.hw_init_state_valid.store(hw_init_state_valid, Ordering::Relaxed);
+        self.hw_init_state_valid
+            .store(hw_init_state_valid, Ordering::Relaxed);
     }
 
     pub fn get_hw_robot_id(&self) -> u8 {
@@ -133,9 +133,10 @@ impl SharedRobotState {
     }
 
     pub fn set_hw_wifi_driver_use_flow_control(&self, use_flow_control: bool) {
-        self.hw_wifi_driver_use_flow_control.store(use_flow_control, Ordering::SeqCst);
+        self.hw_wifi_driver_use_flow_control
+            .store(use_flow_control, Ordering::SeqCst);
     }
- 
+
     pub fn hw_in_debug_mode(&self) -> bool {
         self.hw_debug_mode.load(Ordering::Relaxed)
     }
@@ -245,7 +246,8 @@ impl SharedRobotState {
     }
 
     pub fn set_radio_send_extended_telem(&self, send_extended_telem: bool) {
-        self.radio_send_extended_telem.store(send_extended_telem, Ordering::SeqCst);
+        self.radio_send_extended_telem
+            .store(send_extended_telem, Ordering::SeqCst);
     }
 
     pub fn ball_detected(&self) -> bool {
@@ -261,7 +263,8 @@ impl SharedRobotState {
     }
 
     pub fn set_kicker_shutdown_complete(&self, shutdown_complete: bool) {
-        self.kicker_shutdown_complete.store(shutdown_complete, Ordering::Relaxed);
+        self.kicker_shutdown_complete
+            .store(shutdown_complete, Ordering::Relaxed);
     }
 }
 

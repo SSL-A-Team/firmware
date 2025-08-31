@@ -8,13 +8,17 @@ use {defmt_rtt as _, panic_probe as _};
 
 use embassy_executor::{InterruptExecutor, Spawner};
 use embassy_stm32::{
-    bind_interrupts, gpio::Pull, peripherals, usart::{self, Uart}
+    bind_interrupts,
+    gpio::Pull,
+    peripherals,
+    usart::{self, Uart},
 };
-use embassy_stm32::{
-    interrupt, pac::Interrupt
-};
+use embassy_stm32::{interrupt, pac::Interrupt};
 
-use ateam_lib_stm32::{drivers::boot::stm32_interface::{self, Stm32Interface}, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
+use ateam_lib_stm32::{
+    drivers::boot::stm32_interface::{self, Stm32Interface},
+    idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
+};
 
 use ateam_kicker_board::{tasks::get_system_config, *};
 
@@ -47,22 +51,37 @@ async fn main(_spawner: Spawner) -> ! {
 
     info!("kicker startup!");
 
-    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CORDIC, embassy_stm32::interrupt::Priority::P7);
+    interrupt::InterruptExt::set_priority(
+        embassy_stm32::interrupt::CORDIC,
+        embassy_stm32::interrupt::Priority::P7,
+    );
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(Interrupt::CORDIC);
-
 
     let initial_motor_controller_uart_conifg = stm32_interface::get_bootloader_uart_config();
 
-    let drib_uart = Uart::new(p.USART3, p.PE15, p.PB10, Irqs, p.DMA1_CH1, p.DMA1_CH2, initial_motor_controller_uart_conifg).unwrap();
+    let drib_uart = Uart::new(
+        p.USART3,
+        p.PE15,
+        p.PB10,
+        Irqs,
+        p.DMA1_CH1,
+        p.DMA1_CH2,
+        initial_motor_controller_uart_conifg,
+    )
+    .unwrap();
 
     DRIB_IDLE_BUFFERED_UART.init();
     idle_buffered_uart_spawn_tasks!(uart_queue_spawner, DRIB, drib_uart);
 
     let mut drib_motor = Stm32Interface::new_from_pins(
         &DRIB_IDLE_BUFFERED_UART,
-        DRIB_IDLE_BUFFERED_UART.get_uart_read_queue(), DRIB_IDLE_BUFFERED_UART.get_uart_write_queue(), 
-        p.PE13, p.PE14,
-        Pull::None, true);
+        DRIB_IDLE_BUFFERED_UART.get_uart_read_queue(),
+        DRIB_IDLE_BUFFERED_UART.get_uart_write_queue(),
+        p.PE13.into(),
+        p.PE14.into(),
+        Pull::None,
+        true,
+    );
 
     defmt::info!("programming firmware image");
 

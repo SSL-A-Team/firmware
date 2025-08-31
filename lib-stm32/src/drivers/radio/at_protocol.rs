@@ -214,8 +214,14 @@ impl ATEvent<'_> {
 
         match event {
             Self::PEER_CONNECTED => {
-                let peer_handle = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?.parse::<u16>().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
-                let type_ = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?;
+                let peer_handle = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                    .parse::<u16>()
+                    .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                let type_ = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?;
                 match type_ {
                     Self::PEER_CONNECTED_IPV4 | Self::PEER_CONNECTED_IPV6 => {
                         let protocol = params
@@ -223,11 +229,24 @@ impl ATEvent<'_> {
                             .ok_or(AtPacketError::TypeDecodeParameterMissing)?
                             .parse::<u8>()
                             .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?
-                            .try_into().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
-                        let local_address = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?;
-                        let local_port = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?.parse::<u16>().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
-                        let remote_address = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?;
-                        let remote_port = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?.parse::<u16>().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                            .try_into()
+                            .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                        let local_address = params
+                            .next()
+                            .ok_or(AtPacketError::TypeDecodeParameterMissing)?;
+                        let local_port = params
+                            .next()
+                            .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                            .parse::<u16>()
+                            .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                        let remote_address = params
+                            .next()
+                            .ok_or(AtPacketError::TypeDecodeParameterMissing)?;
+                        let remote_port = params
+                            .next()
+                            .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                            .parse::<u16>()
+                            .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
 
                         Ok(ATEvent::PeerConnectedIP {
                             peer_handle,
@@ -244,13 +263,27 @@ impl ATEvent<'_> {
                 }
             }
             Self::PEER_DISCONNECTED => {
-                let peer_handle = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?.parse::<u16>().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                let peer_handle = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                    .parse::<u16>()
+                    .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
                 Ok(ATEvent::PeerDisconnected { peer_handle })
             }
             Self::WIFI_LINK_CONNECTED => {
-                let conn_id = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?.parse::<u16>().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
-                let bssid = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?;
-                let channel = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?.parse::<u16>().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                let conn_id = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                    .parse::<u16>()
+                    .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                let bssid = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?;
+                let channel = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                    .parse::<u16>()
+                    .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
 
                 Ok(ATEvent::WifiLinkConnected {
                     conn_id,
@@ -259,50 +292,89 @@ impl ATEvent<'_> {
                 })
             }
             Self::WIFI_LINK_DISCONNECTED => {
-                let conn_id = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?.parse::<u16>().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                let conn_id = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                    .parse::<u16>()
+                    .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
                 let reason = params
                     .next()
                     .ok_or(AtPacketError::TypeDecodeParameterMissing)?
                     .parse::<u8>()
                     .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?
-                    .try_into().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                    .try_into()
+                    .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
 
                 Ok(ATEvent::WifiLinkDisconnected { conn_id, reason })
             }
             Self::WIFI_ACCESS_POINT_UP => {
-                let id = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?.parse::<u16>().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                let id = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                    .parse::<u16>()
+                    .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
 
                 Ok(ATEvent::WifiAccessPointUp { id })
             }
             Self::WIFI_ACCESS_POINT_DOWN => {
-                let id = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?.parse::<u16>().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                let id = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                    .parse::<u16>()
+                    .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
 
                 Ok(ATEvent::WifiAccessPointDown { id })
             }
             Self::WIFI_AP_STATION_CONNECTED => {
-                let id = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?.parse::<u16>().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
-                let mac_addr = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?;
+                let id = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                    .parse::<u16>()
+                    .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                let mac_addr = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?;
 
                 Ok(ATEvent::WifiAccessPointStationConnected { id, mac_addr })
             }
             Self::WIFI_AP_STATION_DISCONNECTED => {
-                let id = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?.parse::<u16>().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                let id = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                    .parse::<u16>()
+                    .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
 
                 Ok(ATEvent::WifiAccessPointStationDisconnected { id })
             }
             Self::ETHERNET_LINK_UP => Ok(ATEvent::EthernetLinkUp),
             Self::ETHERNET_LINK_DOWN => Ok(ATEvent::EthernetLinkDown),
             Self::NETWORK_UP => {
-                let interface_id = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?.parse::<u16>().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                let interface_id = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                    .parse::<u16>()
+                    .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
                 Ok(ATEvent::NetworkUp { interface_id })
             }
             Self::NETWORK_DOWN => {
-                let interface_id = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?.parse::<u16>().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                let interface_id = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                    .parse::<u16>()
+                    .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
                 Ok(ATEvent::NetworkDown { interface_id })
             }
             Self::NETWORK_ERROR => {
-                let interface_id = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?.parse::<u16>().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
-                let code = params.next().ok_or(AtPacketError::TypeDecodeParameterMissing)?.parse::<u16>().or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                let interface_id = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                    .parse::<u16>()
+                    .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+                let code = params
+                    .next()
+                    .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                    .parse::<u16>()
+                    .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
 
                 Ok(ATEvent::NetworkError { interface_id, code })
             }
@@ -327,8 +399,10 @@ impl ATResponse<'_> {
     pub fn new(buf: &[u8]) -> Result<ATResponse<'_>, AtPacketError> {
         // TODO: error handling in this function is bad
         let s = core::str::from_utf8(buf).or(Err(AtPacketError::Utf8DecodeFailed))?;
-        
-        let i_echo = s.find(Self::CR_LF).ok_or(AtPacketError::FramingDecodeFailed)?;
+
+        let i_echo = s
+            .find(Self::CR_LF)
+            .ok_or(AtPacketError::FramingDecodeFailed)?;
 
         let s = &s[i_echo + Self::CR_LF.len()..];
         if !s.ends_with(Self::CR_LF) {

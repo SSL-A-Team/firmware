@@ -199,7 +199,8 @@ impl<
 
     pub async fn set_host_name(&self, host_name: &str) -> Result<(), OdinRadioError> {
         let mut str: String<64> = String::new();
-        write!(str, "AT+UNHN=\"{host_name}\"").or(Err(OdinRadioError::CommandConstructionFailed))?;
+        write!(str, "AT+UNHN=\"{host_name}\"")
+            .or(Err(OdinRadioError::CommandConstructionFailed))?;
         defmt::trace!("host configuration string: {}", str.as_str());
         self.send_command(str.as_str()).await?;
         defmt::trace!("sent configuration command");
@@ -216,22 +217,26 @@ impl<
         auth: WifiAuth<'_>,
     ) -> Result<(), OdinRadioError> {
         let mut str: String<64> = String::new();
-        write!(str, "AT+UWSC={config_id},2,\"{ssid}\"").or(Err(OdinRadioError::CommandConstructionFailed))?;
+        write!(str, "AT+UWSC={config_id},2,\"{ssid}\"")
+            .or(Err(OdinRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
         str.clear();
         match auth {
             WifiAuth::Open => {
-                write!(str, "AT+UWSC={config_id},5,1").or(Err(OdinRadioError::CommandConstructionFailed))?;
+                write!(str, "AT+UWSC={config_id},5,1")
+                    .or(Err(OdinRadioError::CommandConstructionFailed))?;
                 self.send_command(str.as_str()).await?;
                 self.read_ok().await?;
             }
             WifiAuth::WPA { passphrase } => {
-                write!(str, "AT+UWSC={config_id},5,2").or(Err(OdinRadioError::CommandConstructionFailed))?;
+                write!(str, "AT+UWSC={config_id},5,2")
+                    .or(Err(OdinRadioError::CommandConstructionFailed))?;
                 self.send_command(str.as_str()).await?;
                 self.read_ok().await?;
                 str.clear();
-                write!(str, "AT+UWSC={config_id},8,\"{passphrase}\"").or(Err(OdinRadioError::CommandConstructionFailed))?;
+                write!(str, "AT+UWSC={config_id},8,\"{passphrase}\"")
+                    .or(Err(OdinRadioError::CommandConstructionFailed))?;
                 self.send_command(str.as_str()).await?;
                 self.read_ok().await?;
             }
@@ -264,36 +269,46 @@ impl<
             async move {
                 let mut run = true;
                 while run {
-                    let _ = self.reader.dequeue(|buf| {
-                        // defmt::warn!("buf {}", buf);
-                        let packet = self.to_packet(buf);
-                        if packet.is_err() {
-                            defmt::warn!("parsed invalid packet");
-                        } else {
-                            let packet = packet.unwrap();
-                            if let EdmPacket::ATEvent(ATEvent::NetworkDown { interface_id: 0 }) = packet {
-                                defmt::debug!("got network down event.");
-                                run = false;
-                            } else if let EdmPacket::ATEvent(ATEvent::WifiLinkDisconnected { conn_id:_, reason: WifiLinkDisconnectedReason::NetworkDisabled }) = packet {
-                                run = false;
-                            } else if let EdmPacket::ATResponse(ATResponse::Ok(_)) = packet {
-                                run = false;
+                    let _ = self
+                        .reader
+                        .dequeue(|buf| {
+                            // defmt::warn!("buf {}", buf);
+                            let packet = self.to_packet(buf);
+                            if let Ok(packet) = packet {
+                                if let EdmPacket::ATEvent(ATEvent::NetworkDown {
+                                    interface_id: 0,
+                                }) = packet
+                                {
+                                    defmt::debug!("got network down event.");
+                                    run = false;
+                                } else if let EdmPacket::ATEvent(ATEvent::WifiLinkDisconnected {
+                                    conn_id: _,
+                                    reason: WifiLinkDisconnectedReason::NetworkDisabled,
+                                }) = packet
+                                {
+                                    run = false;
+                                } else if let EdmPacket::ATResponse(ATResponse::Ok(_)) = packet {
+                                    run = false;
+                                } else {
+                                    defmt::warn!("got edm packet: {}", packet);
+                                }
                             } else {
-                                defmt::warn!("got edm packet: {}", packet);
+                                defmt::warn!("parsed invalid packet");
                             }
-                        }
-                        }).await;
+                        })
+                        .await;
                 }
             },
-            Timer::after_millis(2500)).await {
-                embassy_futures::select::Either::First(_) => {
-                    Ok(())
-                },
-                embassy_futures::select::Either::Second(_) => {
-                    defmt::warn!("disconnect timed out");
-                    Err(OdinRadioError::OperationTimedOut)
-                },
+            Timer::after_millis(2500),
+        )
+        .await
+        {
+            embassy_futures::select::Either::First(_) => Ok(()),
+            embassy_futures::select::Either::Second(_) => {
+                defmt::warn!("disconnect timed out");
+                Err(OdinRadioError::OperationTimedOut)
             }
+        }
     }
 
     pub async fn connect_wifi(&self, config_id: u8) -> Result<(), OdinRadioError> {
@@ -339,7 +354,8 @@ impl<
     ) -> Result<(), OdinRadioError> {
         let mut str: String<64> = String::new();
         let server_type = server_type as u8;
-        write!(str, "AT+UDSC={server_id},{server_type},{port},1,0").or(Err(OdinRadioError::CommandConstructionFailed))?;
+        write!(str, "AT+UDSC={server_id},{server_type},{port},1,0")
+            .or(Err(OdinRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
         Ok(())
@@ -389,7 +405,9 @@ impl<
                             // defmt::info!("AT resp connect event");
 
                             if let Some(i) = resp.find("+UDCP:") {
-                                peer_id = Some(resp[i + 6..].parse::<u8>().or(Err(OdinRadioError::PeerConnectionReceivedInvalidResponse))?);
+                                peer_id = Some(resp[i + 6..].parse::<u8>().or(Err(
+                                    OdinRadioError::PeerConnectionReceivedInvalidResponse,
+                                ))?);
                             } else {
                                 return Err(OdinRadioError::PeerConnectionFailed);
                             }
@@ -450,12 +468,13 @@ impl<
 
     pub fn send_data(&self, channel_id: u8, data: &[u8]) -> Result<(), OdinRadioError> {
         let res = self.writer.enqueue(|buf| {
-                EdmPacket::DataCommand {
-                    channel: channel_id,
-                    data,
-                }
-                .write(buf).unwrap()
-            });
+            EdmPacket::DataCommand {
+                channel: channel_id,
+                data,
+            }
+            .write(buf)
+            .unwrap()
+        });
 
         if res.is_err() {
             // queue was full
@@ -476,7 +495,8 @@ impl<
                 } else {
                     Err(OdinRadioError::ReadDataInvalid)
                 }
-            }).await
+            })
+            .await
     }
 
     pub fn can_read_data(&'a self) -> bool {
@@ -484,30 +504,30 @@ impl<
     }
 
     pub fn try_read_data<RET, FN>(&'a self, fn_read: FN) -> Result<RET, OdinRadioError>
-    where FN: FnOnce(&[u8]) -> RET,
+    where
+        FN: FnOnce(&[u8]) -> RET,
     {
         match self.reader.try_dequeue() {
             Ok(buf) => {
                 match self.to_packet(buf.data()) {
                     Ok(pkt) => {
-                        if let EdmPacket::DataEvent { channel: _ , data } = pkt {
+                        if let EdmPacket::DataEvent { channel: _, data } = pkt {
                             Ok(fn_read(data))
                         } else {
                             // defmt::trace!("got non data event");
                             Err(OdinRadioError::ReadDataInvalid)
                         }
-                    },
+                    }
                     Err(_) => {
                         // defmt::trace!("got data that wasn't an edm packet: {}", buf.data());
                         Err(OdinRadioError::ReadDataInvalid)
-                    },
+                    }
                 }
                 // we read something
-
-            },
+            }
             Err(queue::Error::QueueFull) => {
                 // nothing to read
-                return Err(OdinRadioError::ReadLowLevelBufferEmpty);
+                Err(OdinRadioError::ReadLowLevelBufferEmpty)
             }
             Err(queue::Error::QueueEmpty) => {
                 // nothing to read
@@ -516,7 +536,7 @@ impl<
             Err(queue::Error::InProgress) => {
                 // you did something illegal
                 Err(OdinRadioError::ReadLowLevelBufferBusy)
-            },
+            }
         }
     }
 
@@ -524,24 +544,26 @@ impl<
         match self.mode {
             RadioMode::CommandMode => {
                 let res = self.writer.enqueue(|buf| {
-                        buf[..cmd.len()].clone_from_slice(cmd.as_bytes());
-                        buf[cmd.len()] = b'\r';
-                        cmd.len() + 1
-                    });
+                    buf[..cmd.len()].clone_from_slice(cmd.as_bytes());
+                    buf[cmd.len()] = b'\r';
+                    cmd.len() + 1
+                });
 
                 if res.is_err() {
                     // queue was full
-                    return Err(OdinRadioError::SendCommandLowLevelBufferFull)
+                    return Err(OdinRadioError::SendCommandLowLevelBufferFull);
                 }
 
                 Ok(())
             }
             RadioMode::ExtendedDataMode => {
-                let res = self.writer.enqueue(|buf| EdmPacket::ATRequest(cmd).write(buf).unwrap());
+                let res = self
+                    .writer
+                    .enqueue(|buf| EdmPacket::ATRequest(cmd).write(buf).unwrap());
 
                 if res.is_err() {
                     // queue was full
-                    return Err(OdinRadioError::SendCommandLowLevelBufferFull)
+                    return Err(OdinRadioError::SendCommandLowLevelBufferFull);
                 }
 
                 Ok(())
@@ -620,7 +642,6 @@ impl<
             if brk {
                 break;
             }
-
         }
 
         res
@@ -628,17 +649,20 @@ impl<
 
     async fn read_ok_at_edm_transition(&self) -> Result<bool, OdinRadioError> {
         let transition_buf: [u8; 12] = [13, 10, 79, 75, 13, 10, 170, 0, 2, 0, 113, 85];
-        
 
-        self.reader.dequeue(|buf| {
-            if buf.len() == transition_buf.len() && buf.iter().zip(transition_buf.iter()).all(|(a,b)| a == b) {
-                Ok(true)
-            } else if let EdmPacket::ATResponse(ATResponse::Ok("")) = self.to_packet(buf)? {
-                Ok(false)
-            } else {
-                Err(OdinRadioError::EdmTransitionFailed)
-            }
-        }).await
+        self.reader
+            .dequeue(|buf| {
+                if buf.len() == transition_buf.len()
+                    && buf.iter().zip(transition_buf.iter()).all(|(a, b)| a == b)
+                {
+                    Ok(true)
+                } else if let EdmPacket::ATResponse(ATResponse::Ok("")) = self.to_packet(buf)? {
+                    Ok(false)
+                } else {
+                    Err(OdinRadioError::EdmTransitionFailed)
+                }
+            })
+            .await
     }
 
     fn to_packet<'b>(&self, buf: &'b [u8]) -> Result<EdmPacket<'b>, EdmPacketError> {

@@ -8,7 +8,7 @@ pub struct SyncTicker {
 impl SyncTicker {
     pub fn every(duration: Duration) -> Self {
         Self {
-            duration: duration,
+            duration,
             ready_at: Instant::now() + duration,
         }
     }
@@ -17,6 +17,7 @@ impl SyncTicker {
         self.ready_at = Instant::now() + self.duration;
     }
 
+    #[allow(clippy::should_implement_trait)] // this is mimicking the embassy ticker
     pub fn next(&mut self) -> bool {
         let cur_time = Instant::now();
         if cur_time >= self.ready_at {
@@ -32,16 +33,20 @@ pub struct Limiter<T> {
     prev_val: Option<T>,
 }
 
+impl<T: PartialEq> Default for Limiter<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: PartialEq> Limiter<T> {
     pub const fn new() -> Self {
-        Limiter {
-            prev_val: None
-        }
+        Limiter { prev_val: None }
     }
 
     pub const fn new_with_value(val: T) -> Self {
         Limiter {
-            prev_val: Some(val)
+            prev_val: Some(val),
         }
     }
 

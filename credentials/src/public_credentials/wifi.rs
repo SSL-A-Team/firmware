@@ -8,6 +8,12 @@ pub enum WifiCredentialIndices {
 }
 
 pub static wifi_credentials: [WifiCredential; WifiCredentialIndices::COUNT as usize] = [
-    WifiCredential { ssid: "Dummy Field Network", password: "password1" },
-    WifiCredential { ssid: "Dummy Development Network", password: "password2" },
+    WifiCredential {
+        ssid: "Dummy Field Network",
+        password: "password1",
+    },
+    WifiCredential {
+        ssid: "Dummy Development Network",
+        password: "password2",
+    },
 ];

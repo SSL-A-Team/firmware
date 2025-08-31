@@ -3,9 +3,14 @@
 // criticals are reported to software and force halt high current operations (driving, dribbling, kick/chip charging)
 // powerdowns result in an automatic initiation software shutdown
 
-use ateam_lib_stm32::{math::{linear_map::LinearMap, range::Range}, power::{battery::BatteryConfig, model::lipo_model::LIPO_CELL_MAX_VOLTAGE, PowerRailParameters}};
+use ateam_lib_stm32::{
+    math::{linear_map::LinearMap, range::Range},
+    power::{
+        battery::BatteryConfig, model::lipo_model::LIPO_CELL_MAX_VOLTAGE, PowerRailParameters,
+    },
+};
 
-// power regulators on-board can take a max of 40, and 60 volts respectively. 
+// power regulators on-board can take a max of 40, and 60 volts respectively.
 // stspins can take 45V
 // kicker can take 40V
 // the ADC measurement range is 0-36V
@@ -24,10 +29,10 @@ pub const POWER_RAIL_BATTERY_PARAMETERS: PowerRailParameters<f32> = PowerRailPar
     max_value_crit: VBATT_TOO_HIGH_CRITICAL,
 };
 
-pub const REGULATION_HIGH_WARN_MULT: f32 = 1.05;  // tolerate 5% error for warning
-pub const REGULATION_HIGH_CRIT_MULT: f32 = 1.10;  // tolerate 10% for critical
-pub const REGULATION_LOW_WARN_MULT: f32 = 0.95;   // tolerate 5% error for warning
-pub const REGULATION_LOW_CRIT_MULT: f32 = 0.90;   // tolerate 10% for critical
+pub const REGULATION_HIGH_WARN_MULT: f32 = 1.05; // tolerate 5% error for warning
+pub const REGULATION_HIGH_CRIT_MULT: f32 = 1.10; // tolerate 10% for critical
+pub const REGULATION_LOW_WARN_MULT: f32 = 0.95; // tolerate 5% error for warning
+pub const REGULATION_LOW_CRIT_MULT: f32 = 0.90; // tolerate 10% for critical
 
 // 12v0
 pub const POWER_RAIL_12V0_TOO_HIGH_WARN: f32 = 12.0 * REGULATION_HIGH_WARN_MULT;
@@ -68,7 +73,6 @@ pub const POWER_RAIL_3V3_PARAMETERS: PowerRailParameters<f32> = PowerRailParamet
 const DUAL_RTOL_1PCT_CIEL: f32 = 1.02;
 const DUAL_RTOL_1PCT_FLOOR: f32 = 0.98;
 
-
 // battery
 pub const LIPO_BALANCE_UNCONNECTED_THRESH: f32 = 0.150;
 
@@ -96,10 +100,28 @@ pub const LIPO_BATTERY_CONFIG_6S: BatteryConfig<f32> = BatteryConfig {
 
 // LHS ranges from resistor dividers in power/power_mon sch page
 pub const LIPO6S_BALANCE_RAW_SAMPLES_TO_VOLTAGES: [LinearMap<f32>; 6] = [
-    LinearMap::new(Range::new(0.0, 2.000), Range::new(0.0, LIPO_CELL_MAX_VOLTAGE)),
-    LinearMap::new(Range::new(0.0, 1.997), Range::new(0.0, LIPO_CELL_MAX_VOLTAGE * 2.0)),
-    LinearMap::new(Range::new(0.0, 1.984), Range::new(0.0, LIPO_CELL_MAX_VOLTAGE * 3.0)),
-    LinearMap::new(Range::new(0.0, 2.045), Range::new(0.0, LIPO_CELL_MAX_VOLTAGE * 4.0)),
-    LinearMap::new(Range::new(0.0, 1.996), Range::new(0.0, LIPO_CELL_MAX_VOLTAGE * 5.0)),
-    LinearMap::new(Range::new(0.0, 2.062), Range::new(0.0, LIPO_CELL_MAX_VOLTAGE * 6.0)),
+    LinearMap::new(
+        Range::new(0.0, 2.000),
+        Range::new(0.0, LIPO_CELL_MAX_VOLTAGE),
+    ),
+    LinearMap::new(
+        Range::new(0.0, 1.997),
+        Range::new(0.0, LIPO_CELL_MAX_VOLTAGE * 2.0),
+    ),
+    LinearMap::new(
+        Range::new(0.0, 1.984),
+        Range::new(0.0, LIPO_CELL_MAX_VOLTAGE * 3.0),
+    ),
+    LinearMap::new(
+        Range::new(0.0, 2.045),
+        Range::new(0.0, LIPO_CELL_MAX_VOLTAGE * 4.0),
+    ),
+    LinearMap::new(
+        Range::new(0.0, 1.996),
+        Range::new(0.0, LIPO_CELL_MAX_VOLTAGE * 5.0),
+    ),
+    LinearMap::new(
+        Range::new(0.0, 2.062),
+        Range::new(0.0, LIPO_CELL_MAX_VOLTAGE * 6.0),
+    ),
 ];

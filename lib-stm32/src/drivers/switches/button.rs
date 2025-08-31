@@ -1,6 +1,10 @@
 use defmt::Format;
 use embassy_futures::select;
-use embassy_stm32::{exti::ExtiInput, gpio::{Pin, Pull}, Peripheral};
+use embassy_stm32::{
+    exti::ExtiInput,
+    gpio::{Pin, Pull},
+    Peri,
+};
 use embassy_time::{Instant, Timer};
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug, Format)]
@@ -11,7 +15,11 @@ pub enum AdvButtonEvent {
     Held,
 }
 
-pub const ADV_BTN_EVENT_DOUBLE_TAP: [AdvButtonEvent; 3] = [AdvButtonEvent::ShortPress, AdvButtonEvent::ShortPress, AdvButtonEvent::None];
+pub const ADV_BTN_EVENT_DOUBLE_TAP: [AdvButtonEvent; 3] = [
+    AdvButtonEvent::ShortPress,
+    AdvButtonEvent::ShortPress,
+    AdvButtonEvent::None,
+];
 
 #[derive(Clone, Copy, Debug)]
 enum BtnState {
@@ -19,7 +27,12 @@ enum BtnState {
     Released(Instant),
 }
 
-pub struct AdvExtiButton<const SHORT_PRESS_TIME_MS: u64 = 300, const LONG_PRESS_TIME_MS: u64 = 600, const HOLD_PRESS_TIME_MS: u64 = 1200, const PRESS_TO_MS: u64 = 400> {
+pub struct AdvExtiButton<
+    const SHORT_PRESS_TIME_MS: u64 = 300,
+    const LONG_PRESS_TIME_MS: u64 = 600,
+    const HOLD_PRESS_TIME_MS: u64 = 1200,
+    const PRESS_TO_MS: u64 = 400,
+> {
     input: ExtiInput<'static>,
     input_inverted: bool,
 
@@ -28,7 +41,13 @@ pub struct AdvExtiButton<const SHORT_PRESS_TIME_MS: u64 = 300, const LONG_PRESS_
     btn_event_buf: [AdvButtonEvent; 3],
 }
 
-impl<const SHORT_PRESS_TIME_MS: u64, const LONG_PRESS_TIME_MS: u64, const HOLD_PRESS_TIME_MS: u64, const PRESS_TO_MS: u64> AdvExtiButton<SHORT_PRESS_TIME_MS, LONG_PRESS_TIME_MS, HOLD_PRESS_TIME_MS, PRESS_TO_MS> {
+impl<
+        const SHORT_PRESS_TIME_MS: u64,
+        const LONG_PRESS_TIME_MS: u64,
+        const HOLD_PRESS_TIME_MS: u64,
+        const PRESS_TO_MS: u64,
+    > AdvExtiButton<SHORT_PRESS_TIME_MS, LONG_PRESS_TIME_MS, HOLD_PRESS_TIME_MS, PRESS_TO_MS>
+{
     pub fn new(input: ExtiInput<'static>, input_inverted: bool) -> Self {
         Self {
             input,
@@ -39,7 +58,11 @@ impl<const SHORT_PRESS_TIME_MS: u64, const LONG_PRESS_TIME_MS: u64, const HOLD_P
         }
     }
 
-    pub fn new_from_pins<PIN: Pin>(input_pin: PIN, input_pin_exti: impl Peripheral<P = <PIN as Pin>::ExtiChannel> + 'static, input_inverted: bool) -> Self {
+    pub fn new_from_pins<PIN: Pin>(
+        input_pin: Peri<'static, PIN>,
+        input_pin_exti: Peri<'static, <PIN as Pin>::ExtiChannel>,
+        input_inverted: bool,
+    ) -> Self {
         let input = ExtiInput::new(input_pin, input_pin_exti, Pull::None);
         Self::new(input, input_inverted)
     }
@@ -75,15 +98,17 @@ impl<const SHORT_PRESS_TIME_MS: u64, const LONG_PRESS_TIME_MS: u64, const HOLD_P
         match (self.prev_btn_state, is_btn_pressed) {
             (BtnState::Pressed(_), true) => {
                 // btn state didn't change
-            },
+            }
             (BtnState::Pressed(pressed_time), false) => {
                 let btn_held_time = (now - pressed_time).as_millis();
                 // 50 ms debounce
-                if  50 <= btn_held_time {
+                if 50 <= btn_held_time {
                     if btn_held_time <= SHORT_PRESS_TIME_MS {
                         self.btn_event_buf[self.btn_event_ind] = AdvButtonEvent::ShortPress;
                         self.btn_event_ind += 1;
-                    } else if SHORT_PRESS_TIME_MS <= btn_held_time && btn_held_time <= LONG_PRESS_TIME_MS {
+                    } else if SHORT_PRESS_TIME_MS <= btn_held_time
+                        && btn_held_time <= LONG_PRESS_TIME_MS
+                    {
                         self.btn_event_buf[self.btn_event_ind] = AdvButtonEvent::LongPress;
                         self.btn_event_ind += 1;
                     } else if HOLD_PRESS_TIME_MS <= btn_held_time {
@@ -103,7 +128,7 @@ impl<const SHORT_PRESS_TIME_MS: u64, const LONG_PRESS_TIME_MS: u64, const HOLD_P
                         return ret;
                     }
                 }
-            },
+            }
             (BtnState::Released(released_time), true) => {
                 let btn_rel_time = (now - released_time).as_millis();
 
@@ -111,7 +136,7 @@ impl<const SHORT_PRESS_TIME_MS: u64, const LONG_PRESS_TIME_MS: u64, const HOLD_P
                 if 50 <= btn_rel_time {
                     self.prev_btn_state = BtnState::Pressed(now);
                 }
-            },
+            }
             (BtnState::Released(released_time), false) => {
                 // btn state didn't change
                 let btn_rel_time = (now - released_time).as_millis();
@@ -125,15 +150,14 @@ impl<const SHORT_PRESS_TIME_MS: u64, const LONG_PRESS_TIME_MS: u64, const HOLD_P
 
                     return ret;
                 }
-            },
+            }
         }
 
         None
     }
 
     pub async fn wait_for_btn_event(&mut self, btn_event: [AdvButtonEvent; 3]) {
-        'event_loop:
-        loop {
+        'event_loop: loop {
             match self.prev_btn_state {
                 BtnState::Pressed(prev_press_time) => {
                     self.wait_for_release().await;
@@ -141,11 +165,13 @@ impl<const SHORT_PRESS_TIME_MS: u64, const LONG_PRESS_TIME_MS: u64, const HOLD_P
                     let now = Instant::now();
                     let btn_held_time = (now - prev_press_time).as_millis();
                     // 50 ms debounce
-                    if  50 <= btn_held_time {
+                    if 50 <= btn_held_time {
                         if btn_held_time <= SHORT_PRESS_TIME_MS {
                             self.btn_event_buf[self.btn_event_ind] = AdvButtonEvent::ShortPress;
                             self.btn_event_ind += 1;
-                        } else if SHORT_PRESS_TIME_MS <= btn_held_time && btn_held_time <= LONG_PRESS_TIME_MS {
+                        } else if SHORT_PRESS_TIME_MS <= btn_held_time
+                            && btn_held_time <= LONG_PRESS_TIME_MS
+                        {
                             self.btn_event_buf[self.btn_event_ind] = AdvButtonEvent::LongPress;
                             self.btn_event_ind += 1;
                         } else if HOLD_PRESS_TIME_MS <= btn_held_time {
@@ -172,26 +198,28 @@ impl<const SHORT_PRESS_TIME_MS: u64, const LONG_PRESS_TIME_MS: u64, const HOLD_P
                             self.btn_event_buf = [AdvButtonEvent::None; 3];
                         }
                     }
-                },
+                }
                 BtnState::Released(prev_rel_time) => {
-                    match select::select(self.wait_for_press(), Timer::after_millis(PRESS_TO_MS)).await {
+                    match select::select(self.wait_for_press(), Timer::after_millis(PRESS_TO_MS))
+                        .await
+                    {
                         select::Either::First(_) => {
                             let now = Instant::now();
                             let btn_rel_time = (now - prev_rel_time).as_millis();
-        
+
                             // 50 ms debounce
                             if 50 <= btn_rel_time {
                                 self.prev_btn_state = BtnState::Pressed(now);
                             }
-                        },
+                        }
                         select::Either::Second(_) => {
                             // timed out waiting for a press, reset the buffer
                             self.btn_event_buf = [AdvButtonEvent::None; 3];
                             self.btn_event_ind = 0;
-                        },
+                        }
                     }
-                },
-            }            
+                }
+            }
         }
     }
 }

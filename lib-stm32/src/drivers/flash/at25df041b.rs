@@ -1,7 +1,8 @@
 use embassy_stm32::{
-    gpio::{Level, Output, Pin, Speed}, 
+    gpio::{AnyPin, Level, Output, Speed},
     mode::Async,
-    spi::{self, Error}
+    spi::{self, Error},
+    Peri,
 };
 
 pub struct AT25DF041B<'buf, const CS_POL_N: bool> {
@@ -12,10 +13,12 @@ pub struct AT25DF041B<'buf, const CS_POL_N: bool> {
 }
 
 impl<'buf, const CS_POL_N: bool> AT25DF041B<'buf, CS_POL_N> {
-    pub fn new(spi: spi::Spi<'static, Async>,
-        chip_select: impl Pin,
+    pub fn new(
+        spi: spi::Spi<'static, Async>,
+        chip_select: Peri<'static, AnyPin>,
         tx_buf: &'buf mut [u8; 256],
-        rx_buf: &'buf mut [u8; 256]) -> AT25DF041B<'buf, CS_POL_N> {
+        rx_buf: &'buf mut [u8; 256],
+    ) -> AT25DF041B<'buf, CS_POL_N> {
         AT25DF041B {
             spi,
             chip_select: Output::new(chip_select, Level::High, Speed::High),
@@ -43,8 +46,9 @@ impl<'buf, const CS_POL_N: bool> AT25DF041B<'buf, CS_POL_N> {
     async fn transfer(&mut self, len: usize) -> Result<(), Error> {
         let len = if len > 256 { 256 } else { len };
 
-        
-        self.spi.transfer(&mut self.rx_buf[0..len], self.tx_buf).await
+        self.spi
+            .transfer(&mut self.rx_buf[0..len], self.tx_buf)
+            .await
     }
 
     pub async fn verify_chip_id(&mut self) -> Result<(), ()> {
@@ -70,7 +74,7 @@ impl<'buf, const CS_POL_N: bool> AT25DF041B<'buf, CS_POL_N> {
         if received_mfg_info != expected_mfg_info {
             defmt::error!("AT25DF041B manufacturer information did not match datasheet.");
             defmt::debug!("expected {}, got {}", expected_mfg_info, received_mfg_info);
-            return Err(())
+            return Err(());
         }
 
         Ok(())

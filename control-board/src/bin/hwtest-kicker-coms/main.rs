@@ -1,19 +1,18 @@
 #![no_std]
 #![no_main]
 #![feature(sync_unsafe_cell)]
+#![feature(generic_const_exprs)]
 
 use ateam_control_board::{
-    drivers::kicker::Kicker, get_system_config, include_kicker_bin,
-    DEBUG_KICKER_UART_QUEUES
+    drivers::kicker::Kicker, get_system_config, include_kicker_bin, DEBUG_KICKER_UART_QUEUES,
 };
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface::{self, Stm32Interface},
-    idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
+    idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
+};
 use defmt::info;
 use embassy_executor::InterruptExecutor;
-use embassy_stm32::{
-    gpio::Pull, interrupt, pac::Interrupt, usart::Uart
-};
+use embassy_stm32::{gpio::Pull, interrupt, pac::Interrupt, usart::Uart};
 use embassy_time::{Duration, Ticker};
 use panic_probe as _;
 
@@ -25,7 +24,6 @@ const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 20;
 
 static_idle_buffered_uart!(KICKER, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_KICKER_UART_QUEUES, #[link_section = ".axisram.buffers"]);
-
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
@@ -42,7 +40,10 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     defmt::info!("Kicker system init");
 
-    interrupt::InterruptExt::set_priority(embassy_stm32::interrupt::CEC, embassy_stm32::interrupt::Priority::P5);
+    interrupt::InterruptExt::set_priority(
+        embassy_stm32::interrupt::CEC,
+        embassy_stm32::interrupt::Priority::P5,
+    );
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(Interrupt::CEC);
 
     // loop {
@@ -57,7 +58,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.DMA2_CH4,
         p.DMA2_CH5,
         stm32_interface::get_bootloader_uart_config(),
-    ).unwrap();
+    )
+    .unwrap();
 
     defmt::info!("init uart");
 
@@ -70,10 +72,10 @@ async fn main(_spawner: embassy_executor::Spawner) {
         &KICKER_IDLE_BUFFERED_UART,
         KICKER_IDLE_BUFFERED_UART.get_uart_read_queue(),
         KICKER_IDLE_BUFFERED_UART.get_uart_write_queue(),
-        p.PA8,
-        p.PA9,
+        p.PA8.into(),
+        p.PA9.into(),
         Pull::Up,
-        true
+        true,
     );
 
     info!("flashing kicker...");
@@ -97,7 +99,11 @@ async fn main(_spawner: embassy_executor::Spawner) {
         kicker.process_telemetry();
 
         // TODO print some telemetry or something
-        defmt::info!("high voltage: {}, battery voltage: {}", kicker.hv_rail_voltage(), kicker.battery_voltage());
+        defmt::info!(
+            "high voltage: {}, battery voltage: {}",
+            kicker.hv_rail_voltage(),
+            kicker.battery_voltage()
+        );
 
         kicker.send_command();
 

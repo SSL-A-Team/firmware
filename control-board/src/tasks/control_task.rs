@@ -1,13 +1,31 @@
-use ateam_common_packets::{bindings::{BasicControl, BasicTelemetry, KickerTelemetry, MotionCommandType, PowerTelemetry}, radio::TelemetryPacket};
-use ateam_lib_stm32::{drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
+use ateam_common_packets::{
+    bindings::{BasicControl, BasicTelemetry, KickerTelemetry, MotionCommandType, PowerTelemetry},
+    radio::TelemetryPacket,
+};
+use ateam_lib_stm32::{
+    drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
+};
 use embassy_executor::{SendSpawner, Spawner};
-use embassy_stm32::usart::Uart;
+use embassy_stm32::{usart::Uart, Peri};
 use embassy_time::{Duration, Instant, Ticker, Timer};
 use nalgebra::{Vector3, Vector4};
 
-use crate::{include_external_cpp_bin, motion::{self, params::robot_physical_params::{
-        WHEEL_ANGLES_DEG, WHEEL_DISTANCE_TO_ROBOT_CENTER_M, WHEEL_RADIUS_M
-    }, robot_controller::BodyVelocityController, robot_model::{RobotConstants, RobotModel}}, parameter_interface::ParameterInterface, pins::*, robot_state::{RobotState, SharedRobotState}, stspin_motor::WheelMotor, SystemIrqs, DEBUG_MOTOR_UART_QUEUES, ROBOT_VERSION_MAJOR, ROBOT_VERSION_MINOR};
+use crate::{
+    include_external_cpp_bin,
+    motion::{
+        self,
+        params::robot_physical_params::{
+            WHEEL_ANGLES_DEG, WHEEL_DISTANCE_TO_ROBOT_CENTER_M, WHEEL_RADIUS_M,
+        },
+        robot_controller::BodyVelocityController,
+        robot_model::{RobotConstants, RobotModel},
+    },
+    parameter_interface::ParameterInterface,
+    pins::*,
+    robot_state::{RobotState, SharedRobotState},
+    stspin_motor::WheelMotor,
+    SystemIrqs, DEBUG_MOTOR_UART_QUEUES, ROBOT_VERSION_MAJOR, ROBOT_VERSION_MINOR,
+};
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 
@@ -16,7 +34,8 @@ const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 60;
 const RX_BUF_DEPTH: usize = 20;
 
-type ControlWheelMotor = WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>;
+type ControlWheelMotor =
+    WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>;
 static_idle_buffered_uart!(FRONT_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(BACK_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
@@ -49,17 +68,46 @@ macro_rules! __create_control_task_internal {
         $do_motor_calibrate:expr
     ) => {
         ateam_control_board::tasks::control_task::start_control_task(
-            $main_spawner, $uart_queue_spawner,
+            $main_spawner,
+            $uart_queue_spawner,
             $robot_state,
-            $control_command_subscriber, $control_telemetry_publisher,
-            $power_telemetry_subscriber, $kicker_telemetry_subscriber,
-            $control_gyro_data_subscriber, $control_accel_data_subscriber,
-            $p.UART7, $p.PF6, $p.PF7, $p.DMA1_CH1, $p.DMA1_CH0, $p.PF5, $p.PF4,
-            $p.USART10, $p.PE2, $p.PE3, $p.DMA1_CH3, $p.DMA1_CH2, $p.PE5, $p.PE4,
-            $p.USART6, $p.PC7, $p.PC6, $p.DMA1_CH5, $p.DMA1_CH4, $p.PG7, $p.PG8,
-            $p.USART3, $p.PD9, $p.PD8, $p.DMA1_CH7, $p.DMA1_CH6, $p.PB12, $p.PB13,
+            $control_command_subscriber,
+            $control_telemetry_publisher,
+            $control_gyro_data_subscriber,
+            $control_accel_data_subscriber,
+            $power_telemetry_subscriber,
+            $kicker_telemetry_subscriber,
+            $p.UART7,
+            $p.PF6,
+            $p.PF7,
+            $p.DMA1_CH1,
+            $p.DMA1_CH0,
+            $p.PF5,
+            $p.PF4,
+            $p.USART10,
+            $p.PE2,
+            $p.PE3,
+            $p.DMA1_CH3,
+            $p.DMA1_CH2,
+            $p.PE5,
+            $p.PE4,
+            $p.USART6,
+            $p.PC7,
+            $p.PC6,
+            $p.DMA1_CH5,
+            $p.DMA1_CH4,
+            $p.PG7,
+            $p.PG8,
+            $p.USART3,
+            $p.PD9,
+            $p.PD8,
+            $p.DMA1_CH7,
+            $p.DMA1_CH6,
+            $p.PB12,
+            $p.PB13,
             $do_motor_calibrate,
-        ).await;
+        )
+        .await;
     };
 }
 
@@ -107,7 +155,8 @@ pub struct ControlTask<
     const MAX_RX_PACKET_SIZE: usize,
     const MAX_TX_PACKET_SIZE: usize,
     const RX_BUF_DEPTH: usize,
-    const TX_BUF_DEPTH: usize> {
+    const TX_BUF_DEPTH: usize,
+> {
     shared_robot_state: &'static SharedRobotState,
     command_subscriber: CommandsSubscriber,
     telemetry_publisher: TelemetryPublisher,
@@ -211,7 +260,7 @@ impl <
         }
 
         fn send_motor_commands_and_telemetry(&mut self,
-                                            seq_number: u16,
+                                            seq_number: u8,
                                             robot_controller: &mut BodyVelocityController,
                                             cur_state: RobotState)
         {
@@ -235,7 +284,8 @@ impl <
             let dribbler_motor_hall_error = self.last_kicker_telemetry.dribbler_motor.hall_disconnected_error() as u32;
 
             let basic_telem = TelemetryPacket::Basic(BasicTelemetry {
-                sequence_number: seq_number,
+                transmission_sequence_number: Default::default(),
+                control_data_sequence_number: seq_number,
                 robot_revision_major: ROBOT_VERSION_MAJOR,
                 robot_revision_minor: ROBOT_VERSION_MINOR,
                 _bitfield_align_1: Default::default(),
@@ -518,7 +568,7 @@ impl <
 
                 // increment seq number
                 seq_number += 1;
-                seq_number &= 0xFFF;
+                seq_number &= 0x3F;
 
                 let loop_end_time = Instant::now();
                 let loop_execution_time = loop_end_time - loop_start_time;
@@ -801,10 +851,17 @@ impl <
             self.shared_robot_state.shutdown_requested()
             || self.last_command.emergency_stop() != 0
         }
-    }
+}
 
 #[embassy_executor::task]
-async fn control_task_entry(mut control_task: ControlTask<MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>) {
+async fn control_task_entry(
+    mut control_task: ControlTask<
+        MAX_RX_PACKET_SIZE,
+        MAX_TX_PACKET_SIZE,
+        RX_BUF_DEPTH,
+        TX_BUF_DEPTH,
+    >,
+) {
     loop {
         control_task.control_task_entry().await;
         defmt::error!("control task returned");
@@ -825,14 +882,38 @@ pub async fn start_control_task(
     robot_state: &'static SharedRobotState,
     command_subscriber: CommandsSubscriber,
     telemetry_publisher: TelemetryPublisher,
-    power_telemetry_subscriber: PowerTelemetrySubscriber,
-    kicker_telemetry_subscriber: KickerTelemetrySubscriber,
     gyro_subscriber: GyroDataSubscriber,
     accel_subscriber: AccelDataSubscriber,
-    motor_fl_uart: MotorFLUart, motor_fl_rx_pin: MotorFLUartRxPin, motor_fl_tx_pin: MotorFLUartTxPin, motor_fl_rx_dma: MotorFLDmaRx, motor_fl_tx_dma: MotorFLDmaTx, motor_fl_boot0_pin: MotorFLBootPin, motor_fl_nrst_pin: MotorFLResetPin,
-    motor_bl_uart: MotorBLUart, motor_bl_rx_pin: MotorBLUartRxPin, motor_bl_tx_pin: MotorBLUartTxPin, motor_bl_rx_dma: MotorBLDmaRx, motor_bl_tx_dma: MotorBLDmaTx, motor_bl_boot0_pin: MotorBLBootPin, motor_bl_nrst_pin: MotorBLResetPin,
-    motor_br_uart: MotorBRUart, motor_br_rx_pin: MotorBRUartRxPin, motor_br_tx_pin: MotorBRUartTxPin, motor_br_rx_dma: MotorBRDmaRx, motor_br_tx_dma: MotorBRDmaTx, motor_br_boot0_pin: MotorBRBootPin, motor_br_nrst_pin: MotorBRResetPin,
-    motor_fr_uart: MotorFRUart, motor_fr_rx_pin: MotorFRUartRxPin, motor_fr_tx_pin: MotorFRUartTxPin, motor_fr_rx_dma: MotorFRDmaRx, motor_fr_tx_dma: MotorFRDmaTx, motor_fr_boot0_pin: MotorFRBootPin, motor_fr_nrst_pin: MotorFRResetPin,
+    power_telemetry_subscriber: PowerTelemetrySubscriber,
+    kicker_telemetry_subscriber: KickerTelemetrySubscriber,
+    motor_fl_uart: Peri<'static, MotorFLUart>,
+    motor_fl_rx_pin: Peri<'static, MotorFLUartRxPin>,
+    motor_fl_tx_pin: Peri<'static, MotorFLUartTxPin>,
+    motor_fl_rx_dma: Peri<'static, MotorFLDmaRx>,
+    motor_fl_tx_dma: Peri<'static, MotorFLDmaTx>,
+    motor_fl_boot0_pin: Peri<'static, MotorFLBootPin>,
+    motor_fl_nrst_pin: Peri<'static, MotorFLResetPin>,
+    motor_bl_uart: Peri<'static, MotorBLUart>,
+    motor_bl_rx_pin: Peri<'static, MotorBLUartRxPin>,
+    motor_bl_tx_pin: Peri<'static, MotorBLUartTxPin>,
+    motor_bl_rx_dma: Peri<'static, MotorBLDmaRx>,
+    motor_bl_tx_dma: Peri<'static, MotorBLDmaTx>,
+    motor_bl_boot0_pin: Peri<'static, MotorBLBootPin>,
+    motor_bl_nrst_pin: Peri<'static, MotorBLResetPin>,
+    motor_br_uart: Peri<'static, MotorBRUart>,
+    motor_br_rx_pin: Peri<'static, MotorBRUartRxPin>,
+    motor_br_tx_pin: Peri<'static, MotorBRUartTxPin>,
+    motor_br_rx_dma: Peri<'static, MotorBRDmaRx>,
+    motor_br_tx_dma: Peri<'static, MotorBRDmaTx>,
+    motor_br_boot0_pin: Peri<'static, MotorBRBootPin>,
+    motor_br_nrst_pin: Peri<'static, MotorBRResetPin>,
+    motor_fr_uart: Peri<'static, MotorFRUart>,
+    motor_fr_rx_pin: Peri<'static, MotorFRUartRxPin>,
+    motor_fr_tx_pin: Peri<'static, MotorFRUartTxPin>,
+    motor_fr_rx_dma: Peri<'static, MotorFRDmaRx>,
+    motor_fr_tx_dma: Peri<'static, MotorFRDmaTx>,
+    motor_fr_boot0_pin: Peri<'static, MotorFRBootPin>,
+    motor_fr_nrst_pin: Peri<'static, MotorFRResetPin>,
     do_motor_calibrate: bool,
 ) {
     let initial_motor_controller_uart_config = stm32_interface::get_bootloader_uart_config();
@@ -841,10 +922,46 @@ pub async fn start_control_task(
     //  create motor uarts  //
     //////////////////////////
 
-    let fl_uart = Uart::new(motor_fl_uart, motor_fl_rx_pin, motor_fl_tx_pin, SystemIrqs, motor_fl_tx_dma, motor_fl_rx_dma, initial_motor_controller_uart_config).unwrap();
-    let bl_uart = Uart::new(motor_bl_uart, motor_bl_rx_pin, motor_bl_tx_pin, SystemIrqs, motor_bl_tx_dma, motor_bl_rx_dma, initial_motor_controller_uart_config).unwrap();
-    let br_uart = Uart::new(motor_br_uart, motor_br_rx_pin, motor_br_tx_pin, SystemIrqs, motor_br_tx_dma, motor_br_rx_dma, initial_motor_controller_uart_config).unwrap();
-    let fr_uart = Uart::new(motor_fr_uart, motor_fr_rx_pin, motor_fr_tx_pin, SystemIrqs, motor_fr_tx_dma, motor_fr_rx_dma, initial_motor_controller_uart_config).unwrap();
+    let fl_uart = Uart::new(
+        motor_fl_uart,
+        motor_fl_rx_pin,
+        motor_fl_tx_pin,
+        SystemIrqs,
+        motor_fl_tx_dma,
+        motor_fl_rx_dma,
+        initial_motor_controller_uart_config,
+    )
+    .unwrap();
+    let bl_uart = Uart::new(
+        motor_bl_uart,
+        motor_bl_rx_pin,
+        motor_bl_tx_pin,
+        SystemIrqs,
+        motor_bl_tx_dma,
+        motor_bl_rx_dma,
+        initial_motor_controller_uart_config,
+    )
+    .unwrap();
+    let br_uart = Uart::new(
+        motor_br_uart,
+        motor_br_rx_pin,
+        motor_br_tx_pin,
+        SystemIrqs,
+        motor_br_tx_dma,
+        motor_br_rx_dma,
+        initial_motor_controller_uart_config,
+    )
+    .unwrap();
+    let fr_uart = Uart::new(
+        motor_fr_uart,
+        motor_fr_rx_pin,
+        motor_fr_tx_pin,
+        SystemIrqs,
+        motor_fr_tx_dma,
+        motor_fr_rx_dma,
+        initial_motor_controller_uart_config,
+    )
+    .unwrap();
 
     //////////////////////////////////////////////
     //  register motor queues and DMA hardware  //
@@ -864,16 +981,52 @@ pub async fn start_control_task(
     //  create motor controllers  //
     ////////////////////////////////
 
-    let motor_fl = WheelMotor::new_from_pins(&FRONT_LEFT_IDLE_BUFFERED_UART, FRONT_LEFT_IDLE_BUFFERED_UART.get_uart_read_queue(), FRONT_LEFT_IDLE_BUFFERED_UART.get_uart_write_queue(), motor_fl_boot0_pin, motor_fl_nrst_pin, WHEEL_FW_IMG);
-    let motor_bl = WheelMotor::new_from_pins(&BACK_LEFT_IDLE_BUFFERED_UART, BACK_LEFT_IDLE_BUFFERED_UART.get_uart_read_queue(), BACK_LEFT_IDLE_BUFFERED_UART.get_uart_write_queue(), motor_bl_boot0_pin, motor_bl_nrst_pin, WHEEL_FW_IMG);
-    let motor_br = WheelMotor::new_from_pins(&BACK_RIGHT_IDLE_BUFFERED_UART,  BACK_RIGHT_IDLE_BUFFERED_UART.get_uart_read_queue(), BACK_RIGHT_IDLE_BUFFERED_UART.get_uart_write_queue(), motor_br_boot0_pin, motor_br_nrst_pin, WHEEL_FW_IMG);
-    let motor_fr = WheelMotor::new_from_pins(&FRONT_RIGHT_IDLE_BUFFERED_UART, FRONT_RIGHT_IDLE_BUFFERED_UART.get_uart_read_queue(), FRONT_RIGHT_IDLE_BUFFERED_UART.get_uart_write_queue(), motor_fr_boot0_pin, motor_fr_nrst_pin, WHEEL_FW_IMG);
+    let motor_fl = WheelMotor::new_from_pins(
+        &FRONT_LEFT_IDLE_BUFFERED_UART,
+        FRONT_LEFT_IDLE_BUFFERED_UART.get_uart_read_queue(),
+        FRONT_LEFT_IDLE_BUFFERED_UART.get_uart_write_queue(),
+        motor_fl_boot0_pin.into(),
+        motor_fl_nrst_pin.into(),
+        WHEEL_FW_IMG,
+    );
+    let motor_bl = WheelMotor::new_from_pins(
+        &BACK_LEFT_IDLE_BUFFERED_UART,
+        BACK_LEFT_IDLE_BUFFERED_UART.get_uart_read_queue(),
+        BACK_LEFT_IDLE_BUFFERED_UART.get_uart_write_queue(),
+        motor_bl_boot0_pin.into(),
+        motor_bl_nrst_pin.into(),
+        WHEEL_FW_IMG,
+    );
+    let motor_br = WheelMotor::new_from_pins(
+        &BACK_RIGHT_IDLE_BUFFERED_UART,
+        BACK_RIGHT_IDLE_BUFFERED_UART.get_uart_read_queue(),
+        BACK_RIGHT_IDLE_BUFFERED_UART.get_uart_write_queue(),
+        motor_br_boot0_pin.into(),
+        motor_br_nrst_pin.into(),
+        WHEEL_FW_IMG,
+    );
+    let motor_fr = WheelMotor::new_from_pins(
+        &FRONT_RIGHT_IDLE_BUFFERED_UART,
+        FRONT_RIGHT_IDLE_BUFFERED_UART.get_uart_read_queue(),
+        FRONT_RIGHT_IDLE_BUFFERED_UART.get_uart_write_queue(),
+        motor_fr_boot0_pin.into(),
+        motor_fr_nrst_pin.into(),
+        WHEEL_FW_IMG,
+    );
 
     let control_task = ControlTask::new(
-        robot_state, command_subscriber, telemetry_publisher,
-        gyro_subscriber, accel_subscriber,
-        power_telemetry_subscriber, kicker_telemetry_subscriber,
-        motor_fl, motor_bl, motor_br, motor_fr);
+        robot_state,
+        command_subscriber,
+        telemetry_publisher,
+        gyro_subscriber,
+        accel_subscriber,
+        power_telemetry_subscriber,
+        kicker_telemetry_subscriber,
+        motor_fl,
+        motor_bl,
+        motor_br,
+        motor_fr,
+    );
 
     if !do_motor_calibrate {
         defmt::info!("Control task starting!");

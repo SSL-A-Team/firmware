@@ -5,36 +5,38 @@
 use defmt::*;
 use {defmt_rtt as _, panic_probe as _};
 
-use embassy_executor::Spawner;
 use embassy_executor::Executor;
+use embassy_executor::Spawner;
 use embassy_stm32::{
     adc::{Adc, SampleTime},
-    gpio::{Input, Level, Output, Pull, Speed}, 
-    spi::{Config, Spi}, time::mhz,
+    gpio::{Input, Level, Output, Pull, Speed},
+    spi::{Config, Spi},
+    time::mhz,
+    Peri,
 };
 use embassy_time::{Duration, Timer};
 
 use static_cell::StaticCell;
 
-use ateam_kicker_board::{tasks::get_system_config, *};
 use ateam_kicker_board::pins::*;
+use ateam_kicker_board::{tasks::get_system_config, *};
 
 use panic_probe as _;
 // use panic_halt as _;
 
 #[embassy_executor::task]
-async fn blink( 
-        reg_charge: ChargePin,
-        status_led_red: RedStatusLedPin,
-        status_led_green: GreenStatusLedPin,
-        status_led_blue1: BlueStatusLedPin,
-        usr_btn_pin: UserBtnPin,
-        mut adc: Adc<'static, PowerRailAdc>,
-        mut rail_200v_pin: PowerRail200vReadPin,
-        mut rail_12v0_pin: PowerRailVswReadPin,
-        mut rail_5v0_pin: PowerRail5v0ReadPin,
-        mut rail_3v3_pin: PowerRail3v3ReadPin) -> ! {
-
+async fn blink(
+    reg_charge: Peri<'static, ChargePin>,
+    status_led_red: Peri<'static, RedStatusLedPin>,
+    status_led_green: Peri<'static, GreenStatusLedPin>,
+    status_led_blue1: Peri<'static, BlueStatusLedPin>,
+    usr_btn_pin: Peri<'static, UserBtnPin>,
+    mut adc: Adc<'static, PowerRailAdc>,
+    mut rail_200v_pin: Peri<'static, PowerRail200vReadPin>,
+    mut rail_12v0_pin: Peri<'static, PowerRailVswReadPin>,
+    mut rail_5v0_pin: Peri<'static, PowerRail5v0ReadPin>,
+    mut rail_3v3_pin: Peri<'static, PowerRail3v3ReadPin>,
+) -> ! {
     let mut reg_charge = Output::new(reg_charge, Level::Low, Speed::Medium);
     let mut status_led_green = Output::new(status_led_green, Level::High, Speed::Medium);
     let mut status_led_red = Output::new(status_led_red, Level::Low, Speed::Medium);
@@ -81,22 +83,23 @@ async fn blink(
         // adc_12v_to_rail_voltage(raw_12v),
         // adc_5v0_to_rail_voltage(raw_5v0),
         // adc_3v3_to_rail_voltage(raw_3v3));
-        defmt::info!("voltages - 200v ({}), Vsw ({}), 5v0 ({}), 3v3 ({})",
+        defmt::info!(
+            "voltages - 200v ({}), Vsw ({}), 5v0 ({}), 3v3 ({})",
             adc_200v_to_rail_voltage(adc_raw_to_v(raw_200v, vrefint_sample)),
             adc_12v_to_rail_voltage(adc_raw_to_v(raw_12v, vrefint_sample)),
             adc_5v0_to_rail_voltage(adc_raw_to_v(raw_5v0, vrefint_sample)),
-            adc_3v3_to_rail_voltage(adc_raw_to_v(raw_3v3, vrefint_sample)));
-
+            adc_3v3_to_rail_voltage(adc_raw_to_v(raw_3v3, vrefint_sample))
+        );
     }
 }
 
 #[embassy_executor::task]
 async fn dotstar_lerp_task(
-    dotstar_spi: DotstarSpi,
-    dotstar_mosi_pin: DotstarSpiMosiPin,
-    dotstar_sck_pin: DotstarSpiSckPin,
-    dotstar_tx_dma: DotstarSpiTxDma) {
-
+    dotstar_spi: Peri<'static, DotstarSpi>,
+    dotstar_mosi_pin: Peri<'static, DotstarSpiMosiPin>,
+    dotstar_sck_pin: Peri<'static, DotstarSpiSckPin>,
+    dotstar_tx_dma: Peri<'static, DotstarSpiTxDma>,
+) {
     let mut dotstar_spi_config = Config::default();
     dotstar_spi_config.frequency = mhz(1);
 
@@ -105,7 +108,8 @@ async fn dotstar_lerp_task(
         dotstar_sck_pin,
         dotstar_mosi_pin,
         dotstar_tx_dma,
-        dotstar_spi_config);
+        dotstar_spi_config,
+    );
 
     // let mut dotstar = Apa102::new(dotstar_spi);
 
@@ -115,8 +119,13 @@ async fn dotstar_lerp_task(
     let mut val = 0;
     loop {
         // let _ = dotstar.write([RGB8 { r: val, g: val, b: val }, RGB8 { r: val / 2, g: val / 2, b: val / 2 }].iter().cloned());
-        let _ = dotstar_spi.write(&[0x00 as u8, 0x00, 0x00, 0x00, 0xE7, val, 0x00, val, 0xE7, val, 0x00, val, 0xFF, 0xFF, 0xFF, 0xFF]).await;
-        
+        let _ = dotstar_spi
+            .write(&[
+                0x00 as u8, 0x00, 0x00, 0x00, 0xE7, val, 0x00, val, 0xE7, val, 0x00, val, 0xFF,
+                0xFF, 0xFF, 0xFF,
+            ])
+            .await;
+
         if counting_up {
             val += 1;
         } else {
@@ -146,19 +155,20 @@ async fn main(_spawner: Spawner) -> ! {
     // let _chip_pin = Output::new(p.PE6, Level::Low, Speed::Medium);
 
     let _vsw_en = Output::new(p.PE10, Level::High, Speed::Medium);
-    
+
     info!("kicker startup 1.5!");
 
     let adc = Adc::new(p.ADC1);
 
     info!("kicker startup 2!");
 
-
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
         // unwrap!(spawner.spawn(shutdown_int(p.PD5, p.EXTI5, p.PD6)));
-        unwrap!(spawner.spawn(blink(p.PB15, p.PE0, p.PB9, p.PE1, p.PB5, adc, p.PC3, p.PA1, p.PA2, p.PA3)));
+        unwrap!(spawner.spawn(blink(
+            p.PB15, p.PE0, p.PB9, p.PE1, p.PB5, adc, p.PC3, p.PA1, p.PA2, p.PA3
+        )));
         unwrap!(spawner.spawn(dotstar_lerp_task(p.SPI4, p.PE6, p.PE2, p.DMA2_CH8)));
     });
 }

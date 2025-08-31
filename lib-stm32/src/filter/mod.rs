@@ -12,14 +12,14 @@ pub trait Filter<T>: Default {
 
 pub struct IirFilter {
     alpha: f32,
-    filtered_value: f32
+    filtered_value: f32,
 }
 
 impl IirFilter {
     pub fn new(alpha: f32) -> Self {
         Self {
             alpha,
-            filtered_value: 0.0
+            filtered_value: 0.0,
         }
     }
 
@@ -51,7 +51,7 @@ impl Filter<f32> for IirFilter {
     }
 
     fn reset(&mut self) {
-        self.filtered_value = 0.0    
+        self.filtered_value = 0.0
     }
 }
 
@@ -62,24 +62,30 @@ pub struct WindowAvergingFilter<const WINDOW_SIZE: usize, const SOFT_INIT: bool,
     initialized: bool,
 }
 
-impl<const WINDOW_SIZE: usize, const SOFT_INIT: bool, T: Number> WindowAvergingFilter<WINDOW_SIZE, SOFT_INIT, T> {
+impl<const WINDOW_SIZE: usize, const SOFT_INIT: bool, T: Number>
+    WindowAvergingFilter<WINDOW_SIZE, SOFT_INIT, T>
+{
     pub fn new() -> Self {
         Self {
             window: [T::zero(); WINDOW_SIZE],
             update_ind: 0,
             filtered_value: T::zero(),
-            initialized: false
+            initialized: false,
         }
     }
 }
 
-impl<const WINDOW_SIZE: usize, const SOFT_INIT: bool, T: Number> Default for WindowAvergingFilter<WINDOW_SIZE, SOFT_INIT, T> {
+impl<const WINDOW_SIZE: usize, const SOFT_INIT: bool, T: Number> Default
+    for WindowAvergingFilter<WINDOW_SIZE, SOFT_INIT, T>
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const WINDOW_SIZE: usize, const SOFT_INIT: bool, T: Number> Filter<T> for WindowAvergingFilter<WINDOW_SIZE, SOFT_INIT, T> {
+impl<const WINDOW_SIZE: usize, const SOFT_INIT: bool, T: Number> Filter<T>
+    for WindowAvergingFilter<WINDOW_SIZE, SOFT_INIT, T>
+{
     fn add_sample(&mut self, sample: T) {
         // if we're configured for soft init
         // set every value to the first one
@@ -93,7 +99,7 @@ impl<const WINDOW_SIZE: usize, const SOFT_INIT: bool, T: Number> Filter<T> for W
         }
 
         self.window[self.update_ind] = sample;
-        
+
         self.update_ind += 1;
         if self.update_ind >= WINDOW_SIZE {
             self.update_ind = 0;

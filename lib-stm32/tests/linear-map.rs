@@ -1,13 +1,12 @@
 #![no_std]
 #![no_main]
 
-use panic_probe as _;
 use defmt_rtt as _;
+use panic_probe as _;
 
 #[defmt_test::tests]
-mod tests{
+mod tests {
     use ateam_lib_stm32::math::linear::LinearMap;
-    
 
     #[test]
     fn small_to_large() {
