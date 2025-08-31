@@ -13,8 +13,9 @@ use ateam_lib_stm32::{
     uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue},
 };
 use embassy_stm32::{
-    gpio::{Pin, Pull},
+    gpio::{AnyPin, Pull},
     usart::Parity,
+    Peri,
 };
 use embassy_time::{with_timeout, Duration, Timer};
 
@@ -91,8 +92,8 @@ impl<
         uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_DRIB_UART_QUEUES>,
         read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_DRIB_UART_QUEUES>,
         write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_DRIB_UART_QUEUES>,
-        boot0_pin: impl Pin,
-        reset_pin: impl Pin,
+        boot0_pin: Peri<'a, AnyPin>,
+        reset_pin: Peri<'a, AnyPin>,
         firmware_image: &'a [u8],
         ball_detected_thresh: f32,
     ) -> DribblerMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {

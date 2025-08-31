@@ -4,12 +4,7 @@
 #![feature(inherent_associated_types)]
 #![feature(generic_const_exprs)]
 #![feature(type_alias_impl_trait)]
-#![feature(async_closure)]
-#![feature(
-    maybe_uninit_uninit_array,
-    maybe_uninit_slice,
-    maybe_uninit_write_slice
-)]
+#![feature(maybe_uninit_slice, maybe_uninit_write_slice)]
 #![feature(ptr_metadata)]
 #![feature(sync_unsafe_cell)]
 #![feature(variant_count)]

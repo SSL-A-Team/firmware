@@ -3,8 +3,8 @@ use embassy_futures::select::{select, Either};
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Pull;
 use embassy_stm32::spi::{MisoPin, MosiPin, SckPin};
-use embassy_stm32::Peripheral;
 
+use embassy_stm32::Peri;
 use embassy_time::{Instant, Timer};
 use nalgebra::Vector3;
 
@@ -222,20 +222,20 @@ pub fn start_imu_task(
     gyro_data_publisher: GyroDataPublisher,
     accel_data_publisher: AccelDataPublisher,
     led_cmd_publisher: LedCommandPublisher,
-    peri: impl Peripheral<P = ImuSpi> + 'static,
-    sck: impl Peripheral<P = impl SckPin<ImuSpi>> + 'static,
-    mosi: impl Peripheral<P = impl MosiPin<ImuSpi>> + 'static,
-    miso: impl Peripheral<P = impl MisoPin<ImuSpi>> + 'static,
-    txdma: impl Peripheral<P = ImuSpiTxDma> + 'static,
-    rxdma: impl Peripheral<P = ImuSpiRxDma> + 'static,
-    bmi323_nss: ImuSpiNss0Pin,
-    _ext_nss1_pin: ExtImuSpiNss1Pin,
-    _ext_nss2_pin: ExtImuSpiNss2Pin,
-    accel_int_pin: impl Peripheral<P = ImuSpiInt1Pin> + 'static,
-    gyro_int_pin: impl Peripheral<P = ImuSpiInt2Pin> + 'static,
-    accel_int: impl Peripheral<P = <ImuSpiInt1Pin as embassy_stm32::gpio::Pin>::ExtiChannel> + 'static,
-    gyro_int: impl Peripheral<P = <ImuSpiInt2Pin as embassy_stm32::gpio::Pin>::ExtiChannel> + 'static,
-    _ext_imu_det_pin: ExtImuNDetPin,
+    peri: Peri<'static, ImuSpi>,
+    sck: Peri<'static, impl SckPin<ImuSpi>>,
+    mosi: Peri<'static, impl MosiPin<ImuSpi>>,
+    miso: Peri<'static, impl MisoPin<ImuSpi>>,
+    txdma: Peri<'static, ImuSpiTxDma>,
+    rxdma: Peri<'static, ImuSpiRxDma>,
+    bmi323_nss: Peri<'static, ImuSpiNss0Pin>,
+    _ext_nss1_pin: Peri<'static, ExtImuSpiNss1Pin>,
+    _ext_nss2_pin: Peri<'static, ExtImuSpiNss2Pin>,
+    accel_int_pin: Peri<'static, ImuSpiInt1Pin>,
+    gyro_int_pin: Peri<'static, ImuSpiInt2Pin>,
+    accel_int: Peri<'static, <ImuSpiInt1Pin as embassy_stm32::gpio::Pin>::ExtiChannel>,
+    gyro_int: Peri<'static, <ImuSpiInt2Pin as embassy_stm32::gpio::Pin>::ExtiChannel>,
+    _ext_imu_det_pin: Peri<'static, ExtImuNDetPin>,
 ) {
     defmt::debug!("starting imu task...");
 
@@ -243,7 +243,16 @@ pub fn start_imu_task(
     // let imu_buf: &'static mut [u8; 14] = unsafe { & mut IMU_BUFFER_CELL };
     let imu_buf: &mut [u8; bmi323::SPI_MIN_BUF_LEN] = unsafe { &mut (*(&raw mut IMU_BUFFER_CELL)) };
 
-    let imu = Bmi323::new_from_pins(peri, sck, mosi, miso, txdma, rxdma, bmi323_nss, imu_buf);
+    let imu = Bmi323::new_from_pins(
+        peri,
+        sck,
+        mosi,
+        miso,
+        txdma,
+        rxdma,
+        bmi323_nss.into(),
+        imu_buf,
+    );
 
     // IMU breakout INT2 is directly connected to the MCU with no hardware PU/PD. Select software Pull::Up and
     // imu open drain
@@ -269,20 +278,20 @@ pub fn start_imu_task_via_ie(
     gyro_data_publisher: GyroDataPublisher,
     accel_data_publisher: AccelDataPublisher,
     led_cmd_publisher: LedCommandPublisher,
-    peri: impl Peripheral<P = ImuSpi> + 'static,
-    sck: impl Peripheral<P = impl SckPin<ImuSpi>> + 'static,
-    mosi: impl Peripheral<P = impl MosiPin<ImuSpi>> + 'static,
-    miso: impl Peripheral<P = impl MisoPin<ImuSpi>> + 'static,
-    txdma: impl Peripheral<P = ImuSpiTxDma> + 'static,
-    rxdma: impl Peripheral<P = ImuSpiRxDma> + 'static,
-    bmi323_nss: ImuSpiNss0Pin,
-    _ext_nss1_pin: ExtImuSpiNss1Pin,
-    _ext_nss2_pin: ExtImuSpiNss2Pin,
-    accel_int_pin: impl Peripheral<P = ImuSpiInt1Pin> + 'static,
-    gyro_int_pin: impl Peripheral<P = ImuSpiInt2Pin> + 'static,
-    accel_int: impl Peripheral<P = <ImuSpiInt1Pin as embassy_stm32::gpio::Pin>::ExtiChannel> + 'static,
-    gyro_int: impl Peripheral<P = <ImuSpiInt2Pin as embassy_stm32::gpio::Pin>::ExtiChannel> + 'static,
-    _ext_imu_det_pin: ExtImuNDetPin,
+    peri: Peri<'static, ImuSpi>,
+    sck: Peri<'static, impl SckPin<ImuSpi>>,
+    mosi: Peri<'static, impl MosiPin<ImuSpi>>,
+    miso: Peri<'static, impl MisoPin<ImuSpi>>,
+    txdma: Peri<'static, ImuSpiTxDma>,
+    rxdma: Peri<'static, ImuSpiRxDma>,
+    bmi323_nss: Peri<'static, ImuSpiNss0Pin>,
+    _ext_nss1_pin: Peri<'static, ExtImuSpiNss1Pin>,
+    _ext_nss2_pin: Peri<'static, ExtImuSpiNss2Pin>,
+    accel_int_pin: Peri<'static, ImuSpiInt1Pin>,
+    gyro_int_pin: Peri<'static, ImuSpiInt2Pin>,
+    accel_int: Peri<'static, <ImuSpiInt1Pin as embassy_stm32::gpio::Pin>::ExtiChannel>,
+    gyro_int: Peri<'static, <ImuSpiInt2Pin as embassy_stm32::gpio::Pin>::ExtiChannel>,
+    _ext_imu_det_pin: Peri<'static, ExtImuNDetPin>,
 ) {
     defmt::debug!("starting imu task...");
 
@@ -290,7 +299,16 @@ pub fn start_imu_task_via_ie(
     // let imu_buf: &'static mut [u8; 14] = unsafe { & mut IMU_BUFFER_CELL };
     let imu_buf: &mut [u8; bmi323::SPI_MIN_BUF_LEN] = unsafe { &mut (*(&raw mut IMU_BUFFER_CELL)) };
 
-    let imu = Bmi323::new_from_pins(peri, sck, mosi, miso, txdma, rxdma, bmi323_nss, imu_buf);
+    let imu = Bmi323::new_from_pins(
+        peri,
+        sck,
+        mosi,
+        miso,
+        txdma,
+        rxdma,
+        bmi323_nss.into(),
+        imu_buf,
+    );
 
     // IMU breakout INT2 is directly connected to the MCU with no hardware PU/PD. Select software Pull::Up and
     // imu open drain

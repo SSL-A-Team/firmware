@@ -12,10 +12,10 @@ use embassy_executor::{Executor, InterruptExecutor, Spawner};
 use embassy_stm32::{
     adc::{Adc, Resolution, SampleTime},
     gpio::{Level, Output, Speed},
-    interrupt,
-    interrupt::InterruptExt,
+    interrupt::{self, InterruptExt},
     pac::Interrupt,
     usart::{Config, Parity, StopBits, Uart},
+    Peri,
 };
 use embassy_stm32::{bind_interrupts, peripherals, usart};
 
@@ -55,12 +55,12 @@ async fn high_pri_kick_task(
     coms_reader: &'static UartReadQueue<MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES>,
     coms_writer: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_COMS_UART_QUEUES>,
     mut adc: Adc<'static, embassy_stm32::peripherals::ADC1>,
-    charge_pin: ChargePin,
-    kick_pin: KickPin,
-    chip_pin: ChipPin,
-    mut rail_pin: PowerRail200vReadPin,
-    err_led_pin: RedStatusLedPin,
-    ball_detected_led_pin: BlueStatusLedPin,
+    charge_pin: Peri<'static, ChargePin>,
+    kick_pin: Peri<'static, KickPin>,
+    chip_pin: Peri<'static, ChipPin>,
+    mut rail_pin: Peri<'static, PowerRail200vReadPin>,
+    err_led_pin: Peri<'static, RedStatusLedPin>,
+    ball_detected_led_pin: Peri<'static, BlueStatusLedPin>,
 ) -> ! {
     // pins/safety management
     let charge_pin = Output::new(charge_pin, Level::Low, Speed::Medium);
@@ -194,7 +194,7 @@ async fn high_pri_kick_task(
 static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
 static _EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
-#[interrupt]
+#[embassy_stm32::interrupt]
 unsafe fn TIM2() {
     EXECUTOR_HIGH.on_interrupt();
 }

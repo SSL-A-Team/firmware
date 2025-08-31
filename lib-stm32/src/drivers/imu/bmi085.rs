@@ -8,11 +8,11 @@
 use core::{cmp::min, f32::consts::PI};
 
 use embassy_stm32::{
-    gpio::{Level, Output, Pin, Speed},
+    gpio::{AnyPin, Level, Output, Speed},
     mode::Async,
     spi::{self, MisoPin, MosiPin, SckPin},
     time::hz,
-    Peripheral,
+    Peri,
 };
 use embassy_time::{Duration, Timer};
 
@@ -219,14 +219,14 @@ impl<'a, 'buf> Bmi085<'a, 'buf> {
 
     ///t creates a new BMI085 instance from uninitialized pins
     pub fn new_from_pins<SpiPeri: spi::Instance>(
-        peri: impl Peripheral<P = SpiPeri> + 'a,
-        sck: impl Peripheral<P = impl SckPin<SpiPeri>> + 'a,
-        mosi: impl Peripheral<P = impl MosiPin<SpiPeri>> + 'a,
-        miso: impl Peripheral<P = impl MisoPin<SpiPeri>> + 'a,
-        txdma: impl Peripheral<P = impl spi::TxDma<SpiPeri>> + 'a,
-        rxdma: impl Peripheral<P = impl spi::RxDma<SpiPeri>> + 'a,
-        accel_cs: impl Pin,
-        gyro_cs: impl Pin,
+        peri: Peri<'a, SpiPeri>,
+        sck: Peri<'a, impl SckPin<SpiPeri>>,
+        mosi: Peri<'a, impl MosiPin<SpiPeri>>,
+        miso: Peri<'a, impl MisoPin<SpiPeri>>,
+        txdma: Peri<'a, impl spi::TxDma<SpiPeri>>,
+        rxdma: Peri<'a, impl spi::RxDma<SpiPeri>>,
+        accel_cs: Peri<'a, AnyPin>,
+        gyro_cs: Peri<'a, AnyPin>,
         spi_buf: &'buf mut [u8; SPI_MIN_BUF_LEN],
     ) -> Self {
         let mut spi_config = spi::Config::default();

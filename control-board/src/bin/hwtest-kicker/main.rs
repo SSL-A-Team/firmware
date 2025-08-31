@@ -69,8 +69,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
         &KICKER_IDLE_BUFFERED_UART,
         KICKER_IDLE_BUFFERED_UART.get_uart_read_queue(),
         KICKER_IDLE_BUFFERED_UART.get_uart_write_queue(),
-        p.PG2,
-        p.PG3,
+        p.PG2.into(),
+        p.PG3.into(),
         Pull::Up,
         true,
     );

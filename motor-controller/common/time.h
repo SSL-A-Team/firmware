@@ -87,3 +87,5 @@ bool time_sync_block(SyncTimer_t *time_sync);
  * @return false 
  */
 bool time_sync_block_rst(SyncTimer_t *time_sync);
+
+void wait_cyc(uint32_t cycles);

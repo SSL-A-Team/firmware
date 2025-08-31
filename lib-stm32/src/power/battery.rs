@@ -72,7 +72,7 @@ impl<'a, const NUM_CELLS: usize, F: Filter<f32>> LipoModel<'a, NUM_CELLS, F> {
 
         if self.cell_voltage_compute_mode == CellVoltageComputeMode::Chained {
             for i in (1..NUM_CELLS).rev() {
-                self.cell_voltages[i] = self.cell_voltages[i] - self.cell_voltages[i - 1];
+                self.cell_voltages[i] -= self.cell_voltages[i - 1];
             }
         }
 
@@ -123,7 +123,7 @@ impl<'a, const NUM_CELLS: usize, F: Filter<f32>> LipoModel<'a, NUM_CELLS, F> {
 
     pub fn battery_warn(&self) -> bool {
         self.battery_cell_imbalance_warn()
-            || self.get_cell_voltages().into_iter().any(|cell_voltage| {
+            || self.get_cell_voltages().iter().any(|cell_voltage| {
                 *cell_voltage > self.config.cell_voltage_high_warn
                     || *cell_voltage < self.config.cell_voltage_low_warn
             })
@@ -135,7 +135,7 @@ impl<'a, const NUM_CELLS: usize, F: Filter<f32>> LipoModel<'a, NUM_CELLS, F> {
 
     pub fn battery_crit(&self) -> bool {
         self.get_worst_cell_imbalance() > self.config.cell_voltage_difference_crit
-            || self.get_cell_voltages().into_iter().any(|cell_voltage| {
+            || self.get_cell_voltages().iter().any(|cell_voltage| {
                 *cell_voltage > self.config.cell_voltage_high_crit
                     || *cell_voltage < self.config.cell_voltage_low_crit
             })
@@ -143,7 +143,7 @@ impl<'a, const NUM_CELLS: usize, F: Filter<f32>> LipoModel<'a, NUM_CELLS, F> {
 
     pub fn battery_power_off(&self) -> bool {
         self.get_worst_cell_imbalance() > self.config.cell_votlage_difference_off
-            || self.get_cell_voltages().into_iter().any(|cell_voltage| {
+            || self.get_cell_voltages().iter().any(|cell_voltage| {
                 *cell_voltage > self.config.cell_voltage_high_power_off
                     || *cell_voltage < self.config.cell_voltage_low_power_off
             })

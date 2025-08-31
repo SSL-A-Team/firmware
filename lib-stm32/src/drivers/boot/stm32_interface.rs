@@ -2,8 +2,9 @@ use core::cmp::min;
 
 use defmt_rtt as _;
 
-use embassy_stm32::gpio::{Level, Output, Pin, Pull, Speed};
+use embassy_stm32::gpio::{AnyPin, Level, Output, Pull, Speed};
 use embassy_stm32::usart::{self, Config, DataBits, Parity, StopBits};
+use embassy_stm32::Peri;
 use embassy_time::with_timeout;
 use embassy_time::{Duration, Timer};
 
@@ -88,8 +89,8 @@ impl<
         uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
         read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
         write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
-        boot0_pin: impl Pin,
-        reset_pin: impl Pin,
+        boot0_pin: Peri<'a, AnyPin>,
+        reset_pin: Peri<'a, AnyPin>,
         _reset_pin_pull: Pull,
         reset_polarity_high: bool,
     ) -> Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_UART_QUEUES> {
@@ -181,7 +182,7 @@ impl<
         let sync_res = with_timeout(
             Duration::from_millis(5000),
             self.reader.read(|buf| {
-                if buf.len() >= 1 {
+                if !buf.is_empty() {
                     if buf[0] == STM32_BOOTLOADER_ACK {
                         defmt::debug!("bootloader replied with ACK after calibration.");
                         self.in_bootloader = true;
@@ -228,12 +229,12 @@ impl<
         }
     }
 
-    pub fn try_read_data(&self) -> Result<DequeueRef<LEN_RX, DEPTH_RX>, Error> {
-        return self.reader.try_dequeue();
+    pub fn try_read_data(&'_ self) -> Result<DequeueRef<'_, LEN_RX, DEPTH_RX>, Error> {
+        self.reader.try_dequeue()
     }
 
     pub fn try_send_data(&self, data: &[u8]) -> Result<(), Error> {
-        return self.writer.enqueue_copy(data);
+        self.writer.enqueue_copy(data)
     }
 
     pub fn send_or_discard_data(&self, data: &[u8]) {
@@ -251,8 +252,8 @@ impl<
 
     fn bootloader_checksum_u32(word: u32) -> u8 {
         let word_b: [u8; 4] = word.to_be_bytes();
-        let cks = word_b[0] ^ word_b[1] ^ word_b[2] ^ word_b[3];
-        cks
+
+        word_b[0] ^ word_b[1] ^ word_b[2] ^ word_b[3]
     }
 
     fn bootloader_checksum_buf(buf: &[u8]) -> u8 {
@@ -378,7 +379,7 @@ impl<
         self.reader
             .read(|buf| {
                 // defmt::info!("go cmd reply {:?}", buf);
-                if buf.len() >= 1 {
+                if !buf.is_empty() {
                     if buf[0] == STM32_BOOTLOADER_ACK {
                         res = Ok(());
                     } else {
@@ -388,9 +389,7 @@ impl<
             })
             .await?;
 
-        if res.is_err() {
-            return res;
-        }
+        res?;
 
         // defmt::debug!("sending the load address {:X}...", write_base_addr);
         self.writer
@@ -411,7 +410,7 @@ impl<
         self.reader
             .read(|buf| {
                 defmt::trace!("load address reply {:X}", buf);
-                if buf.len() >= 1 {
+                if !buf.is_empty() {
                     if buf[0] == STM32_BOOTLOADER_ACK {
                         res = Ok(());
                         // defmt::trace!("load address accepted.");
@@ -440,7 +439,7 @@ impl<
         self.reader
             .read(|buf| {
                 // defmt::trace!("send data reply {:X}", buf);
-                if buf.len() >= 1 {
+                if !buf.is_empty() {
                     if buf[0] == STM32_BOOTLOADER_ACK {
                         res = Ok(());
                         // defmt::trace!("data accepted.");
@@ -508,7 +507,7 @@ impl<
         self.reader
             .read(|buf| {
                 defmt::trace!("extended erase reply {:?}", buf);
-                if buf.len() >= 1 {
+                if !buf.is_empty() {
                     if buf[0] == STM32_BOOTLOADER_ACK {
                         res = Ok(());
                     } else {
@@ -532,7 +531,7 @@ impl<
         self.reader
             .read(|buf| {
                 defmt::debug!("erase reply {:?}", buf);
-                if buf.len() >= 1 {
+                if !buf.is_empty() {
                     if buf[0] == STM32_BOOTLOADER_ACK {
                         defmt::debug!("flash erased");
                         res = Ok(());
@@ -555,14 +554,10 @@ impl<
             defmt::trace!("device is already in bootloader");
         } else {
             defmt::trace!("resetting device into bootloader");
-            if let Err(err) = self.reset_into_bootloader().await {
-                return Err(err);
-            }
+            self.reset_into_bootloader().await?
         }
 
-        if let Err(err) = self.verify_bootloader().await {
-            return Err(err);
-        }
+        self.verify_bootloader().await?;
 
         match self.get_device_id().await {
             Err(err) => return Err(err),
@@ -584,14 +579,10 @@ impl<
         };
 
         // erase part
-        if let Err(err) = self.erase_flash_memory().await {
-            return Err(err);
-        }
+        self.erase_flash_memory().await?;
 
         // program image
-        if let Err(err) = self.write_device_memory(fw_image_bytes, None).await {
-            return Err(err);
-        }
+        self.write_device_memory(fw_image_bytes, None).await?;
 
         self.reset_into_program(leave_in_reset).await;
 
@@ -599,9 +590,7 @@ impl<
     }
 
     pub async fn execute_code(&mut self, start_address: Option<u32>) -> Result<(), ()> {
-        defmt::debug!("firmware jump/go command implementation not working. will reset part.");
-        self.reset_into_program(false).await;
-        return Ok(());
+        defmt::warn!("firmware jump/go command implementation does not work on some parts. If this appears not to work, consider simply resetting the device.");
 
         if !self.in_bootloader {
             defmt::error!("called bootloader operation when not in bootloader context.");
@@ -628,7 +617,7 @@ impl<
         self.reader
             .read(|buf| {
                 defmt::info!("go cmd reply {:?}", buf);
-                if buf.len() >= 1 {
+                if !buf.is_empty() {
                     if buf[0] == STM32_BOOTLOADER_ACK {
                         res = Ok(());
                     } else {
@@ -638,9 +627,7 @@ impl<
             })
             .await?;
 
-        if res.is_err() {
-            return res;
-        }
+        res?;
 
         defmt::debug!("sending the start address {:?}...", start_address);
         self.writer
@@ -661,7 +648,7 @@ impl<
         self.reader
             .read(|buf| {
                 defmt::info!("sa reply {:?}", buf);
-                if buf.len() >= 1 {
+                if !buf.is_empty() {
                     if buf[0] == STM32_BOOTLOADER_ACK {
                         res = Ok(());
                         self.in_bootloader = false;
