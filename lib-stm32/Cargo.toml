@@ -7,11 +7,11 @@ description = "A common library for ateam stm32 targets"
 repository = "https://github.com/SSL-A-Team/firmware"
 
 [dependencies]
-embassy-stm32 = { version = "0.4.0", default-features = false, features = ["exti"]}
-embassy-executor = { version = "0.9.1", default-features = false }
-embassy-sync = { version = "0.7.2" }
-embassy-futures = { version = "0.1.2" }
-embassy-time = { version = "0.5.0" }
+embassy-stm32 = { version = "0.3.0", default-features = false, features = ["exti"]}
+embassy-executor = { version = "0.8.0", default-features = false }
+embassy-sync = { version = "0.7.1" }
+embassy-futures = { version = "0.1.0" }
+embassy-time = { version = "0.4.0" }
 paste = { version = "1.0.15" }
 
 defmt = "1.0.1"
