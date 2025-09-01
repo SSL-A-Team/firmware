@@ -264,8 +264,8 @@ dependencies = [
 
 [[package]]
 name = "embassy-embedded-hal"
-version = "0.4.0"
-source = "git+https://github.com/embassy-rs/embassy#ef673c6ca310cf0a7e9b1254afb7806bd6879e94"
+version = "0.5.0"
+source = "git+https://github.com/embassy-rs/embassy#de33d113a5fb70ca5086058cc894a2ce192c27d6"
 dependencies = [
  "embassy-futures",
  "embassy-hal-internal",
@@ -280,8 +280,9 @@ dependencies = [
 
 [[package]]
 name = "embassy-executor"
-version = "0.8.0"
-source = "git+https://github.com/embassy-rs/embassy#ef673c6ca310cf0a7e9b1254afb7806bd6879e94"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06070468370195e0e86f241c8e5004356d696590a678d47d6676795b2e439c6b"
 dependencies = [
  "critical-section",
  "document-features",
@@ -292,7 +293,8 @@ dependencies = [
 [[package]]
 name = "embassy-executor-macros"
 version = "0.7.0"
-source = "git+https://github.com/embassy-rs/embassy#ef673c6ca310cf0a7e9b1254afb7806bd6879e94"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfdddc3a04226828316bf31393b6903ee162238576b1584ee2669af215d55472"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -308,13 +310,13 @@ checksum = "2fc328bf943af66b80b98755db9106bf7e7471b0cf47dc8559cd9a6be504cc9c"
 
 [[package]]
 name = "embassy-futures"
-version = "0.1.1"
-source = "git+https://github.com/embassy-rs/embassy#ef673c6ca310cf0a7e9b1254afb7806bd6879e94"
+version = "0.1.2"
+source = "git+https://github.com/embassy-rs/embassy#de33d113a5fb70ca5086058cc894a2ce192c27d6"
 
 [[package]]
 name = "embassy-hal-internal"
 version = "0.3.0"
-source = "git+https://github.com/embassy-rs/embassy#ef673c6ca310cf0a7e9b1254afb7806bd6879e94"
+source = "git+https://github.com/embassy-rs/embassy#de33d113a5fb70ca5086058cc894a2ce192c27d6"
 dependencies = [
  "cortex-m",
  "critical-section",
@@ -324,12 +326,12 @@ dependencies = [
 [[package]]
 name = "embassy-net-driver"
 version = "0.2.0"
-source = "git+https://github.com/embassy-rs/embassy#ef673c6ca310cf0a7e9b1254afb7806bd6879e94"
+source = "git+https://github.com/embassy-rs/embassy#de33d113a5fb70ca5086058cc894a2ce192c27d6"
 
 [[package]]
 name = "embassy-stm32"
-version = "0.3.0"
-source = "git+https://github.com/embassy-rs/embassy#ef673c6ca310cf0a7e9b1254afb7806bd6879e94"
+version = "0.4.0"
+source = "git+https://github.com/embassy-rs/embassy#de33d113a5fb70ca5086058cc894a2ce192c27d6"
 dependencies = [
  "aligned",
  "bit_field",
@@ -372,8 +374,8 @@ dependencies = [
 
 [[package]]
 name = "embassy-sync"
-version = "0.7.1"
-source = "git+https://github.com/embassy-rs/embassy#ef673c6ca310cf0a7e9b1254afb7806bd6879e94"
+version = "0.7.2"
+source = "git+https://github.com/embassy-rs/embassy#de33d113a5fb70ca5086058cc894a2ce192c27d6"
 dependencies = [
  "cfg-if",
  "critical-section",
@@ -385,8 +387,8 @@ dependencies = [
 
 [[package]]
 name = "embassy-time"
-version = "0.4.0"
-source = "git+https://github.com/embassy-rs/embassy#ef673c6ca310cf0a7e9b1254afb7806bd6879e94"
+version = "0.5.0"
+source = "git+https://github.com/embassy-rs/embassy#de33d113a5fb70ca5086058cc894a2ce192c27d6"
 dependencies = [
  "cfg-if",
  "critical-section",
@@ -400,8 +402,8 @@ dependencies = [
 
 [[package]]
 name = "embassy-time-driver"
-version = "0.2.0"
-source = "git+https://github.com/embassy-rs/embassy#ef673c6ca310cf0a7e9b1254afb7806bd6879e94"
+version = "0.2.1"
+source = "git+https://github.com/embassy-rs/embassy#de33d113a5fb70ca5086058cc894a2ce192c27d6"
 dependencies = [
  "document-features",
 ]
@@ -409,15 +411,15 @@ dependencies = [
 [[package]]
 name = "embassy-usb-driver"
 version = "0.2.0"
-source = "git+https://github.com/embassy-rs/embassy#ef673c6ca310cf0a7e9b1254afb7806bd6879e94"
+source = "git+https://github.com/embassy-rs/embassy#de33d113a5fb70ca5086058cc894a2ce192c27d6"
 dependencies = [
  "embedded-io-async",
 ]
 
 [[package]]
 name = "embassy-usb-synopsys-otg"
-version = "0.3.0"
-source = "git+https://github.com/embassy-rs/embassy#ef673c6ca310cf0a7e9b1254afb7806bd6879e94"
+version = "0.3.1"
+source = "git+https://github.com/embassy-rs/embassy#de33d113a5fb70ca5086058cc894a2ce192c27d6"
 dependencies = [
  "critical-section",
  "embassy-sync",
@@ -759,8 +761,9 @@ dependencies = [
 
 [[package]]
 name = "stm32-metapac"
-version = "17.0.0"
-source = "git+https://github.com/embassy-rs/stm32-data-generated?tag=stm32-data-ecb93d42a6cbcd9e09cab74873908a2ca22327f7#6f80b256aa7e41d34394ccf6fa127475d455d4c3"
+version = "18.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6fd8ec3a292a0d9fc4798416a61b21da5ae50341b2e7b8d12e662bf305366097"
 dependencies = [
  "cortex-m",
 ]
