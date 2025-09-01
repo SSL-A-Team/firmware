@@ -9,26 +9,26 @@ repository = "https://github.com/SSL-A-Team/firmware"
 cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7.5"
 
-embassy-executor = { version = "0.8.0", features = [
+embassy-executor = { version = "0.9.1", features = [
     "arch-cortex-m",
     "executor-thread",
     "executor-interrupt",
     "defmt",
 ] }
-embassy-time = { version = "0.4.0", features = [
+embassy-time = { version = "0.5.0", features = [
     "defmt",
     "defmt-timestamp-uptime",
     "tick-hz-32_768",
 ] }
-embassy-stm32 = { version = "0.3.0", features = [
+embassy-stm32 = { version = "0.4.0", features = [
     "defmt",
     "stm32g030c8",
     "unstable-pac", 
     "time-driver-tim1",
     "exti",
 ] }
-embassy-futures = { version = "0.1.0" }
-embassy-sync = { version = "0.7.1" }
+embassy-futures = { version = "0.1.2" }
+embassy-sync = { version = "0.7.2" }
 
 defmt = "1.0.1"
 defmt-rtt = "1.0.0"
