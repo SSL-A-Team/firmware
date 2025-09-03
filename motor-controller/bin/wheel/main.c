@@ -214,6 +214,8 @@ int main() {
     uart_logging_status_tx_t uart_logging_status_send;
     #endif
 
+    uint32_t green_led_ticker = 0;
+
     // toggle J1-1
     while (true) {
         IWDG->KR = 0x0000AAAA; // feed the watchdog
@@ -618,9 +620,17 @@ int main() {
         // Green LED means we are able to send telemetry upstream.
         // This means the upstream sent a packet downstream with telemetry enabled.
         if (!telemetry_enabled) {
-            turn_off_green_led();
-        } else {
             turn_on_green_led();
+        } else {
+            if (green_led_ticker > 2000) {
+                green_led_ticker = 0;
+            } else if (green_led_ticker > 1000) {
+                turn_off_green_led();
+            } else {
+                turn_on_green_led();
+            }
+
+            green_led_ticker++;
         }
 
         #ifdef COMP_MODE

@@ -29,9 +29,9 @@ use crate::{
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 
-const MAX_TX_PACKET_SIZE: usize = 60;
+const MAX_TX_PACKET_SIZE: usize = 80;
 const TX_BUF_DEPTH: usize = 3;
-const MAX_RX_PACKET_SIZE: usize = 60;
+const MAX_RX_PACKET_SIZE: usize = 80;
 const RX_BUF_DEPTH: usize = 20;
 
 type ControlWheelMotor =
@@ -354,6 +354,17 @@ impl <
             while !self.shared_robot_state.hw_init_state_valid() {
                 Timer::after_millis(10).await;
             }
+
+            self.motor_fl.set_telemetry_enabled(true);
+            self.motor_bl.set_telemetry_enabled(true);
+            self.motor_br.set_telemetry_enabled(true);
+            self.motor_fr.set_telemetry_enabled(true);
+
+            self.motor_fl.send_motion_command();
+            self.motor_bl.send_motion_command();
+            self.motor_br.send_motion_command();
+            self.motor_fr.send_motion_command();
+
 
             self.flash_motor_firmware(
                 self.shared_robot_state.hw_in_debug_mode()).await;

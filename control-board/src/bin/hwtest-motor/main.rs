@@ -126,7 +126,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     loop {
         Timer::after_millis(10).await;
 
-<<<<<<< HEAD
         test_command_publisher.publish(DataPacket::BasicControl(BasicControl {
             _bitfield_1: Default::default(),
             _bitfield_align_1: Default::default(),
@@ -137,19 +136,5 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             dribbler_speed: 10.0,
             kick_request: KickRequest::KR_DISABLE,
         })).await;
-=======
-        test_command_publisher
-            .publish(DataPacket::BasicControl(BasicControl {
-                _bitfield_1: Default::default(),
-                _bitfield_align_1: Default::default(),
-                vel_x_linear: 1.0,
-                vel_y_linear: 0.0,
-                vel_z_angular: 0.0,
-                kick_vel: 0.0,
-                dribbler_speed: 10.0,
-                kick_request: KickRequest::KR_DISABLE,
-            }))
-            .await;
->>>>>>> main
     }
 }
