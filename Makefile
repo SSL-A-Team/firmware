@@ -108,7 +108,7 @@ kicker_binaries := ${shell cd kicker-board/src/bin && ls -d * && cd ../../..}
 kicker_openocd_cfg_file := board/st_nucleo_f0.cfg
 
 define create-kicker-board-rust-targets
-$1--$2: motor-controller--all
+$1--$2: motor-controller--dribbler
 	cd $1 && \
 	cargo build --release --bin $2 && \
 	arm-none-eabi-objcopy -Obinary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin
@@ -138,7 +138,7 @@ control_binaries := ${shell cd control-board/src/bin && ls -d * && cd ../../..}
 control_openocd_cfg_file := board/st_nucleo_h743zi.cfg
 
 define create-control-board-rust-targets
-$1--$2: kicker-board--all motor-controller--all
+$1--$2: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel
 	cd $1 && \
 	cargo build $(additional_control_cargo_flags) --release --bin $2 && \
 	arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin && \
@@ -164,10 +164,10 @@ control-board--clean: kicker-board--clean motor-controller--clean
 ##################
 
 .PHONY: control
+.DEFAULT_GOAL := control
 control:: control-board--control--run
 
 .PHONY: all
-.DEFAULT_GOAL := all
 all:: kicker-board--all motor-controller--all control-board--all
 
 .PHONY: clean
