@@ -130,13 +130,14 @@ async fn high_pri_kick_task(
     let mut status_led = Output::new(grn_led_pin, Level::Low, Speed::Low);
     let mut err_led = Output::new(err_led_pin, Level::Low, Speed::Low);
     let mut ball_detected_led1 = Output::new(ball_detected_led1_pin, Level::Low, Speed::Low);
+    let mut green_led_ctr: u16 = 0;
 
     // TODO dotstars
 
     let mut breakbeam = Breakbeam::new(breakbeam_tx.into(), breakbeam_rx.into());
 
     // coms buffers
-    let mut telemetry_enabled: bool; //  = false;
+    let mut telemetry_enabled: bool;
     let mut kicker_control_packet: KickerControl = Default::default();
     let mut kicker_telemetry_packet: KickerTelemetry = Default::default();
     let mut dribbler_motor_telemetry: MotorTelemetry = Default::default();
@@ -238,10 +239,16 @@ async fn high_pri_kick_task(
 
         // update telemetry requests
         telemetry_enabled = kicker_control_packet.telemetry_enabled() != 0;
-        if telemetry_enabled {
+        if !telemetry_enabled {
             status_led.set_high();
         } else {
-            status_led.set_low();
+            if green_led_ctr > 200 {
+                green_led_ctr = 0;
+            } else if green_led_ctr > 100 {
+                status_led.set_low();
+            } else {
+                status_led.set_high();
+            }
         }
 
         // for now shutdown requests will be latched and a reboot is required to re-power
@@ -396,47 +403,45 @@ async fn high_pri_kick_task(
         }
 
         // send telemetry packet
-        if telemetry_enabled {
-            let cur_time = Instant::now();
-            if Instant::checked_duration_since(&cur_time, last_packet_sent_time)
-                .unwrap()
-                .as_millis()
-                > 20
-            {
-                kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(
-                    res.is_err() as u16,
-                    dribbler_motor_telemetry.master_error() as u16,
-                    shutdown_requested as u16,
-                    shutdown_completed as u16,
-                    ball_detected as u16,
-                    (rail_voltage_ave > CHARGED_THRESH_VOLTAGE) as u16,
-                    Default::default(),
+        let cur_time = Instant::now();
+        if Instant::checked_duration_since(&cur_time, last_packet_sent_time)
+            .unwrap()
+            .as_millis()
+            > 20
+        {
+            kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(
+                res.is_err() as u16,
+                dribbler_motor_telemetry.master_error() as u16,
+                shutdown_requested as u16,
+                shutdown_completed as u16,
+                ball_detected as u16,
+                (rail_voltage_ave > CHARGED_THRESH_VOLTAGE) as u16,
+                Default::default(),
+            );
+
+            let charge_pct = rail_voltage_ave / CHARGE_TARGET_VOLTAGE;
+            kicker_telemetry_packet.charge_pct = (charge_pct * 100.0) as u16;
+            kicker_telemetry_packet.rail_voltage = rail_voltage_ave;
+            kicker_telemetry_packet.battery_voltage = battery_voltage;
+
+            kicker_telemetry_packet.dribbler_motor = dribbler_motor_telemetry;
+            kicker_telemetry_packet
+                .kicker_image_hash
+                .copy_from_slice(&kicker_img_hash_kicker[0..4]);
+
+            // raw interpretaion of a struct for wire transmission is unsafe
+            unsafe {
+                // get a slice to packet for transmission
+                let struct_bytes = core::slice::from_raw_parts(
+                    (&kicker_telemetry_packet as *const KickerTelemetry) as *const u8,
+                    core::mem::size_of::<KickerTelemetry>(),
                 );
 
-                let charge_pct = rail_voltage_ave / CHARGE_TARGET_VOLTAGE;
-                kicker_telemetry_packet.charge_pct = (charge_pct * 100.0) as u16;
-                kicker_telemetry_packet.rail_voltage = rail_voltage_ave;
-                kicker_telemetry_packet.battery_voltage = battery_voltage;
-
-                kicker_telemetry_packet.dribbler_motor = dribbler_motor_telemetry;
-                kicker_telemetry_packet
-                    .kicker_image_hash
-                    .copy_from_slice(&kicker_img_hash_kicker[0..4]);
-
-                // raw interpretaion of a struct for wire transmission is unsafe
-                unsafe {
-                    // get a slice to packet for transmission
-                    let struct_bytes = core::slice::from_raw_parts(
-                        (&kicker_telemetry_packet as *const KickerTelemetry) as *const u8,
-                        core::mem::size_of::<KickerTelemetry>(),
-                    );
-
-                    // send the packet
-                    let _res = coms_writer.enqueue_copy(struct_bytes);
-                }
-
-                last_packet_sent_time = cur_time;
+                // send the packet
+                let _res = coms_writer.enqueue_copy(struct_bytes);
             }
+
+            last_packet_sent_time = cur_time;
         }
 
         // LEDs

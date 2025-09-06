@@ -59,6 +59,7 @@ async fn high_pri_kick_task(
     kick_pin: Peri<'static, KickPin>,
     chip_pin: Peri<'static, ChipPin>,
     mut rail_pin: Peri<'static, PowerRail200vReadPin>,
+    grn_led_pin: Peri<'static, GreenStatusLedPin>,
     err_led_pin: Peri<'static, RedStatusLedPin>,
     ball_detected_led_pin: Peri<'static, BlueStatusLedPin>,
 ) -> ! {
@@ -69,8 +70,10 @@ async fn high_pri_kick_task(
     let mut kick_manager = KickManager::new(charge_pin, kick_pin, chip_pin);
 
     // debug LEDs
+    let mut status_led = Output::new(grn_led_pin, Level::Low, Speed::Low);
     let mut err_led = Output::new(err_led_pin, Level::Low, Speed::Low);
     let mut ball_detected_led = Output::new(ball_detected_led_pin, Level::Low, Speed::Low);
+    let mut green_led_ctr: u16 = 0;
 
     // TODO dotstars
 
@@ -124,6 +127,17 @@ async fn high_pri_kick_task(
 
         // update telemetry requests
         telemetry_enabled = kicker_control_packet.telemetry_enabled() != 0;
+        if !telemetry_enabled {
+            status_led.set_high();
+        } else {
+            if green_led_ctr > 200 {
+                green_led_ctr = 0;
+            } else if green_led_ctr > 100 {
+                status_led.set_low();
+            } else {
+                status_led.set_high();
+            }
+        }
 
         // no charge/kick in coms test
         let res = kick_manager
@@ -131,46 +145,45 @@ async fn high_pri_kick_task(
             .await;
 
         // send telemetry packet
-        if telemetry_enabled {
-            let cur_time = Instant::now();
-            if Instant::checked_duration_since(&cur_time, last_packet_sent_time)
-                .unwrap()
-                .as_millis()
-                > 20
-            {
-                kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(
-                    res.is_err() as u16,
-                    0,
-                    0,
-                    0,
-                    ball_detected as u16,
-                    0,
-                    Default::default(),
+        let cur_time = Instant::now();
+        if Instant::checked_duration_since(&cur_time, last_packet_sent_time)
+            .unwrap()
+            .as_millis()
+            > 20
+        {
+            kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(
+                res.is_err() as u16,
+                0,
+                0,
+                0,
+                ball_detected as u16,
+                0,
+                Default::default(),
+            );
+            kicker_telemetry_packet.rail_voltage = rail_voltage;
+            kicker_telemetry_packet.battery_voltage = 22.5;
+
+            // raw interpretaion of a struct for wire transmission is unsafe
+            unsafe {
+                // get a slice to packet for transmission
+                let struct_bytes = core::slice::from_raw_parts(
+                    (&kicker_telemetry_packet as *const KickerTelemetry) as *const u8,
+                    core::mem::size_of::<KickerTelemetry>(),
                 );
-                kicker_telemetry_packet.rail_voltage = rail_voltage;
-                kicker_telemetry_packet.battery_voltage = 22.5;
 
-                // raw interpretaion of a struct for wire transmission is unsafe
-                unsafe {
-                    // get a slice to packet for transmission
-                    let struct_bytes = core::slice::from_raw_parts(
-                        (&kicker_telemetry_packet as *const KickerTelemetry) as *const u8,
-                        core::mem::size_of::<KickerTelemetry>(),
-                    );
-
-                    // send the packet
-                    let _res = coms_writer.enqueue_copy(struct_bytes);
-                }
-
-                if ball_detected_led.is_set_high() {
-                    ball_detected_led.set_low();
-                } else {
-                    ball_detected_led.set_high();
-                }
-
-                last_packet_sent_time = cur_time;
+                // send the packet
+                let _res = coms_writer.enqueue_copy(struct_bytes);
             }
+
+            if ball_detected_led.is_set_high() {
+                ball_detected_led.set_low();
+            } else {
+                ball_detected_led.set_high();
+            }
+
+            last_packet_sent_time = cur_time;
         }
+
 
         // LEDs
         if res.is_err() {
@@ -254,6 +267,7 @@ async fn main(spawner: Spawner) -> ! {
             p.PD9,
             p.PD8,
             p.PC3,
+            p.PB9,
             p.PE0,
             p.PE1,
         ))

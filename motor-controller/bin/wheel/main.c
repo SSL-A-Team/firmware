@@ -195,6 +195,8 @@ int main() {
     turn_off_red_led();
     turn_off_yellow_led();
 
+    uint16_t green_led_ctr = 0;
+
     #ifdef UART_ENABLED
     // Initialize UART and logging status.
     uart_initialize();
@@ -487,7 +489,7 @@ int main() {
 
             // transmit packets
 #ifdef UART_ENABLED
-            if (telemetry_enabled && run_telemetry) {
+            if (run_telemetry) {
                 // If previous UART transmit is still occurring,
                 // wait for it to finish.
                 uart_wait_for_transmission();
@@ -562,7 +564,7 @@ int main() {
         // Red LED means we are in an error state.
         // This latches and requires resetting the robot to clear.
         if (response_packet.data.motion.master_error ||
-            (telemetry_enabled && ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS)) {
+            ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
             turn_on_red_led();
         }
 
@@ -575,17 +577,25 @@ int main() {
             turn_off_yellow_led();
         }
 
-        // Green LED means we are able to send telemetry upstream.
-        // This means the upstream sent a packet downstream with telemetry enabled.
+        // Green LED means system is up. Flicker means we're acknowledging that
+        // control has enabled the system (non-zero motor commands allowed)
         if (!telemetry_enabled) {
-            turn_off_green_led();
-        } else {
             turn_on_green_led();
+        } else {
+            // 5Hz flicker
+            if (green_led_ctr > 200) {
+                green_led_ctr = 0;
+            } else if (green_led_ctr > 100) {
+                turn_off_green_led();
+            } else {
+                turn_on_green_led();
+            }
+
+            green_led_ctr++;
         }
 
         #ifdef COMP_MODE
-        if (telemetry_enabled &&
-            ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
+        if (ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
             // If have telemetry enabled (meaning we at one
             // point received a message from upstream) and haven't
             // received a command packet in a while, we need to reset
