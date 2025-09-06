@@ -108,14 +108,18 @@ kicker_binaries := ${shell cd kicker-board/src/bin && ls -d * && cd ../../..}
 kicker_openocd_cfg_file := board/st_nucleo_f0.cfg
 
 define create-kicker-board-rust-targets
-$1--$2: motor-controller--all
-	cd $1 && \
-	cargo build --release --bin $2 && \
-	arm-none-eabi-objcopy -Obinary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin
+$1/target/thumbv7em-none-eabihf/release/$2: motor-controller--dribbler
+	cargo build --target thumbv7em-none-eabihf --manifest-path $1/Cargo.toml --release --bin $2
+
+$1/target/thumbv7em-none-eabihf/release/$2.bin: $1/target/thumbv7em-none-eabihf/release/$2
+	arm-none-eabi-objcopy -Obinary $1/target/thumbv7em-none-eabihf/release/$2 $1/target/thumbv7em-none-eabihf/release/$2.bin
+
+$1--$2: $1/target/thumbv7em-none-eabihf/release/$2.bin
+	echo "Building $1--$2 flat bin."
 kicker-board--all:: $1--$2
 
-$1--$2--run: $1--$2
-	cd $1 && \
+$1--$2--run: motor-controller--dribbler
+	cd $1/ && \
 	cargo run --release --bin $2
 
 $1--$2--debug: $1--$2
@@ -138,14 +142,25 @@ control_binaries := ${shell cd control-board/src/bin && ls -d * && cd ../../..}
 control_openocd_cfg_file := board/st_nucleo_h743zi.cfg
 
 define create-control-board-rust-targets
-$1--$2: kicker-board--all motor-controller--all
-	cd $1 && \
-	cargo build $(additional_control_cargo_flags) --release --bin $2 && \
-	arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin && \
-	python ../util/embed_img_hash.py
-control-board--all:: $1--$2
+$1/target/thumbv7em-none-eabihf/release/$2: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel
+	cargo build $(additional_control_cargo_flags) --target thumbv7em-none-eabihf --manifest-path $1/Cargo.toml --release --bin $2
 
-$1--$2--run: $1--$2
+$1/target/thumbv7em-none-eabihf/release/$2.bin: $1/target/thumbv7em-none-eabihf/release/$2
+	arm-none-eabi-objcopy -Obinary $1/target/thumbv7em-none-eabihf/release/$2 $1/target/thumbv7em-none-eabihf/release/$2.bin
+
+$1--$2: $1/target/thumbv7em-none-eabihf/release/$2.bin
+	cd $1/ && \
+	python ../util/embed_img_hash.py
+kicker-board--all:: $1--$2
+
+# $1--$2: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel
+# 	cd $1 && \
+# 	cargo build $(additional_control_cargo_flags) --release --bin $2 && \
+# 	arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin && \
+# 	python ../util/embed_img_hash.py
+# control-board--all:: $1--$2
+
+$1--$2--run: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel
 	cd $1 && \
 	cargo run $(additional_control_cargo_flags) --release --bin $2
 
@@ -164,10 +179,10 @@ control-board--clean: kicker-board--clean motor-controller--clean
 ##################
 
 .PHONY: control
+.DEFAULT_GOAL := control
 control:: control-board--control--run
 
 .PHONY: all
-.DEFAULT_GOAL := all
 all:: kicker-board--all motor-controller--all control-board--all
 
 .PHONY: clean
