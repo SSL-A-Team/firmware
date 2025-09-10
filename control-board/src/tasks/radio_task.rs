@@ -392,8 +392,7 @@ impl<
                     // reboot the robot (unless we had a shutdown request).
                     let cur_time = Instant::now();
                     if !cur_robot_state.shutdown_requested
-                        && Instant::checked_duration_since(&cur_time, self.last_software_packet)
-                            .unwrap()
+                        && Instant::duration_since(&cur_time, self.last_software_packet)
                             .as_millis()
                             > Self::RESPONSE_FROM_PC_TIMEOUT_MS
                     {
@@ -425,8 +424,8 @@ impl<
 
             let loop_end_time = Instant::now();
             let loop_execution_time = loop_end_time - loop_start_time;
-            if loop_execution_time > Duration::from_millis(2) {
-                defmt::warn!("radio loop is taking >2ms to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {:?}", loop_execution_time);
+            if loop_execution_time > Duration::from_millis(2) && self.connection_state == RadioConnectionState::Connected {
+                defmt::warn!("radio loop is connected and taking >2ms to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {:?}", loop_execution_time);
             }
 
             last_loop_term_time = Instant::now();
