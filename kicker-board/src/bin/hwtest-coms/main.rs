@@ -146,8 +146,7 @@ async fn high_pri_kick_task(
 
         // send telemetry packet
         let cur_time = Instant::now();
-        if Instant::checked_duration_since(&cur_time, last_packet_sent_time)
-            .unwrap()
+        if Instant::duration_since(&cur_time, last_packet_sent_time)
             .as_millis()
             > 20
         {
