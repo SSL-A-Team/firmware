@@ -239,7 +239,7 @@ impl<
 
     pub fn send_or_discard_data(&self, data: &[u8]) {
         if self.try_send_data(data).is_err() {
-            defmt::error!("Failed to send motor data");
+            defmt::warn!("Failed to send motor data");
         };
     }
 

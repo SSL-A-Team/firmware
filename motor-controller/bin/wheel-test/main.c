@@ -428,7 +428,7 @@ int main() {
 
             // transmit packets
 #ifdef UART_ENABLED
-            if (telemetry_enabled && run_telemetry) {
+            if (run_telemetry) {
                 // If previous UART transmit is still occurring,
                 // wait for it to finish.
                 uart_wait_for_transmission();
@@ -500,7 +500,7 @@ int main() {
         // Red LED means we are in an error state.
         // This latches and requires resetting the robot to clear.
         if (response_packet.data.motion.master_error ||
-            (telemetry_enabled && ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS)) {
+            ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
             turn_on_red_led();
         }
 
