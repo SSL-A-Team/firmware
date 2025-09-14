@@ -336,7 +336,7 @@ int main() {
             response_packet.data.motion.current_estimate = current_sense_I;
             response_packet.data.motion.torque_estimate = measured_torque_Nm;
             response_packet.data.motion.torque_computed_error = torque_pid.prev_err;
-            response_packet.data.motion.torque_computed_setpoint = torque_setpoint_Nm;
+            response_packet.data.motion.torque_computed_nm = torque_setpoint_Nm;
         }
 
         // run velocity loop if applicable
@@ -368,11 +368,11 @@ int main() {
 
             // velocity control data
             response_packet.data.motion.vel_setpoint = r_motor_board;
-            response_packet.data.motion.vel_setpoint_clamped = control_setpoint_vel_rads;
+            response_packet.data.motion.vel_computed_rads = control_setpoint_vel_rads;
             response_packet.data.motion.encoder_delta = enc_delta;
             response_packet.data.motion.vel_enc_estimate = enc_rad_s_filt;
             response_packet.data.motion.vel_computed_error = vel_pid.prev_err;
-            response_packet.data.motion.vel_computed_setpoint = control_setpoint_vel_duty;
+            response_packet.data.motion.vel_computed_duty = control_setpoint_vel_duty;
         }
 
         if (run_torque_loop || run_vel_loop) {
@@ -458,7 +458,7 @@ int main() {
                 response_packet.data.params.version_major = VERSION_MAJOR;
                 response_packet.data.params.version_major = VERSION_MINOR;
                 response_packet.data.params.version_major = VERSION_PATCH;
-                response_packet.data.params.timestamp = time_local_epoch_s();
+                response_packet.timestamp = time_local_epoch_s();
 
                 response_packet.data.params.vel_p = vel_pid_constants.kP;
                 response_packet.data.params.vel_i = vel_pid_constants.kI;

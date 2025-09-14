@@ -375,7 +375,7 @@ int main() {
             response_packet.data.motion.current_estimate = current_sense_I;
             response_packet.data.motion.torque_estimate = measured_torque_Nm;
             response_packet.data.motion.torque_computed_error = torque_pid.prev_err;
-            response_packet.data.motion.torque_computed_setpoint = torque_setpoint_Nm;
+            response_packet.data.motion.torque_computed_nm = torque_setpoint_Nm;
         }
 
         // run velocity loop if applicable
@@ -416,11 +416,11 @@ int main() {
 
             // velocity control data
             response_packet.data.motion.vel_setpoint = r_motor_board;
-            response_packet.data.motion.vel_setpoint_clamped = control_setpoint_vel_rads;
+            response_packet.data.motion.vel_computed_rads = control_setpoint_vel_rads;
             response_packet.data.motion.encoder_delta = enc_delta;
             response_packet.data.motion.vel_enc_estimate = enc_rad_s_filt;
             response_packet.data.motion.vel_computed_error = vel_pid.prev_err;
-            response_packet.data.motion.vel_computed_setpoint = control_setpoint_vel_duty;
+            response_packet.data.motion.vel_computed_duty = control_setpoint_vel_duty;
         }
 
         if (run_torque_loop || run_vel_loop) {
@@ -432,7 +432,7 @@ int main() {
             if (motion_control_type == OPEN_LOOP) {
                 float r_motor = mm_rads_to_dc(&df45_model, r_motor_board);
                 response_packet.data.motion.vel_setpoint = r_motor_board;
-                response_packet.data.motion.vel_computed_setpoint = r_motor;
+                response_packet.data.motion.vel_setpoint = r_motor;
                 pwm6step_set_duty_cycle_f(r_motor);
             } else if (motion_control_type == VELOCITY) {
                 pwm6step_set_duty_cycle_f(control_setpoint_vel_duty);
@@ -519,7 +519,7 @@ int main() {
                 response_packet.data.params.version_major = VERSION_MAJOR;
                 response_packet.data.params.version_minor = VERSION_MINOR;
                 response_packet.data.params.version_patch = VERSION_PATCH;
-                response_packet.data.params.timestamp = time_local_epoch_s();
+                response_packet.timestamp = time_local_epoch_s();
 
                 // TODO parameter updates are off for gain scheduled PID
                 // response_packet.data.params.vel_p = vel_pid_constants.kP;

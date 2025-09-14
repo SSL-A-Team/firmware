@@ -378,7 +378,7 @@ impl<
                             self.last_command.wheel_vel_control_enabled() != 0,
                             self.last_command.wheel_torque_control_enabled() != 0,
                         ) {
-                            (true, true) => MotionCommandType::BOTH,
+                            (true, true) => MotionCommandType::VELOCITY_W_TORQUE,
                             (true, false) => MotionCommandType::VELOCITY,
                             (false, true) => MotionCommandType::TORQUE,
                             (false, false) => MotionCommandType::OPEN_LOOP,
