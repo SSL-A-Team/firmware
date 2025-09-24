@@ -123,14 +123,26 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p
     );
 
+    let mut vel: f32 = 0.0;
+    let mut ctr: usize = 0;
     loop {
         Timer::after_millis(100).await;
+
+        ctr += 1;
+        if ctr > 100 {
+            ctr = 0;
+        } else if ctr > 50 {
+            vel = 2.0;
+        } else {
+            vel = 0.0;
+        }
+
 
         test_command_publisher
             .publish(DataPacket::BasicControl(BasicControl {
                 _bitfield_1: Default::default(),
                 _bitfield_align_1: Default::default(),
-                vel_x_linear: 1.0,
+                vel_x_linear: vel,
                 vel_y_linear: 0.0,
                 vel_z_angular: 0.0,
                 kick_vel: 0.0,

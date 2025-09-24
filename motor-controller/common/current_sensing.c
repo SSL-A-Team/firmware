@@ -41,60 +41,60 @@ void DMA1_Channel1_IRQHandler() {
  * 
  * @return ADC_Result result of the ADC operation
  */
-void currsen_read(ADC_Result_t *res)
-{
-    const int NUM_CHANNELS = 4;
+// void currsen_read(ADC_Result_t *res)
+// {
+//     const int NUM_CHANNELS = 4;
 
-    ADC1->CR |= ADC_CR_ADSTART;
+//     ADC1->CR |= ADC_CR_ADSTART;
 
-    //ADC_Result_t res;
-    res->status = CS_OK;
-    while (1)
-    {
+//     //ADC_Result_t res;
+//     res->status = CS_OK;
+//     while (1)
+//     {
 
-        for (int i = 0; i < NUM_CHANNELS; i++)
-        {
-            // Start ADC conversion
-            ADC1->CR |= ADC_CR_ADSTART;
+//         for (int i = 0; i < NUM_CHANNELS; i++)
+//         {
+//             // Start ADC conversion
+//             ADC1->CR |= ADC_CR_ADSTART;
 
-            // Wait until end of conversion
-            uint32_t timeout_count = 0;
-            while ((ADC1->ISR & ADC_ISR_EOC) == 0)
-            {
-                if (timeout_count < ADC_DIS_TIMEOUT)
-                {
-                    //wait_ms(1);
-                    //timeout_count += 1;
-                }
-                else
-                {
-                    res->status = CS_TIMEOUT;
-                    //return res;
-                }
-            }
-            // Store the ADC conversion
-            uint16_t currADC = ADC1->DR;
-            switch (i)
-            {
-                case 0:
-                    res->I_motor_filt = currADC;
-                    //return;
-                    break;
-                case 1:
-                    res->I_motor = currADC;
-                    break;
-                case 2:
-                    res->T_spin = currADC;
-                    break;
-                case 3:
-                    res->V_int = currADC;
-                    return;
-                    //return res;
-            }
-        }
-    }
+//             // Wait until end of conversion
+//             uint32_t timeout_count = 0;
+//             while ((ADC1->ISR & ADC_ISR_EOC) == 0)
+//             {
+//                 if (timeout_count < ADC_DIS_TIMEOUT)
+//                 {
+//                     //wait_ms(1);
+//                     //timeout_count += 1;
+//                 }
+//                 else
+//                 {
+//                     res->status = CS_TIMEOUT;
+//                     //return res;
+//                 }
+//             }
+//             // Store the ADC conversion
+//             uint16_t currADC = ADC1->DR;
+//             switch (i)
+//             {
+//                 case 0:
+//                     res->I_motor_filt = currADC;
+//                     //return;
+//                     break;
+//                 case 1:
+//                     res->I_motor = currADC;
+//                     break;
+//                 case 2:
+//                     res->T_spin = currADC;
+//                     break;
+//                 case 3:
+//                     res->V_int = currADC;
+//                     return;
+//                     //return res;
+//             }
+//         }
+//     }
 
-}
+// }
 
 
 /**
@@ -210,8 +210,8 @@ CS_Status_t currsen_adc_group_config()
               );
 
     // Wake-up the VREFINT (only for VBAT, Temp sensor and VRefInt) 
-    ADC->CCR |= ADC_CCR_VREFEN; // enable internal Vref source
-    ADC->CCR |= ADC_CCR_TSEN; // enable internal temp source
+    // ADC->CCR |= ADC_CCR_VREFEN; // enable internal Vref source
+    // ADC->CCR |= ADC_CCR_TSEN; // enable internal temp source
 
     return CS_OK;
 }
@@ -237,18 +237,18 @@ CS_Status_t currsen_adc_conf()
                | ADC_CFGR1_WAIT
                | ADC_CFGR1_AUTOFF
               ,
-                ADC_RESOLUTION_10B
+                ADC_RESOLUTION_12B
                | ADC_DATA_ALIGN_LEFT
                | ADC_LP_MODE_NONE
               );
 
     // Set ADC clock
-    // PCLK DIV 2, Latency is deterministic (no jitter) and equal to
+    // PCLK DIV 4, Latency is deterministic (no jitter) and equal to
     // 2.75 ADC clock cycles
     MODIFY_REG(ADC1->CFGR2,
                ADC_CFGR2_CKMODE
               ,
-               ADC_CFGR2_CKMODE_0
+               ADC_CFGR2_CKMODE_1
               );
 
     return CS_OK;

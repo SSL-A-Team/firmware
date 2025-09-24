@@ -48,7 +48,8 @@ typedef enum
 #define ADC_LP_MODE_NONE (0x00000000U)                          /*!< No ADC low power mode activated */
 
 // ADC Trigger mode
-#define ADC_REG_TRIG_EXT_EDGE_DEFAULT   (ADC_CFGR1_EXTEN_1) // falling edge only
+// #define ADC_REG_TRIG_EXT_EDGE_DEFAULT   (ADC_CFGR1_EXTEN_1) // falling edge only
+#define ADC_REG_TRIG_EXT_EDGE_DEFAULT   (ADC_CFGR1_EXTEN_0) // rising edge only
 #define ADC_REG_TRIG_SOFTWARE           (0x00000000U)                                                             /*!< ADC group regular conversion trigger internal: SW start. */
 #define ADC_REG_TRIG_EXT_TIM1_TRGO      (ADC_REG_TRIG_EXT_EDGE_DEFAULT)                                           /*!< ADC group regular conversion trigger from external IP: TIM1 TRGO. Trigger edge set to rising edge (default setting). */
 #define ADC_REG_TRIG_EXT_TIM1_CH4       (ADC_CFGR1_EXTSEL_0 | ADC_REG_TRIG_EXT_EDGE_DEFAULT)                      /*!< ADC group regular conversion trigger from external IP: TIM1 channel 4 event (capture compare: input capture or output capture). Trigger edge set to rising edge (default setting). */
@@ -92,10 +93,11 @@ typedef enum
 // transfers
 typedef struct 
 __attribute__((__packed__)) ADC_Result {
+    // uint16_t    I_motor;
     uint16_t    I_motor_filt;
-    uint16_t    I_motor;
-    uint16_t    T_spin;
-    uint16_t    V_int;
+    uint16_t    V_batt;
+    // uint16_t    T_spin;
+    // uint16_t    V_int;
     CS_Status_t status;
 } ADC_Result_t;
 
