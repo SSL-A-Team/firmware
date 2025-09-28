@@ -29,9 +29,9 @@ use crate::{
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 
-const MAX_TX_PACKET_SIZE: usize = 60;
+const MAX_TX_PACKET_SIZE: usize = 80;
 const TX_BUF_DEPTH: usize = 3;
-const MAX_RX_PACKET_SIZE: usize = 60;
+const MAX_RX_PACKET_SIZE: usize = 80;
 const RX_BUF_DEPTH: usize = 20;
 
 type ControlWheelMotor =
