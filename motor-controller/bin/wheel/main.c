@@ -68,9 +68,6 @@ int main() {
     uint32_t ticks_since_last_command_packet = 0;
     bool telemetry_enabled = false;
 
-    // initialize current sensing setup
-    ADC_Result_t res;
-    currsen_setup(ADC_MODE, &res, ADC_NUM_CHANNELS, ADC_CH_MASK, ADC_SR_MASK);
 
     // initialize motor driver
     pwm6step_setup();
@@ -82,6 +79,13 @@ int main() {
     // setup encoder
     quadenc_setup();
     quadenc_reset_encoder_delta();
+
+    // initialize current sensing setup
+    CS_Status_t cs_status = currsen_setup(ADC_CH_MASK);
+    if (cs_status != CS_OK) {
+        // turn on red LED to indicate error
+        turn_on_red_led();
+    }
 
     // Initialized response_packet here to capture the reset method.
     MotorResponse response_packet;
