@@ -213,7 +213,7 @@ int main() {
         bool run_telemetry = time_sync_ready_rst(&telemetry_timer);
 
         if (run_torque_loop) {
-            float cur_measurement = ((float) res.I_motor / (float) UINT16_MAX) * AVDD_V;
+            float cur_measurement = ((float) res.I_motor_filt / (float) UINT16_MAX) * AVDD_V;
             // TODO: recover current from voltage
             // TODO: estimate torque from current
             // TODO: filter?
