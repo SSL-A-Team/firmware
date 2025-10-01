@@ -137,7 +137,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             vel = 0.0;
         }
 
-
         test_command_publisher
             .publish(DataPacket::BasicControl(BasicControl {
                 _bitfield_1: Default::default(),

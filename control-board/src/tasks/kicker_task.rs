@@ -143,8 +143,7 @@ impl<
             } else if self.kicker_task_state >= KickerTaskState::ConnectUart {
                 // Check if connection timeout occurred
                 let time_elapsed =
-                    Instant::duration_since(&Instant::now(), connection_timeout_start)
-                        .as_millis();
+                    Instant::duration_since(&Instant::now(), connection_timeout_start).as_millis();
                 if time_elapsed > TELEMETRY_TIMEOUT_MS {
                     defmt::error!("Kicker Interface - Kicker telemetry timed out, current state is '{}', rolling state back to 'Reset'", self.kicker_task_state);
                     self.kicker_task_state = KickerTaskState::Reset;

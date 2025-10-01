@@ -281,13 +281,16 @@ impl<
         }
         return self.init_firmware_image(flash, self.firmware_image).await;
     }
-    
+
     pub async fn save_motor_current_constants(&mut self, current_constant: f32) -> Result<(), ()> {
-        defmt::debug!("Drive Motor - Saving motor current constant: {:?}", current_constant);
-        self.stm32_uart_interface.write_current_calibration_constants(current_constant).await
-
+        defmt::debug!(
+            "Drive Motor - Saving motor current constant: {:?}",
+            current_constant
+        );
+        self.stm32_uart_interface
+            .write_current_calibration_constants(current_constant)
+            .await
     }
-
 
     pub fn process_packets(&mut self) {
         while let Ok(res) = self.stm32_uart_interface.try_read_data() {

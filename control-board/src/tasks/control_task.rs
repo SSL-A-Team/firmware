@@ -459,8 +459,20 @@ impl<
             self.motor_br.set_setpoint(wheel_vels[2]);
             self.motor_fr.set_setpoint(wheel_vels[3]);
 
-            defmt::info!("wheel vels: {} {} {} {}", self.motor_fl.read_encoder_delta(), self.motor_bl.read_encoder_delta(), self.motor_br.read_encoder_delta(), self.motor_fr.read_encoder_delta());
-            defmt::info!("wheel curr: {} {} {} {}", self.motor_fl.read_current(), self.motor_bl.read_current(), self.motor_br.read_current(), self.motor_fr.read_current());
+            defmt::info!(
+                "wheel vels: {} {} {} {}",
+                self.motor_fl.read_encoder_delta(),
+                self.motor_bl.read_encoder_delta(),
+                self.motor_br.read_encoder_delta(),
+                self.motor_fr.read_encoder_delta()
+            );
+            defmt::info!(
+                "wheel curr: {} {} {} {}",
+                self.motor_fl.read_current(),
+                self.motor_bl.read_current(),
+                self.motor_br.read_current(),
+                self.motor_fr.read_current()
+            );
 
             ///////////////////////////////////
             //  send commands and telemetry  //

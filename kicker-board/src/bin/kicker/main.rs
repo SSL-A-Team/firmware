@@ -404,10 +404,7 @@ async fn high_pri_kick_task(
 
         // send telemetry packet
         let cur_time = Instant::now();
-        if Instant::duration_since(&cur_time, last_packet_sent_time)
-            .as_millis()
-            > 20
-        {
+        if Instant::duration_since(&cur_time, last_packet_sent_time).as_millis() > 20 {
             kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(
                 res.is_err() as u16,
                 dribbler_motor_telemetry.master_error() as u16,
