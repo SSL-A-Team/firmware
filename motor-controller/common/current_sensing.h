@@ -39,13 +39,15 @@ static const float MOTOR_OPAMP_RESISTOR_SENSE = 0.05f; // ohm
 // Gmax = V_dyn_range / (Imax * Rs) = 2.6 / (10.0 * 0.05) = 5.2
 // NOTE: Using Imax * Rs instead of 2 * Imax * Rs since not measuring negative current.
 // G_real = (Ra/(Ra + Rb)) * (1 + R2/R1) = (140k/(140k + 2.37k)) * (1 + 40.2k/10.0k) = 0.983 * 5.02 = 4.94
-static const float MOTOR_OPAMP_GAIN_REAL = ((MOTOR_OPAMP_RESISTOR_A / (MOTOR_OPAMP_RESISTOR_A + MOTOR_OPAMP_RESISTOR_B)) * (1.0f + (MOTOR_OPAMP_RESISTOR_2 / MOTOR_OPAMP_RESISTOR_1)));
+// static const float MOTOR_OPAMP_GAIN_REAL = ((MOTOR_OPAMP_RESISTOR_A / (MOTOR_OPAMP_RESISTOR_A + MOTOR_OPAMP_RESISTOR_B)) * (1.0f + (MOTOR_OPAMP_RESISTOR_2 / MOTOR_OPAMP_RESISTOR_1)));
 // BW = GBP/(1 + R2/R1) = 18MHz / (1 + 40.2k/10k) = 18MHz / 5.02 = 3.58MHz
 // Closed Loop Gain = 1 + R2/R1 = 1 + 40.2k/10k = 5.02 > Closed Loop Gain Min of STSPIN = 4
 // T_settling > ((Imax * Rs * G_real) / SR) = ((10.0 * 0.05 * 4.94) / 10V/us) = 0.247us
 
+static const float MOTOR_OPAMP_GAIN_REAL = 5.5;
+
 // Op-amp is configured so 0A motor current = 0.2V
-static const float V_MIN_OP_AMP = 0.2f; // V
+static const float V_MIN_OP_AMP = 0.25f; // V
 
 // VBUS voltage scaling
 // 11.5k / 1k resistor divider -> 12.5 scaling
@@ -158,6 +160,7 @@ CS_Status_t calculate_motor_zero_current_setpoint();
 float currsen_get_motor_current();
 float currsen_get_motor_current_with_offset();
 float currsen_get_motor_current_offset();
+bool currsen_calibrate_sense();
 float currsen_get_vbus_voltage();
 int32_t currsen_get_temperature();
 uint16_t currsen_get_motor_current_zero_adc_raw();

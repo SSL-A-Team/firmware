@@ -22,6 +22,8 @@ static CS_Mode_t m_cs_mode;
 static ADC_Result_t m_adc_result;
 static bool m_adc_calibrated = false;
 
+static bool m_motor_current_adc_offset_set = false;
+static size_t m_motor_current_adc_offset_ctr = 0;
 static float m_motor_current_adc_offset = 0.0f;
 
 void currsen_enable_ht() {
@@ -397,6 +399,25 @@ float currsen_get_motor_current_with_offset()
     }
 
     return i_motor;
+}
+
+bool currsen_calibrate_sense()
+{
+    if (m_motor_current_adc_offset_set) {
+        m_motor_current_adc_offset_set = false;
+        m_motor_current_adc_offset_ctr = 0;
+        m_motor_current_adc_offset = 0.0f;
+    }
+
+    m_motor_current_adc_offset += currsen_get_motor_current();
+    m_motor_current_adc_offset_ctr++;
+
+    if (m_motor_current_adc_offset_ctr >= 10) {
+        m_motor_current_adc_offset /= 10.0f;
+        m_motor_current_adc_offset_set = true;
+    }
+
+    return m_motor_current_adc_offset_set;
 }
 
 /**

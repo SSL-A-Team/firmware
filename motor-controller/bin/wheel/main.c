@@ -57,25 +57,6 @@ int main() {
     // Setups clocks
     setup();
 
-    // start watchdog
-    IWDG->KR = 0x0000CCCC; // enable the module
-    IWDG->KR = 0x00005555; // enable register writes
-    IWDG->PR = 0x4; // set prescaler to 64, 40kHz -> 625Hz, 1.6ms per tick
-    IWDG->RLR = 5; // count to 10 ticks, 16ms then trigger a system reset
-    while (IWDG->SR) {} // wait for value to take
-    IWDG->KR = 0x0000AAAA; // feed the watchdog
-
-    uint32_t ticks_since_last_command_packet = 0;
-    bool telemetry_enabled = false;
-
-
-    // initialize motor driver
-    pwm6step_setup();
-    pwm6step_set_duty_cycle_f(0.0f);
-
-    // enable ADC hardware trigger (tied to 6step timer)
-    currsen_enable_ht();
-
     // setup encoder
     quadenc_setup();
     quadenc_reset_encoder_delta();
@@ -85,6 +66,32 @@ int main() {
     if (cs_status != CS_OK) {
         // turn on red LED to indicate error
         turn_on_red_led();
+    }
+
+    // start watchdog
+    IWDG->KR = 0x0000CCCC; // enable the module
+    IWDG->KR = 0x00005555; // enable register writes
+    IWDG->PR = 0x4; // set prescaler to 64, 40kHz -> 625Hz, 1.6ms per tick
+    IWDG->RLR = 10; // count to 10 ticks, 16ms then trigger a system reset
+    while (IWDG->SR) {} // wait for value to take
+    IWDG->KR = 0x0000AAAA; // feed the watchdog
+
+    uint32_t ticks_since_last_command_packet = 0;
+    bool telemetry_enabled = false;
+
+    // initialize motor driver
+    pwm6step_setup();
+    pwm6step_set_duty_cycle_f(0.0f);
+
+    // enable ADC hardware trigger (tied to 6step timer)
+    currsen_enable_ht();
+
+    wait_ms(5);
+
+    // calibrate current
+    while (!currsen_calibrate_sense()) {
+        wait_ms(1);
+        IWDG->KR = 0x0000AAAA; // feed the watchdog
     }
 
     // Initialized response_packet here to capture the reset method.
@@ -336,13 +343,9 @@ int main() {
         if (run_torque_loop) {
             // recover torque using the shunt voltage drop, amplification network model and motor model
             // pct of voltage range 0-3.3V
-            float current_sense_shunt_v = (((float) res.I_motor_filt / (float) UINT16_MAX) * AVDD_V) + 0.009f - 0.2492f;
-            float vbatt = ((((float) res.V_batt / (float) UINT16_MAX) * AVDD_V) / 2.016f) * 25.2f;
-            if (current_sense_shunt_v < 0.0f) {
-                current_sense_shunt_v = 0.0f;
-            }
+            float vbatt = currsen_get_vbus_voltage();
             // map voltage given by the amp network to current
-            float current_sense_I = current_sense_shunt_v / 0.25f; // mm_voltage_to_current(&df45_model, current_sense_shunt_v);
+            float current_sense_I = currsen_get_motor_current_with_offset(); // mm_voltage_to_current(&df45_model, current_sense_shunt_v);
             // float current_sense_I = current_sense_shunt_v;
             // float current_sense_I = current_sense_shunt_v;
             // map current to torque using the motor model
