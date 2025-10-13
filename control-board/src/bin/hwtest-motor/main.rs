@@ -129,10 +129,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         Timer::after_millis(100).await;
 
         ctr += 1;
-        if ctr > 100 {
+        if ctr > 50 {
             ctr = 0;
-        } else if ctr > 50 {
-            vel = 1.0;
+        } else if ctr > 25 {
+            vel = 2.0;
         } else {
             vel = 0.0;
         }

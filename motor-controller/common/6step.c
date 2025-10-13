@@ -532,8 +532,6 @@ void TIM2_IRQHandler() {
     }
 
     if (TIM2->SR & TIM_SR_UIF) {
-        turn_on_red_led();
-
         TIM2_IRQHandler_HallTransition();
 
         TIM2->SR &= ~(TIM_SR_UIF);
@@ -732,7 +730,7 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     uint16_t ccmr2 = CCMR2_TIM4_ADC_TRIG;
     // TIM1->CCR4 = (current_duty_cycle == NUM_RAW_DC_STEPS) ? NUM_RAW_DC_STEPS - MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW : current_duty_cycle;
 
-    TIM1->CCR4 = 4;
+    TIM1->CCR4 = 7;
 
     if (phase1_low) {
         if (command_brake) {
