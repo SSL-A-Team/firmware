@@ -132,7 +132,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         if ctr > 100 {
             ctr = 0;
         } else if ctr > 50 {
-            vel = 2.0;
+            vel = 1.0;
         } else {
             vel = 0.0;
         }
