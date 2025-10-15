@@ -187,8 +187,8 @@ CS_Status_t currsen_setup(uint8_t motor_adc_ch)
 
     // 7.5 ADC clock cycles (0.625 us) is the minimum sampling time for the motor.
     // T_settling > ((Imax * Rs * G_real) / SR) = ((10.0 * 0.05 * 4.94) / 10V/us) = 0.247us
-    // ADC1->SMPR = ADC_SMPR_SMP_0;
-    ADC1->SMPR = 0;
+    ADC1->SMPR = ADC_SMPR_SMP_0;
+    // ADC1->SMPR = 0;
 
 
     // Set ADC channel selection. Ch9 is the Vbus.

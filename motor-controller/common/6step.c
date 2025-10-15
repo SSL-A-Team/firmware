@@ -677,15 +677,15 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     bool phase3_low  = commutation_values[4];
     bool phase3_high = commutation_values[5];
 
-    uint16_t arr_pwm_dc_value = (uint16_t) (F_SYS_CLK_HZ / ((uint32_t) PWM_FREQ_HZ * (PWM_TIM_PRESCALER + 1)) - 1);
-    TIM1->CCR4 = arr_pwm_dc_value;
+    // uint16_t arr_pwm_dc_value = (uint16_t) (F_SYS_CLK_HZ / ((uint32_t) PWM_FREQ_HZ * (PWM_TIM_PRESCALER + 1)) - 1);
+    // TIM1->CCR4 = arr_pwm_dc_value;
 
     // uint16_t ccer = 0;
     uint16_t ccer = CCER_TIM4_ADC_TRIG;
     uint16_t ccmr1 = 0;
     // uint16_t ccmr2 = 0;
     uint16_t ccmr2 = CCMR2_TIM4_ADC_TRIG;
-    TIM1->CCR4 = (current_duty_cycle == NUM_RAW_DC_STEPS) ? NUM_RAW_DC_STEPS - MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW : current_duty_cycle;
+    // TIM1->CCR4 = (current_duty_cycle == NUM_RAW_DC_STEPS) ? NUM_RAW_DC_STEPS - MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW : current_duty_cycle;
 
     TIM1->CCR4 = 22;
 
