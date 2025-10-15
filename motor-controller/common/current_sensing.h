@@ -157,6 +157,8 @@ CS_Status_t currsen_adc_en();
 CS_Status_t currsen_adc_dis();
 CS_Status_t calculate_motor_zero_current_setpoint();
 
+float currsen_get_shunt_voltage_raw();
+float currsen_get_shunt_voltage();
 float currsen_get_motor_current();
 float currsen_get_motor_current_with_offset();
 float currsen_get_motor_current_offset();

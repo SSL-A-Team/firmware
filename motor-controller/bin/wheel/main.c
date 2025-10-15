@@ -345,7 +345,10 @@ int main() {
             // pct of voltage range 0-3.3V
             float vbatt = currsen_get_vbus_voltage();
             // map voltage given by the amp network to current
-            float current_sense_I = currsen_get_motor_current_with_offset(); // mm_voltage_to_current(&df45_model, current_sense_shunt_v);
+            float current_sense_I = currsen_get_motor_current(); // mm_voltage_to_current(&df45_model, current_sense_shunt_v);
+            current_sense_I *= (0.25f / currsen_get_motor_current_offset());
+            // current_sense_I = currsen_get_motor_current_offset();
+            // current_sense_I = currsen_get_shunt_voltage_raw();
             // float current_sense_I = current_sense_shunt_v;
             // float current_sense_I = current_sense_shunt_v;
             // map current to torque using the motor model

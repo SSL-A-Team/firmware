@@ -22,9 +22,9 @@ static CS_Mode_t m_cs_mode;
 static ADC_Result_t m_adc_result;
 static bool m_adc_calibrated = false;
 
-static bool m_motor_current_adc_offset_set = false;
-static size_t m_motor_current_adc_offset_ctr = 0;
-static float m_motor_current_adc_offset = 0.0f;
+static bool m_motor_adc_offset_set = false;
+static size_t m_motor_adc_offset_ctr = 0;
+static float m_motor_adc_offset = 0.0f;
 
 void currsen_enable_ht() {
     ADC1->CR |= ADC_CR_ADSTART;
@@ -364,6 +364,21 @@ CS_Status_t currsen_adc_dis()
     return CS_OK;
 }
 
+float currsen_get_shunt_voltage_raw() {
+    float v_adc = ((float) (m_adc_result.Motor_current_raw)) * V_ADC_SCALE_V;
+
+    return v_adc;
+}
+
+float currsen_get_shunt_voltage() {
+    float v_motor_sense = (currsen_get_shunt_voltage_raw() - currsen_get_motor_current_offset()) / MOTOR_OPAMP_GAIN_REAL;
+    if (v_motor_sense < 0.0f) {
+        v_motor_sense = 0.0f;
+    }
+
+    return v_motor_sense;
+}
+
 /**
  * @brief gets the motor current. Translate from raw ADC value to
  *       to scaled raw ADC value to motor current.
@@ -372,16 +387,14 @@ CS_Status_t currsen_adc_dis()
  */
 float currsen_get_motor_current()
 {
-    float v_adc = ((float) (m_adc_result.Motor_current_raw)) * V_ADC_SCALE_V;
-    float v_motor_sense = (v_adc - V_MIN_OP_AMP) / MOTOR_OPAMP_GAIN_REAL;
-    float i_motor = v_motor_sense / MOTOR_OPAMP_RESISTOR_SENSE;
+    float i_motor = currsen_get_shunt_voltage() / MOTOR_OPAMP_RESISTOR_SENSE;
 
     return i_motor;
 }
 
 float currsen_get_motor_current_offset()
 {
-    return m_motor_current_adc_offset;
+    return m_motor_adc_offset;
 }
 
 float currsen_get_motor_current_with_offset()
@@ -403,21 +416,21 @@ float currsen_get_motor_current_with_offset()
 
 bool currsen_calibrate_sense()
 {
-    if (m_motor_current_adc_offset_set) {
-        m_motor_current_adc_offset_set = false;
-        m_motor_current_adc_offset_ctr = 0;
-        m_motor_current_adc_offset = 0.0f;
+    if (m_motor_adc_offset_set) {
+        m_motor_adc_offset_set = false;
+        m_motor_adc_offset_ctr = 0;
+        m_motor_adc_offset = 0.0f;
     }
 
-    m_motor_current_adc_offset += currsen_get_motor_current();
-    m_motor_current_adc_offset_ctr++;
+    m_motor_adc_offset += currsen_get_shunt_voltage_raw();
+    m_motor_adc_offset_ctr++;
 
-    if (m_motor_current_adc_offset_ctr >= 10) {
-        m_motor_current_adc_offset /= 10.0f;
-        m_motor_current_adc_offset_set = true;
+    if (m_motor_adc_offset_ctr >= 10) {
+        m_motor_adc_offset /= 10.0f;
+        m_motor_adc_offset_set = true;
     }
 
-    return m_motor_current_adc_offset_set;
+    return m_motor_adc_offset_set;
 }
 
 /**
@@ -459,9 +472,9 @@ void init_motor_current_adc_offset()
     // If not set, set to 0.0f.
     volatile uint32_t* current_offset_ptr = (uint32_t*) CURRENT_OFFSET_ADDRESS;
     if (*current_offset_ptr != CURRENT_OFFSET_MAGIC) {
-        m_motor_current_adc_offset = 0.0f;
+        m_motor_adc_offset = 0.0f;
     } else {
         // If the magic number matches, read the float value one after the magic number.
-        m_motor_current_adc_offset = *((float*) (current_offset_ptr + 1));
+        m_motor_adc_offset = *((float*) (current_offset_ptr + 1));
     }
 }
