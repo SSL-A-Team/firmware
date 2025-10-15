@@ -26,7 +26,7 @@ embassy-time = { version = "0.4.0", features = [
 embassy-stm32 = { version = "0.3.0", features = [
     "defmt",
     "stm32h723zg",
-    "unstable-pac", 
+    "unstable-pac",
     "time-driver-tim1",
     "exti",
     "chrono"
@@ -124,6 +124,11 @@ name = "hwtest-radio"
 test = false
 harness = false
 
+[[bin]]
+name = "calibrate-motor"
+test = false
+harness = false
+
 [[test]]
 name = "basic-test"
 harness = false
@@ -140,4 +145,3 @@ embassy-sync = { git = "https://github.com/embassy-rs/embassy"}
 embassy-time = { git = "https://github.com/embassy-rs/embassy"}
 embassy-stm32 = { git = "https://github.com/embassy-rs/embassy"}
 embassy-futures = { git = "https://github.com/embassy-rs/embassy"}
-
