@@ -34,7 +34,7 @@ macro(ateam_add_targets root_dir linker_file device_prefix)
         file(GLOB_RECURSE BIN_C_FILES "${bin_dir}/*.c")
         file(GLOB_RECURSE BIN_CXX_FILES "${bin_dir}/*.cpp")
     
-        add_executable(${target_name}.elf
+        add_executable(${target_name}
             ${BIN_ASM_FILES}
             ${BIN_C_FILES}
             ${BIN_CXX_FILES}
@@ -45,29 +45,31 @@ macro(ateam_add_targets root_dir linker_file device_prefix)
     
         header_directories(BIN_INCLUDE_DIRS ${bin_dir})
         message(INFO "${BIN_INCLUDE_DIRS}")
-        target_include_directories(${target_name}.elf PRIVATE
+        target_include_directories(${target_name} PRIVATE
             ${BIN_INCLUDE_DIRS}
             ${LOCAL_COMMON_INCLUDE_DIRS}
             ${COMMON_PACKETS_DIR}
         )
     
-        target_compile_definitions(${target_name}.elf PRIVATE
+        target_compile_definitions(${target_name} PRIVATE
             ${${device_prefix}_DEFINITIONS}
         )
     
-        target_compile_options(${target_name}.elf PRIVATE
+        target_compile_options(${target_name} PRIVATE
             $<$<COMPILE_LANGUAGE:C>:${${device_prefix}_C_OPTIONS}>
             $<$<COMPILE_LANGUAGE:CXX>:${${device_prefix}_CXX_OPTIONS}>
             -Wdouble-promotion
             -Werror=double-promotion
         ) 
     
-        target_link_options(${target_name}.elf PRIVATE ${${device_prefix}_LINKER_OPTIONS} -T ${linker_file})
+        target_link_options(${target_name} PRIVATE ${${device_prefix}_LINKER_OPTIONS} -T ${linker_file})
     
-        add_custom_target(${target_name}
-            arm-none-eabi-objcopy -Obinary "${target_name}.elf" "${target_name}.bin"
+        add_custom_command(
+            TARGET ${target_name}
+            POST_BUILD
+            COMMAND arm-none-eabi-objcopy ARGS -Obinary "${target_name}" "${target_name}.bin"
+            BYPRODUCTS ${target_name}.bin
             WORKING_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
-            DEPENDS ${target_name}.elf
             COMMENT "create flat binary for programming"
         )
     

@@ -20,7 +20,7 @@ from pathlib import Path
 
 
 firmware_dir_path = (Path(__file__) / ".." / "..").absolute().resolve()
-control_bin_path = firmware_dir_path / "control-board" / "target" / "thumbv7em-none-eabihf" / "release" / "control"
+control_bin_path = firmware_dir_path / "control-board" / "target" / "thumbv7em-none-eabihf" / "release" / "control.bin"
 kicker_bin_path = firmware_dir_path / "kicker-board" / "target" / "thumbv7em-none-eabihf" / "release" / "kicker.bin"
 wheel_bin_path = firmware_dir_path / "motor-controller" / "build" / "bin" / "wheel.bin"
 dribbler_bin_path = firmware_dir_path / "motor-controller" / "build" / "bin" / "dribbler.bin"
@@ -82,18 +82,9 @@ def try_embed_img_hash(embed_img_path, img_path, img_hash_magic):
 
 
 if __name__ == "__main__":
-    embed_img_path = os.path.join(firmware_dir_path, f"control-board/target/thumbv7em-none-eabihf/release/control")
-    try_embed_img_hash(embed_img_path, wheel_bin_path, wheel_img_hash_magic_ctrl)
-    try_embed_img_hash(embed_img_path, wheel_bin_path, wheel_img_hash_magic_weel)
-    try_embed_img_hash(embed_img_path, kicker_bin_path, kicker_img_hash_magic_ctrl)
-    try_embed_img_hash(embed_img_path, kicker_bin_path, kicker_img_hash_magic_kick)
-    try_embed_img_hash(embed_img_path, dribbler_bin_path, dribbler_img_hash_magic_kick)
-    try_embed_img_hash(embed_img_path, dribbler_bin_path, dribbler_img_hash_magic_drbl)
-    # Do we use control.bin for anything?
-    # embed_img_path = embed_img_path + ".bin"
-    # try_embed_img_hash(embed_img_path, wheel_bin_path, wheel_img_hash_magic_ctrl)
-    # try_embed_img_hash(embed_img_path, wheel_bin_path, wheel_img_hash_magic_weel)
-    # try_embed_img_hash(embed_img_path, kicker_bin_path, kicker_img_hash_magic_ctrl)
-    # try_embed_img_hash(embed_img_path, kicker_bin_path, kicker_img_hash_magic_kick)
-    # try_embed_img_hash(embed_img_path, dribbler_bin_path, dribbler_img_hash_magic_kick)
-    # try_embed_img_hash(embed_img_path, dribbler_bin_path, dribbler_img_hash_magic_drbl)
+    try_embed_img_hash(control_bin_path, wheel_bin_path, wheel_img_hash_magic_ctrl)
+    try_embed_img_hash(control_bin_path, wheel_bin_path, wheel_img_hash_magic_weel)
+    try_embed_img_hash(control_bin_path, kicker_bin_path, kicker_img_hash_magic_ctrl)
+    try_embed_img_hash(control_bin_path, kicker_bin_path, kicker_img_hash_magic_kick)
+    try_embed_img_hash(control_bin_path, dribbler_bin_path, dribbler_img_hash_magic_kick)
+    try_embed_img_hash(control_bin_path, dribbler_bin_path, dribbler_img_hash_magic_drbl)
