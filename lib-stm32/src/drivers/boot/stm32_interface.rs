@@ -30,6 +30,11 @@ pub const STM32_BOOTLOADER_CMD_READ_PROT: u8 = 0x82;
 pub const STM32_BOOTLOADER_CMD_READ_UNPROT: u8 = 0x92;
 pub const STM32_BOOTLOADER_CMD_GET_CHECKSUM: u8 = 0xA1;
 
+// TODO Make this shared in software-communication
+pub const MOTOR_CURRENT_START_ADDRESS: u32 = 0x0800_7C00; // 512k flash, so this is the start of the last page
+pub const MOTOR_CURRENT_PAGE: u8 = 31;
+pub const MOTOR_CURRENT_MAGIC: [u8; 4] = [0xAA, 0xBB, 0xCC, 0xDD]; // Magic number to identify the motor current calibration data
+
 pub fn get_bootloader_uart_config() -> Config {
     let mut config = usart::Config::default();
     config.baudrate = 115_200; // max officially support baudrate
@@ -190,7 +195,10 @@ impl<
                     } else {
                         defmt::debug!("bootloader replied with NACK after calibration.");
                     }
+                } else {
+                    defmt::debug!("bootloader reply too short after calibration.");
                 }
+                res
             }),
         )
         .await;
@@ -350,8 +358,215 @@ impl<
         res
     }
 
-    pub async fn read_device_memory(&self) -> Result<(), ()> {
-        defmt::panic!("implement if needed.");
+    // Based on 3.4 of AN3155
+    pub async fn read_device_memory(&self, data: &mut [u8], read_base_addr: u32) -> Result<(), ()> {
+        if !self.in_bootloader {
+            defmt::error!("called bootloader operation when not in bootloader context.");
+            return Err(());
+        }
+
+        let data_len = data.len();
+        if data_len > 255 || data_len + 1 > LEN_TX {
+            defmt::error!("Data length too large for bootloader read mem command.");
+            return Err(());
+        }
+
+        // defmt::debug!("sending the read command...");
+        self.writer
+            .write(|buf| {
+                buf[0] = STM32_BOOTLOADER_CMD_READ_MEM;
+                buf[1] = !STM32_BOOTLOADER_CMD_READ_MEM;
+                //defmt::info!("send buffer {:?}", buf);
+                2
+            })
+            .await?;
+
+        // Wait for the bootloader to acknowledge the command
+        let mut res = Err(());
+        self.reader
+            .read(|buf| {
+                // defmt::info!("Read cmd reply {:?}", buf);
+                if buf.len() >= 1 {
+                    if buf[0] == STM32_BOOTLOADER_ACK {
+                        res = Ok(());
+                    } else {
+                        defmt::error!("Read mem cmd replied with NACK");
+                    }
+                } else {
+                    defmt::error!("Read mem cmd reply too short.");
+                }
+            })
+            .await?;
+
+        if res.is_err() {
+            return res;
+        }
+
+        // defmt::debug!("sending the load address {:?}...", read_base_addr);
+        self.writer
+            .write(|buf| {
+                let start_address_bytes: [u8; 4] = read_base_addr.to_be_bytes();
+                let cs = Self::bootloader_checksum_u32(read_base_addr);
+                buf[0] = start_address_bytes[0];
+                buf[1] = start_address_bytes[1];
+                buf[2] = start_address_bytes[2];
+                buf[3] = start_address_bytes[3];
+                buf[4] = cs;
+                // defmt::debug!("send buffer {:?}", buf);
+                5
+            })
+            .await?;
+
+        res = Err(());
+        // Wait for the bootloader to acknowledge the address
+        self.reader
+            .read(|buf| {
+                // defmt::info!("go cmd reply {:?}", buf);
+                if buf.len() >= 1 {
+                    if buf[0] == STM32_BOOTLOADER_ACK {
+                        res = Ok(());
+                    } else {
+                        defmt::error!("Address read mem replied with NACK");
+                    }
+                } else {
+                    defmt::error!("Address read mem reply too short.");
+                }
+            })
+            .await?;
+
+        if res.is_err() {
+            return res;
+        }
+
+        // defmt::debug!("sending the data length...");
+        self.writer
+            .write(|buf| {
+                let data_len_minus_one = data_len as u8 - 1;
+                buf[0] = data_len_minus_one;
+                buf[1] = !data_len_minus_one;
+                // defmt::debug!("send buffer {:?}", buf);
+                2
+            })
+            .await?;
+
+        res = Err(());
+        // defmt::debug!("reading the data...");
+        self.reader
+            .read(|buf| {
+                // defmt::info!("data reply {:?}", buf);
+                if buf.len() >= 1 {
+                    if buf[0] == STM32_BOOTLOADER_ACK {
+                        data.copy_from_slice(&buf[1..]);
+                        res = Ok(());
+                    } else {
+                        defmt::error!("Data read mem replied with NACK");
+                    }
+                } else {
+                    defmt::error!("Data read mem reply too short!");
+                }
+            })
+            .await?;
+
+        res
+    }
+
+    // Based on 3.8 of AN3155
+    // Have to use extended erase command since the normal erase command
+    // doesn't seem to work?
+    // Designed to erase a up to N + 1 page of device memory.
+    pub async fn erase_device_memory_to_page(
+        &self,
+        start_page: u8,
+        end_page: u8,
+    ) -> Result<(), ()> {
+        if !self.in_bootloader {
+            defmt::error!("Called bootloader operation when not in bootloader context.");
+            return Err(());
+        }
+
+        if end_page < start_page {
+            defmt::error!("End page must be greater than or equal to start page.");
+            return Err(());
+        }
+
+        // defmt::debug!("sending the erase command...");
+        self.writer
+            .write(|buf| {
+                buf[0] = STM32_BOOTLOADER_CMD_EXTENDED_ERASE;
+                buf[1] = !STM32_BOOTLOADER_CMD_EXTENDED_ERASE;
+                2
+            })
+            .await?;
+
+        let mut res = Err(());
+        self.reader
+            .read(|buf| {
+                // defmt::info!("erase cmd reply {:?}", buf);
+                if buf.len() >= 1 {
+                    if buf[0] == STM32_BOOTLOADER_ACK {
+                        res = Ok(());
+                    } else {
+                        defmt::error!("Bootloader replied to erase command with NACK");
+                    }
+                } else {
+                    defmt::error!("Erase command reply too short.");
+                }
+            })
+            .await?;
+
+        if res.is_err() {
+            return res;
+        }
+
+        // defmt::debug!("sending the page number...");
+        self.writer
+            .write(|buf| {
+                // Quantity is N + 1 lead with MSB. Limited to 32 pages on STM32F1.
+                let erase_page_quantity = end_page - start_page;
+                buf[0] = 0x00;
+                buf[1] = erase_page_quantity;
+                // Need to send the page number for each page to erase in two bytes, MSB first
+                let mut checksum = erase_page_quantity;
+                // Track the index for use in returning the buffer length
+                let mut buf_indx: usize = 2;
+                for i in start_page..=end_page {
+                    // Won't erase more than 256 pages, so always lead with 0x00
+                    buf[buf_indx] = 0x00;
+                    buf[buf_indx + 1] = i;
+                    buf_indx += 2;
+                    // Checksum is XOR of all previous bytes. Ignore 0x00 so just LSB
+                    checksum ^= i;
+                }
+                // Checksum for all previous bytes is just the erase page number
+                buf[buf_indx] = checksum;
+                // defmt::debug!("send buffer {:?}", buf);
+                // Final size is buf_indx + 1 from checksum byte
+                buf_indx + 1
+            })
+            .await?;
+
+        // defmt::debug!("wait for erase reply");
+        self.reader
+            .read(|buf| {
+                // defmt::info!("erase reply {:?}", buf);
+                if buf.len() >= 1 {
+                    if buf[0] == STM32_BOOTLOADER_ACK {
+                        res = Ok(());
+                        // defmt::info!("erase accepted.");
+                    } else {
+                        defmt::error!("bootloader replied to erase payload with NACK");
+                    }
+                }
+            })
+            .await?;
+
+        res
+    }
+
+    // Single page of device memory is just a page to the same page.
+    pub async fn erase_device_memory_single(&self, erase_page: u8) -> Result<(), ()> {
+        self.erase_device_memory_to_page(erase_page, erase_page)
+            .await
     }
 
     async fn write_device_memory_chunk(&self, data: &[u8], write_base_addr: u32) -> Result<(), ()> {
@@ -463,7 +678,7 @@ impl<
             return Err(());
         }
 
-        // ensure step size is below bootlaoder supported, below transmit buffer size (incl len and cs bytes),
+        // ensure step size is below bootloader supported, below transmit buffer size (incl len and cs bytes),
         // and is 4-byte aligned
         let step_size = min(256, LEN_TX - 2) & 0xFFFF_FFF8;
         defmt::debug!("bootloader will use data chunk sizes of {:?}", step_size);
@@ -585,6 +800,111 @@ impl<
         self.write_device_memory(fw_image_bytes, None).await?;
 
         self.reset_into_program(leave_in_reset).await;
+
+        Ok(())
+    }
+
+    pub async fn load_motor_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
+        if !self.in_bootloader {
+            if let Err(err) = self.reset_into_bootloader().await {
+                return Err(err);
+            }
+        }
+
+        if let Err(err) = self.verify_bootloader().await {
+            return Err(err);
+        }
+
+        match self.get_device_id().await {
+            Err(err) => return Err(err),
+            Ok(device_id) => match device_id {
+                68 => {
+                    defmt::trace!("found stm32f1 device");
+                }
+                19 => {
+                    defmt::trace!("found stm32f40xxx device");
+                }
+                105 => {
+                    defmt::trace!("found stm32g474xx device");
+                }
+                _ => {
+                    defmt::error!("found unknown device id {}", device_id);
+                    return Err(());
+                }
+            },
+        };
+
+        // Erase up to Page 31 since the last page is used for current calibration constants.
+        if let Err(err) = self.erase_device_memory_to_page(0, 15).await {
+            return Err(err);
+        }
+
+        // Split up to 2 commands to reduce UART packet size.
+        if let Err(err) = self
+            .erase_device_memory_to_page(16, MOTOR_CURRENT_PAGE)
+            .await
+        {
+            return Err(err);
+        }
+
+        // program image
+        if let Err(err) = self.write_device_memory(fw_image_bytes, None).await {
+            return Err(err);
+        }
+
+        self.reset_into_program(true).await;
+
+        Ok(())
+    }
+
+    pub async fn write_current_calibration_constants(
+        &mut self,
+        current_constant: f32,
+    ) -> Result<(), ()> {
+        if !self.in_bootloader {
+            if let Err(err) = self.reset_into_bootloader().await {
+                return Err(err);
+            }
+        }
+
+        if let Err(err) = self.verify_bootloader().await {
+            return Err(err);
+        }
+
+        match self.get_device_id().await {
+            Err(err) => return Err(err),
+            Ok(device_id) => match device_id {
+                68 => {
+                    defmt::trace!("found STSPINF0 device");
+                }
+                _ => {
+                    defmt::error!(
+                        "Invalid device id for current calibration constants {}",
+                        device_id
+                    );
+                    return Err(());
+                }
+            },
+        };
+
+        // Erase the last page
+        if let Err(err) = self.erase_device_memory_single(MOTOR_CURRENT_PAGE).await {
+            return Err(err);
+        }
+
+        // Write the constants to the last page but with the magic number prepended
+        let mut data_to_write = [0u8; 8];
+        data_to_write[..4].copy_from_slice(&MOTOR_CURRENT_MAGIC);
+        // Convert the f32 to bytes and write it after the magic number
+        let current_bytes = current_constant.to_le_bytes();
+        data_to_write[4..8].copy_from_slice(&current_bytes);
+
+        if let Err(err) = self
+            .write_device_memory(&data_to_write, Some(MOTOR_CURRENT_START_ADDRESS))
+            .await
+        {
+            return Err(err);
+        }
 
         Ok(())
     }

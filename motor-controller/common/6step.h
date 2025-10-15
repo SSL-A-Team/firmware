@@ -17,10 +17,10 @@
 #define MAX_DUTYCYCLE_COMMAND 65535U
 #define MIN_DUTYCYCLE_COMMAND -(MAX_DUTYCYCLE_COMMAND)
 
-#define NUM_RAW_DC_STEPS 1000U
-#define MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW 10U
-#define SCALING_FACTOR ((MAX_DUTYCYCLE_COMMAND / (NUM_RAW_DC_STEPS - MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW)) + 1U)
-#define MAP_UINT16_TO_RAW_DC(dc) (dc > 0 ? ((dc / SCALING_FACTOR) + MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW) : 0U)
+// period 20833ns
+// be conscious of dead time ratio
+#define PWM_TIM_PRESCALER 0
+#define PWM_FREQ_HZ 40000
 
 //////////////////////
 //  ERROR HANDLING  //
@@ -49,12 +49,6 @@ typedef struct MotorErrors {
 //  LOW LEVEL CONTROL PARAMS  //
 ////////////////////////////////
 
-#define PWM_TIM_PRESCALER 0
-
-// period 20833ns
-// be conscious of dead time ratio
-#define PWM_FREQ_HZ 48000
-
 // no div on CK_INT = 48MHz
 // Tdts = CK_INT = 48MHz
 // xxx yyyyy -> 0xx selects no multiplier
@@ -63,6 +57,13 @@ typedef struct MotorErrors {
 // DEAD_TIME = 20.8 * 7 = 145.6ns
 // 0000 0111 = 0x07
 #define DEAD_TIME 0x07
+
+#define NUM_RAW_DC_STEPS (uint16_t) (F_SYS_CLK_HZ / ((uint32_t) PWM_FREQ_HZ * (PWM_TIM_PRESCALER + 1)))
+#define MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW 10U
+#define SCALING_FACTOR ((MAX_DUTYCYCLE_COMMAND / (NUM_RAW_DC_STEPS - MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW)) + 1U)
+#define MAP_UINT16_TO_RAW_DC(dc) (dc > 0 ? ((dc / SCALING_FACTOR) + MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW) : 0U)
+
+// #define FORCE_COMUTATION_TRANSITION_DELAY
 
 ////////////////////////
 //  PUBLIC FUNCTIONS  //

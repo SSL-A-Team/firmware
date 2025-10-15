@@ -62,8 +62,11 @@ int main() {
     bool telemetry_enabled = false;
 
     // initialize current sensing setup
-    ADC_Result_t res;
-    currsen_setup(ADC_MODE, &res, ADC_NUM_CHANNELS, ADC_CH_MASK, ADC_SR_MASK);
+    CS_Status_t cs_status = currsen_setup(ADC_CH_MASK);
+    if (cs_status != CS_OK) {
+        // turn on red LED to indicate error
+        turn_on_red_led();
+    }
 
     // initialize motor driver
     pwm6step_setup();
@@ -293,9 +296,8 @@ int main() {
         if (run_torque_loop) {
             // recover torque using the shunt voltage drop, amplification network model and motor model
             // pct of voltage range 0-3.3V
-            float current_sense_shunt_v = ((float) res.I_motor_filt / (float) UINT16_MAX) * AVDD_V;
             // map voltage given by the amp network to current
-            float current_sense_I = mm_voltage_to_current(&df45_model, current_sense_shunt_v);
+            float current_sense_I = currsen_get_motor_current_with_offset();
             // map current to torque using the motor model
             float measured_torque_Nm = mm_current_to_torque(&df45_model, current_sense_I);
             // filter torque
@@ -336,7 +338,7 @@ int main() {
             response_packet.data.motion.current_estimate = current_sense_I;
             response_packet.data.motion.torque_estimate = measured_torque_Nm;
             response_packet.data.motion.torque_computed_error = torque_pid.prev_err;
-            response_packet.data.motion.torque_computed_setpoint = torque_setpoint_Nm;
+            response_packet.data.motion.torque_computed_nm = torque_setpoint_Nm;
         }
 
         // run velocity loop if applicable
@@ -368,11 +370,11 @@ int main() {
 
             // velocity control data
             response_packet.data.motion.vel_setpoint = r_motor_board;
-            response_packet.data.motion.vel_setpoint_clamped = control_setpoint_vel_rads;
+            response_packet.data.motion.vel_computed_rads = control_setpoint_vel_rads;
             response_packet.data.motion.encoder_delta = enc_delta;
             response_packet.data.motion.vel_enc_estimate = enc_rad_s_filt;
             response_packet.data.motion.vel_computed_error = vel_pid.prev_err;
-            response_packet.data.motion.vel_computed_setpoint = control_setpoint_vel_duty;
+            response_packet.data.motion.vel_computed_duty = control_setpoint_vel_duty;
         }
 
         if (run_torque_loop || run_vel_loop) {
@@ -428,7 +430,7 @@ int main() {
 
             // transmit packets
 #ifdef UART_ENABLED
-            if (telemetry_enabled && run_telemetry) {
+            if (run_telemetry) {
                 // If previous UART transmit is still occurring,
                 // wait for it to finish.
                 uart_wait_for_transmission();
@@ -458,7 +460,7 @@ int main() {
                 response_packet.data.params.version_major = VERSION_MAJOR;
                 response_packet.data.params.version_major = VERSION_MINOR;
                 response_packet.data.params.version_major = VERSION_PATCH;
-                response_packet.data.params.timestamp = time_local_epoch_s();
+                response_packet.timestamp = time_local_epoch_s();
 
                 response_packet.data.params.vel_p = vel_pid_constants.kP;
                 response_packet.data.params.vel_i = vel_pid_constants.kI;
@@ -500,7 +502,7 @@ int main() {
         // Red LED means we are in an error state.
         // This latches and requires resetting the robot to clear.
         if (response_packet.data.motion.master_error ||
-            (telemetry_enabled && ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS)) {
+            ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
             turn_on_red_led();
         }
 

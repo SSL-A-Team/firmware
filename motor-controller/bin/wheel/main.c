@@ -57,20 +57,27 @@ int main() {
     // Setups clocks
     setup();
 
+    // setup encoder
+    quadenc_setup();
+    quadenc_reset_encoder_delta();
+
+    // initialize current sensing setup
+    CS_Status_t cs_status = currsen_setup(ADC_CH_MASK);
+    if (cs_status != CS_OK) {
+        // turn on red LED to indicate error
+        turn_on_red_led();
+    }
+
     // start watchdog
     IWDG->KR = 0x0000CCCC; // enable the module
     IWDG->KR = 0x00005555; // enable register writes
     IWDG->PR = 0x4; // set prescaler to 64, 40kHz -> 625Hz, 1.6ms per tick
-    IWDG->RLR = 5; // count to 10 ticks, 16ms then trigger a system reset
+    IWDG->RLR = 10; // count to 10 ticks, 16ms then trigger a system reset
     while (IWDG->SR) {} // wait for value to take
     IWDG->KR = 0x0000AAAA; // feed the watchdog
 
     uint32_t ticks_since_last_command_packet = 0;
     bool telemetry_enabled = false;
-
-    // initialize current sensing setup
-    ADC_Result_t res;
-    currsen_setup(ADC_MODE, &res, ADC_NUM_CHANNELS, ADC_CH_MASK, ADC_SR_MASK);
 
     // initialize motor driver
     pwm6step_setup();
@@ -79,9 +86,13 @@ int main() {
     // enable ADC hardware trigger (tied to 6step timer)
     currsen_enable_ht();
 
-    // setup encoder
-    quadenc_setup();
-    quadenc_reset_encoder_delta();
+    wait_ms(5);
+
+    // calibrate current
+    while (!currsen_calibrate_sense()) {
+        wait_ms(1);
+        IWDG->KR = 0x0000AAAA; // feed the watchdog
+    }
 
     // Initialized response_packet here to capture the reset method.
     MotorResponse response_packet;
@@ -194,6 +205,8 @@ int main() {
     // Turn off Red/Yellow LED after booting.
     turn_off_red_led();
     turn_off_yellow_led();
+
+    uint16_t green_led_ctr = 0;
 
     #ifdef UART_ENABLED
     // Initialize UART and logging status.
@@ -330,9 +343,14 @@ int main() {
         if (run_torque_loop) {
             // recover torque using the shunt voltage drop, amplification network model and motor model
             // pct of voltage range 0-3.3V
-            float current_sense_shunt_v = ((float) res.I_motor_filt / (float) UINT16_MAX) * AVDD_V;
+            float vbatt = currsen_get_vbus_voltage();
             // map voltage given by the amp network to current
-            float current_sense_I = mm_voltage_to_current(&df45_model, current_sense_shunt_v);
+            float current_sense_I = currsen_get_motor_current(); // mm_voltage_to_current(&df45_model, current_sense_shunt_v);
+            current_sense_I *= (0.25f / currsen_get_motor_current_offset());
+            // current_sense_I = currsen_get_motor_current_offset();
+            // current_sense_I = currsen_get_shunt_voltage_raw();
+            // float current_sense_I = current_sense_shunt_v;
+            // float current_sense_I = current_sense_shunt_v;
             // map current to torque using the motor model
             float measured_torque_Nm = mm_current_to_torque(&df45_model, current_sense_I);
             // filter torque
@@ -373,7 +391,7 @@ int main() {
             response_packet.data.motion.current_estimate = current_sense_I;
             response_packet.data.motion.torque_estimate = measured_torque_Nm;
             response_packet.data.motion.torque_computed_error = torque_pid.prev_err;
-            response_packet.data.motion.torque_computed_setpoint = torque_setpoint_Nm;
+            response_packet.data.motion.torque_computed_nm = torque_setpoint_Nm;
         }
 
         // run velocity loop if applicable
@@ -414,11 +432,11 @@ int main() {
 
             // velocity control data
             response_packet.data.motion.vel_setpoint = r_motor_board;
-            response_packet.data.motion.vel_setpoint_clamped = control_setpoint_vel_rads;
+            response_packet.data.motion.vel_computed_rads = control_setpoint_vel_rads;
             response_packet.data.motion.encoder_delta = enc_delta;
             response_packet.data.motion.vel_enc_estimate = enc_rad_s_filt;
             response_packet.data.motion.vel_computed_error = vel_pid.prev_err;
-            response_packet.data.motion.vel_computed_setpoint = control_setpoint_vel_duty;
+            response_packet.data.motion.vel_computed_duty = control_setpoint_vel_duty;
         }
 
         if (run_torque_loop || run_vel_loop) {
@@ -430,7 +448,7 @@ int main() {
             if (motion_control_type == OPEN_LOOP) {
                 float r_motor = mm_rads_to_dc(&df45_model, r_motor_board);
                 response_packet.data.motion.vel_setpoint = r_motor_board;
-                response_packet.data.motion.vel_computed_setpoint = r_motor;
+                response_packet.data.motion.vel_setpoint = r_motor;
                 pwm6step_set_duty_cycle_f(r_motor);
             } else if (motion_control_type == VELOCITY) {
                 pwm6step_set_duty_cycle_f(control_setpoint_vel_duty);
@@ -487,7 +505,7 @@ int main() {
 
             // transmit packets
 #ifdef UART_ENABLED
-            if (telemetry_enabled && run_telemetry) {
+            if (run_telemetry) {
                 // If previous UART transmit is still occurring,
                 // wait for it to finish.
                 uart_wait_for_transmission();
@@ -517,7 +535,7 @@ int main() {
                 response_packet.data.params.version_major = VERSION_MAJOR;
                 response_packet.data.params.version_minor = VERSION_MINOR;
                 response_packet.data.params.version_patch = VERSION_PATCH;
-                response_packet.data.params.timestamp = time_local_epoch_s();
+                response_packet.timestamp = time_local_epoch_s();
 
                 // TODO parameter updates are off for gain scheduled PID
                 // response_packet.data.params.vel_p = vel_pid_constants.kP;
@@ -562,7 +580,7 @@ int main() {
         // Red LED means we are in an error state.
         // This latches and requires resetting the robot to clear.
         if (response_packet.data.motion.master_error ||
-            (telemetry_enabled && ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS)) {
+            ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
             turn_on_red_led();
         }
 
@@ -575,17 +593,25 @@ int main() {
             turn_off_yellow_led();
         }
 
-        // Green LED means we are able to send telemetry upstream.
-        // This means the upstream sent a packet downstream with telemetry enabled.
+        // Green LED means system is up. Flicker means we're acknowledging that
+        // control has enabled the system (non-zero motor commands allowed)
         if (!telemetry_enabled) {
-            turn_off_green_led();
-        } else {
             turn_on_green_led();
+        } else {
+            // 5Hz flicker
+            if (green_led_ctr > 200) {
+                green_led_ctr = 0;
+            } else if (green_led_ctr > 100) {
+                turn_off_green_led();
+            } else {
+                turn_on_green_led();
+            }
+
+            green_led_ctr++;
         }
 
         #ifdef COMP_MODE
-        if (telemetry_enabled &&
-            ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
+        if (ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
             // If have telemetry enabled (meaning we at one
             // point received a message from upstream) and haven't
             // received a command packet in a while, we need to reset

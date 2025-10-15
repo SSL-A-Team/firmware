@@ -189,8 +189,7 @@ async fn imu_task_entry(
                         } else {
                             // After the first tipped is seen, then wait if it has been tipped for long enough.
                             let cur_time = Instant::now();
-                            if Instant::checked_duration_since(&cur_time, first_tipped_check_time)
-                                .unwrap()
+                            if Instant::duration_since(&cur_time, first_tipped_check_time)
                                 .as_millis()
                                 > TIPPED_MIN_DURATION_MS
                             {

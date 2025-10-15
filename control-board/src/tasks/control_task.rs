@@ -29,9 +29,9 @@ use crate::{
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
 
-const MAX_TX_PACKET_SIZE: usize = 60;
+const MAX_TX_PACKET_SIZE: usize = 80;
 const TX_BUF_DEPTH: usize = 3;
-const MAX_RX_PACKET_SIZE: usize = 60;
+const MAX_RX_PACKET_SIZE: usize = 80;
 const RX_BUF_DEPTH: usize = 20;
 
 type ControlWheelMotor =
@@ -378,7 +378,7 @@ impl<
                             self.last_command.wheel_vel_control_enabled() != 0,
                             self.last_command.wheel_torque_control_enabled() != 0,
                         ) {
-                            (true, true) => MotionCommandType::BOTH,
+                            (true, true) => MotionCommandType::VELOCITY_W_TORQUE,
                             (true, false) => MotionCommandType::VELOCITY,
                             (false, true) => MotionCommandType::TORQUE,
                             (false, false) => MotionCommandType::OPEN_LOOP,
@@ -459,8 +459,20 @@ impl<
             self.motor_br.set_setpoint(wheel_vels[2]);
             self.motor_fr.set_setpoint(wheel_vels[3]);
 
-            // defmt::info!("wheel vels: {} {} {} {}", self.motor_fl.read_encoder_delta(), self.motor_bl.read_encoder_delta(), self.motor_br.read_encoder_delta(), self.motor_fr.read_encoder_delta());
-            // defmt::info!("wheel curr: {} {} {} {}", self.motor_fl.read_current(), self.motor_bl.read_current(), self.motor_br.read_current(), self.motor_fr.read_current());
+            defmt::info!(
+                "wheel vels: {} {} {} {}",
+                self.motor_fl.read_encoder_delta(),
+                self.motor_bl.read_encoder_delta(),
+                self.motor_br.read_encoder_delta(),
+                self.motor_fr.read_encoder_delta()
+            );
+            defmt::info!(
+                "wheel curr: {} {} {} {}",
+                self.motor_fl.read_current(),
+                self.motor_bl.read_current(),
+                self.motor_br.read_current(),
+                self.motor_fr.read_current()
+            );
 
             ///////////////////////////////////
             //  send commands and telemetry  //
