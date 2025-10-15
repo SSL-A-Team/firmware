@@ -20,7 +20,7 @@
 // period 20833ns
 // be conscious of dead time ratio
 #define PWM_TIM_PRESCALER 0
-#define PWM_FREQ_HZ 48000
+#define PWM_FREQ_HZ 40000
 
 //////////////////////
 //  ERROR HANDLING  //
