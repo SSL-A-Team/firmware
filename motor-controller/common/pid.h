@@ -1,8 +1,10 @@
 
 #pragma once
 
-#include "stddef.h"
-#include "stdbool.h"
+#include <stddef.h>
+#include <stdbool.h>
+
+#include "fixedarith.h"
 
 typedef struct PidConstants {
     float kP;
@@ -50,3 +52,21 @@ typedef struct GainScheduledPid {
 GainScheduledPidResult_t gspid_initialize(GainScheduledPid_t *pid, size_t num_gain_stages, PidConstants_t *pid_constants, float *gain_schedule, float hyst_pct, bool gain_schedule_abs);
 float gspid_calculate(GainScheduledPid_t *pid, float r, float y, float dt);
 size_t gspid_get_cur_gain_stage_index(GainScheduledPid_t *pid);
+
+typedef struct FixedPointS12F4_PiConstants {
+    Int16FixedPoint_t kP;
+    Int16FixedPoint_t kI;
+    Int16FixedPoint_t kI_max;
+    Int16FixedPoint_t kI_min;
+} FixedPointS12F4_PiConstants_t;
+
+typedef struct FixedPointS12F4_PiController {
+    FixedPointS12F4_PiConstants_t *pi_constants;
+    Int16FixedPoint_t eI;
+
+    Int16FixedPoint_t setpoint;
+    Int16FixedPoint_t output;
+} FixedPointS12F4_PiController_t;
+
+void fxptpi_initialize();
+void fxptpi_calculate();
