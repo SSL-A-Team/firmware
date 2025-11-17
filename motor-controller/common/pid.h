@@ -54,19 +54,26 @@ float gspid_calculate(GainScheduledPid_t *pid, float r, float y, float dt);
 size_t gspid_get_cur_gain_stage_index(GainScheduledPid_t *pid);
 
 typedef struct FixedPointS12F4_PiConstants {
-    Int16FixedPoint_t kP;
-    Int16FixedPoint_t kI;
-    Int16FixedPoint_t kI_max;
-    Int16FixedPoint_t kI_min;
+    Int16FixedPoint_t kP;        // S07F10
+    Int16FixedPoint_t kI;        // S05F13
+    Int16FixedPoint_t kI_max;    // S12F0
+    Int16FixedPoint_t kI_min;    // S12F0
+    Int16FixedPoint_t anti_jitter_thresh;     // S12F0
+    Int16FixedPoint_t anti_jitter_thresh_inv; // S0F12
 } FixedPointS12F4_PiConstants_t;
 
 typedef struct FixedPointS12F4_PiController {
     FixedPointS12F4_PiConstants_t *pi_constants;
-    Int16FixedPoint_t eI;
+    Int16FixedPoint_t eI;        // S12F12
 
-    Int16FixedPoint_t setpoint;
-    Int16FixedPoint_t output;
+    Int16FixedPoint_t setpoint;  // S12F0
+    Int16FixedPoint_t output;    // S12F0
+
+    bool overload;
 } FixedPointS12F4_PiController_t;
 
-void fxptpi_initialize();
-void fxptpi_calculate();
+void fxptpi_constants_initialize(FixedPointS12F4_PiConstants_t *pid_constants);
+void fxptpi_initialize(FixedPointS12F4_PiController_t *pi, FixedPointS12F4_PiConstants_t *pi_constants);
+void fxptpi_setpoint(FixedPointS12F4_PiController_t *pi, Int16FixedPoint_t r);
+Int16FixedPoint_t fxptpi_calculate(FixedPointS12F4_PiController_t *pid, Int16FixedPoint_t y, Int16FixedPoint_t dt);
+Int16FixedPoint_t fxptpi_get_output(FixedPointS12F4_PiController_t *pid);

@@ -22,5 +22,8 @@
     // this gnarly in too many files
     // ctrl + alt to show
     "editor.inlayHints.enabled": "offUnlessPressed",
-    "ros.distro": "humble"
+    "ros.distro": "humble",
+    "files.associations": {
+        "compare": "c"
+    }
 }

@@ -1,5 +1,6 @@
 
 #include <float.h>
+#include <limits.h>
 #include <math.h>
 
 #include "pid.h"
@@ -180,4 +181,117 @@ float gspid_calculate(GainScheduledPid_t *pid, float r, float y, float dt) {
 
 size_t gspid_get_cur_gain_stage_index(GainScheduledPid_t *pid) {
     return pid->cur_gain_stage_ind;
+}
+
+void fxptpi_constants_initialize(FixedPointS12F4_PiConstants_t *pi_constants) {
+    pi_constants->kP = 0;
+    pi_constants->kI = 0;
+    pi_constants->kI_max = 4095; // S12F0
+    pi_constants->kI_min = -4096; // S12F0
+    pi_constants->anti_jitter_thresh = 0;
+    pi_constants->anti_jitter_thresh_inv = 0;
+}
+
+void fxptpi_initialize(FixedPointS12F4_PiController_t *pi, FixedPointS12F4_PiConstants_t *pi_constants) {
+    pi->pi_constants = pi;
+
+    pi->eI = 0;
+    pi->output = 0;
+    pi->setpoint = 0;
+    pi->overload = 0;
+}
+
+void fxptpi_setpoint(FixedPointS12F4_PiController_t *pi, Int16FixedPoint_t r) {
+    if (r > FixedPointS12_MAX) {
+        r = FixedPointS12_MAX;
+    }
+
+    if (r < FixedPointS12_MIN) {
+        r = FixedPointS12_MIN;
+    }
+
+    pi->setpoint = r;
+}
+
+Int16FixedPoint_t fxptpi_calculate(FixedPointS12F4_PiController_t *pi, Int16FixedPoint_t y, Int16FixedPoint_t dt) {
+	if (y > FixedPointS12_MAX) {
+		y = FixedPointS12_MAX;
+    }
+
+	if (y < FixedPointS12_MIN) {
+		y = FixedPointS12_MIN;
+    }
+
+    // Add/Sub operation required one additional int bit
+	// S13F0 = S12F0 - S12F0
+	Int16OperationContainer_t error = pi->setpoint - y;
+
+    // Mul adds int and frac bits
+	// S18F13 = S5F13 * S13F0
+	Int16OperationContainer_t i_error = pi->pi_constants->kI * error;
+
+	// => S18F12
+	i_error >>= 1;
+
+    // The PID output is limited primarily by the motor PWM timer resolution
+    // which in practice is between 1024 - 2048 depending on frequency
+    // this can't be improved due to system clock limitations, so any arithmetic
+    // significantly higher S11F0 or S12F0 is lost unless a fractional P is used
+    // so we add some margin in for that
+	// S19F12 = S12F12 + S18F12
+	Int16OperationContainer_t updated_eI = pi->eI + i_error;
+
+	// intergator accumulator max and min are S12F0 FxPt
+    // convert S12F0 => S12F12 to make decimals match for addition
+	if(updated_eI > (pi->pi_constants->kI_max << 12)) {
+		updated_eI = pi->pi_constants->kI_max << 12;
+    }
+
+	if(updated_eI < (pi->pi_constants->kI_min << 12)) {
+		updated_eI = (pi->pi_constants->kI_min << 12);
+    }
+
+	pi->eI = updated_eI;
+
+	// S20F10 = S7F10 * S13F0
+	Int16OperationContainer_t p_error = pi->pi_constants->kP * error;
+
+    // I accumulator has some extra frac bits, we need to remove that
+    // precision for the addition to be legal.
+	// S21.10 = S20.10 + [(S12F12 >> 2) => S12F10]
+	Int16OperationContainer_t output = p_error + (updated_eI >> 2);
+
+	// => S21.0
+	output >>= 10;
+
+	if(pi->pi_constants->anti_jitter_thresh) {
+        // S13F0
+		int32_t abs_err = error < 0 ? -error : error;
+
+		if(abs_err < pi->pi_constants->anti_jitter_thresh) {
+			// S12F0 = (S0F12 * S13F0 * S12.0) >> 12;
+            // S12F0 = ([[S0F12 * S12F0 => S12F0] * S12F0] => S24F0) >> 12 [S12F0]
+			//          \___________/ => due to (abs_err < anti_jitter_thresh) this can be a max of 4096 (S12F0)
+                output = (pi->pi_constants->anti_jitter_thresh_inv * abs_err * output) >> 12;
+		}
+	}
+
+	// => S12.0
+	if(output > FixedPointS12_MAX) {
+		output = FixedPointS12_MAX;
+		pi->overload = 1;
+	} else if(output < FixedPointS12_MIN) {
+		output = FixedPointS12_MIN;
+		pi->overload = 1;
+	} else {
+		pi->overload = 0;
+    }
+
+	pi->output = output;
+
+    return output;
+}
+
+Int16FixedPoint_t fxptpi_get_output(FixedPointS12F4_PiController_t *pi) {
+    pi->output;
 }

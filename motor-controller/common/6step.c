@@ -496,6 +496,10 @@ void TIM16_IRQHandler() {
     }
 }
 
+void ADC1_IRQHandler() {
+
+}
+
 /**
  * @brief 
  * 
