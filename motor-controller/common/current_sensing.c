@@ -367,9 +367,10 @@ CS_Status_t currsen_adc_dis()
 
 Uint32FixedPoint_t currsen_get_shunt_current_fxpt() {
     const Int32FixedPoint_t ADC_RAW_TO_MV_S0F16 = 48012;  // S0F16
-    const Int32FixedPoint_t ADC_CALIB_OFFSET_S10F16 = 16384000;  // S10F16;
-    const Int32FixedPoint_t AMP_INV_GAIN_S0F10 = 186;  // 0.18181818: S0F10;
+    const Int32FixedPoint_t ADC_CALIB_OFFSET_S10F16 = 16384000;  // S10F16
+    const Int32FixedPoint_t AMP_INV_GAIN_S0F10 = 186;  // 0.18181818: S0F10
     const Int32FixedPoint_t R_SHUNT_INV_S6F0 = 20;  // 20: S6F0
+    const Int32FixedPoint_t AMP_R_SHUNT_INV_S2F12 = 14894;  // 3.6363: S2F12
 
     // S12F16 = S12F0 * S0F16;
     Int32FixedPoint_t v_adc_raw = m_adc_result.Motor_current_raw * ADC_RAW_TO_MV_S0F16;
@@ -385,12 +386,16 @@ Uint32FixedPoint_t currsen_get_shunt_current_fxpt() {
 
     // v_shunt = v_adc_no_bias / AMP_GAIN
     // S13F18 = S13F8 * S0F10
-    Int32FixedPoint_t v_shunt = (v_adc_no_bias >> 8) * AMP_INV_GAIN_S0F10;
+    // Int32FixedPoint_t v_shunt = (v_adc_no_bias >> 8) * AMP_INV_GAIN_S0F10;
 
     // S19F12 = S13F12 * S6F0
-    Int32FixedPoint_t i_shunt = (v_shunt >> 6) * R_SHUNT_INV_S6F0;
+    // Int32FixedPoint_t i_shunt = (v_shunt >> 6) * R_SHUNT_INV_S6F0;
 
-    // S19F12
+    // S15F12 = S13F16 * S2F12
+    // S15F16 = S13F4 * S2F12
+    Int32FixedPoint_t i_shunt = (v_adc_no_bias >> 12) * AMP_R_SHUNT_INV_S2F12;
+
+    // S15F16
     return i_shunt;
 }
 
