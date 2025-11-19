@@ -44,7 +44,7 @@ static const float MOTOR_OPAMP_RESISTOR_SENSE = 0.05f; // ohm
 // Closed Loop Gain = 1 + R2/R1 = 1 + 40.2k/10k = 5.02 > Closed Loop Gain Min of STSPIN = 4
 // T_settling > ((Imax * Rs * G_real) / SR) = ((10.0 * 0.05 * 4.94) / 10V/us) = 0.247us
 
-static const float MOTOR_OPAMP_GAIN_REAL = 5.5;
+static const float MOTOR_OPAMP_GAIN_REAL = 5.5f;
 
 // Op-amp is configured so 0A motor current = 0.2V
 static const float V_MIN_OP_AMP = 0.25f; // V

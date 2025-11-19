@@ -29,6 +29,7 @@
 #include <stm32f031x6.h>
 
 #include "6step.h"
+#include "pid.h"
 #include "system.h"
 #include "time.h"
 
@@ -56,6 +57,17 @@ static bool direction_change_commanded = false;
 static uint16_t current_duty_cycle = 0;
 static uint8_t hall_recorded_state_on_transition = 0;
 static bool command_brake = false;
+
+static FixedPointS12F4_PiConstants_t current_controller_constants = {
+    .kP = 0,
+    .kI = 0,
+    .kI_max = 0,
+    .kI_min = 0,
+    .anti_jitter_thresh = 0,
+    .anti_jitter_thresh_inv = 0,
+};
+
+static FixedPointS12F4_PiController_t current_controller;
 
 /////////////////////
 //  hall velocity  //
@@ -497,7 +509,12 @@ void TIM16_IRQHandler() {
 }
 
 void ADC1_IRQHandler() {
+    // filter current
+    // filter velocity
 
+    // update PID
+
+    // load output to PWM
 }
 
 /**
@@ -806,8 +823,6 @@ static void pwm6step_set_direct(uint16_t duty_cycle, MotorDirection_t motor_dire
  * 
  */
 void pwm6step_setup() {
-
-
     pwm6step_setup_hall_timer();
     pwm6step_setup_commutation_timer(PWM_FREQ_HZ);
 }
