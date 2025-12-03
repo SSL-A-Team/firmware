@@ -24,3 +24,15 @@ set(STSPIN32F0x_DEFINITIONS -DSTM32F031xx)
 set(STSPIN32F0x_CHIP STM32F031C6 CACHE STRING "Full STM32 Chip Model")
 # set(STSPIN32F0x_OPENOCD_CFG "board/stm32f0discovery.cfg")
 set(STSPIN32F0x_OPENOCD_CFG "${CMAKE_SOURCE_DIR}/../util/openocd/steval-spin320x.cfg")
+
+###################
+#  Nucleo G071RB  #
+###################
+
+set(NUCLEO_G071RB_MACHINE_OPTIONS -mthumb -mcpu=cortex-m0plus -mfloat-abi=soft CACHE STRING "")
+set(NUCLEO_G071RB_C_OPTIONS ${NUCLEO_G071RB_MACHINE_OPTIONS} -Wall)
+set(NUCLEO_G071RB_CXX_OPTIONS ${NUCLEO_G071RB_MACHINE_OPTIONS} -Wno-register -fno-exceptions -fno-rtti -ffunction-sections -fdata-sections CACHE STRING "")
+set(NUCLEO_G071RB_LINKER_OPTIONS ${NUCLEO_G071RB_MACHINE_OPTIONS} -Wl,--gc-sections --specs=rdimon.specs -lrdimon CACHE STRING "")
+set(NUCLEO_G071RB_DEFINITIONS -DSTM32G071xx)
+set(NUCLEO_G071RB_CHIP STM32G071RB CACHE STRING "Full STM32 Chip Model")
+set(NUCLEO_G071RB_OPENOCD_CFG "${CMAKE_SOURCE_DIR}/../util/openocd/nucleo-g071rb.cfg")

@@ -100,6 +100,37 @@ motor-controller--clean:
 	rm -rf motor-controller/build
 
 #####################
+#  float-test       #
+#####################
+
+.PHONY: .float-test-setup
+.float-test-setup:
+	cd float-test/ && \
+	cmake -B build/ \
+
+.PHONY: float-test--all
+float_test_binaries := ${shell cd float-test/bin && ls -d * && cd ../..}
+
+define create-float-test-targets
+float-test--$1: .float-test-setup
+	cd float-test/build/ && \
+	make $1
+float-test--all:: float-test--$1
+
+float-test--$1--prog: float-test--$1
+	cd float-test/build/ && \
+	make $1-prog
+
+float-test--$1--debug: float-test--$1
+	cd float-test/build/ && \
+	make $1-gdb
+endef
+$(foreach element,$(float_test_binaries),$(eval $(call create-float-test-targets,$(element))))
+
+float-test--clean:
+	rm -rf float-test/build
+
+#####################
 #  kicker binaries  #
 #####################
 
@@ -186,4 +217,4 @@ control:: control-board--control--run
 all:: kicker-board--all motor-controller--all control-board--all
 
 .PHONY: clean
-clean: software-communication--clean kicker-board--clean motor-controller--clean control-board--clean
+clean: software-communication--clean kicker-board--clean motor-controller--clean control-board--clean float-test--clean
