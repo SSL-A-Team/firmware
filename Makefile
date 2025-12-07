@@ -18,16 +18,16 @@ endif
 ############################
 
 software-communication--clean:
-	cd software-communication && \
+	cd software-communication/ && \
 	make clean
 
 software-communication--build:
-	cd software-communication && \
+	cd software-communication/ && \
 	make all
 all:: software-communication--build
 
 software-communication--test:
-	cd software-communication && \
+	cd software-communication/ && \
 	make test
 test:: software-communication--test
 
@@ -39,21 +39,27 @@ test:: software-communication--test
 common_binaries := ${shell cd common/src/bin && ls -d * && cd ../../..}
 
 define create-common-targets
-$1--$2:
+.PHONY: .$1-$2-cargo-build
+.$1-$2-cargo-build:
 	cd $1/ && \
 	cargo build --release --bin $2
-common--all:: $1--$2
 
-$1--$2--run:
+.PHONY: .$1-$2-cargo-build-debug
+.$1-$2-cargo-build-debug:
+	cd $1/ && \
+	cargo build --bin $2
+
+$1--$2: .$1-$2-cargo-build
+$1--all:: $1--$2
+
+$1--$2--run: $1--$2
 	cd $1/ && \
 	cargo run --release --bin $2
 
-$1--$2--debug:
-	cd $1/ && \
-	cargo build --bin $2
-common--all:: $1--$2--debug
+$1--$2--debug: .$1-$2-cargo-build-debug
+$1--all:: $1--$2--debug
 
-$1--$2--debug-run:
+$1--$2--debug-run: $1--$2--debug
 	cd $1/ && \
 	cargo run --bin $2
 endef
@@ -65,7 +71,7 @@ common--test:
 test:: common--test
 
 common--clean:
-	cd common && \
+	cd common/ && \
 	cargo clean
 
 ###############################
@@ -81,20 +87,20 @@ common--clean:
 motor_controller_binaries := ${shell cd motor-controller/bin && ls -d * && cd ../..}
 
 define create-motor-controller-targets
-motor-controller--$1: .motor-controller-setup
-	cd motor-controller/build/ && \
-	make $1
-motor-controller--all:: motor-controller--$1
+$1--$2: .motor-controller-setup
+	cd $1/build/ && \
+	make $2
+$1--all:: $1--$2
 
-motor-controller--$1--prog: motor-controller--$1
-	cd motor-controller/build/ && \
-	make $1-prog
+$1--$2--prog: $1--$2
+	cd $1/build/ && \
+	make $2-prog
 
-motor-controller--$1--debug: motor-controller--$1
-	cd motor-controller/build/ && \
-	make $1-gdb
+$1--$2--debug: $1--$2
+	cd $1/build/ && \
+	make $2-gdb
 endef
-$(foreach element,$(motor_controller_binaries),$(eval $(call create-motor-controller-targets,$(element))))
+$(foreach element,$(motor_controller_binaries),$(eval $(call create-motor-controller-targets,motor-controller,$(element))))
 
 motor-controller--clean:
 	rm -rf motor-controller/build
@@ -108,22 +114,36 @@ kicker_binaries := ${shell cd kicker-board/src/bin && ls -d * && cd ../../..}
 kicker_openocd_cfg_file := board/st_nucleo_f0.cfg
 
 define create-kicker-board-rust-targets
-$1/target/thumbv7em-none-eabihf/release/$2: motor-controller--dribbler
-	cargo build --target thumbv7em-none-eabihf --manifest-path $1/Cargo.toml --release --bin $2
+.PHONY: .$1-$2-cargo-build
+.$1-$2-cargo-build: motor-controller--dribbler motor-controller--wheel
+	cd $1/ && \
+	cargo build --target thumbv7em-none-eabihf --release --bin $2
 
-$1/target/thumbv7em-none-eabihf/release/$2.bin: $1/target/thumbv7em-none-eabihf/release/$2
-	arm-none-eabi-objcopy -Obinary $1/target/thumbv7em-none-eabihf/release/$2 $1/target/thumbv7em-none-eabihf/release/$2.bin
+$1/target/thumbv7em-none-eabihf/release/$2.bin: .$1-$2-cargo-build
+	echo; \
+	echo "Updating $1--$2 flat binary output:"; \
+	elf_path="$1/target/thumbv7em-none-eabihf/release/$2"; \
+	bin_path="$1/target/thumbv7em-none-eabihf/release/$2.bin"; \
+	tmp_path="$1/target/thumbv7em-none-eabihf/release/$2.tmp.bin"; \
+	arm-none-eabi-objcopy -Obinary $$$${elf_path} $$$${tmp_path}; \
+	if ! cmp -s $$$${tmp_path} $$$${bin_path}; then \
+	    echo "$2.bin has new changes!"; \
+	    mv $$$${tmp_path} $$$${bin_path}; \
+	else \
+	    echo "$2.bin unchanged!"; \
+	    rm $$$${tmp_path}; \
+	fi; \
+	echo; \
 
 $1--$2: $1/target/thumbv7em-none-eabihf/release/$2.bin
-	echo "Building $1--$2 flat bin."
-kicker-board--all:: $1--$2
+$1--all:: $1--$2
 
-$1--$2--run: motor-controller--dribbler
+$1--$2--run: $1--$2
 	cd $1/ && \
 	cargo run --release --bin $2
 
 $1--$2--debug: $1--$2
-	cd $1 && \
+	cd $1/ && \
 	cargo build --release --bin $2 && \
 	../util/program.sh $3 $1/target/thumbv7em-none-eabihf/release/$2
 endef
@@ -142,30 +162,40 @@ control_binaries := ${shell cd control-board/src/bin && ls -d * && cd ../../..}
 control_openocd_cfg_file := board/st_nucleo_h743zi.cfg
 
 define create-control-board-rust-targets
-$1/target/thumbv7em-none-eabihf/release/$2: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel
-	cargo build $(additional_control_cargo_flags) --target thumbv7em-none-eabihf --manifest-path $1/Cargo.toml --release --bin $2
+.PHONY: .$1-$2-cargo-build
+.$1-$2-cargo-build: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel
+	cd $1/ && \
+	cargo build $(additional_control_cargo_flags) --target thumbv7em-none-eabihf --release --bin $2
 
-$1/target/thumbv7em-none-eabihf/release/$2.bin: $1/target/thumbv7em-none-eabihf/release/$2
-	arm-none-eabi-objcopy -Obinary $1/target/thumbv7em-none-eabihf/release/$2 $1/target/thumbv7em-none-eabihf/release/$2.bin
+.PHONY: .$1-$2-embed-hash
+.$1-$2-embed-hash: .$1-$2-cargo-build
+	python util/embed_img_hash.py --bin $1/target/thumbv7em-none-eabihf/release/$2
+
+$1/target/thumbv7em-none-eabihf/release/$2.bin: .$1-$2-embed-hash
+	echo; \
+	echo "Updating $1--$2 flat binary output:"; \
+	elf_path="$1/target/thumbv7em-none-eabihf/release/$2"; \
+	bin_path="$1/target/thumbv7em-none-eabihf/release/$2.bin"; \
+	tmp_path="$1/target/thumbv7em-none-eabihf/release/$2.tmp.bin"; \
+	arm-none-eabi-objcopy -Obinary $$$${elf_path} $$$${tmp_path}; \
+	if ! cmp -s $$$${tmp_path} $$$${bin_path}; then \
+	    echo "$2.bin has new changes!"; \
+	    mv $$$${tmp_path} $$$${bin_path}; \
+	else \
+	    echo "$2.bin unchanged!"; \
+	    rm $$$${tmp_path}; \
+	fi; \
+	echo; \
 
 $1--$2: $1/target/thumbv7em-none-eabihf/release/$2.bin
+$1--all:: $1--$2
+
+$1--$2--run: $1--$2
 	cd $1/ && \
-	python ../util/embed_img_hash.py
-kicker-board--all:: $1--$2
-
-# $1--$2: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel
-# 	cd $1 && \
-# 	cargo build $(additional_control_cargo_flags) --release --bin $2 && \
-# 	arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin && \
-# 	python ../util/embed_img_hash.py
-# control-board--all:: $1--$2
-
-$1--$2--run: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel
-	cd $1 && \
 	cargo run $(additional_control_cargo_flags) --release --bin $2
 
 $1--$2--debug: $1--$2
-	cd $1 && \
+	cd $1/ && \
 	../util/program.sh $3 target/thumbv7em-none-eabihf/release/$2
 endef
 $(foreach element,$(control_binaries),$(eval $(call create-control-board-rust-targets,control-board,$(element),$(control_openocd_cfg_file))))
