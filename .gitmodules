@@ -3,4 +3,4 @@
 	url = https://github.com/SSL-A-Team/software-communication.git
 [submodule "controls"]
 	path = controls
-	url = ./controls
+	url = https://github.com/SSL-A-Team/controls.git
