@@ -92,6 +92,12 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             .publish(DataPacket::BasicControl(BasicControl {
                 _bitfield_1: Default::default(),
                 _bitfield_align_1: Default::default(),
+                vision_x: 0.0,
+                vision_y: 0.0,
+                vision_z: 0.0,
+                target_x: 0.0,
+                target_y: 0.0,
+                target_z: 0.0,
                 vel_x_linear: 0.0,
                 vel_y_linear: 0.0,
                 vel_z_angular: 0.0,
