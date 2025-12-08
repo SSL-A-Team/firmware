@@ -204,12 +204,12 @@ pub const fn is_float_safe(f: f32) -> bool {
 pub fn is_command_packet_safe(cmd_pck: DataPacket) -> bool {
     match cmd_pck {
         DataPacket::BasicControl(basic_control) => {
-            is_float_safe(basic_control.vision_x) &&
-            is_float_safe(basic_control.vision_y) &&
-            is_float_safe(basic_control.vision_z) &&
-            is_float_safe(basic_control.target_x) &&
-            is_float_safe(basic_control.target_y) &&
-            is_float_safe(basic_control.target_z) &&
+            is_float_safe(basic_control.pos_x_linear_vision) &&
+            is_float_safe(basic_control.pos_y_linear_vision) &&
+            is_float_safe(basic_control.pos_z_angular_vision) &&
+            is_float_safe(basic_control.pos_x_linear) &&
+            is_float_safe(basic_control.pos_x_linear) &&
+            is_float_safe(basic_control.pos_z_angular) &&
             is_float_safe(basic_control.vel_x_linear) &&
             is_float_safe(basic_control.vel_y_linear) &&
             is_float_safe(basic_control.vel_z_angular) &&

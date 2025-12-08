@@ -598,96 +598,98 @@ impl BodyPositionController {
         gyro_theta_meas: f32,
         controls_enabled: bool,
     ) {
-        // Assign telemetry data
-        // TODO pass all of the gyro data up, not just theta
-        self.debug_telemetry.imu_gyro[2] = gyro_theta_meas;
+        todo!()
 
-        // TODO: update extended packet with commanded position
-        // self.debug_telemetry
-        //     .commanded_body_velocity
-        //     .copy_from_slice(body_vel_setpoint.as_slice());
+        // // Assign telemetry data
+        // // TODO pass all of the gyro data up, not just theta
+        // self.debug_telemetry.imu_gyro[2] = gyro_theta_meas;
 
-        // let measurement: Vector5<f32> = Vector5::new(
-        //     wheel_velocities_meas[0],
-        //     wheel_velocities_meas[1],
-        //     wheel_velocities_meas[2],
-        //     wheel_velocities_meas[3],
-        //     gyro_meas,
+        // // TODO: update extended packet with commanded position
+        // // self.debug_telemetry
+        // //     .commanded_body_velocity
+        // //     .copy_from_slice(body_vel_setpoint.as_slice());
+
+        // // let measurement: Vector5<f32> = Vector5::new(
+        // //     wheel_velocities_meas[0],
+        // //     wheel_velocities_meas[1],
+        // //     wheel_velocities_meas[2],
+        // //     wheel_velocities_meas[3],
+        // //     gyro_meas,
+        // // );
+
+        // // TODO: Use CgKalman filter for body velocity estimate
+        // // // Update measurements process observation input into CGKF.
+        // // self.body_vel_filter.update(&measurement);
+
+        // // // Read the current body velocity state estimate from the CGKF.
+        // // let mut body_vel_estimate = self.body_vel_filter.get_state();
+
+        // // // Deadzone the velocity estimate
+        // // if libm::fabsf(body_vel_estimate[0]) < 0.05 {
+        // //     body_vel_estimate[0] = 0.0;
+        // // }
+
+        // // if libm::fabsf(body_vel_estimate[1]) < 0.05 {
+        // //     body_vel_estimate[1] = 0.0;
+        // // }
+
+        // // if libm::fabsf(body_vel_estimate[2]) < 0.05 {
+        // //     body_vel_estimate[2] = 0.0;
+        // // }
+
+        // // self.debug_telemetry
+        // //     .cgkf_body_velocity_state_estimate
+        // //     .copy_from_slice(body_vel_estimate.as_slice());
+
+        // // Use raw wheel readings and vision measurements for state estimate until kalman filter is implemented
+        // let body_velocity = self.robot_model.wheel_velocities_to_global_velocity(wheel_velocities_meas, vision_position_meas.z);
+
+        // let state_estimate = GlobalState { 
+        //     x: vision_position_meas.x,
+        //     y: vision_position_meas.y,
+        //     z: vision_position_meas.z,
+        //     xd: body_velocity.xd,
+        //     yd: body_velocity.yd,
+        //     zd: body_velocity.zd 
+        // };
+
+        // // TODO: ensure that the setpoint has zero velocity
+        // // Calculate the optimal trajectory to the setpoint
+        // let traj = ateam_controls::bang_bang_trajectory::compute_optimal_bang_bang_traj_3d(
+        //     state_estimate, state_setpoint
         // );
+        // // Calculate the acceleration needed to achieve the trajectory right now
+        // let body_acceleration_output = ateam_controls::bang_bang_trajectory::compute_bang_bang_traj_3d_global_control_2order_at_t(traj, 0.0);
 
-        // TODO: Use CgKalman filter for body velocity estimate
-        // // Update measurements process observation input into CGKF.
-        // self.body_vel_filter.update(&measurement);
+        // // TODO: output in telemetery
+        // // self.debug_telemetry
+        // //     .body_velocity_u
+        // //     .copy_from_slice(body_vel_output.as_slice());
 
-        // // Read the current body velocity state estimate from the CGKF.
-        // let mut body_vel_estimate = self.body_vel_filter.get_state();
+        // // TODO: do any hard clamping? although I think it should already be clamped
 
-        // // Deadzone the velocity estimate
-        // if libm::fabsf(body_vel_estimate[0]) < 0.05 {
-        //     body_vel_estimate[0] = 0.0;
-        // }
+        // let wheel_torques_output = self.robot_model.global_control_2order_to_wheel_torques(&body_acceleration_output, state_estimate.z);
+        // let wheel_velocities = self.robot_model.global_state_to_wheel_velocities(&state_estimate);
 
-        // if libm::fabsf(body_vel_estimate[1]) < 0.05 {
-        //     body_vel_estimate[1] = 0.0;
-        // }
+        // // TODO: output in telemetry
+        // // self.debug_telemetry
+        // //     .wheel_velocity_u
+        // //     .copy_from_slice(wheel_vel_output.as_slice());
 
-        // if libm::fabsf(body_vel_estimate[2]) < 0.05 {
-        //     body_vel_estimate[2] = 0.0;
-        // }
+        // // TODO: kalman filter update
+        // // // Use control law adjusted value to predict the next cycle's state.
+        // // self.body_vel_filter.predict(&wheel_vel_output);
 
-        // self.debug_telemetry
-        //     .cgkf_body_velocity_state_estimate
-        //     .copy_from_slice(body_vel_estimate.as_slice());
-
-        // Use raw wheel readings and vision measurements for state estimate until kalman filter is implemented
-        let body_velocity = self.robot_model.wheel_velocities_to_global_velocity(wheel_velocities_meas, vision_position_meas.z);
-
-        let state_estimate = GlobalState { 
-            x: vision_position_meas.x,
-            y: vision_position_meas.y,
-            z: vision_position_meas.z,
-            xd: body_velocity.xd,
-            yd: body_velocity.yd,
-            zd: body_velocity.zd 
-        };
-
-        // TODO: ensure that the setpoint has zero velocity
-        // Calculate the optimal trajectory to the setpoint
-        let traj = ateam_controls::bang_bang_trajectory::compute_optimal_bang_bang_traj_3d(
-            state_estimate, state_setpoint
-        );
-        // Calculate the acceleration needed to achieve the trajectory right now
-        let body_acceleration_output = ateam_controls::bang_bang_trajectory::compute_bang_bang_traj_3d_global_control_2order_at_t(traj, 0.0);
-
-        // TODO: output in telemetery
-        // self.debug_telemetry
-        //     .body_velocity_u
-        //     .copy_from_slice(body_vel_output.as_slice());
-
-        // TODO: do any hard clamping? although I think it should already be clamped
-
-        let wheel_torques_output = self.robot_model.global_control_2order_to_wheel_torques(&body_acceleration_output, state_estimate.z);
-        let wheel_velocities = self.robot_model.global_state_to_wheel_velocities(&state_estimate);
-
-        // TODO: output in telemetry
-        // self.debug_telemetry
-        //     .wheel_velocity_u
-        //     .copy_from_slice(wheel_vel_output.as_slice());
-
-        // TODO: kalman filter update
-        // // Use control law adjusted value to predict the next cycle's state.
-        // self.body_vel_filter.predict(&wheel_vel_output);
-
-        // TODO: needed?
-        // Save command state.
-        // if controls_enabled {
-        //     self.cmd_wheel_velocities = wheel_vel_output;
-        // } else {
-        //     self.cmd_wheel_velocities = self.robot_model.robot_vel_to_wheel_vel(&body_vel_setpoint);
-        //     self.debug_telemetry
-        //         .wheel_velocity_u
-        //         .copy_from_slice(wheel_vel_output.as_slice());
-        // }
+        // // TODO: needed?
+        // // Save command state.
+        // // if controls_enabled {
+        // //     self.cmd_wheel_velocities = wheel_vel_output;
+        // // } else {
+        // //     self.cmd_wheel_velocities = self.robot_model.robot_vel_to_wheel_vel(&body_vel_setpoint);
+        // //     self.debug_telemetry
+        // //         .wheel_velocity_u
+        // //         .copy_from_slice(wheel_vel_output.as_slice());
+        // // }
     }
 
     pub fn get_wheel_velocities(&self) -> Vector4<f32> {

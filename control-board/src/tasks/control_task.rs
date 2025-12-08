@@ -321,9 +321,9 @@ impl<
         Timer::after_millis(10).await;
 
         let robot_model = self.get_robot_model();
-        let mut robot_controller = BodyPositionController::new();
-        // let mut robot_controller =
-        //     BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
+        // let mut robot_controller = BodyPositionController::new();
+        let mut robot_controller =
+            BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
 
         let mut ctrl_seq_number = 0;
         let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));
@@ -361,6 +361,9 @@ impl<
                             latest_control.vel_y_linear,
                             latest_control.vel_z_angular,
                         );
+
+                        defmt::println!("{}, {}, {}", latest_control.pos_x_linear_vision, latest_control.pos_y_linear_vision, latest_control.pos_z_angular_vision);
+                        defmt::println!("{}", latest_control.pos_x_linear);
 
                         cmd_vel = new_cmd_vel;
                         ticks_since_control_packet = 0;
