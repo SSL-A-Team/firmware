@@ -11,7 +11,9 @@ use ateam_common_packets::bindings::{
 };
 use ateam_controls;
 use ateam_controls::robot_physical_params::*;
-use ateam_controls::{GlobalPosition, GlobalState, WheelTorques, WheelVelocities};
+use ateam_controls::geometry::{RigidBodyState, Pose};
+use ateam_controls::robot_model::{WheelTorques, WheelVelocities};
+use ateam_controls::bangbang_trajectory::BangBangTraj3D;
 use embassy_stm32::pac::adc::vals::Exten;
 use nalgebra::{SVector, Vector3, Vector4, Vector5};
 
@@ -589,8 +591,8 @@ impl BodyPositionController {
 
     pub fn control_update(
         &mut self,
-        state_setpoint: GlobalState,
-        vision_position_meas: GlobalPosition,
+        state_setpoint: RigidBodyState,
+        vision_position_meas: RigidBodyState,
         wheel_velocities_meas: &WheelVelocities,
         wheel_torques_meas: &WheelTorques,
         gyro_theta_meas: f32,
