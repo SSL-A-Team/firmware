@@ -17,7 +17,7 @@ use crate::{
         params::robot_physical_params::{
             WHEEL_ANGLES_DEG, WHEEL_DISTANCE_TO_ROBOT_CENTER_M, WHEEL_RADIUS_M,
         },
-        robot_controller::BodyVelocityController,
+        robot_controller::{BodyPositionController, BodyVelocityController},
         robot_model::{RobotConstants, RobotModel},
     },
     parameter_interface::ParameterInterface,
@@ -321,8 +321,9 @@ impl<
         Timer::after_millis(10).await;
 
         let robot_model = self.get_robot_model();
-        let mut robot_controller =
-            BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
+        let mut robot_controller = BodyPositionController::new();
+        // let mut robot_controller =
+        //     BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
 
         let mut ctrl_seq_number = 0;
         let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));

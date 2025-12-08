@@ -9,6 +9,9 @@ use ateam_common_packets::bindings::{
         VEL_CGKF_K_MATRIX, VEL_CGKF_PROCESS_NOISE, VEL_PID_X, VEL_PID_Y,
     },
 };
+use ateam_controls;
+use ateam_controls::robot_physical_params::*;
+use ateam_controls::{GlobalPosition, GlobalState, WheelTorques, WheelVelocities};
 use embassy_stm32::pac::adc::vals::Exten;
 use nalgebra::{SVector, Vector3, Vector4, Vector5};
 
@@ -549,6 +552,195 @@ impl<'a> ParameterInterface for BodyVelocityController<'a> {
                         return Err(reply_cmd);
                     }
                 }
+                _ => {
+                    defmt::debug!("unimplemented key write in RobotController");
+                    reply_cmd.command_code = PCC_NACK_INVALID_NAME;
+                    return Err(reply_cmd);
+                }
+            }
+        }
+
+        return Ok(reply_cmd);
+    }
+}
+
+// TODO: Use CgKalman filter for body velocity estimate
+pub struct BodyPositionController {
+    robot_model: ateam_controls::robot_model::RobotModel,
+    // body_vel_filter: CgKalmanFilter<'a, 3, 4, 5>,
+    // body_vel_controller: PidController<3>,
+    // body_velocity_limit: Vector3<f32>,
+    // body_acceleration_limit: Vector3<f32>,
+    // body_deceleration_limit: Vector3<f32>,
+    // wheel_acceleration_limits: Vector4<f32>,
+    // prev_output: Vector3<f32>,
+    // cmd_wheel_velocities: Vector4<f32>,
+    debug_telemetry: ExtendedTelemetry,
+}
+
+impl BodyPositionController {
+    pub fn new(
+    ) -> BodyPositionController {
+        BodyPositionController {
+            robot_model: ateam_controls::robot_model::RobotModel::new_from_alpha_beta_l(WHEEL_ANGLE_ALPHA, WHEEL_ANGLE_BETA, WHEEL_DISTANCE),
+            debug_telemetry: Default::default(),
+        }
+    }
+
+    pub fn control_update(
+        &mut self,
+        state_setpoint: GlobalState,
+        vision_position_meas: GlobalPosition,
+        wheel_velocities_meas: &WheelVelocities,
+        wheel_torques_meas: &WheelTorques,
+        gyro_theta_meas: f32,
+        controls_enabled: bool,
+    ) {
+        // Assign telemetry data
+        // TODO pass all of the gyro data up, not just theta
+        self.debug_telemetry.imu_gyro[2] = gyro_theta_meas;
+
+        // TODO: update extended packet with commanded position
+        // self.debug_telemetry
+        //     .commanded_body_velocity
+        //     .copy_from_slice(body_vel_setpoint.as_slice());
+
+        // let measurement: Vector5<f32> = Vector5::new(
+        //     wheel_velocities_meas[0],
+        //     wheel_velocities_meas[1],
+        //     wheel_velocities_meas[2],
+        //     wheel_velocities_meas[3],
+        //     gyro_meas,
+        // );
+
+        // TODO: Use CgKalman filter for body velocity estimate
+        // // Update measurements process observation input into CGKF.
+        // self.body_vel_filter.update(&measurement);
+
+        // // Read the current body velocity state estimate from the CGKF.
+        // let mut body_vel_estimate = self.body_vel_filter.get_state();
+
+        // // Deadzone the velocity estimate
+        // if libm::fabsf(body_vel_estimate[0]) < 0.05 {
+        //     body_vel_estimate[0] = 0.0;
+        // }
+
+        // if libm::fabsf(body_vel_estimate[1]) < 0.05 {
+        //     body_vel_estimate[1] = 0.0;
+        // }
+
+        // if libm::fabsf(body_vel_estimate[2]) < 0.05 {
+        //     body_vel_estimate[2] = 0.0;
+        // }
+
+        // self.debug_telemetry
+        //     .cgkf_body_velocity_state_estimate
+        //     .copy_from_slice(body_vel_estimate.as_slice());
+
+        // Use raw wheel readings and vision measurements for state estimate until kalman filter is implemented
+        let body_velocity = self.robot_model.wheel_velocities_to_global_velocity(wheel_velocities_meas, vision_position_meas.z);
+
+        let state_estimate = GlobalState { 
+            x: vision_position_meas.x,
+            y: vision_position_meas.y,
+            z: vision_position_meas.z,
+            xd: body_velocity.xd,
+            yd: body_velocity.yd,
+            zd: body_velocity.zd 
+        };
+
+        // TODO: ensure that the setpoint has zero velocity
+        // Calculate the optimal trajectory to the setpoint
+        let traj = ateam_controls::bang_bang_trajectory::compute_optimal_bang_bang_traj_3d(
+            state_estimate, state_setpoint
+        );
+        // Calculate the acceleration needed to achieve the trajectory right now
+        let body_acceleration_output = ateam_controls::bang_bang_trajectory::compute_bang_bang_traj_3d_global_control_2order_at_t(traj, 0.0);
+
+        // TODO: output in telemetery
+        // self.debug_telemetry
+        //     .body_velocity_u
+        //     .copy_from_slice(body_vel_output.as_slice());
+
+        // TODO: do any hard clamping? although I think it should already be clamped
+
+        let wheel_torques_output = self.robot_model.global_control_2order_to_wheel_torques(&body_acceleration_output, state_estimate.z);
+        let wheel_velocities = self.robot_model.global_state_to_wheel_velocities(&state_estimate);
+
+        // TODO: output in telemetry
+        // self.debug_telemetry
+        //     .wheel_velocity_u
+        //     .copy_from_slice(wheel_vel_output.as_slice());
+
+        // TODO: kalman filter update
+        // // Use control law adjusted value to predict the next cycle's state.
+        // self.body_vel_filter.predict(&wheel_vel_output);
+
+        // TODO: needed?
+        // Save command state.
+        // if controls_enabled {
+        //     self.cmd_wheel_velocities = wheel_vel_output;
+        // } else {
+        //     self.cmd_wheel_velocities = self.robot_model.robot_vel_to_wheel_vel(&body_vel_setpoint);
+        //     self.debug_telemetry
+        //         .wheel_velocity_u
+        //         .copy_from_slice(wheel_vel_output.as_slice());
+        // }
+    }
+
+    pub fn get_wheel_velocities(&self) -> Vector4<f32> {
+        todo!();
+        // self.cmd_wheel_velocities
+    }
+
+    pub fn get_control_debug_telem(&self) -> ExtendedTelemetry {
+        self.debug_telemetry
+    }
+}
+
+impl ParameterInterface for BodyPositionController {
+    fn processes_cmd(&self, param_cmd: &ParameterCommand) -> bool {
+        return self.has_name(param_cmd.parameter_name);
+    }
+
+    fn has_name(&self, param_name: ParameterName::Type) -> bool {
+        return match param_name {
+            _ => false,
+        };
+    }
+
+    fn apply_command(
+        &mut self,
+        param_cmd: &ParameterCommand,
+    ) -> Result<ParameterCommand, ParameterCommand> {
+        let mut reply_cmd = param_cmd.clone();
+
+        // if we haven't been given an actionable command code, ignore the call
+        if !(param_cmd.command_code == PCC_READ || param_cmd.command_code == PCC_WRITE) {
+            defmt::warn!("asked to apply a command with out and actional command code");
+            return Err(reply_cmd);
+        }
+
+        // if we've been asked to apply a command we don't have a key for it
+        // error out
+        if !self.has_name(param_cmd.parameter_name) {
+            defmt::warn!(
+                "asked to apply a command with a parameter name not managed by this module"
+            );
+            reply_cmd.command_code = PCC_NACK_INVALID_NAME;
+            return Err(*param_cmd);
+        }
+
+        if param_cmd.command_code == PCC_READ {
+            match param_cmd.parameter_name {
+                _ => {
+                    defmt::debug!("unimplemented key read in RobotController");
+                    reply_cmd.command_code = PCC_NACK_INVALID_NAME;
+                    return Err(reply_cmd);
+                }
+            }
+        } else if param_cmd.command_code == PCC_WRITE {
+            match param_cmd.parameter_name {
                 _ => {
                     defmt::debug!("unimplemented key write in RobotController");
                     reply_cmd.command_code = PCC_NACK_INVALID_NAME;
