@@ -41,7 +41,7 @@ static_idle_buffered_uart!(BACK_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_P
 static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(FRONT_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
-const TICKS_WITHOUT_PACKET_STOP: usize = 20;
+const TICKS_WITHOUT_PACKET_STOP: usize = 200;
 
 #[macro_export]
 macro_rules! create_control_task {
@@ -331,10 +331,12 @@ impl<
         let mut cmd_vel = Vector3::new(0.0, 0.0, 0.0);
         let mut ticks_since_control_packet = 0;
 
+        //////////////////////// Frequency Measurement Vars //////////////////////////
         let mut loop_ticks_since_freqeuncy_measurement = 0;
         let mut frequency_measurement_time_elapsed_sum_ms = 0;
         let frequency_measurement_window_length = 60;
         let mut last_frequency_measurement_time = Instant::now();
+        //////////////////////////////////////////////////////////////////////////////
 
 
         let mut last_loop_term_time = Instant::now();
@@ -342,8 +344,8 @@ impl<
         loop {
             let loop_start_time = Instant::now();
             let loop_invocation_dead_time = loop_start_time - last_loop_term_time;
-            if loop_start_time - last_loop_term_time > Duration::from_millis(11) {
-                defmt::warn!("control loop scheuling lagged. Expected ~10ms between loop invocations, but got {:?}us", loop_invocation_dead_time.as_micros());
+            if loop_start_time - last_loop_term_time > Duration::from_micros(1100) {
+                defmt::warn!("control loop scheuling lagged. Expected ~1ms between loop invocations, but got {:?}us", loop_invocation_dead_time.as_micros());
             }
 
             self.motor_fl.process_packets();
@@ -500,8 +502,8 @@ impl<
 
             let loop_end_time = Instant::now();
             let loop_execution_time = loop_end_time - loop_start_time;
-            if loop_execution_time > Duration::from_millis(2) {
-                defmt::warn!("control loop is taking >2ms to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {:?}", loop_execution_time);
+            if loop_execution_time > Duration::from_micros(200) {
+                defmt::warn!("control loop is taking >200us to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {:?}", loop_execution_time);
             }
 
             last_loop_term_time = Instant::now();
