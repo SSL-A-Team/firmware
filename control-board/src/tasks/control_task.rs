@@ -326,10 +326,16 @@ impl<
             BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
 
         let mut ctrl_seq_number = 0;
-        let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));
+        let mut loop_rate_ticker = Ticker::every(Duration::from_millis(1));
 
         let mut cmd_vel = Vector3::new(0.0, 0.0, 0.0);
         let mut ticks_since_control_packet = 0;
+
+        let mut loop_ticks_since_freqeuncy_measurement = 0;
+        let mut frequency_measurement_time_elapsed_sum_ms = 0;
+        let frequency_measurement_window_length = 60;
+        let mut last_frequency_measurement_time = Instant::now();
+
 
         let mut last_loop_term_time = Instant::now();
 
@@ -362,8 +368,21 @@ impl<
                             latest_control.vel_z_angular,
                         );
 
-                        defmt::println!("{}, {}, {}", latest_control.pos_x_linear_vision, latest_control.pos_y_linear_vision, latest_control.pos_z_angular_vision);
-                        defmt::println!("{}", latest_control.pos_x_linear);
+                        // defmt::println!("{}, {}, {}", latest_control.pos_x_linear_vision, latest_control.pos_y_linear_vision, latest_control.pos_z_angular_vision);
+                        // defmt::println!("{}", latest_control.pos_x_linear);
+
+                        //////////////////////// Loop Rate Measurement ///////////////////////////////
+                        let frequency_measurement_loop_time_elapsed = (Instant::now() - last_frequency_measurement_time).as_millis();
+                        frequency_measurement_time_elapsed_sum_ms += frequency_measurement_loop_time_elapsed;
+                        if loop_ticks_since_freqeuncy_measurement == frequency_measurement_window_length {
+                            let frequency: f32 = loop_ticks_since_freqeuncy_measurement as f32 / ((frequency_measurement_time_elapsed_sum_ms as f32) / 1000.0) ;
+                            defmt::debug!("Rx Command Frequency - {} hz", frequency);
+                            frequency_measurement_time_elapsed_sum_ms = 0;
+                            loop_ticks_since_freqeuncy_measurement = 0;
+                        }
+                        last_frequency_measurement_time = Instant::now();
+                        loop_ticks_since_freqeuncy_measurement += 1;
+                        //////////////////////////////////////////////////////////////////////////////
 
                         cmd_vel = new_cmd_vel;
                         ticks_since_control_packet = 0;

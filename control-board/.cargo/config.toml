@@ -8,4 +8,4 @@ runner = 'probe-rs run --preverify --chip STM32H723ZGTx'
 
 [env]
 # DEFMT_LOG = "error,ateam-control-board::tasks::control_task=trace"
-DEFMT_LOG="info"
+DEFMT_LOG="debug"
