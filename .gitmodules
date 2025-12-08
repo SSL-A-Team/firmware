@@ -1,3 +1,6 @@
 [submodule "software-communication"]
 	path = software-communication
 	url = https://github.com/SSL-A-Team/software-communication.git
+[submodule "controls"]
+	path = controls
+	url = ./controls

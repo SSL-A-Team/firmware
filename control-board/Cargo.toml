@@ -51,6 +51,7 @@ apa102-spi = "0.5.1"
 
 ateam-lib-stm32 = { path = "../lib-stm32", default-features = false  }
 ateam-common-packets = { path = "../software-communication/ateam-common-packets/rust-lib" }
+ateam-controls = { path = "../controls/ateam_controls" }
 credentials = { path = "../credentials" }
 
 [features]
