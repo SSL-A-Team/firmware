@@ -5,6 +5,7 @@ use ateam_common_packets::{
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
 };
+use ateam_controls::{geometry::Pose, robot_model::{WheelTorques, WheelVelocities}};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::{usart::Uart, Peri};
 use embassy_time::{Duration, Instant, Ticker, Timer};
@@ -164,8 +165,9 @@ impl<
 
     fn do_control_update(
         &mut self,
-        robot_controller: &mut BodyVelocityController,
-        cmd_vel: Vector3<f32>,
+        robot_controller: &mut BodyPositionController,
+        cmd_pose: &Pose,
+        vision_position_meas: &Pose,
         gyro_rads: f32,
         controls_enabled: bool,
     ) -> Vector4<f32>
@@ -174,26 +176,28 @@ impl<
             and torques from the appropriate sensors, then get a set of wheel
             velocities to apply based on the controller's current state.
          */ {
-        let wheel_vels = Vector4::new(
-            self.motor_fl.read_rads(),
-            self.motor_bl.read_rads(),
-            self.motor_br.read_rads(),
-            self.motor_fr.read_rads(),
-        );
+
+        let wheel_vels = WheelVelocities {
+            fl: self.motor_fl.read_rads() as f64,
+            bl: self.motor_bl.read_rads() as f64,
+            br: self.motor_br.read_rads() as f64,
+            fr: self.motor_fr.read_rads() as f64,
+        };
 
         // torque values are computed on the spin but put in the current variable
         // TODO update this when packet/var names are updated to match software
-        let wheel_torques = Vector4::new(
-            self.motor_fl.read_current(),
-            self.motor_bl.read_current(),
-            self.motor_br.read_current(),
-            self.motor_fr.read_current(),
-        );
+        let wheel_torques = WheelTorques {
+            fl: self.motor_fl.read_current() as f64,
+            bl: self.motor_bl.read_current() as f64,
+            br: self.motor_br.read_current() as f64,
+            fr: self.motor_fr.read_current() as f64,
+        };
 
         // TODO read from channel or something
 
         robot_controller.control_update(
-            &cmd_vel,
+            cmd_pose,
+            vision_position_meas,
             &wheel_vels,
             &wheel_torques,
             gyro_rads,
@@ -205,7 +209,7 @@ impl<
     fn send_motor_commands_and_telemetry(
         &mut self,
         seq_number: u16,
-        robot_controller: &mut BodyVelocityController,
+        robot_controller: &mut BodyPositionController,
         cur_state: RobotState,
     ) {
         self.motor_fl.send_motion_command();
@@ -321,14 +325,15 @@ impl<
         Timer::after_millis(10).await;
 
         let robot_model = self.get_robot_model();
-        // let mut robot_controller = BodyPositionController::new();
-        let mut robot_controller =
-            BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
+        let mut robot_controller = BodyPositionController::new();
+        // let mut robot_controller =
+        //     BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
 
         let mut ctrl_seq_number = 0;
         let mut loop_rate_ticker = Ticker::every(Duration::from_millis(1));
 
-        let mut cmd_vel = Vector3::new(0.0, 0.0, 0.0);
+        let mut cmd_pose = Pose::default();
+        let mut latest_vision_meas = Pose::default();
         let mut ticks_since_control_packet = 0;
 
         //////////////////////// Frequency Measurement Vars //////////////////////////
@@ -364,10 +369,16 @@ impl<
             while let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
                 match latest_packet {
                     ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
-                        let new_cmd_vel = Vector3::new(
-                            latest_control.vel_x_linear,
-                            latest_control.vel_y_linear,
-                            latest_control.vel_z_angular,
+                        let new_cmd_pose = Pose::from_xy_theta(
+                            latest_control.pos_x_linear as f64,
+                            latest_control.pos_y_linear as f64,
+                            latest_control.pos_z_angular as f64,
+                        );
+
+                        let new_vision_meas = Pose::from_xy_theta(
+                            latest_control.pos_x_linear_vision as f64,
+                            latest_control.pos_y_linear_vision as f64,
+                            latest_control.pos_z_angular_vision as f64,
                         );
 
                         // defmt::println!("{}, {}, {}", latest_control.pos_x_linear_vision, latest_control.pos_y_linear_vision, latest_control.pos_z_angular_vision);
@@ -386,7 +397,8 @@ impl<
                         loop_ticks_since_freqeuncy_measurement += 1;
                         //////////////////////////////////////////////////////////////////////////////
 
-                        cmd_vel = new_cmd_vel;
+                        cmd_pose = new_cmd_pose;
+                        latest_vision_meas = new_vision_meas;
                         ticks_since_control_packet = 0;
 
                         if latest_control.reboot_robot() != 0 {
@@ -433,11 +445,12 @@ impl<
             }
 
             if ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
-                cmd_vel = Vector3::new(0., 0., 0.);
+                cmd_pose = Pose::default();
+                latest_vision_meas = Pose::default();
                 //defmt::warn!("ticks since packet lockout");
             }
 
-            // now we have setpoint r(t) in self.cmd_vel
+            // now we have setpoint r(t) in self.cmd_pose
 
             while let Some(gyro_rads) = self.gyro_subscriber.try_next_message_pure() {
                 self.last_gyro_rads = gyro_rads[2];
@@ -461,7 +474,7 @@ impl<
             }
 
             if self.stop_wheels() {
-                cmd_vel = Vector3::new(0.0, 0.0, 0.0);
+                cmd_pose = Pose::default();
             } else if self.last_command.game_state_in_stop() != 0 {
                 // TODO impl 1.5m/s clamping or something
             }
@@ -473,7 +486,8 @@ impl<
                 let controls_enabled = self.last_command.body_vel_controls_enabled() != 0;
                 self.do_control_update(
                     &mut robot_controller,
-                    cmd_vel,
+                    &cmd_pose,
+                    &latest_vision_meas,
                     self.last_gyro_rads,
                     controls_enabled,
                 )
