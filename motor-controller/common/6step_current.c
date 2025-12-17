@@ -13,35 +13,13 @@ typedef enum MotorDirection {
     COUNTER_CLOCKWISE
 } MotorDirection_t;
 
-typedef enum CommutationValuesType {
-    NORMAL,
-    MOMENTUM_DETECTED,
-    ERROR_DETECTED
-} CommutationValuesType_t;
-
 //////////////////////
 //  motor commands  //
 //////////////////////
 
-static bool manual_estop = false;
-static bool brake_on_dc_0 = false;
-
 static MotorDirection_t commanded_motor_direction = CLOCKWISE;
-static bool direction_change_commanded = false;
 static uint16_t current_duty_cycle = 0;
 static uint8_t hall_recorded_state_on_transition = 0;
-static bool command_brake = false;
-
-static FixedPointS12F4_PiConstants_t current_controller_constants = {
-    .kP = 338,      // S07F10, 1000Hz BW * 0.33 mH = 0.33
-    .kI = 5791744,  // S05F13, 1000Hz BW * (0.7ohm coil + 0.007 ohm wire) = 707
-    .kI_max = 4 * 707,  // S12F0
-    .kI_min = -(4 * 707),  // S12F0
-    .anti_jitter_thresh = 0,  // S12F0
-    .anti_jitter_thresh_inv = 0,  // S0F12
-};
-
-static FixedPointS12F4_PiController_t current_controller;
 
 /////////////////////
 //  hall velocity  //
@@ -65,16 +43,20 @@ static int hall_transition_error_count = 0;
 //  Current PID  //
 ///////////////////
 
-static FixedPointS12F4_PiController_t current_pi_controller;
-static FixedPointS12F4_PiConstants_t current_pi_controller_constants = {
-    .kP = 0,        // S07F10
-    .kI = 0,        // S05F13
-    .kI_max = 0,    // S12F0
-    .kI_min = 0,    // S12F0
-    .anti_jitter_thresh = 0,     // S12F0
-    .anti_jitter_thresh_inv = 0, // S0F12
+const Uint16FixedPoint_t S0F16_4096_OVER_9000 = 29826;
+
+static FixedPointS12F4_PiConstants_t current_controller_constants = {
+    .kP = 338,      // S07F10, 1000Hz BW * 0.33 mH = 0.33
+    .kI = 5791744,  // S05F13, 1000Hz BW * (0.7ohm coil + 0.007 ohm wire) = 707
+    .kI_max = 4 * 707,  // S12F0
+    .kI_min = -(4 * 707),  // S12F0
+    .anti_jitter_thresh = 0,  // S12F0
+    .anti_jitter_thresh_inv = 0,  // S0F12
 };
 
+static FixedPointS12F4_PiController_t current_controller;
+
+static int16_t measured_rail_voltage = 0;
 
 ////////////////////////////////
 //  local data and functions  //
@@ -495,6 +477,9 @@ void TIM16_IRQHandler() {
     }
 }
 
+static int32_t voltage_filter[4];
+static size_t voltage_filter_index = 0;
+
 static int32_t current_filter[8];
 static size_t current_filter_ind = 0;
 
@@ -511,11 +496,10 @@ void ADC1_IRQHandler() {
     // S15F0
     current_measurement >>= 16;
 
-    const Uint16FixedPoint_t S0F16_4096_OVER_9000 = 29826;
     // S15F16 >> 16 = S15F0 * S0F16 = S15F16 >> 19 = S12F0
     Uint32FixedPoint_t qtz_current = (current_measurement * S0F16_4096_OVER_9000) >> 19;
 
-    // TODO filter current
+    // filter current
     current_filter[current_filter_ind++] = qtz_current;
     current_filter_ind &= 0x7;
 
@@ -525,21 +509,24 @@ void ADC1_IRQHandler() {
     }
     avg_current >>= 3;  // div 8
 
+    // TODO measure and average voltages and update global
 
-    // update PID
+
+    // update PID, maps current to voltage
     fxptpi_calculate(&current_controller, current_measurement, 0);
-
     Uint32FixedPoint_t voltage_sp = fxptpi_get_output(&current_controller);
 
-    // PID xfr function maps current setpoint to voltage
-    // current in mA was scaled down to 4096
-    // so output in mV is also scaled down by 4096/9000
-    // PWM is not out of 4096, its out of 1200 based on TIM1 CCR (I think, double check)
-    // so we need to scale down again
-    // scaled value = voltage_sp * ARR / 4096
-    Uint32FixedPoint_t arr_scaled_dc_value = (voltage_sp * ARR_VALUE) >> 12;
+    // TODO scale voltage_sp back up to 25200mV
+    // note: set_voltage will need to compute a scale from measured voltage
+    // as a the actual max the PWM is commanding, to the DC
+    // as we've observed, the RPM/power output is quite different from
+    // max battery to minimum and certainly if the voltage further dips under load
+    // we want to correct for this 
 
-    // load output to PWM
+    // scale from 4096 -> battery voltage
+    uint16_t voltage_sp_mv = (voltage_sp * BATTERY_VOLTAGE_MV) >> 12;
+
+    pwm6step_set_voltage(voltage_sp_mv, false);
 }
 
 /**
@@ -648,8 +635,6 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     if (estop) {
         // use whatever error mode was selected for the tables
         commutation_values = cw_commutation_table[ESTOP_COMMUTATION_INDEX];
-    } else if (command_brake) {
-        commutation_values = cw_commutation_table[BRAKE_COMMUTATION_INDEX];
     } else if (current_duty_cycle == 0) {
         commutation_values = cw_commutation_table[COAST_COMMUTATION_INDEX];
     } else {
@@ -676,15 +661,9 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     TIM1->CCR4 = 22;
 
     if (phase1_low) {
-        if (command_brake) {
-            TIM1->CCR1 = current_duty_cycle;
-            ccmr1 |= CCMR1_PHASE1_PWM_BRAKE;
-            ccer |= CCER_PHASE1_PWM_BRAKE;
-        } else {
-            TIM1->CCR1 = 0;
-            ccmr1 |= CCMR1_PHASE1_LOW;
-            ccer |= CCER_PHASE1_LOW;
-        }
+        TIM1->CCR1 = 0;
+        ccmr1 |= CCMR1_PHASE1_LOW;
+        ccer |= CCER_PHASE1_LOW;
     } else if (phase1_high) {
         TIM1->CCR1 = current_duty_cycle;
         ccmr1 |= CCMR1_PHASE1_PWM;
@@ -696,15 +675,9 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     }
 
     if (phase2_low) {
-        if (command_brake) {
-            TIM1->CCR2 = current_duty_cycle;
-            ccmr1 |= CCMR1_PHASE2_PWM_BRAKE;
-            ccer |= CCER_PHASE2_PWM_BRAKE;            
-        } else {
-            TIM1->CCR2 = 0;
-            ccmr1 |= CCMR1_PHASE2_LOW;
-            ccer |= CCER_PHASE2_LOW;
-        }
+        TIM1->CCR2 = 0;
+        ccmr1 |= CCMR1_PHASE2_LOW;
+        ccer |= CCER_PHASE2_LOW;
     } else if (phase2_high) {
         TIM1->CCR2 = current_duty_cycle;
         ccmr1 |= CCMR1_PHASE2_PWM;
@@ -716,15 +689,9 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     }
 
     if (phase3_low) {
-        if (command_brake) {
-            TIM1->CCR3 = current_duty_cycle;
-            ccmr2 |= CCMR2_PHASE3_PWM_BRAKE;
-            ccer |= CCER_PHASE3_PWM_BRAKE;
-        } else {
-            TIM1->CCR3 = 0;
-            ccmr2 |= CCMR2_PHASE3_LOW;
-            ccer |= CCER_PHASE3_LOW;
-        }
+        TIM1->CCR3 = 0;
+        ccmr2 |= CCMR2_PHASE3_LOW;
+        ccer |= CCER_PHASE3_LOW;
     } else if (phase3_high) {
         TIM1->CCR3 = current_duty_cycle;
         ccmr2 |= CCMR2_PHASE3_PWM;
@@ -757,27 +724,6 @@ void TIM1_CC_IRQHandler() {
     TIM1->SR &= ~(TIM_SR_CC4IF);
 }
 
-/**
- * @brief 
- * 
- * @param duty_cycle 
- * @param motor_direction 
- */
-static void pwm6step_set_direct(uint16_t duty_cycle, MotorDirection_t motor_direction) {
-    uint16_t scaled_dc = MAP_UINT16_TO_RAW_DC(duty_cycle);
-    if (scaled_dc != 0 && motor_direction != commanded_motor_direction) {
-        direction_change_commanded = true;
-    }
-
-    // PWM is inverted to facilitate current sensing, so invert user input
-    uint32_t scaled_dc_inv = NUM_RAW_DC_STEPS - scaled_dc;
-
-    commanded_motor_direction = motor_direction;
-    current_duty_cycle = scaled_dc_inv;
-
-    perform_commutation_cycle();
-}
-
 ////////////////////////
 //  Public Functions  //
 ////////////////////////
@@ -795,18 +741,9 @@ void pwm6step_setup() {
 }
 
 /**
- * @brief 
  * 
- * @param duty_cycle 
  */
-void pwm6step_set_duty_cycle(int32_t duty_cycle) {
-    MotorDirection_t motor_direction;
-    if (duty_cycle < 0) {
-        motor_direction = COUNTER_CLOCKWISE;
-    } else {
-        motor_direction = CLOCKWISE;
-    }
-
+void pwm6step_set_direction(MotorDirection_t motor_direction) {
     if (INVERT_MOTOR_DIRECTION) {
         if (motor_direction == COUNTER_CLOCKWISE) {
             motor_direction = CLOCKWISE;
@@ -815,19 +752,59 @@ void pwm6step_set_duty_cycle(int32_t duty_cycle) {
         }
     }
 
-    uint32_t duty_cycle_abs = abs(duty_cycle);
-    if (duty_cycle_abs > UINT16_MAX) {
-        duty_cycle_abs = UINT16_MAX;
-    }
+    commanded_motor_direction = motor_direction;
+}
 
-    uint16_t timer_duty_cycle = (uint16_t) duty_cycle_abs;
-
-    command_brake = false;
-    pwm6step_set_direct(timer_duty_cycle, motor_direction);
+/**
+ * @brief 
+ * 
+ * @param duty_cycle_arr 
+ */
+void pwm6step_set_duty_cycle(uint16_t duty_cycle) {
+    current_duty_cycle = MAP_MAX_DUTY_TO_ARR_DUTY(duty_cycle);
 }
 
 void pwm6step_set_duty_cycle_f(float duty_cycle_pct) {
-    pwm6step_set_duty_cycle((int32_t) (duty_cycle_pct * (float) UINT16_MAX));
+    pwm6step_set_duty_cycle((uint16_t) (duty_cycle_pct * (float) MAX_DUTYCYCLE_COMMAND));
+}
+
+void pwm6step_set_voltage(int16_t voltage_mv, bool set_direction) {
+    if (set_direction) {
+        if (voltage_mv < 0) {
+            pwm6step_set_direction(COUNTER_CLOCKWISE);
+        } else {
+            pwm6step_set_direction(CLOCKWISE);
+        }
+    }
+
+    uint16_t abs_voltage_mv = abs(voltage_mv);
+    
+    // we can't command more than the battery can currently offer
+    // set it to the max we can offer (gets more effective PWM range
+    // at the top end)
+    if (voltage_mv > measured_rail_voltage) {
+        voltage_mv = measured_rail_voltage;
+    }
+
+    // scale from mv to max duty
+    uint32_t voltage_scaled_to_dc = (uint16_t) ((uint32_t) voltage_mv * MAX_DUTYCYCLE_COMMAND / (uint32_t) measured_rail_voltage);
+    pwm6step_set_duty_cycle(voltage_scaled_to_dc);
+}
+
+void pwm6step_set_current(int16_t current_ma, bool set_direction) {
+    if (set_direction) {
+        if (current_ma < 0) {
+            pwm6step_set_direction(COUNTER_CLOCKWISE);
+        } else {
+            pwm6step_set_direction(CLOCKWISE);
+        }
+    }
+
+    uint16_t abs_current_ma = abs(current_ma);
+
+    // map current_ma to 4096
+    Uint16FixedPoint_t scaled_current = abs_current_ma * S0F16_4096_OVER_9000;
+    fxptpi_setpoint(&current_controller, scaled_current);
 }
 
 const MotorErrors_t pwm6step_get_motor_errors() {

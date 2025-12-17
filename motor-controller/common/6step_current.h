@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define MAX_DUTYCYCLE_COMMAND 65535U
+#define MAX_DUTYCYCLE_COMMAND 4095U
 #define MIN_DUTYCYCLE_COMMAND -(MAX_DUTYCYCLE_COMMAND)
 #define INVERT_MOTOR_DIRECTION false
 
@@ -11,6 +11,7 @@
 #define PWM_FREQ_HZ 40000    // if you update date, be conscious of dead time ratio
 #define PWM_TIM_PRESCALER 0  // you almost certainly don't want to touch this with the low-ish sys clk of 48MHz
 
+#define BATTERY_VOLTAGE_MV (25200U)
 
 //////////////////////
 //  ERROR HANDLING  //
@@ -50,7 +51,7 @@ typedef struct MotorErrors {
 
 #define NUM_RAW_DC_STEPS ((uint16_t) (F_SYS_CLK_HZ / ((uint32_t) PWM_FREQ_HZ * (PWM_TIM_PRESCALER + 1))))
 #define SCALING_FACTOR (MAX_DUTYCYCLE_COMMAND / NUM_RAW_DC_STEPS + 1U)
-#define MAP_UINT16_TO_RAW_DC(dc) (dc / SCALING_FACTOR)
+#define MAP_MAX_DUTY_TO_ARR_DUTY(dc) (dc / SCALING_FACTOR)
 
 #define ARR_VALUE (NUM_RAW_DC_STEPS)
 #define ARR_REG_VALUE (ARR_VALUE - 1)
@@ -60,10 +61,12 @@ typedef struct MotorErrors {
 ////////////////////////
 
 void pwm6step_setup();
+void pwm6step_set_duty_cycle(uint16_t duty_cycle);
 void pwm6step_set_duty_cycle_f(float duty_cycle_pct);
-void pwm6step_set_duty_cycle(int32_t duty_cycle);
 void pwm6step_set_voltage(int32_t voltage_mv);
 void pwm6step_set_current(int32_t current_ma);
+void pwm6step_set_output_current_limit(int32_t output_current_limit_ma);
+
 
 // hall velocity estimate
 bool pwm6step_hall_rps_estimate_valid();
