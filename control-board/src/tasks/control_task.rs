@@ -178,19 +178,19 @@ impl<
          */ {
 
         let wheel_vels = WheelVelocities {
-            fl: self.motor_fl.read_rads() as f64,
-            bl: self.motor_bl.read_rads() as f64,
-            br: self.motor_br.read_rads() as f64,
-            fr: self.motor_fr.read_rads() as f64,
+            fl: self.motor_fl.read_rads(),
+            bl: self.motor_bl.read_rads(),
+            br: self.motor_br.read_rads(),
+            fr: self.motor_fr.read_rads(),
         };
 
         // torque values are computed on the spin but put in the current variable
         // TODO update this when packet/var names are updated to match software
         let wheel_torques = WheelTorques {
-            fl: self.motor_fl.read_current() as f64,
-            bl: self.motor_bl.read_current() as f64,
-            br: self.motor_br.read_current() as f64,
-            fr: self.motor_fr.read_current() as f64,
+            fl: self.motor_fl.read_current(),
+            bl: self.motor_bl.read_current(),
+            br: self.motor_br.read_current(),
+            fr: self.motor_fr.read_current(),
         };
 
         // TODO read from channel or something
@@ -370,15 +370,15 @@ impl<
                 match latest_packet {
                     ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
                         let new_cmd_pose = Pose::from_xy_theta(
-                            latest_control.pos_x_linear as f64,
-                            latest_control.pos_y_linear as f64,
-                            latest_control.pos_z_angular as f64,
+                            latest_control.pos_x_linear,
+                            latest_control.pos_y_linear,
+                            latest_control.pos_z_angular,
                         );
 
                         let new_vision_meas = Pose::from_xy_theta(
-                            latest_control.pos_x_linear_vision as f64,
-                            latest_control.pos_y_linear_vision as f64,
-                            latest_control.pos_z_angular_vision as f64,
+                            latest_control.pos_x_linear_vision,
+                            latest_control.pos_y_linear_vision,
+                            latest_control.pos_z_angular_vision,
                         );
 
                         // defmt::println!("{}, {}, {}", latest_control.pos_x_linear_vision, latest_control.pos_y_linear_vision, latest_control.pos_z_angular_vision);
