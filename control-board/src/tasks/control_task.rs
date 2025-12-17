@@ -170,7 +170,7 @@ impl<
         vision_position_meas: &Pose,
         gyro_rads: f32,
         controls_enabled: bool,
-    ) -> Vector4<f32>
+    ) -> WheelVelocities
 /*
             Provide the motion controller with the current wheel velocities
             and torques from the appropriate sensors, then get a set of wheel
@@ -481,7 +481,7 @@ impl<
 
             let wheel_vels = if self.stop_wheels() {
                 defmt::warn!("control task - motor commands locked out");
-                Vector4::new(0.0, 0.0, 0.0, 0.0)
+                WheelVelocities::default()
             } else {
                 let controls_enabled = self.last_command.body_vel_controls_enabled() != 0;
                 self.do_control_update(
@@ -493,10 +493,10 @@ impl<
                 )
             };
 
-            self.motor_fl.set_setpoint(wheel_vels[0]);
-            self.motor_bl.set_setpoint(wheel_vels[1]);
-            self.motor_br.set_setpoint(wheel_vels[2]);
-            self.motor_fr.set_setpoint(wheel_vels[3]);
+            self.motor_fl.set_setpoint(wheel_vels.fl);
+            self.motor_bl.set_setpoint(wheel_vels.bl);
+            self.motor_br.set_setpoint(wheel_vels.br);
+            self.motor_fr.set_setpoint(wheel_vels.fr);
 
             // defmt::info!("wheel vels: {} {} {} {}", self.motor_fl.read_encoder_delta(), self.motor_bl.read_encoder_delta(), self.motor_br.read_encoder_delta(), self.motor_fr.read_encoder_delta());
             // defmt::info!("wheel curr: {} {} {} {}", self.motor_fl.read_current(), self.motor_bl.read_current(), self.motor_br.read_current(), self.motor_fr.read_current());

@@ -576,7 +576,8 @@ pub struct BodyPositionController {
     // body_deceleration_limit: Vector3<f32>,
     // wheel_acceleration_limits: Vector4<f32>,
     // prev_output: Vector3<f32>,
-    // cmd_wheel_velocities: Vector4<f32>,
+    cmd_wheel_velocities: WheelVelocities,
+    cmd_wheel_torques: WheelTorques,
     debug_telemetry: ExtendedTelemetry,
 }
 
@@ -585,6 +586,8 @@ impl BodyPositionController {
     ) -> BodyPositionController {
         BodyPositionController {
             robot_model: ateam_controls::robot_model::RobotModel::new_from_alpha_beta_l(WHEEL_ANGLE_ALPHA, WHEEL_ANGLE_BETA, WHEEL_DISTANCE),
+            cmd_wheel_velocities: WheelVelocities::default(),
+            cmd_wheel_torques: WheelTorques::default(),
             debug_telemetry: Default::default(),
         }
     }
@@ -640,7 +643,7 @@ impl BodyPositionController {
         //     .copy_from_slice(body_vel_estimate.as_slice());
 
         // Use raw wheel readings and vision measurements for state estimate until kalman filter is implemented
-        let twist = self.robot_model.wheel_velocities_to_global_twist(wheel_velocities_meas, vision_position_meas.to_xy_theta().z);
+        let twist = self.robot_model.wheel_velocities_to_global_twist(wheel_velocities_meas, vision_position_meas.orientation.z);
 
         let state_estimate = RigidBodyState { 
             pose: *vision_position_meas,
@@ -653,7 +656,10 @@ impl BodyPositionController {
             state_estimate, *state_setpoint
         );
         // Calculate the acceleration needed to achieve the trajectory right now
-        let body_acceleration_output = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_accel_at_t(traj, 0.0);
+        let current_body_accel = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_accel_at_t(traj, 0.0);
+        // Calculate the velocity that should be achieved at the next time step after applying this acceleration
+        let dt = 0.001; // TODO: get real dt
+        let next_body_state = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_state_at_t(traj, state_estimate, 0.0, dt);
 
         // TODO: output in telemetery
         // self.debug_telemetry
@@ -662,13 +668,11 @@ impl BodyPositionController {
 
         // TODO: do any hard clamping? although I think it should already be clamped
 
-        let wheel_torques_output = self.robot_model.global_accel_to_wheel_torques(&body_acceleration_output, state_estimate.pose.to_xy_theta().z);
-        let wheel_velocities = self.robot_model.global_twist_to_wheel_velocities(&state_estimate.twist, state_estimate.pose.to_xy_theta().z);
+        self.cmd_wheel_torques = self.robot_model.global_accel_to_wheel_torques(&current_body_accel, state_estimate.pose.orientation.z);
+        self.cmd_wheel_velocities = self.robot_model.global_twist_to_wheel_velocities(&next_body_state.twist, next_body_state.pose.orientation.z);
 
-        // TODO: output in telemetry
-        // self.debug_telemetry
-        //     .wheel_velocity_u
-        //     .copy_from_slice(wheel_vel_output.as_slice());
+        // output in telemetry
+        self.debug_telemetry.wheel_velocity_u.copy_from_slice(Vector4::from(self.cmd_wheel_velocities).as_slice());
 
         // TODO: kalman filter update
         // // Use control law adjusted value to predict the next cycle's state.
@@ -686,9 +690,8 @@ impl BodyPositionController {
         // }
     }
 
-    pub fn get_wheel_velocities(&self) -> Vector4<f32> {
-        todo!();
-        // self.cmd_wheel_velocities
+    pub fn get_wheel_velocities(&self) -> WheelVelocities {
+        self.cmd_wheel_velocities
     }
 
     pub fn get_control_debug_telem(&self) -> ExtendedTelemetry {
