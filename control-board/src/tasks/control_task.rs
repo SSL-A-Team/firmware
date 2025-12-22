@@ -5,11 +5,12 @@ use ateam_common_packets::{
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
 };
-use ateam_controls::{geometry::Pose, robot_model::{WheelTorques, WheelVelocities}};
+use ateam_controls::robot_model::RobotModel;
+use ateam_controls::robot_physical_params::*;
+use ateam_controls::{Vector3f, Vector4f};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::{usart::Uart, Peri};
 use embassy_time::{Duration, Instant, Ticker, Timer};
-use nalgebra::{Vector3, Vector4};
 
 use crate::{
     include_external_cpp_bin,
@@ -18,8 +19,8 @@ use crate::{
         params::robot_physical_params::{
             WHEEL_ANGLES_DEG, WHEEL_DISTANCE_TO_ROBOT_CENTER_M, WHEEL_RADIUS_M,
         },
-        robot_controller::{BodyPositionController, BodyVelocityController},
-        robot_model::{RobotConstants, RobotModel},
+        robot_controller::BodyPoseController,
+        // robot_model::{RobotConstants, RobotModel},
     },
     parameter_interface::ParameterInterface,
     pins::*,
@@ -165,51 +166,55 @@ impl<
 
     fn do_control_update(
         &mut self,
-        robot_controller: &mut BodyPositionController,
-        cmd_pose: &Pose,
-        vision_position_meas: &Pose,
-        gyro_rads: f32,
+        robot_controller: &mut BodyPoseController,
+        cmd: Vector3f,
+        loop_period: Duration,
+        vision_pose_meas: Vector3f,
+        vision_pose_meas_instant: Instant,
+        gyro_rads_meas: f32,
         controls_enabled: bool,
-    ) -> WheelVelocities
+    ) -> (Vector4f, Vector4f)
 /*
             Provide the motion controller with the current wheel velocities
             and torques from the appropriate sensors, then get a set of wheel
             velocities to apply based on the controller's current state.
          */ {
 
-        let wheel_vels = WheelVelocities {
-            fl: self.motor_fl.read_rads(),
-            bl: self.motor_bl.read_rads(),
-            br: self.motor_br.read_rads(),
-            fr: self.motor_fr.read_rads(),
-        };
+        let wheel_vel_meas = Vector4f::new(
+            self.motor_fl.read_rads(),
+            self.motor_bl.read_rads(),
+            self.motor_br.read_rads(),
+            self.motor_fr.read_rads(),
+        );
 
         // torque values are computed on the spin but put in the current variable
         // TODO update this when packet/var names are updated to match software
-        let wheel_torques = WheelTorques {
-            fl: self.motor_fl.read_current(),
-            bl: self.motor_bl.read_current(),
-            br: self.motor_br.read_current(),
-            fr: self.motor_fr.read_current(),
-        };
+        let wheel_torque_meas = Vector4f::new(
+            self.motor_fl.read_current(),
+            self.motor_bl.read_current(),
+            self.motor_br.read_current(),
+            self.motor_fr.read_current(),
+        );
 
         // TODO read from channel or something
 
         robot_controller.control_update(
-            cmd_pose,
-            vision_position_meas,
-            &wheel_vels,
-            &wheel_torques,
-            gyro_rads,
+            cmd,
+            loop_period,
+            vision_pose_meas,
+            vision_pose_meas_instant,
+            wheel_vel_meas,
+            wheel_torque_meas,
+            gyro_rads_meas,
             controls_enabled,
         );
-        robot_controller.get_wheel_velocities()
+        (robot_controller.get_wheel_velocities(), robot_controller.get_wheel_torques())
     }
 
     fn send_motor_commands_and_telemetry(
         &mut self,
         seq_number: u16,
-        robot_controller: &mut BodyPositionController,
+        robot_controller: &mut BodyPoseController,
         cur_state: RobotState,
     ) {
         self.motor_fl.send_motion_command();
@@ -324,24 +329,33 @@ impl<
 
         Timer::after_millis(10).await;
 
-        let robot_model = self.get_robot_model();
-        let mut robot_controller = BodyPositionController::new();
+        // let robot_model = RobotModel::new(
+        //     WHEEL_ANGLE_ALPHA, 
+        //     WHEEL_ANGLE_BETA, 
+        //     WHEEL_DISTANCE, 
+        //     WHEEL_RADIUS,
+        //     BODY_MASS,
+        //     BODY_MOMENT_Z,
+        // );
+        let mut robot_controller = BodyPoseController::new();
         // let mut robot_controller =
         //     BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
 
         let mut ctrl_seq_number = 0;
-        let mut loop_rate_ticker = Ticker::every(Duration::from_millis(1));
+        let loop_period = Duration::from_millis(1);  // 1 kHz
+        let mut loop_rate_ticker = Ticker::every(loop_period);
 
-        let mut cmd_pose = Pose::default();
-        let mut latest_vision_meas = Pose::default();
+        let mut cmd = Vector3f::default();
+        let mut last_vision_pose_meas = Vector3f::default();
+        let mut last_vision_pose_instant = Instant::from_micros(0);
         let mut ticks_since_control_packet = 0;
 
-        //////////////////////// Frequency Measurement Vars //////////////////////////
-        let mut loop_ticks_since_freqeuncy_measurement = 0;
-        let mut frequency_measurement_time_elapsed_sum_ms = 0;
-        let frequency_measurement_window_length = 60;
-        let mut last_frequency_measurement_time = Instant::now();
-        //////////////////////////////////////////////////////////////////////////////
+        // //////////////////////// Frequency Measurement Vars //////////////////////////
+        // let mut loop_ticks_since_freqeuncy_measurement = 0;
+        // let mut frequency_measurement_time_elapsed_sum_ms = 0;
+        // let frequency_measurement_window_length = 60;
+        // let mut last_frequency_measurement_time = Instant::now();
+        // //////////////////////////////////////////////////////////////////////////////
 
 
         let mut last_loop_term_time = Instant::now();
@@ -369,43 +383,43 @@ impl<
             while let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
                 match latest_packet {
                     ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
-                        let new_cmd_pose = Pose::from_xy_theta(
-                            latest_control.pos_x_linear,
-                            latest_control.pos_y_linear,
-                            latest_control.pos_z_angular,
-                        );
-
-                        let new_vision_meas = Pose::from_xy_theta(
-                            latest_control.pos_x_linear_vision,
-                            latest_control.pos_y_linear_vision,
-                            latest_control.pos_z_angular_vision,
-                        );
-
-                        // defmt::println!("{}, {}, {}", latest_control.pos_x_linear_vision, latest_control.pos_y_linear_vision, latest_control.pos_z_angular_vision);
-                        // defmt::println!("{}", latest_control.pos_x_linear);
-
-                        //////////////////////// Loop Rate Measurement ///////////////////////////////
-                        let frequency_measurement_loop_time_elapsed = (Instant::now() - last_frequency_measurement_time).as_millis();
-                        frequency_measurement_time_elapsed_sum_ms += frequency_measurement_loop_time_elapsed;
-                        if loop_ticks_since_freqeuncy_measurement == frequency_measurement_window_length {
-                            let frequency: f32 = loop_ticks_since_freqeuncy_measurement as f32 / ((frequency_measurement_time_elapsed_sum_ms as f32) / 1000.0) ;
-                            defmt::debug!("Rx Command Frequency - {} hz", frequency);
-                            frequency_measurement_time_elapsed_sum_ms = 0;
-                            loop_ticks_since_freqeuncy_measurement = 0;
-                        }
-                        last_frequency_measurement_time = Instant::now();
-                        loop_ticks_since_freqeuncy_measurement += 1;
-                        //////////////////////////////////////////////////////////////////////////////
-
-                        cmd_pose = new_cmd_pose;
-                        latest_vision_meas = new_vision_meas;
-                        ticks_since_control_packet = 0;
+                        // //////////////////////// Loop Rate Measurement ///////////////////////////////
+                        // let frequency_measurement_loop_time_elapsed = (Instant::now() - last_frequency_measurement_time).as_millis();
+                        // frequency_measurement_time_elapsed_sum_ms += frequency_measurement_loop_time_elapsed;
+                        // if loop_ticks_since_freqeuncy_measurement == frequency_measurement_window_length {
+                        //     let frequency: f32 = loop_ticks_since_freqeuncy_measurement as f32 / ((frequency_measurement_time_elapsed_sum_ms as f32) / 1000.0) ;
+                        //     defmt::debug!("Rx Command Frequency - {} hz", frequency);
+                        //     frequency_measurement_time_elapsed_sum_ms = 0;
+                        //     loop_ticks_since_freqeuncy_measurement = 0;
+                        // }
+                        // last_frequency_measurement_time = Instant::now();
+                        // loop_ticks_since_freqeuncy_measurement += 1;
+                        // //////////////////////////////////////////////////////////////////////////////
 
                         if latest_control.reboot_robot() != 0 {
                             loop {
                                 cortex_m::peripheral::SCB::sys_reset();
                             }
                         }
+
+                        ticks_since_control_packet = 0;
+
+                        cmd = Vector3f::new(
+                            latest_control.x_linear_cmd,
+                            latest_control.y_linear_cmd,
+                            latest_control.z_angular_cmd,
+                        );
+                        last_vision_pose_meas = Vector3f::new(
+                            latest_control.pose_x_linear_vision,
+                            latest_control.pose_y_linear_vision,
+                            latest_control.pose_z_angular_vision,
+                        );
+                        // TODO: time sync on boot to get this value and grab it from shared_robot_state
+                        let us_since_unix_epoch_at_sys_boot = Duration::from_micros(0);
+                        let us_since_unix_epoch_at_meas = Duration::from_micros(
+                            (latest_control.last_vision_update_us_hi as u64) << 32 | (latest_control.last_vision_update_us_lo as u64)
+                        );
+                        last_vision_pose_instant = Instant::from_micros((us_since_unix_epoch_at_meas - us_since_unix_epoch_at_sys_boot).as_micros());
 
                         if latest_control.request_shutdown() != 0 {
                             self.shared_robot_state.flag_shutdown_requested();
@@ -444,13 +458,7 @@ impl<
                 }
             }
 
-            if ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
-                cmd_pose = Pose::default();
-                latest_vision_meas = Pose::default();
-                //defmt::warn!("ticks since packet lockout");
-            }
-
-            // now we have setpoint r(t) in self.cmd_pose
+            // now we have setpoint r(t) in self.cmd
 
             while let Some(gyro_rads) = self.gyro_subscriber.try_next_message_pure() {
                 self.last_gyro_rads = gyro_rads[2];
@@ -473,30 +481,34 @@ impl<
                 self.last_power_telemetry = power_telemetry;
             }
 
-            if self.stop_wheels() {
-                cmd_pose = Pose::default();
-            } else if self.last_command.game_state_in_stop() != 0 {
+            if self.last_command.game_state_in_stop() != 0 {
                 // TODO impl 1.5m/s clamping or something
             }
 
-            let wheel_vels = if self.stop_wheels() {
+            let (wheel_vel_cmd, wheel_torque_cmd) = if 
+                self.stop_wheels() || 
+                ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP
+            {
                 defmt::warn!("control task - motor commands locked out");
-                WheelVelocities::default()
+                cmd = Vector3f::default();
+                (Vector4f::default(), Vector4f::default())
             } else {
                 let controls_enabled = self.last_command.body_vel_controls_enabled() != 0;
                 self.do_control_update(
                     &mut robot_controller,
-                    &cmd_pose,
-                    &latest_vision_meas,
+                    cmd,
+                    loop_period,
+                    last_vision_pose_meas,
+                    last_vision_pose_instant,
                     self.last_gyro_rads,
                     controls_enabled,
                 )
             };
 
-            self.motor_fl.set_setpoint(wheel_vels.fl);
-            self.motor_bl.set_setpoint(wheel_vels.bl);
-            self.motor_br.set_setpoint(wheel_vels.br);
-            self.motor_fr.set_setpoint(wheel_vels.fr);
+            self.motor_fl.set_setpoint(wheel_vel_cmd.x);
+            self.motor_bl.set_setpoint(wheel_vel_cmd.y);
+            self.motor_br.set_setpoint(wheel_vel_cmd.z);
+            self.motor_fr.set_setpoint(wheel_vel_cmd.w);
 
             // defmt::info!("wheel vels: {} {} {} {}", self.motor_fl.read_encoder_delta(), self.motor_bl.read_encoder_delta(), self.motor_br.read_encoder_delta(), self.motor_fr.read_encoder_delta());
             // defmt::info!("wheel curr: {} {} {} {}", self.motor_fl.read_current(), self.motor_bl.read_current(), self.motor_br.read_current(), self.motor_fr.read_current());
@@ -611,32 +623,32 @@ impl<
         }
     }
 
-    fn get_robot_model(&mut self) -> motion::robot_model::RobotModel {
-        let robot_model_constants: RobotConstants = RobotConstants {
-            wheel_angles_rad: Vector4::new(
-                WHEEL_ANGLES_DEG[0].to_radians(),
-                WHEEL_ANGLES_DEG[1].to_radians(),
-                WHEEL_ANGLES_DEG[2].to_radians(),
-                WHEEL_ANGLES_DEG[3].to_radians(),
-            ),
-            wheel_radius_m: Vector4::new(
-                WHEEL_RADIUS_M,
-                WHEEL_RADIUS_M,
-                WHEEL_RADIUS_M,
-                WHEEL_RADIUS_M,
-            ),
-            wheel_dist_to_cent_m: Vector4::new(
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
-            ),
-        };
+    // fn get_robot_model(&mut self) -> motion::robot_model::RobotModel {
+    //     let robot_model_constants: RobotConstants = RobotConstants {
+    //         wheel_angles_rad: Vector4::new(
+    //             WHEEL_ANGLES_DEG[0].to_radians(),
+    //             WHEEL_ANGLES_DEG[1].to_radians(),
+    //             WHEEL_ANGLES_DEG[2].to_radians(),
+    //             WHEEL_ANGLES_DEG[3].to_radians(),
+    //         ),
+    //         wheel_radius_m: Vector4::new(
+    //             WHEEL_RADIUS_M,
+    //             WHEEL_RADIUS_M,
+    //             WHEEL_RADIUS_M,
+    //             WHEEL_RADIUS_M,
+    //         ),
+    //         wheel_dist_to_cent_m: Vector4::new(
+    //             WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+    //             WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+    //             WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+    //             WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+    //         ),
+    //     };
 
-        let robot_model: RobotModel = RobotModel::new(robot_model_constants);
+    //     let robot_model: RobotModel = RobotModel::new(robot_model_constants);
 
-        return robot_model;
-    }
+    //     return robot_model;
+    // }
 
     fn stop_wheels(&self) -> bool {
         // defmt::debug!("hco: {}, sd req: {}, estop: {}", self.last_power_telemetry.high_current_operations_allowed() == 0, self.shared_robot_state.shutdown_requested(), self.last_command.emergency_stop() != 0);
