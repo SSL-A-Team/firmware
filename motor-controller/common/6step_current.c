@@ -4,6 +4,7 @@
 #include <stm32f031x6.h>
 
 #include "6step_current.h"
+#include "current_sensing.h"
 #include "pid.h"
 #include "system.h"
 #include "time.h"
@@ -17,9 +18,16 @@ typedef enum MotorDirection {
 //  motor commands  //
 //////////////////////
 
-static MotorDirection_t commanded_motor_direction = CLOCKWISE;
-static uint16_t current_duty_cycle = 0;
-static uint8_t hall_recorded_state_on_transition = 0;
+typedef enum _MotorControlMode {
+    DUTY = 0,
+    VOLTAGE  = 1,
+    CURRENT = 2,
+} MotorControlMode;
+
+static volatile MotorControlMode motor_control_mode = CURRENT;
+static volatile MotorDirection_t commanded_motor_direction = CLOCKWISE;
+static volatile uint16_t current_duty_cycle = 0;
+static volatile uint8_t hall_recorded_state_on_transition = 0;
 
 /////////////////////
 //  hall velocity  //
@@ -56,7 +64,7 @@ static FixedPointS12F4_PiConstants_t current_controller_constants = {
 
 static FixedPointS12F4_PiController_t current_controller;
 
-static int16_t measured_rail_voltage = 0;
+static volatile uint16_t measured_vbus_voltage = 0;
 
 ////////////////////////////////
 //  local data and functions  //
@@ -206,8 +214,11 @@ static uint8_t read_hall();
 static void set_commutation_estop();
 static void set_commutation_for_hall(uint8_t hall_value, bool estop);
 static void trigger_commutation();
-static void load_commutation_values(CommutationValuesType_t);
-static void pwm6step_set_direct(uint16_t, MotorDirection_t);
+
+static void set_duty_cycle(uint16_t duty_cycle);
+static void set_voltage(uint16_t voltage_mv);
+static void set_current(uint16_t current_ma);
+
 
 /**
  * @brief sets up the hall sensor timer
@@ -477,26 +488,34 @@ void TIM16_IRQHandler() {
     }
 }
 
-static int32_t voltage_filter[4];
+static uint32_t voltage_filter[4];
 static size_t voltage_filter_index = 0;
 
 static int32_t current_filter[8];
 static size_t current_filter_ind = 0;
 
+static volatile size_t double_buffer_ind = 0;
+static uint16_t current_data_buffer[2][20];
+static uint32_t logging_2frame_avg_cur = 0;
+
+static uint16_t adc_callback_ctr = 0;
+
+static volatile bool flag_1ms = false;
+
+/**
+ * should be called at 40Khz
+ */
 void ADC1_IRQHandler() {
     // read current
-    Uint32FixedPoint_t current_measurement = currsen_get_shunt_current_fxpt();  // S15F16
+    Uint32FixedPoint_t current_measurement = currsen_get_shunt_current_ma();  // U15
     // we need to normalize some values so the fixed point arith has reasonable intermediate computation sizes (32bit)
     // quantize current_measurement to 4096 (12 bits)
     // Max current the sense network should read is ~9A -> 9000mA
-    const Uint16FixedPoint_t S15F16_9000MA = 589824000;
-    if (current_measurement > S15F16_9000MA) {
-        current_measurement = S15F16_9000MA;
+    if (current_measurement > 9000) {
+        current_measurement = 9000;
     }
-    // S15F0
-    current_measurement >>= 16;
 
-    // S15F16 >> 16 = S15F0 * S0F16 = S15F16 >> 19 = S12F0
+    // S15F0 * S0F16 = S15F16 >> 19 = S12F0
     Uint32FixedPoint_t qtz_current = (current_measurement * S0F16_4096_OVER_9000) >> 19;
 
     // filter current
@@ -509,7 +528,21 @@ void ADC1_IRQHandler() {
     }
     avg_current >>= 3;  // div 8
 
-    // TODO measure and average voltages and update global
+
+    // update bus voltage
+
+    uint16_t vbus_mv = currsen_get_vbus_voltage_mv();
+
+    voltage_filter[voltage_filter_index++] = vbus_mv;
+    voltage_filter_index &= 0x3;
+
+    uint32_t average_bus_voltage = 0;
+    for (int i = 0; i < sizeof(voltage_filter) / 4; i++) {
+        average_bus_voltage += voltage_filter[i];
+    }
+    average_bus_voltage >>= 2;
+
+    measured_vbus_voltage = average_bus_voltage;
 
 
     // update PID, maps current to voltage
@@ -526,7 +559,27 @@ void ADC1_IRQHandler() {
     // scale from 4096 -> battery voltage
     uint16_t voltage_sp_mv = (voltage_sp * BATTERY_VOLTAGE_MV) >> 12;
 
-    pwm6step_set_voltage(voltage_sp_mv, false);
+    // if we're not in CURRENT mode, then the user has directly set the voltage/dc via the public function
+    // in that case, this callback is collecting logging data and averaging/update bus voltage for VOLTAGE mode
+    if (motor_control_mode == CURRENT) {
+        set_voltage(voltage_sp_mv);    
+    }
+
+    if ((adc_callback_ctr & 0x1) == 0) {
+        logging_2frame_avg_cur = avg_current;
+    } else {
+        current_data_buffer[double_buffer_ind][adc_callback_ctr / 2] = (uint16_t) ((logging_2frame_avg_cur + (uint32_t) avg_current) >> 1);
+        logging_2frame_avg_cur = 0;
+    }
+
+    adc_callback_ctr++;
+    if (adc_callback_ctr == 40) {
+        flag_1ms = true;
+
+        // 
+        adc_callback_ctr = 0;
+        double_buffer_ind = (double_buffer_ind + 1) & 0x1;
+    }
 }
 
 /**
@@ -755,68 +808,113 @@ void pwm6step_set_direction(MotorDirection_t motor_direction) {
     commanded_motor_direction = motor_direction;
 }
 
+static void set_duty_cycle(uint16_t duty_cycle) {
+    current_duty_cycle = MAP_MAX_DUTY_TO_ARR_DUTY(duty_cycle);
+}
+
 /**
  * @brief 
  * 
  * @param duty_cycle_arr 
  */
-void pwm6step_set_duty_cycle(uint16_t duty_cycle) {
-    current_duty_cycle = MAP_MAX_DUTY_TO_ARR_DUTY(duty_cycle);
+void pwm6step_set_duty_cycle(int16_t duty_cycle) {
+    if (duty_cycle < 0) {
+        pwm6step_set_direction(COUNTER_CLOCKWISE);
+    } else {
+        pwm6step_set_direction(CLOCKWISE);
+    }
+
+    // public function was called, set control mode to duty direct
+    motor_control_mode = DUTY;
+
+    uint16_t duty_cycle_abs = abs(duty_cycle);
+    set_duty_cycle(duty_cycle_abs);
 }
 
 void pwm6step_set_duty_cycle_f(float duty_cycle_pct) {
+    if (duty_cycle_pct < 0) {
+        pwm6step_set_direction(COUNTER_CLOCKWISE);
+    } else {
+        pwm6step_set_direction(CLOCKWISE);
+    }
+
     pwm6step_set_duty_cycle((uint16_t) (duty_cycle_pct * (float) MAX_DUTYCYCLE_COMMAND));
 }
 
-void pwm6step_set_voltage(int16_t voltage_mv, bool set_direction) {
-    if (set_direction) {
-        if (voltage_mv < 0) {
-            pwm6step_set_direction(COUNTER_CLOCKWISE);
-        } else {
-            pwm6step_set_direction(CLOCKWISE);
-        }
-    }
-
-    uint16_t abs_voltage_mv = abs(voltage_mv);
-    
+static void set_voltage(uint16_t voltage_mv) {
     // we can't command more than the battery can currently offer
     // set it to the max we can offer (gets more effective PWM range
     // at the top end)
-    if (voltage_mv > measured_rail_voltage) {
-        voltage_mv = measured_rail_voltage;
+    if (voltage_mv > measured_vbus_voltage) {
+        voltage_mv = measured_vbus_voltage;
     }
 
     // scale from mv to max duty
-    uint32_t voltage_scaled_to_dc = (uint16_t) ((uint32_t) voltage_mv * MAX_DUTYCYCLE_COMMAND / (uint32_t) measured_rail_voltage);
+    uint32_t voltage_scaled_to_dc = (uint16_t) ((uint32_t) voltage_mv * MAX_DUTYCYCLE_COMMAND / (uint32_t) measured_vbus_voltage);
     pwm6step_set_duty_cycle(voltage_scaled_to_dc);
 }
 
-void pwm6step_set_current(int16_t current_ma, bool set_direction) {
-    if (set_direction) {
-        if (current_ma < 0) {
-            pwm6step_set_direction(COUNTER_CLOCKWISE);
-        } else {
-            pwm6step_set_direction(CLOCKWISE);
-        }
+void pwm6step_set_voltage(int16_t voltage_mv) {
+    if (voltage_mv < 0) {
+        pwm6step_set_direction(COUNTER_CLOCKWISE);
+    } else {
+        pwm6step_set_direction(CLOCKWISE);
     }
 
-    uint16_t abs_current_ma = abs(current_ma);
+    // public function was called, set control mode to voltage
+    motor_control_mode = VOLTAGE;
 
+    uint16_t abs_voltage_mv = abs(voltage_mv);
+    set_voltage(abs_voltage_mv);
+}
+
+static void set_current(uint16_t current_ma) {
     // map current_ma to 4096
-    Uint16FixedPoint_t scaled_current = abs_current_ma * S0F16_4096_OVER_9000;
+    Uint16FixedPoint_t scaled_current = current_ma * S0F16_4096_OVER_9000;
     fxptpi_setpoint(&current_controller, scaled_current);
+}
+
+void pwm6step_set_current(int16_t current_ma) {
+    if (current_ma < 0) {
+        pwm6step_set_direction(COUNTER_CLOCKWISE);
+    } else {
+        pwm6step_set_direction(CLOCKWISE);
+    }
+
+    motor_control_mode = CURRENT;
+
+    uint16_t abs_current_ma = abs(current_ma);
+    set_current(abs_current_ma);
+}
+
+bool pwm6step_1ms_flag() {
+    if (flag_1ms) {
+        flag_1ms = false;
+        return true;
+    }
+
+    return false;
+}
+
+
+bool pwm6step_hall_rps_estimate_valid() {
+    return hall_speed_estimate_valid;
+}
+
+int pwm6step_hall_get_rps_estimate() {
+    return 0;
 }
 
 const MotorErrors_t pwm6step_get_motor_errors() {
     return motor_errors;
 } 
 
-bool pwm6step_hall_rps_estimate_valid() {
-
+const uint16_t* pwm6step_get_current_log() {
+    // use the inactive buffer
+    return current_data_buffer[!double_buffer_ind];
 }
 
-int pwm6step_hall_get_rps_estimate() {
-
-}
-
+const uint16_t pwm6step_get_vbus_voltage() {
+    return measured_vbus_voltage;
+}   
 

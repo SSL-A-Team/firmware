@@ -24,6 +24,9 @@
     "editor.inlayHints.enabled": "offUnlessPressed",
     "ros.distro": "humble",
     "files.associations": {
-        "compare": "c"
-    }
+        "compare": "c",
+        "type_traits": "cpp",
+        "utility": "cpp"
+    },
+    "makefile.configureOnOpen": true
 }

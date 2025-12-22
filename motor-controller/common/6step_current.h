@@ -61,15 +61,20 @@ typedef struct MotorErrors {
 ////////////////////////
 
 void pwm6step_setup();
-void pwm6step_set_duty_cycle(uint16_t duty_cycle);
+void pwm6step_set_duty_cycle(int16_t duty_cycle);
 void pwm6step_set_duty_cycle_f(float duty_cycle_pct);
-void pwm6step_set_voltage(int32_t voltage_mv);
-void pwm6step_set_current(int32_t current_ma);
-void pwm6step_set_output_current_limit(int32_t output_current_limit_ma);
+void pwm6step_set_voltage(int16_t voltage_mv);
+void pwm6step_set_current(int16_t current_ma);
+void pwm6step_set_output_current_limit(int16_t output_current_limit_ma);
 
+// timekeeping
+bool pwm6step_1ms_flag();
 
 // hall velocity estimate
 bool pwm6step_hall_rps_estimate_valid();
 int pwm6step_hall_get_rps_estimate();
 
+// error handling and logging
 const MotorErrors_t pwm6step_get_motor_errors();
+const uint16_t* pwm6step_get_current_log();
+const uint16_t pwm6step_get_vbus_voltage();

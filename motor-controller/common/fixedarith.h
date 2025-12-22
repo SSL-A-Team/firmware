@@ -4,6 +4,8 @@
 
 #include <stdint.h>
 
+#pragma once
+
 typedef struct FixedPointConfig {
     uint8_t total_bits;
     uint8_t int_bits;
@@ -19,17 +21,8 @@ typedef int64_t Int32OperationContainer_t;
 typedef uint32_t Uint32FixedPoint_t;
 typedef uint64_t Uint32OperationContainer_t;
 
-const Int16FixedPoint_t FixedPointS12_MAX = 4095;
-const Int16FixedPoint_t FixedPointS12_MIN = -4096;
+extern const Int16FixedPoint_t FixedPointS12_MAX;
+extern const Int16FixedPoint_t FixedPointS12_MIN;
 
-const FixedPointConfig_t FixedU12F4Config = {
-    .total_bits = 16,
-    .int_bits = 12,
-    .frac_bits = 4,
-};
-
-const FixedPointConfig_t FixedS12F4Config = {
-    .total_bits = 16,
-    .int_bits = 12,
-    .frac_bits = 4,
-};
+extern const FixedPointConfig_t FixedU12F4Config;
+extern const FixedPointConfig_t FixedS12F4Config;

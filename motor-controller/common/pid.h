@@ -49,7 +49,7 @@ typedef struct GainScheduledPid {
     float prev_err;
 } GainScheduledPid_t;
 
-GainScheduledPidResult_t gspid_initialize(GainScheduledPid_t *pid, size_t num_gain_stages, PidConstants_t *pid_constants, float *gain_schedule, float hyst_pct, bool gain_schedule_abs);
+GainScheduledPidResult_t gspid_initialize(GainScheduledPid_t *pid, const size_t num_gain_stages, const PidConstants_t *pid_constants, const float *gain_schedule, const float hyst_pct, const bool gain_schedule_abs);
 float gspid_calculate(GainScheduledPid_t *pid, float r, float y, float dt);
 size_t gspid_get_cur_gain_stage_index(GainScheduledPid_t *pid);
 

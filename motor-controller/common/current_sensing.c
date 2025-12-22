@@ -44,7 +44,7 @@ void DMA1_Channel1_IRQHandler() {
  *
  * @return CS_Status_t status of the operation
  */
-CS_Status_t currsen_setup(uint8_t motor_adc_ch)
+CS_Status_t currsen_setup(uint16_t motor_adc_ch)
 {
     memset(&m_adc_result, 0, sizeof(ADC_Result_t));
 
@@ -397,6 +397,14 @@ Uint32FixedPoint_t currsen_get_shunt_current_fxpt() {
 
     // S15F16
     return i_shunt;
+}
+
+uint16_t currsen_get_shunt_current_ma() {
+    currsen_get_shunt_current_fxpt() >> 16;
+}
+
+uint16_t currsen_get_vbus_voltage_mv() {
+    return (uint16_t) ((((uint32_t) m_adc_result.Vbus_raw) * 37500U) >> 12U);
 }
 
 Uint32FixedPoint_t currsen_get_shunt_voltage_fxpt() {

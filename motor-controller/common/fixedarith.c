@@ -4,6 +4,22 @@
 
 #include "fixedarith.h"
 
+
+extern const Int16FixedPoint_t FixedPointS12_MAX = 4095;
+extern const Int16FixedPoint_t FixedPointS12_MIN = -4096;
+
+const FixedPointConfig_t FixedU12F4Config = {
+    .total_bits = 16,
+    .int_bits = 12,
+    .frac_bits = 4,
+};
+
+const FixedPointConfig_t FixedS12F4Config = {
+    .total_bits = 16,
+    .int_bits = 12,
+    .frac_bits = 4,
+};
+
 /**
  * Create an unsigned fixed point number with at least 16 bits of storage.
  */
@@ -31,15 +47,15 @@ uint16_t uint16fixed_to_int(Uint16FixedPoint_t val, const FixedPointConfig_t *va
 /**
  * Add two fixed point numbers, frac bits must be the same
  */
-Uint16FixedPoint_t* uint16fixed_add(Uint16FixedPoint_t lhs, Uint16FixedPoint_t rhs) {
+Uint16FixedPoint_t uint16fixed_add(Uint16FixedPoint_t lhs, Uint16FixedPoint_t rhs) {
     return lhs + rhs;
 }
 
-Uint16FixedPoint_t* uint16fixed_sub(Uint16FixedPoint_t lhs, Uint16FixedPoint_t rhs) {
+Uint16FixedPoint_t uint16fixed_sub(Uint16FixedPoint_t lhs, Uint16FixedPoint_t rhs) {
     return lhs - rhs;
 }
 
-Uint16FixedPoint_t* uint16fixed_mul(Uint16FixedPoint_t lhs, Uint16FixedPoint_t rhs, const FixedPointConfig_t *config) {
+Uint16FixedPoint_t uint16fixed_mul(Uint16FixedPoint_t lhs, Uint16FixedPoint_t rhs, const FixedPointConfig_t *config) {
     Uint16OperationContainer_t ires = (Uint16OperationContainer_t) lhs * (Uint16OperationContainer_t) rhs;
 
     // (1 << config->frac_bits) term provides rounding
@@ -50,7 +66,7 @@ Uint16FixedPoint_t* uint16fixed_mul(Uint16FixedPoint_t lhs, Uint16FixedPoint_t r
     #endif
 }
 
-Uint16FixedPoint_t* uint16fixed_div(Uint16FixedPoint_t numerator, Uint16FixedPoint_t denominator, const FixedPointConfig_t *config) {
+Uint16FixedPoint_t uint16fixed_div(Uint16FixedPoint_t numerator, Uint16FixedPoint_t denominator, const FixedPointConfig_t *config) {
     Uint16OperationContainer_t tdiv = (Uint16OperationContainer_t) numerator * (Uint16OperationContainer_t) (1 << config->frac_bits);
     return (Uint16FixedPoint_t) (tdiv / denominator);
 }

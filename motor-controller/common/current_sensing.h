@@ -8,10 +8,12 @@
  *
  */
 
-#pragma once
-
 #include <math.h>
 #include <stdbool.h>
+
+#include "fixedarith.h"
+
+#pragma once
 
 static const float V_DDA_MV = 3000.0f; // mV
 static const float V_DDA_V = 3.0f; // V
@@ -151,11 +153,15 @@ __attribute__((__packed__)) ADC_Result {
 
 void currsen_enable_ht();
 void currsen_read_dma();
-CS_Status_t currsen_setup(uint8_t motor_adc_ch);
+CS_Status_t currsen_setup(uint16_t motor_adc_ch);
 CS_Status_t currsen_adc_cal();
 CS_Status_t currsen_adc_en();
 CS_Status_t currsen_adc_dis();
 CS_Status_t calculate_motor_zero_current_setpoint();
+
+Uint32FixedPoint_t currsen_get_shunt_current_fxpt();
+uint16_t currsen_get_shunt_current_ma();
+uint16_t currsen_get_vbus_voltage_mv();
 
 float currsen_get_shunt_voltage_raw();
 float currsen_get_shunt_voltage();

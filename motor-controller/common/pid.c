@@ -48,10 +48,11 @@ float pid_calculate(Pid_t *pid, float r, float y, float dt) {
 
 GainScheduledPidResult_t gspid_initialize(
         GainScheduledPid_t *pid,
-        size_t num_gain_stages,
-        PidConstants_t pid_constants[],
-        float gain_schedule[], float hyst_pct,
-        bool gain_schedule_abs) {
+        const size_t num_gain_stages,
+        const PidConstants_t pid_constants[],
+        const float gain_schedule[],
+        const float hyst_pct,
+        const bool gain_schedule_abs) {
     // size_t pid_constants_len = sizeof(pid_constants) / sizeof(pid_constants[0]);
     // size_t gain_sched_len = sizeof(pid_constants) / sizeof(pid_constants[0]);
 
@@ -193,7 +194,7 @@ void fxptpi_constants_initialize(FixedPointS12F4_PiConstants_t *pi_constants) {
 }
 
 void fxptpi_initialize(FixedPointS12F4_PiController_t *pi, FixedPointS12F4_PiConstants_t *pi_constants) {
-    pi->pi_constants = pi;
+    pi->pi_constants = pi_constants;
 
     pi->eI = 0;
     pi->output = 0;
@@ -293,5 +294,5 @@ Int16FixedPoint_t fxptpi_calculate(FixedPointS12F4_PiController_t *pi, Int16Fixe
 }
 
 Int16FixedPoint_t fxptpi_get_output(FixedPointS12F4_PiController_t *pi) {
-    pi->output;
+    return pi->output;
 }
