@@ -138,7 +138,7 @@ impl BodyPoseController {
         );
         // Calculate the acceleration needed to achieve the trajectory right now
         let global_accel_cmd = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_accel_at_t(traj, 0.0);
-        // Calculate the velocity that should be achieved at the next time step after applying this acceleration
+        // Calculate the state that should be achieved at the next time step after applying this acceleration
         let next_body_state = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_state_at_t(traj, state_estimate, 0.0, loop_period.as_micros() as f32 * 1e-6);
 
         // TODO: output in telemetery
