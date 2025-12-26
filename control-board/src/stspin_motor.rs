@@ -171,7 +171,7 @@ impl<
             // params state firmware_img_hash field is initialized as 0's
             if self.current_params_state.firmware_img_hash != [0; 4] {
                 let current_img_hash = self.current_params_state.firmware_img_hash;
-                defmt::debug!("Wheel Interface - Received parameter response");
+                defmt::debug!("Wheel Interface - Parameter response updated the firmware image hash!");
                 defmt::trace!(
                     "Wheel Interface - Current device image hash {:x}",
                     current_img_hash
