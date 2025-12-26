@@ -206,7 +206,6 @@ impl<
             wheel_vel_meas,
             wheel_torque_meas,
             gyro_rads_meas,
-            controls_enabled,
         );
         (robot_controller.get_wheel_velocities(), robot_controller.get_wheel_torques())
     }

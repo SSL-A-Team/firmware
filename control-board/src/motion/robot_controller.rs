@@ -73,24 +73,14 @@ impl BodyPoseController {
 
     pub fn control_update(
         &mut self,
-        state_setpoint: Vector3f,
+        pose_cmd: Vector3f,
         loop_period: Duration,
         vision_pose_meas: Vector3f,
         vision_pose_meas_instant: Instant,
         wheel_vel_meas: Vector4f,
         wheel_torque_meas: Vector4f,
         gyro_theta_meas: f32,
-        controls_enabled: bool,
     ) {
-        // Assign telemetry data
-        // TODO pass all of the gyro data up, not just theta
-        self.debug_telemetry.imu_gyro[2] = gyro_theta_meas;
-
-        // TODO: update extended packet with commanded position
-        // self.debug_telemetry
-        //     .commanded_body_velocity
-        //     .copy_from_slice(body_vel_setpoint.as_slice());
-
         // let measurement: Vector5<f32> = Vector5::new(
         //     wheel_velocities_meas[0],
         //     wheel_velocities_meas[1],
@@ -132,44 +122,38 @@ impl BodyPoseController {
             twist: global_twist,
         };
 
+        // Calculate global values
         // Calculate the optimal trajectory to the setpoint
         let traj = ateam_controls::bangbang_trajectory::compute_optimal_bangbang_traj_3d(
-            state_estimate, state_setpoint
+            state_estimate, pose_cmd,
         );
         // Calculate the acceleration needed to achieve the trajectory right now
         let global_accel_cmd = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_accel_at_t(traj, 0.0);
-        // Calculate the state that should be achieved at the next time step after applying this acceleration
+        // Calculate the twist that should be achieved at the next time step after applying this acceleration
         let next_body_state = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_state_at_t(traj, state_estimate, 0.0, loop_period.as_micros() as f32 * 1e-6);
+        let global_twist_cmd = next_body_state.twist;
 
-        // TODO: output in telemetery
-        // self.debug_telemetry
-        //     .body_velocity_u
-        //     .copy_from_slice(body_vel_output.as_slice());
-
-        // TODO: do any hard clamping? although I think it should already be clamped
-
+        // Transform global values to robot values
         let robot_accel_cmd = transform_frame_global2robot_accel(state_estimate.pose, global_accel_cmd);
+        // These torques are discretized by the loop rate, but in an ideal world, it would be a continuous command update to reach the next state wheel velocities as theta changes. However, the loop rate should be fast enough that the error due to a change in theta during each control period should be negligible, and the individual wheel velocities are achieved by the next control update
         self.wheel_torque_cmd = self.robot_model.accel_to_wheel_torques(robot_accel_cmd);
         let robot_twist_next_body_state = transform_frame_global2robot_twist(next_body_state.pose, next_body_state.twist);
         self.wheel_vel_cmd = self.robot_model.twist_to_wheel_velocities(robot_twist_next_body_state);
+        // TODO: do any hard clamping? although I think it should already be clamped
 
-        // output in telemetry
-        self.debug_telemetry.wheel_velocity_u.copy_from_slice(Vector4::from(self.wheel_vel_cmd).as_slice());
+        // Copy values to telemetry
+        self.debug_telemetry.imu_gyro[2] = gyro_theta_meas;
+        self.debug_telemetry.body_cmd.copy_from_slice(pose_cmd.as_slice());
+        self.debug_telemetry.kf_body_pose_estimate.copy_from_slice(state_estimate.pose.as_slice());
+        self.debug_telemetry.kf_body_twist_estimate.copy_from_slice(state_estimate.twist.as_slice());
+        self.debug_telemetry.body_twist_u.copy_from_slice(global_twist_cmd.as_slice());
+        self.debug_telemetry.body_accel_u.copy_from_slice(global_accel_cmd.as_slice());
+        self.debug_telemetry.wheel_velocity_u.copy_from_slice(self.wheel_vel_cmd.as_slice());
+        self.debug_telemetry.wheel_torque_u.copy_from_slice(self.wheel_torque_cmd.as_slice());
 
-        // TODO: kalman filter update
+        // TODO: kalman filter predict next state
         // // Use control law adjusted value to predict the next cycle's state.
         // self.body_vel_filter.predict(&wheel_vel_output);
-
-        // TODO: needed?
-        // Save command state.
-        // if controls_enabled {
-        //     self.cmd_wheel_velocities = wheel_vel_output;
-        // } else {
-        //     self.cmd_wheel_velocities = self.robot_model.robot_vel_to_wheel_vel(&body_vel_setpoint);
-        //     self.debug_telemetry
-        //         .wheel_velocity_u
-        //         .copy_from_slice(wheel_vel_output.as_slice());
-        // }
     }
 
     pub fn get_wheel_velocities(&self) -> Vector4f {
