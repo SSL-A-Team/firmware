@@ -11,7 +11,7 @@ use ateam_common_packets::bindings::{
 };
 use ateam_controls::{Vector3f, Vector4f, RigidBodyState};
 use ateam_controls::robot_model::RobotModel;
-use ateam_controls::robot_model::{global_frame_to_robot_frame_accel, global_frame_to_robot_frame_twist, robot_frame_to_global_frame_twist};
+use ateam_controls::robot_model::{transform_frame_global2robot_accel, transform_frame_global2robot_twist, transform_frame_robot2global_twist};
 use ateam_controls::robot_physical_params::*;
 use ateam_controls::bangbang_trajectory::BangBangTraj3D;
 use embassy_stm32::pac::adc::vals::Exten;
@@ -125,7 +125,7 @@ impl BodyPoseController {
 
         // Use raw wheel readings and vision measurements for state estimate until kalman filter is implemented
         let robot_twist = self.robot_model.wheel_velocities_to_twist(wheel_vel_meas);
-        let global_twist = robot_frame_to_global_frame_twist(vision_pose_meas, robot_twist);
+        let global_twist = transform_frame_robot2global_twist(vision_pose_meas, robot_twist);
 
         let state_estimate = RigidBodyState { 
             pose: vision_pose_meas,
@@ -148,9 +148,9 @@ impl BodyPoseController {
 
         // TODO: do any hard clamping? although I think it should already be clamped
 
-        let robot_accel_cmd = global_frame_to_robot_frame_accel(state_estimate.pose, global_accel_cmd);
+        let robot_accel_cmd = transform_frame_global2robot_accel(state_estimate.pose, global_accel_cmd);
         self.wheel_torque_cmd = self.robot_model.accel_to_wheel_torques(robot_accel_cmd);
-        let robot_twist_next_body_state = global_frame_to_robot_frame_twist(next_body_state.pose, next_body_state.twist);
+        let robot_twist_next_body_state = transform_frame_global2robot_twist(next_body_state.pose, next_body_state.twist);
         self.wheel_vel_cmd = self.robot_model.twist_to_wheel_velocities(robot_twist_next_body_state);
 
         // output in telemetry
