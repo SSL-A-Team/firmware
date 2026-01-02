@@ -349,12 +349,12 @@ impl<
         let mut last_vision_pose_instant = Instant::from_micros(0);
         let mut ticks_since_control_packet = 0;
 
-        // //////////////////////// Frequency Measurement Vars //////////////////////////
-        // let mut loop_ticks_since_freqeuncy_measurement = 0;
-        // let mut frequency_measurement_time_elapsed_sum_ms = 0;
-        // let frequency_measurement_window_length = 60;
-        // let mut last_frequency_measurement_time = Instant::now();
-        // //////////////////////////////////////////////////////////////////////////////
+        //////////////////////// Frequency Measurement Vars //////////////////////////
+        let mut loop_ticks_since_freqeuncy_measurement = 0;
+        let mut frequency_measurement_time_elapsed_sum_ms = 0;
+        let frequency_measurement_window_length = 60;
+        let mut last_frequency_measurement_time = Instant::now();
+        //////////////////////////////////////////////////////////////////////////////
 
 
         let mut last_loop_term_time = Instant::now();
@@ -382,18 +382,19 @@ impl<
             while let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
                 match latest_packet {
                     ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
-                        // //////////////////////// Loop Rate Measurement ///////////////////////////////
-                        // let frequency_measurement_loop_time_elapsed = (Instant::now() - last_frequency_measurement_time).as_millis();
-                        // frequency_measurement_time_elapsed_sum_ms += frequency_measurement_loop_time_elapsed;
-                        // if loop_ticks_since_freqeuncy_measurement == frequency_measurement_window_length {
-                        //     let frequency: f32 = loop_ticks_since_freqeuncy_measurement as f32 / ((frequency_measurement_time_elapsed_sum_ms as f32) / 1000.0) ;
-                        //     defmt::debug!("Rx Command Frequency - {} hz", frequency);
-                        //     frequency_measurement_time_elapsed_sum_ms = 0;
-                        //     loop_ticks_since_freqeuncy_measurement = 0;
-                        // }
-                        // last_frequency_measurement_time = Instant::now();
-                        // loop_ticks_since_freqeuncy_measurement += 1;
-                        // //////////////////////////////////////////////////////////////////////////////
+                        defmt::info!("received basic control packet");
+                        //////////////////////// Loop Rate Measurement ///////////////////////////////
+                        let frequency_measurement_loop_time_elapsed = (Instant::now() - last_frequency_measurement_time).as_millis();
+                        frequency_measurement_time_elapsed_sum_ms += frequency_measurement_loop_time_elapsed;
+                        if loop_ticks_since_freqeuncy_measurement == frequency_measurement_window_length {
+                            let frequency: f32 = loop_ticks_since_freqeuncy_measurement as f32 / ((frequency_measurement_time_elapsed_sum_ms as f32) / 1000.0) ;
+                            defmt::info!("Rx Command Frequency - {} hz", frequency);
+                            frequency_measurement_time_elapsed_sum_ms = 0;
+                            loop_ticks_since_freqeuncy_measurement = 0;
+                        }
+                        last_frequency_measurement_time = Instant::now();
+                        loop_ticks_since_freqeuncy_measurement += 1;
+                        //////////////////////////////////////////////////////////////////////////////
 
                         if latest_control.reboot_robot() != 0 {
                             loop {
@@ -528,7 +529,7 @@ impl<
             let loop_end_time = Instant::now();
             let loop_execution_time = loop_end_time - loop_start_time;
             if loop_execution_time > Duration::from_micros(200) {
-                defmt::warn!("control loop is taking >200us to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {:?}", loop_execution_time);
+                defmt::warn!("control loop is taking >200us to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {} us", loop_execution_time.as_micros());
             }
 
             last_loop_term_time = Instant::now();
