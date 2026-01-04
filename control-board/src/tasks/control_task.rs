@@ -44,6 +44,8 @@ static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_
 static_idle_buffered_uart!(FRONT_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
 const TICKS_WITHOUT_PACKET_STOP: usize = 200;
+const TICKS_BASIC_TELEM_INTERVAL: usize = 20;  // send basic telem every 10 ticks (100 Hz if loop is 1 kHz)
+const TICKS_EXTENDED_TELEM_INTERVAL: usize = 20;  // send extended telem every 20 ticks (50 Hz if loop is 1 kHz)
 
 #[macro_export]
 macro_rules! create_control_task {
@@ -117,6 +119,9 @@ pub struct ControlTask<
     last_power_telemetry: PowerTelemetry,
     last_kicker_telemetry: KickerTelemetry,
 
+    ticks_since_extended_telem: usize,
+    ticks_since_basic_telem: usize,
+
     motor_fl: ControlWheelMotor,
     motor_bl: ControlWheelMotor,
     motor_br: ControlWheelMotor,
@@ -157,6 +162,8 @@ impl<
             last_command: Default::default(),
             last_power_telemetry: Default::default(),
             last_kicker_telemetry: Default::default(),
+            ticks_since_basic_telem: 0,
+            ticks_since_extended_telem: 0,
             motor_fl: motor_fl,
             motor_bl: motor_bl,
             motor_br: motor_br,
@@ -278,8 +285,10 @@ impl<
             kicker_charge_percent: self.last_kicker_telemetry.charge_pct,
         });
 
-        if cur_state.radio_bridge_ok {
+        self.ticks_since_basic_telem += 1;
+        if cur_state.radio_bridge_ok && self.ticks_since_basic_telem >= TICKS_BASIC_TELEM_INTERVAL {
             self.telemetry_publisher.publish_immediate(basic_telem);
+            self.ticks_since_basic_telem = 0;
         }
 
         let mut control_debug_telem = robot_controller.get_control_debug_telem();
@@ -296,9 +305,11 @@ impl<
         control_debug_telem.power_status = self.last_power_telemetry;
 
         let control_debug_telem = TelemetryPacket::Extended(control_debug_telem);
-        if cur_state.radio_bridge_ok {
+        self.ticks_since_extended_telem += 1;
+        if cur_state.radio_bridge_ok && self.ticks_since_extended_telem >= TICKS_EXTENDED_TELEM_INTERVAL {
             self.telemetry_publisher
                 .publish_immediate(control_debug_telem);
+            self.ticks_since_extended_telem = 0;
         }
     }
 
@@ -382,7 +393,7 @@ impl<
             while let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
                 match latest_packet {
                     ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
-                        defmt::info!("received basic control packet");
+                        // defmt::info!("received basic control packet");
                         //////////////////////// Loop Rate Measurement ///////////////////////////////
                         let frequency_measurement_loop_time_elapsed = (Instant::now() - last_frequency_measurement_time).as_millis();
                         frequency_measurement_time_elapsed_sum_ms += frequency_measurement_loop_time_elapsed;
