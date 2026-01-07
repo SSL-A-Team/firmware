@@ -26,6 +26,7 @@ use embassy_stm32::{
 use embassy_time::Instant;
 
 pub mod image_hash;
+pub mod motor;
 pub mod parameter_interface;
 pub mod pins;
 pub mod robot_state;
