@@ -153,14 +153,14 @@ $1--$2: $1/target/thumbv7em-none-eabihf/release/$2.bin
 	python ../util/embed_img_hash.py
 kicker-board--all:: $1--$2
 
-# $1--$2: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel
+# $1--$2: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel motor-controller--wheel-torque
 # 	cd $1 && \
 # 	cargo build $(additional_control_cargo_flags) --release --bin $2 && \
 # 	arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/$2 target/thumbv7em-none-eabihf/release/$2.bin && \
 # 	python ../util/embed_img_hash.py
 # control-board--all:: $1--$2
 
-$1--$2--run: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel
+$1--$2--run: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel motor-controller--wheel-torque
 	cd $1 && \
 	cargo run $(additional_control_cargo_flags) --release --bin $2
 

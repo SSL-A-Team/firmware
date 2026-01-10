@@ -480,8 +480,8 @@ impl<
         return self.current_state.vel_setpoint;
     }
 
-    pub fn read_vel_computed_duty(&self) -> f32 {
-        return self.current_state.vel_computed_duty;
+    pub fn read_vel_computed_error(&self) -> f32 {
+        return self.current_state.vel_computed_error;
     }
 
     pub fn read_current(&self) -> f32 {
@@ -501,14 +501,6 @@ impl<
     }
 
     pub fn read_torque_computed_nm(&self) -> f32 {
-        return self.current_state.torque_computed_nm;
-    }
-
-    pub fn read_torque_computed_duty(&self) -> f32 {
-        return self.current_state.torque_computed_duty;
-    }
-
-    pub fn read_vbus_voltage(&self) -> f32 {
-        return self.current_state.vbus_voltage;
+        return self.current_state.torque_computed_setpoint;
     }
 }

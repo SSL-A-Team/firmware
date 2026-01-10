@@ -235,32 +235,32 @@ int main() {
 
         // "soft" error conditions zero out the motor setpoint
         if (allow_motor_to_run()) {
-            motor_command_packet.motion_control_type = MOTOR_OFF;
+            motor_command_packet.motion_control_type = CCM_MCT_MOTOR_OFF;
             motor_command_packet.current_setpoint_ma = 0;
-            motor_command_packet.velocity_setpoint_rads = 0.0f;
+            motor_command_packet.setpoint = 0.0f;
         }
 
         // update wheel velocity est
         update_wheel_vel_est();
 
         switch (motor_command_packet.motion_control_type) {
-            case MOTOR_OFF:
+            case CCM_MCT_MOTOR_OFF:
                 pwm6step_set_duty_cycle(0);
                 break;
-            case DUTY_OPENLOOP:
-                pwm6step_set_duty_cycle_f(motor_command_packet.duty_setpoint_f);
-            case VOLTAGE_OPENLOOP:
-                pwm6step_set_voltage((int32_t) motor_command_packet.voltage_setpoint_mv);
+            case CCM_MCT_DUTY_OPENLOOP:
+                pwm6step_set_duty_cycle_f(motor_command_packet.setpoint);
+            case CCM_MCT_VOLTAGE_OPENLOOP:
+                pwm6step_set_voltage((int32_t) motor_command_packet.setpoint);
                 break;
-            case CURRENT:
+            case CCM_MCT_CURRENT:
                 pwm6step_set_current(motor_command_packet.current_setpoint_ma);
                 break;
-            case VELOCITY:
+            case CCM_MCT_VELOCITY:
                 float dc_f = do_vel_control();
                 pwm6step_set_duty_cycle_f(dc_f);
 
                 break;
-            case VELOCITY_CURRENT:
+            case CCM_MCT_VELOCITY_CURRENT:
                 pwm6step_set_current(motor_command_packet.current_setpoint_ma);
 
                 do_vel_cur_control();
@@ -358,7 +358,7 @@ static void do_vel_cur_control() {
 }
 
 static float do_vel_control() {
-    float r_motor_board = motor_command_packet.velocity_setpoint_rads;
+    float r_motor_board = motor_command_packet.setpoint;
     float cur_wheel_vel_est_rads = response_packet.velocity_telemetry.wheel_vel_rads;
     static float control_setpoint_vel_rads_prev = 0.0f;
 
