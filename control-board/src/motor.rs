@@ -15,15 +15,10 @@ use nalgebra::Vector3;
 
 use crate::{image_hash, DEBUG_MOTOR_UART_QUEUES};
 use ateam_common_packets::bindings::{
-    MotionCommandType::{self, OPEN_LOOP},
-    MotorCommandPacket,
-    MotorCommandType::{MCP_MOTION, MCP_PARAMS},
-    MotorResponse,
-    MotorResponseType::{MRP_MOTION, MRP_PARAMS},
-    MotorTelemetry, ParameterMotorResponse,
+    CurrentControlledMotor_CurrentTelemetry, CurrentControlledMotor_MotionControlType, CurrentControlledMotor_Response, CurrentControlledMotor_ResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM}, CurrentControlledMotor_Telemetry, MotionCommandType::{self, OPEN_LOOP}, MotorCommandPacket, MotorCommandType::{MCP_MOTION, MCP_PARAMS}, MotorResponse, MotorResponseType::{MRP_MOTION, MRP_PARAMS}
 };
 
-pub struct WheelMotor<
+pub struct CurrentControlledMotor<
     'a,
     const LEN_RX: usize,
     const LEN_TX: usize,
@@ -34,23 +29,15 @@ pub struct WheelMotor<
         Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES>,
     firmware_image: &'a [u8],
     current_timestamp_ms: u32,
-    current_state: MotorTelemetry,
-    current_params_state: ParameterMotorResponse,
-    version_major: u8,
-    version_minor: u8,
-    version_patch: u16,
-    vel_pid_constants: Vector3<f32>,
-    vel_pid_i_max: f32,
-    torque_pid_constants: Vector3<f32>,
-    torque_pid_i_max: f32,
+    current_state: CurrentControlledMotor_Telemetry,
+    current_params_state: CurrentControlledMotor_CurrentTelemetry,
     torque_limit: f32,
 
     setpoint: f32,
-    motion_type: MotionCommandType::Type,
+    motion_type: CurrentControlledMotor_MotionControlType::Type,
     reset_flagged: bool,
     telemetry_enabled: bool,
     motion_enabled: bool,
-    calibrate_current: bool,
 }
 
 impl<
@@ -59,7 +46,7 @@ impl<
         const LEN_TX: usize,
         const DEPTH_RX: usize,
         const DEPTH_TX: usize,
-    > WheelMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
+    > CurrentControlledMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX>
 {
     pub fn new(
         stm32_interface: Stm32Interface<
@@ -71,24 +58,17 @@ impl<
             DEBUG_MOTOR_UART_QUEUES,
         >,
         firmware_image: &'a [u8],
-    ) -> WheelMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
-        let start_state: MotorTelemetry = Default::default();
-        let start_params_state: ParameterMotorResponse = Default::default();
+    ) -> CurrentControlledMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
+        let start_state: CurrentControlledMotor_Telemetry = Default::default();
+        let start_params_state: CurrentControlledMotor_Response = Default::default();
 
-        WheelMotor {
+        CurrentControlledMotor {
             stm32_uart_interface: stm32_interface,
             firmware_image,
 
-            version_major: 0,
-            version_minor: 0,
-            version_patch: 0,
             current_timestamp_ms: 0,
             current_state: start_state,
             current_params_state: start_params_state,
-            vel_pid_constants: Vector3::new(0.0, 0.0, 0.0),
-            vel_pid_i_max: 0.0,
-            torque_pid_constants: Vector3::new(0.0, 0.0, 0.0),
-            torque_pid_i_max: 0.0,
             torque_limit: 0.0,
 
             setpoint: 0.0,
@@ -96,7 +76,6 @@ impl<
             reset_flagged: false,
             telemetry_enabled: false,
             motion_enabled: false,
-            calibrate_current: false,
         }
     }
 
@@ -107,7 +86,7 @@ impl<
         boot0_pin: Peri<'static, AnyPin>,
         reset_pin: Peri<'static, AnyPin>,
         firmware_image: &'a [u8],
-    ) -> WheelMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
+    ) -> CurrentControlledMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
         // Need a Pull None to allow for STSPIN watchdog usage.
         let stm32_interface = Stm32Interface::new_from_pins(
             uart,
@@ -119,23 +98,16 @@ impl<
             true,
         );
 
-        let start_state: MotorTelemetry = Default::default();
-        let start_params_state: ParameterMotorResponse = Default::default();
+        let start_state: CurrentControlledMotor_Telemetry = Default::default();
+        let start_params_state: CurrentControlledMotor_Response = Default::default();
 
-        WheelMotor {
+        CurrentControlledMotor {
             stm32_uart_interface: stm32_interface,
             firmware_image,
 
-            version_major: 0,
-            version_minor: 0,
-            version_patch: 0,
             current_timestamp_ms: 0,
             current_state: start_state,
             current_params_state: start_params_state,
-            vel_pid_constants: Vector3::new(0.0, 0.0, 0.0),
-            vel_pid_i_max: 0.0,
-            torque_pid_constants: Vector3::new(0.0, 0.0, 0.0),
-            torque_pid_i_max: 0.0,
             torque_limit: 0.0,
 
             setpoint: 0.0,
@@ -143,7 +115,6 @@ impl<
             reset_flagged: false,
             telemetry_enabled: false,
             motion_enabled: false,
-            calibrate_current: false,
         }
     }
 
@@ -165,29 +136,36 @@ impl<
 
     /// Get the first 4 bytes of the currently loaded image hash on the device, Run with timeout!
     pub async fn get_current_device_img_hash(&mut self) -> [u8; 4] {
-        loop {
-            // defmt::trace!("Wheel Interface - Sending parameter command packet");
-            self.send_params_command();
+        // TODO: fix with new structure
 
-            Timer::after(Duration::from_millis(5)).await;
+        
+        // loop {
+        //     // defmt::trace!("Wheel Interface - Sending parameter command packet");
+        //     self.send_params_command();
 
-            // defmt::debug!("Wheel Interface - Checking for parameter response");
-            // Parse incoming packets
-            self.process_packets();
-            // Check if curret_params_state has updated, assuming that the
-            // params state firmware_img_hash field is initialized as 0's
-            if self.current_params_state.firmware_img_hash != [0; 4] {
-                let current_img_hash = self.current_params_state.firmware_img_hash;
-                defmt::debug!("Wheel Interface - Parameter response updated the firmware image hash!");
-                defmt::trace!(
-                    "Wheel Interface - Current device image hash {:x}",
-                    current_img_hash
-                );
-                return current_img_hash;
-            };
+        //     Timer::after(Duration::from_millis(5)).await;
 
-            Timer::after(Duration::from_millis(5)).await;
-        }
+        //     // defmt::debug!("Wheel Interface - Checking for parameter response");
+        //     // Parse incoming packets
+        //     self.process_packets();
+
+
+        //     // Check if curret_params_state has updated, assuming that the
+        //     // params state firmware_img_hash field is initialized as 0's
+        //     // if self.current_params_state.firmware_img_hash != [0; 4] {
+        //     //     let current_img_hash = self.current_params_state.firmware_img_hash;
+        //     //     defmt::debug!("Wheel Interface - Received parameter response");
+        //     //     defmt::trace!(
+        //     //         "Wheel Interface - Current device image hash {:x}",
+        //     //         current_img_hash
+        //     //     );
+        //     //     return current_img_hash;
+        //     // };
+
+        //     // Timer::after(Duration::from_millis(5)).await;
+        // }
+
+        [0; 4]
     }
 
     pub async fn check_device_has_latest_default_image(&mut self) -> Result<bool, ()> {
@@ -309,7 +287,7 @@ impl<
             // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
             unsafe {
                 // zero initialize a local response packet
-                let mut mrp: MotorResponse = Default::default();
+                let mut mrp: CurrentControlledMotor_Response = Default::default();
 
                 // copy receieved uart bytes into packet
                 let state = &mut mrp as *mut _ as *mut u8;
@@ -320,7 +298,7 @@ impl<
                 // TODO probably do some checksum stuff eventually
 
                 // decode union type, and reinterpret subtype
-                if mrp.type_ == MRP_MOTION {
+                if mrp.type_ == CCM_RESP_TELEM {
                     self.current_state = mrp.data.motion;
                     // // // info!("{:?}", defmt::Debug2Format(&mrp.data.motion));
                     // // info!("\n");
@@ -349,7 +327,7 @@ impl<
                     // info!("reset_watchdog_window {:?}", mrp.data.motion.reset_watchdog_window());
                     // info!("reset_low_power {:?}", mrp.data.motion.reset_low_power());
                     // info!("reset_software {:?}", mrp.data.motion.reset_software());
-                } else if mrp.type_ == MRP_PARAMS {
+                } else if mrp.type_ == CCM_RESP_PARAMS {
                     trace!("Received parameter response packet");
                     debug!("Parameter response data: {:?}", buf);
                     self.current_params_state = mrp.data.params;
@@ -422,7 +400,7 @@ impl<
         self.reset_flagged = false;
     }
 
-    pub fn get_latest_state(&self) -> MotorTelemetry {
+    pub fn get_latest_state(&self) -> CurrentControlledMotor_Telemetry {
         self.current_state
     }
 
@@ -460,52 +438,27 @@ impl<
 
     pub fn check_hall_error(&self) -> bool {
         return self.current_state.hall_power_error() != 0
-            || self.current_state.hall_disconnected_error() != 0
-            || self.current_state.hall_enc_vel_disagreement_error() != 0;
-    }
-
-    pub fn read_encoder_delta(&self) -> i32 {
-        return self.current_state.encoder_delta;
+            || self.current_state.hall_disconnected_error() != 0;
     }
 
     pub fn read_rads(&self) -> f32 {
-        return self.current_state.vel_enc_estimate;
+        return self.current_state.velocity_telemetry.wheel_vel_rads;
     }
 
     pub fn read_rpm(&self) -> f32 {
-        return self.current_state.vel_enc_estimate * 60.0 / (2.0 * PI);
+        return self.current_state.velocity_telemetry.wheel_vel_rads * 60.0 / (2.0 * PI);
     }
 
     pub fn read_vel_setpoint(&self) -> f32 {
-        return self.current_state.vel_setpoint;
+        return self.current_state.velocity_telemetry.vel_setpoint_rads;
     }
 
-    pub fn read_vel_computed_duty(&self) -> f32 {
-        return self.current_state.vel_computed_duty;
+    pub fn read_current_estimate_ma(&self) -> u16 {
+        return self.current_state.current_telemetry.current_samples_ma.iter().sum() / self.current_state.current_telemetry.current_samples_ma.len();
     }
 
-    pub fn read_current(&self) -> f32 {
-        return self.current_state.current_estimate;
-    }
-
-    pub fn read_torque_setpoint(&self) -> f32 {
-        return self.current_state.torque_setpoint;
-    }
-
-    pub fn read_torque_estimate(&self) -> f32 {
-        return self.current_state.torque_estimate;
-    }
-
-    pub fn read_torque_computed_error(&self) -> f32 {
-        return self.current_state.torque_computed_error;
-    }
-
-    pub fn read_torque_computed_nm(&self) -> f32 {
-        return self.current_state.torque_computed_nm;
-    }
-
-    pub fn read_torque_computed_duty(&self) -> f32 {
-        return self.current_state.torque_computed_duty;
+    pub fn read_current_setpoint_ma(&self) -> u16 {
+        return self.current_state.current_telemetry.current_setpoint_ma;
     }
 
     pub fn read_vbus_voltage(&self) -> f32 {

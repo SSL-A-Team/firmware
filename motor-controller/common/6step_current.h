@@ -1,26 +1,17 @@
-/**
- * @file 6step.h
- * @author Will Stuckey
- * @brief 
- * @version 0.1
- * @date 2022-05-22
- * 
- * @copyright Copyright (c) 2022
- * 
- */
-
 #pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
 
-#define MAX_DUTYCYCLE_COMMAND 65535U
+#define MAX_DUTYCYCLE_COMMAND 4095U
 #define MIN_DUTYCYCLE_COMMAND -(MAX_DUTYCYCLE_COMMAND)
+#define INVERT_MOTOR_DIRECTION false
 
-#define NUM_RAW_DC_STEPS 1000U
-#define MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW 10U
-#define SCALING_FACTOR ((MAX_DUTYCYCLE_COMMAND / (NUM_RAW_DC_STEPS - MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW)) + 1U)
-#define MAP_UINT16_TO_RAW_DC(dc) (dc > 0 ? ((dc / SCALING_FACTOR) + MINIMUM_EFFECTIVE_DUTY_CYCLE_RAW) : 0U)
+// period 20833ns
+#define PWM_FREQ_HZ 40000    // if you update date, be conscious of dead time ratio
+#define PWM_TIM_PRESCALER 0  // you almost certainly don't want to touch this with the low-ish sys clk of 48MHz
+
+#define BATTERY_VOLTAGE_MV (25200U)
 
 //////////////////////
 //  ERROR HANDLING  //
@@ -49,12 +40,6 @@ typedef struct MotorErrors {
 //  LOW LEVEL CONTROL PARAMS  //
 ////////////////////////////////
 
-#define PWM_TIM_PRESCALER 0
-
-// period 20833ns
-// be conscious of dead time ratio
-#define PWM_FREQ_HZ 48000
-
 // no div on CK_INT = 48MHz
 // Tdts = CK_INT = 48MHz
 // xxx yyyyy -> 0xx selects no multiplier
@@ -64,18 +49,32 @@ typedef struct MotorErrors {
 // 0000 0111 = 0x07
 #define DEAD_TIME 0x07
 
+#define NUM_RAW_DC_STEPS ((uint16_t) (F_SYS_CLK_HZ / ((uint32_t) PWM_FREQ_HZ * (PWM_TIM_PRESCALER + 1))))
+#define SCALING_FACTOR (MAX_DUTYCYCLE_COMMAND / NUM_RAW_DC_STEPS + 1U)
+#define MAP_MAX_DUTY_TO_ARR_DUTY(dc) (dc / SCALING_FACTOR)
+
+#define ARR_VALUE (NUM_RAW_DC_STEPS)
+#define ARR_REG_VALUE (ARR_VALUE - 1)
+
 ////////////////////////
 //  PUBLIC FUNCTIONS  //
 ////////////////////////
 
 void pwm6step_setup();
+void pwm6step_set_duty_cycle(int16_t duty_cycle);
 void pwm6step_set_duty_cycle_f(float duty_cycle_pct);
-void pwm6step_set_duty_cycle(int32_t duty_cycle);
-void pwm6step_brake(uint16_t braking_force);
-void pwm6step_stop();
-void pwm6step_estop();
-void pwm6step_invert_direction(bool invert);
-bool pwm6step_is_direction_inverted();
-const MotorErrors_t pwm6step_get_motor_errors();
+void pwm6step_set_voltage(int16_t voltage_mv);
+void pwm6step_set_current(int16_t current_ma);
+void pwm6step_set_output_current_limit(int16_t output_current_limit_ma);
+
+// timekeeping
+bool pwm6step_1ms_flag();
+
+// hall velocity estimate
 bool pwm6step_hall_rps_estimate_valid();
 int pwm6step_hall_get_rps_estimate();
+
+// error handling and logging
+const MotorErrors_t pwm6step_get_motor_errors();
+const uint16_t* pwm6step_get_current_log();
+const uint16_t pwm6step_get_vbus_voltage();

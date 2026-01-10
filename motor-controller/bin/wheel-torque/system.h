@@ -11,14 +11,18 @@
 
 #pragma once
 
+// if the system has an encoder
 #define HAS_ENCODER
+// if the system is using the external encoder connector rather than the
+// internal encoder
+// #define HAS_EXTERNAL_ENCODER
 
 ///////////////////
 //  UART PARAMS  //
 ///////////////////
 
 #define UART_ENABLED
-#define IOQ_BUF_LENGTH 80
+#define IOQ_BUF_LENGTH 72
 #define IOQ_BUF_DEPTH 4
 
 //////////////////

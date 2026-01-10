@@ -1,8 +1,10 @@
 
 #pragma once
 
-#include "stddef.h"
-#include "stdbool.h"
+#include <stddef.h>
+#include <stdbool.h>
+
+#include "fixedarith.h"
 
 typedef struct PidConstants {
     float kP;
@@ -47,6 +49,31 @@ typedef struct GainScheduledPid {
     float prev_err;
 } GainScheduledPid_t;
 
-GainScheduledPidResult_t gspid_initialize(GainScheduledPid_t *pid, size_t num_gain_stages, PidConstants_t *pid_constants, float *gain_schedule, float hyst_pct, bool gain_schedule_abs);
+GainScheduledPidResult_t gspid_initialize(GainScheduledPid_t *pid, const size_t num_gain_stages, const PidConstants_t *pid_constants, const float *gain_schedule, const float hyst_pct, const bool gain_schedule_abs);
 float gspid_calculate(GainScheduledPid_t *pid, float r, float y, float dt);
 size_t gspid_get_cur_gain_stage_index(GainScheduledPid_t *pid);
+
+typedef struct FixedPointS12F4_PiConstants {
+    Int16FixedPoint_t kP;        // S07F10
+    Int16FixedPoint_t kI;        // S05F13
+    Int16FixedPoint_t kI_max;    // S12F0
+    Int16FixedPoint_t kI_min;    // S12F0
+    Int16FixedPoint_t anti_jitter_thresh;     // S12F0
+    Int16FixedPoint_t anti_jitter_thresh_inv; // S0F12
+} FixedPointS12F4_PiConstants_t;
+
+typedef struct FixedPointS12F4_PiController {
+    FixedPointS12F4_PiConstants_t *pi_constants;
+    Int16FixedPoint_t eI;        // S12F12
+
+    Int16FixedPoint_t setpoint;  // S12F0
+    Int16FixedPoint_t output;    // S12F0
+
+    bool overload;
+} FixedPointS12F4_PiController_t;
+
+void fxptpi_constants_initialize(FixedPointS12F4_PiConstants_t *pid_constants);
+void fxptpi_initialize(FixedPointS12F4_PiController_t *pi, FixedPointS12F4_PiConstants_t *pi_constants);
+void fxptpi_setpoint(FixedPointS12F4_PiController_t *pi, Int16FixedPoint_t r);
+Int16FixedPoint_t fxptpi_calculate(FixedPointS12F4_PiController_t *pid, Int16FixedPoint_t y, Int16FixedPoint_t dt);
+Int16FixedPoint_t fxptpi_get_output(FixedPointS12F4_PiController_t *pid);
