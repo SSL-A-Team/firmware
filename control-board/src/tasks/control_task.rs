@@ -25,7 +25,7 @@ use crate::{
     parameter_interface::ParameterInterface,
     pins::*,
     robot_state::{RobotState, SharedRobotState},
-    stspin_motor::WheelMotor,
+    motor::CurrentControlledMotor,
     SystemIrqs, DEBUG_MOTOR_UART_QUEUES, ROBOT_VERSION_MAJOR, ROBOT_VERSION_MINOR,
 };
 
@@ -37,7 +37,7 @@ const MAX_RX_PACKET_SIZE: usize = 80;
 const RX_BUF_DEPTH: usize = 20;
 
 type ControlWheelMotor =
-    WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>;
+    CurrentControlledMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>;
 static_idle_buffered_uart!(FRONT_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(BACK_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
@@ -197,10 +197,10 @@ impl<
         // torque values are computed on the spin but put in the current variable
         // TODO update this when packet/var names are updated to match software
         let wheel_torque_meas = Vector4f::new(
-            self.motor_fl.read_current(),
-            self.motor_bl.read_current(),
-            self.motor_br.read_current(),
-            self.motor_fr.read_current(),
+            self.motor_fl.read_current_estimate_ma() as f32,
+            self.motor_bl.read_current_estimate_ma() as f32,
+            self.motor_br.read_current_estimate_ma() as f32,
+            self.motor_fr.read_current_estimate_ma() as f32,
         );
 
         // TODO read from channel or something
@@ -440,7 +440,7 @@ impl<
                             self.last_command.wheel_vel_control_enabled() != 0,
                             self.last_command.wheel_torque_control_enabled() != 0,
                         ) {
-                            (true, true) => MotionCommandType::VELOCITY_W_TORQUE,
+                            (true, true) => MotionCommandType::BOTH,
                             (true, false) => MotionCommandType::VELOCITY,
                             (false, true) => MotionCommandType::TORQUE,
                             (false, false) => MotionCommandType::OPEN_LOOP,
@@ -516,24 +516,28 @@ impl<
                 )
             };
 
-            self.motor_fl.set_setpoint(wheel_vel_cmd.x);
-            self.motor_bl.set_setpoint(wheel_vel_cmd.y);
-            self.motor_br.set_setpoint(wheel_vel_cmd.z);
-            self.motor_fr.set_setpoint(wheel_vel_cmd.w);
+            // self.motor_fl.set_setpoint(wheel_vel_cmd.x);
+            // self.motor_bl.set_setpoint(wheel_vel_cmd.y);
+            // self.motor_br.set_setpoint(wheel_vel_cmd.z);
+            // self.motor_fr.set_setpoint(wheel_vel_cmd.w);
+            self.motor_fl.set_setpoint(wheel_torque_cmd.x);
+            self.motor_bl.set_setpoint(wheel_torque_cmd.y);
+            self.motor_br.set_setpoint(wheel_torque_cmd.z);
+            self.motor_fr.set_setpoint(wheel_torque_cmd.w);
 
-            defmt::info!(
+            defmt::trace!(
                 "wheel vels: {} {} {} {}",
-                self.motor_fl.read_encoder_delta(),
-                self.motor_bl.read_encoder_delta(),
-                self.motor_br.read_encoder_delta(),
-                self.motor_fr.read_encoder_delta()
+                self.motor_fl.read_rads(),
+                self.motor_bl.read_rads(),
+                self.motor_br.read_rads(),
+                self.motor_fr.read_rads()
             );
-            defmt::info!(
+            defmt::trace!(
                 "wheel curr: {} {} {} {}",
-                self.motor_fl.read_current(),
-                self.motor_bl.read_current(),
-                self.motor_br.read_current(),
-                self.motor_fr.read_current()
+                self.motor_fl.read_current_estimate_ma(),
+                self.motor_bl.read_current_estimate_ma(),
+                self.motor_br.read_current_estimate_ma(),
+                self.motor_fr.read_current_estimate_ma()
             );
 
             ///////////////////////////////////
@@ -800,7 +804,7 @@ pub async fn start_control_task(
     //  create motor controllers  //
     ////////////////////////////////
 
-    let motor_fl = WheelMotor::new_from_pins(
+    let motor_fl = ControlWheelMotor::new_from_pins(
         &FRONT_LEFT_IDLE_BUFFERED_UART,
         FRONT_LEFT_IDLE_BUFFERED_UART.get_uart_read_queue(),
         FRONT_LEFT_IDLE_BUFFERED_UART.get_uart_write_queue(),
@@ -808,7 +812,7 @@ pub async fn start_control_task(
         motor_fl_nrst_pin.into(),
         WHEEL_FW_IMG,
     );
-    let motor_bl = WheelMotor::new_from_pins(
+    let motor_bl = ControlWheelMotor::new_from_pins(
         &BACK_LEFT_IDLE_BUFFERED_UART,
         BACK_LEFT_IDLE_BUFFERED_UART.get_uart_read_queue(),
         BACK_LEFT_IDLE_BUFFERED_UART.get_uart_write_queue(),
@@ -816,7 +820,7 @@ pub async fn start_control_task(
         motor_bl_nrst_pin.into(),
         WHEEL_FW_IMG,
     );
-    let motor_br = WheelMotor::new_from_pins(
+    let motor_br = ControlWheelMotor::new_from_pins(
         &BACK_RIGHT_IDLE_BUFFERED_UART,
         BACK_RIGHT_IDLE_BUFFERED_UART.get_uart_read_queue(),
         BACK_RIGHT_IDLE_BUFFERED_UART.get_uart_write_queue(),
@@ -824,7 +828,7 @@ pub async fn start_control_task(
         motor_br_nrst_pin.into(),
         WHEEL_FW_IMG,
     );
-    let motor_fr = WheelMotor::new_from_pins(
+    let motor_fr = ControlWheelMotor::new_from_pins(
         &FRONT_RIGHT_IDLE_BUFFERED_UART,
         FRONT_RIGHT_IDLE_BUFFERED_UART.get_uart_read_queue(),
         FRONT_RIGHT_IDLE_BUFFERED_UART.get_uart_write_queue(),
