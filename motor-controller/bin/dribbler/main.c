@@ -59,8 +59,11 @@ int main() {
     bool telemetry_enabled = false;
 
     // initialize current sensing setup
-    ADC_Result_t res;
-    currsen_setup(ADC_MODE, &res, ADC_NUM_CHANNELS, ADC_CH_MASK, ADC_SR_MASK);
+    CS_Status_t cs_status = currsen_setup(ADC_CH_MASK);
+    if (cs_status != CS_OK) {
+        // turn on red LED to indicate error
+        turn_on_red_led();
+    }
 
     // initialize motor driver
     pwm6step_setup();
@@ -104,6 +107,7 @@ int main() {
     // Turn off Red/Yellow LED after booting.
     turn_off_red_led();
     turn_off_yellow_led();
+    uint16_t green_led_ctr = 0;
 
     #ifdef UART_ENABLED
     // Initialize UART and logging status.
@@ -212,7 +216,7 @@ int main() {
         bool run_telemetry = time_sync_ready_rst(&telemetry_timer);
 
         if (run_torque_loop) {
-            float cur_measurement = ((float) res.I_motor / (float) UINT16_MAX) * AVDD_V;
+            float cur_measurement = currsen_get_motor_current_with_offset();
             // TODO: recover current from voltage
             // TODO: estimate torque from current
             // TODO: filter?
@@ -229,7 +233,7 @@ int main() {
             response_packet.data.motion.torque_setpoint = r;
             response_packet.data.motion.torque_estimate = cur_measurement;
             response_packet.data.motion.torque_computed_error = torque_pid.prev_err;
-            response_packet.data.motion.torque_computed_setpoint = torque_setpoint;
+            response_packet.data.motion.torque_computed_nm = torque_setpoint;
         }
 
         if (run_torque_loop) {
@@ -289,7 +293,7 @@ int main() {
 
             // transmit packets
 #ifdef UART_ENABLED
-            if (telemetry_enabled && run_telemetry) {
+            if (run_telemetry) {
                 // If previous UART transmit is still occurring,
                 // wait for it to finish.
                 uart_wait_for_transmission();
@@ -358,7 +362,7 @@ int main() {
         // Red LED means we are in an error state.
         // This latches and requires resetting the robot to clear.
         if (response_packet.data.motion.master_error ||
-            (telemetry_enabled && ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS)) {
+            ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
             turn_on_red_led();
         }
 
@@ -371,17 +375,25 @@ int main() {
             turn_off_yellow_led();
         }
 
-        // Green LED means we are able to send telemetry upstream.
-        // This means the upstream sent a packet downstream with telemetry enabled.
+        // Green LED means system is up. Flicker means we're acknowledging that
+        // control has enabled the system (non-zero motor commands allowed)
         if (!telemetry_enabled) {
-            turn_off_green_led();
-        } else {
             turn_on_green_led();
+        } else {
+            // 5Hz flicker
+            if (green_led_ctr > 200) {
+                green_led_ctr = 0;
+            } else if (green_led_ctr > 100) {
+                turn_off_green_led();
+            } else {
+                turn_on_green_led();
+            }
+
+            green_led_ctr++;
         }
 
         #ifdef COMP_MODE
-        if (telemetry_enabled &&
-            ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
+        if (ticks_since_last_command_packet > COMMAND_PACKET_TIMEOUT_TICKS) {
             // If have telemetry enabled (meaning we at one
             // point received a message from upstream) and haven't
             // received a command packet in a while, we need to reset

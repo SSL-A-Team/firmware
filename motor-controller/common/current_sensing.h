@@ -1,28 +1,77 @@
 /**
  * @file setup.h
- * @author your name (you@domain.com)
- * @brief 
+ * @author Joe Spall
+ * @brief
  * @version 0.1
- * @date 2022-04-10
- * 
- * @copyright Copyright (c) 2022
- * 
+ *
+ * @copyright Copyright (c) 2025
+ *
  */
 
 #pragma once
 
+#include <math.h>
+#include <stdbool.h>
+
+static const float V_DDA_MV = 3000.0f; // mV
+static const float V_DDA_V = 3.0f; // V
+static const float V_ADC_SCALE_MV = (V_DDA_MV / 4095.0f); // mV
+static const float V_ADC_SCALE_V = (V_DDA_V / 4095.0f); // V
+
+// From A.7.16 of RM0091
+#define TEMP110_CAL_ADDR ((uint16_t*) ((uint32_t) 0x1FFFF7C2))
+#define TEMP30_CAL_ADDR ((uint16_t*) ((uint32_t) 0x1FFFF7B8))
+
+#define VDD_CALIB ((uint16_t) (3300))
+#define VDD_APPLI ((uint16_t) (V_DDA_MV))
+
+// Motor Current scaling
+// In v1.0 motor-controller board, schematic based off of AN5397.
+// Rs = 2x 0.1 ohm in parallel -> 0.05 ohm
+static const float MOTOR_OPAMP_RESISTOR_A = 140E3f; // ohm
+static const float MOTOR_OPAMP_RESISTOR_B = 2.370E3f; // ohm
+static const float MOTOR_OPAMP_RESISTOR_1 = 10E3f; // ohm
+static const float MOTOR_OPAMP_RESISTOR_2 = 40.2E3f; // ohm
+static const float MOTOR_OPAMP_RESISTOR_SENSE = 0.05f; // ohm
+// V_dyn_range = VDD - (0.2 * 2) = 2.6V
+// NOTE: 0.2V is the safety margin for the op-amp from STSPIN32 datasheet.
+// SR = 10V/us op-amp slew rate
+// Gmax = V_dyn_range / (Imax * Rs) = 2.6 / (10.0 * 0.05) = 5.2
+// NOTE: Using Imax * Rs instead of 2 * Imax * Rs since not measuring negative current.
+// G_real = (Ra/(Ra + Rb)) * (1 + R2/R1) = (140k/(140k + 2.37k)) * (1 + 40.2k/10.0k) = 0.983 * 5.02 = 4.94
+// static const float MOTOR_OPAMP_GAIN_REAL = ((MOTOR_OPAMP_RESISTOR_A / (MOTOR_OPAMP_RESISTOR_A + MOTOR_OPAMP_RESISTOR_B)) * (1.0f + (MOTOR_OPAMP_RESISTOR_2 / MOTOR_OPAMP_RESISTOR_1)));
+// BW = GBP/(1 + R2/R1) = 18MHz / (1 + 40.2k/10k) = 18MHz / 5.02 = 3.58MHz
+// Closed Loop Gain = 1 + R2/R1 = 1 + 40.2k/10k = 5.02 > Closed Loop Gain Min of STSPIN = 4
+// T_settling > ((Imax * Rs * G_real) / SR) = ((10.0 * 0.05 * 4.94) / 10V/us) = 0.247us
+
+static const float MOTOR_OPAMP_GAIN_REAL = 5.5;
+
+// Op-amp is configured so 0A motor current = 0.2V
+static const float V_MIN_OP_AMP = 0.25f; // V
+
+// VBUS voltage scaling
+// 11.5k / 1k resistor divider -> 12.5 scaling
+// 12.5 * V_ADC_SCALE = VBUS_SCALE
+// V_ADC_SCALE_V = 3.0V / 4095.0f ADC resolution
+// NOTE: Compute ahead of time to reduce floating point math.
+// V_bus = V_adc_raw * VBUS_SCALE
+static const float VBUS_SCALE = 0.0091575f;
+
+// TODO Move to software-communication
+static const uint32_t CURRENT_OFFSET_ADDRESS = 0x08007C00;
+static const uint32_t CURRENT_OFFSET_MAGIC = 0xAABBCCDD;
+
 typedef enum {
-  CS_MODE_POLLING,
-  CS_MODE_DMA,
-  CS_MODE_TIMER_DMA
+    CS_MODE_PWM_DMA,
+    CS_MODE_SOFTWARE
 } CS_Mode_t;
 
-typedef enum 
+typedef enum
 {
-  CS_OK       = 0x00U,
-  CS_ERROR    = 0x01U,
-  CS_BUSY     = 0x02U,
-  CS_TIMEOUT  = 0x03U
+    CS_OK       = 0x00U,
+    CS_ERROR    = 0x01U,
+    CS_BUSY     = 0x02U,
+    CS_TIMEOUT  = 0x03U
 } CS_Status_t;
 
 #define SET_BIT(REG, BIT)     ((REG) |= (BIT))
@@ -82,31 +131,38 @@ typedef enum
 // TODO tune timing
 #define ADC_STP_TIMEOUT 5 //ms
 
+#define ADC_SOFTWARE_CONVERSION_TIMEOUT 2 // ms
+#define ADC_MOTOR_CURRENT_ZERO_SAMPLE_NUM 4
+#define UINT_12_BIT_MAX 4095 // 2^12 - 1, max value for 12 bit ADC
 
-// this struct is used as a DMA target. 
+// this struct is used as a DMA target.
 // ADC->DR reads are two bytes, DMA will do half word transfers
 // rm0091 tells us the 16->32 bit port mapping packing scheme
 // which all us to derive that this struct should be packed
-// hald words. Additionally, result must be at the end since a
+// half words. Additionally, result must be at the end since a
 // ref to this struct will be passed into DMAR register for N
 // transfers
-typedef struct 
+typedef struct
 __attribute__((__packed__)) ADC_Result {
-    uint16_t    I_motor_filt;
-    uint16_t    I_motor;
-    uint16_t    T_spin;
-    uint16_t    V_int;
-    CS_Status_t status;
+    uint16_t    Motor_current_raw;
+    uint16_t    Vbus_raw;
+    uint16_t    Spin_temperature_raw;
 } ADC_Result_t;
 
 void currsen_enable_ht();
 void currsen_read_dma();
-void currsen_read(ADC_Result_t *res);
-CS_Status_t currsen_setup(CS_Mode_t mode, ADC_Result_t *res, uint8_t num_ch, uint32_t ch_sel, uint32_t sr_sel);
-CS_Status_t currsen_adc_group_config();
-CS_Status_t currsen_adc_conf();
+CS_Status_t currsen_setup(uint8_t motor_adc_ch);
 CS_Status_t currsen_adc_cal();
 CS_Status_t currsen_adc_en();
 CS_Status_t currsen_adc_dis();
+CS_Status_t calculate_motor_zero_current_setpoint();
 
-
+float currsen_get_shunt_voltage_raw();
+float currsen_get_shunt_voltage();
+float currsen_get_motor_current();
+float currsen_get_motor_current_with_offset();
+float currsen_get_motor_current_offset();
+bool currsen_calibrate_sense();
+float currsen_get_vbus_voltage();
+int32_t currsen_get_temperature();
+uint16_t currsen_get_motor_current_zero_adc_raw();
