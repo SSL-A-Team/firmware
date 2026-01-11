@@ -298,6 +298,9 @@ impl<
                 // decode union type, and reinterpret subtype
                 if mrp.type_ == CCM_RESP_TELEM {
                     self.current_state = mrp.data.motion;
+
+                    // defmt::info!("got a telem packet!");
+
                     // // // info!("{:?}", defmt::Debug2Format(&mrp.data.motion));
                     // // info!("\n");
                     // // // info!("vel set {:?}", mrp.data.motion.vel_setpoint + 0.);

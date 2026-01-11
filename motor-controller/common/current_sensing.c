@@ -35,9 +35,10 @@ void currsen_read_dma() {
     ADC1->CR |= ADC_CR_ADSTART;
 }
 
-void DMA1_Channel1_IRQHandler() {
-    DMA1->IFCR |= DMA_IFCR_CGIF1;
-}
+// now defined by 6step controller
+// void DMA1_Channel1_IRQHandler() {
+//     DMA1->IFCR |= DMA_IFCR_CGIF1;
+// }
 
 /**
  * @brief configure, calibrate, and enable the ADC
@@ -71,8 +72,13 @@ CS_Status_t currsen_setup(uint16_t motor_adc_ch)
     DMA1_Channel1->CCR |= DMA_CCR_MINC;
     // Set DMA Channel 1 transfer error interrupt enable.
     DMA1_Channel1->CCR |= DMA_CCR_TEIE;
-    // Set DMA Channel 1 half transfer interrupt and transfer complete interrupt to disable.
-    DMA1_Channel1->CCR &= ~(DMA_CCR_HTIE | DMA_CCR_TCIE);
+    // // Set DMA Channel 1 half transfer interrupt and transfer complete interrupt to disable.
+    // // DMA1_Channel1->CCR &= ~(DMA_CCR_HTIE | DMA_CCR_TCIE);
+
+    // Set DMA Channel 1 half transfer interrupt to disable.
+    DMA1_Channel1->CCR &= ~(DMA_CCR_HTIE);
+    DMA1_Channel1->CCR |= (DMA_CCR_TCIE);
+
     // Set DMA Channel 1 direction to read from peripheral.
     DMA1_Channel1->CCR &= ~DMA_CCR_DIR;
     // Set DMA Channel 1 priority to very high.

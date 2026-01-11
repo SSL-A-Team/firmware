@@ -64,6 +64,7 @@ static FixedPointS12F4_PiConstants_t current_controller_constants = {
 
 static FixedPointS12F4_PiController_t current_controller;
 
+static volatile uint16_t measured_current = 0;
 static volatile uint16_t measured_vbus_voltage = 0;
 
 ////////////////////////////////
@@ -452,6 +453,9 @@ static void pwm6step_setup_commutation_timer() {
     // TIM1->DIER |= TIM_DIER_CC4IE;
     // NVIC_SetPriority(TIM1_CC_IRQn, 5);
     // NVIC_EnableIRQ(TIM1_CC_IRQn);
+
+    perform_commutation_cycle();
+    trigger_commutation();
 }
 
 void TIM2_IRQHandler() {
@@ -505,49 +509,58 @@ static volatile bool flag_1ms = false;
 /**
  * should be called at 40Khz
  */
-void ADC1_IRQHandler() {
+// void ADC1_IRQHandler() {
+void DMA1_Channel1_IRQHandler() {
+    // clear DMA interrupt flags
+    DMA1->IFCR = DMA_IFCR_CGIF1;
+
+    // clear ADC converstion flags
+	ADC1->ISR = ADC_ISR_EOSMP | ADC_ISR_EOC | ADC_ISR_EOSEQ | ADC_ISR_OVR;
+
     // read current
     Uint32FixedPoint_t current_measurement = currsen_get_shunt_current_ma();  // U15
     // we need to normalize some values so the fixed point arith has reasonable intermediate computation sizes (32bit)
     // quantize current_measurement to 4096 (12 bits)
     // Max current the sense network should read is ~9A -> 9000mA
-    if (current_measurement > 9000) {
-        current_measurement = 9000;
-    }
+    // if (current_measurement > 9000) {
+    //     current_measurement = 9000;
+    // }
 
-    // S15F0 * S0F16 = S15F16 >> 19 = S12F0
-    Uint32FixedPoint_t qtz_current = (current_measurement * S0F16_4096_OVER_9000) >> 19;
+    // // S15F0 * S0F16 = S15F16 >> 19 = S12F0
+    // Uint32FixedPoint_t qtz_current = (current_measurement * S0F16_4096_OVER_9000) >> 19;
 
-    // filter current
-    current_filter[current_filter_ind++] = qtz_current;
-    current_filter_ind &= 0x7;
+    // // filter current
+    // current_filter[current_filter_ind++] = qtz_current;
+    // current_filter_ind &= 0x7;
 
-    Uint32FixedPoint_t avg_current = 0;
-    for (int i = 0; i < sizeof(current_filter) / 4; i++) {
-        avg_current += current_filter[i];
-    }
-    avg_current >>= 3;  // div 8
+    // Uint32FixedPoint_t avg_current = 0;
+    // for (int i = 0; i < sizeof(current_filter) / 4; i++) {
+    //     avg_current += current_filter[i];
+    // }
+    // avg_current >>= 3;  // div 8
 
+    measured_current = current_measurement;
 
     // update bus voltage
 
     uint16_t vbus_mv = currsen_get_vbus_voltage_mv();
+    measured_vbus_voltage = vbus_mv;
 
-    voltage_filter[voltage_filter_index++] = vbus_mv;
-    voltage_filter_index &= 0x3;
+    // voltage_filter[voltage_filter_index++] = vbus_mv;
+    // voltage_filter_index &= 0x3;
 
-    uint32_t average_bus_voltage = 0;
-    for (int i = 0; i < sizeof(voltage_filter) / 4; i++) {
-        average_bus_voltage += voltage_filter[i];
-    }
-    average_bus_voltage >>= 2;
+    // uint32_t average_bus_voltage = 0;
+    // for (int i = 0; i < sizeof(voltage_filter) / 4; i++) {
+    //     average_bus_voltage += voltage_filter[i];
+    // }
+    // average_bus_voltage >>= 2;
 
-    measured_vbus_voltage = average_bus_voltage;
+    // measured_vbus_voltage = average_bus_voltage;
 
 
     // update PID, maps current to voltage
-    fxptpi_calculate(&current_controller, current_measurement, 0);
-    Uint32FixedPoint_t voltage_sp = fxptpi_get_output(&current_controller);
+    // fxptpi_calculate(&current_controller, current_measurement, 0);
+    // Uint32FixedPoint_t voltage_sp = fxptpi_get_output(&current_controller);
 
     // TODO scale voltage_sp back up to 25200mV
     // note: set_voltage will need to compute a scale from measured voltage
@@ -557,29 +570,31 @@ void ADC1_IRQHandler() {
     // we want to correct for this 
 
     // scale from 4096 -> battery voltage
-    uint16_t voltage_sp_mv = (voltage_sp * BATTERY_VOLTAGE_MV) >> 12;
+    // uint16_t voltage_sp_mv = (voltage_sp * BATTERY_VOLTAGE_MV) >> 12;
 
     // if we're not in CURRENT mode, then the user has directly set the voltage/dc via the public function
     // in that case, this callback is collecting logging data and averaging/update bus voltage for VOLTAGE mode
-    if (motor_control_mode == CURRENT) {
-        set_voltage(voltage_sp_mv);    
-    }
+    // if (motor_control_mode == CURRENT) {
+    //     set_voltage(voltage_sp_mv);    
+    // }
 
-    if ((adc_callback_ctr & 0x1) == 0) {
-        logging_2frame_avg_cur = avg_current;
-    } else {
-        current_data_buffer[double_buffer_ind][adc_callback_ctr / 2] = (uint16_t) ((logging_2frame_avg_cur + (uint32_t) avg_current) >> 1);
-        logging_2frame_avg_cur = 0;
-    }
+    // if ((adc_callback_ctr & 0x1) == 0) {
+    //     logging_2frame_avg_cur = avg_current;
+    // } else {
+    //     current_data_buffer[double_buffer_ind][adc_callback_ctr / 2] = (uint16_t) ((logging_2frame_avg_cur + (uint32_t) avg_current) >> 1);
+    //     logging_2frame_avg_cur = 0;
+    // }
 
-    adc_callback_ctr++;
-    if (adc_callback_ctr == 40) {
-        flag_1ms = true;
+    // adc_callback_ctr++;
+    // if (adc_callback_ctr == 40) {
+    //     flag_1ms = true;
 
-        // 
-        adc_callback_ctr = 0;
-        double_buffer_ind = (double_buffer_ind + 1) & 0x1;
-    }
+    //     // 
+    //     adc_callback_ctr = 0;
+    //     double_buffer_ind = (double_buffer_ind + 1) & 0x1;
+    // }
+
+    // trigger_commutation();
 }
 
 /**
@@ -711,8 +726,6 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     uint16_t ccmr1 = 0;
     uint16_t ccmr2 = CCMR2_TIM4_ADC_TRIG;
 
-    TIM1->CCR4 = 22;
-
     if (phase1_low) {
         TIM1->CCR1 = 0;
         ccmr1 |= CCMR1_PHASE1_LOW;
@@ -810,6 +823,8 @@ void pwm6step_set_direction(MotorDirection_t motor_direction) {
 
 static void set_duty_cycle(uint16_t duty_cycle) {
     current_duty_cycle = MAP_MAX_DUTY_TO_ARR_DUTY(duty_cycle);
+
+    trigger_commutation();
 }
 
 /**
@@ -908,6 +923,10 @@ int pwm6step_hall_get_rps_estimate() {
 const MotorErrors_t pwm6step_get_motor_errors() {
     return motor_errors;
 } 
+
+const uint16_t pwm6step_get_current_measurement() {
+    
+}
 
 const uint16_t* pwm6step_get_current_log() {
     // use the inactive buffer

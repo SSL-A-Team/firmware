@@ -267,6 +267,11 @@ int main() {
                 break;
         }
 
+        response_packet.current_telemetry.bus_voltage_mv = currsen_get_vbus_voltage_mv();
+
+        // response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
+        // response_packet.current_telemetry.current_samples_ma = pwm6step_get_current_log();
+
         // load errors into packets and set LEDs
         update_errors();
 
@@ -438,12 +443,14 @@ static void update_errors() {
     response_packet.gain_stage_index = gspid_get_cur_gain_stage_index(&vel_pid) & 0xFF;
 }
 
+static uint8_t seq_ctr = 0;
 static void send_packets() {
     CurrentControlledMotor_Response response_pkt;
     response_pkt.type = CCM_RESP_TELEM;
-
     response_pkt.timestamp = time_local_epoch_s();
+    response_pkt.seq_num++;  // intentionally overflow
 
+    response_pkt.data.motion = response_packet;
 
     // If previous UART transmit is still occurring,
     // wait for it to finish.
@@ -468,6 +475,9 @@ static void send_packets() {
         params_return_packet_requested = false;
 
         response_pkt.type = CCM_RESP_PARAMS;
+        response_pkt.timestamp = time_local_epoch_s();
+        response_pkt.seq_num++;  // intentionally overflow
+
 
         // responding with firmware image hash, read operation, as a reply message
         response_pkt.data.params.parameter = CCM_PARAM_FIRMWARE_IMAGE_HASH;

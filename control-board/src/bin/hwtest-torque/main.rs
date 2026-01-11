@@ -34,9 +34,9 @@ static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 include_external_cpp_bin! {CURRENT_CONTROLLED_WHEEL_IMAGE, "wheel-torque.bin"}
 
 const MAX_TX_PACKET_SIZE: usize = 80;
-const TX_BUF_DEPTH: usize = 3;
+const TX_BUF_DEPTH: usize = 5;
 const MAX_RX_PACKET_SIZE: usize = 80;
-const RX_BUF_DEPTH: usize = 20;
+const RX_BUF_DEPTH: usize = 5;
 
 static_idle_buffered_uart!(CCM_UART, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, false, #[link_section = ".axisram.buffers"]);
 
@@ -121,6 +121,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     ccm.leave_reset().await;
 
+    let mut ctr = 0;
     let mut ticker = Ticker::every(Duration::from_millis(1));
     loop {
         ccm.process_packets();
@@ -129,7 +130,12 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         let i = ccm.read_current_estimate_ma();
         let w = ccm.read_rads();
 
-        defmt::info!("vrail: {}, current: {}, vel: {}", v, i, w);
+        if ctr > 9 {
+            defmt::info!("vrail: {}, current: {}, vel: {}", v, i, w);
+            ctr = 0;
+        } else {
+            ctr += 1;
+        }
 
         ccm.send_motion_command();
 
