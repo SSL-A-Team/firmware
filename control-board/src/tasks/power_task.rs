@@ -171,7 +171,7 @@ impl<
     fn process_packets(&mut self) {
         // read any packets
         while let Ok(res) = self.power_rx_uart_queue.try_dequeue() {
-            defmt::trace!("Received Power Telemetry Packet");
+            // defmt::trace!("Received Power Telemetry Packet");
             let buf = res.data();
 
             if buf.len() != core::mem::size_of::<PowerTelemetry>() {
