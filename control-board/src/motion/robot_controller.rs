@@ -78,8 +78,9 @@ impl BodyPoseController {
         wheel_vel_meas: Vector4f,
         wheel_torque_meas: Vector4f,
         gyro_theta_meas: f32,
+        trace: bool,
     ) {
-
+        let mut start = Instant::now();
         let measurement: Vector8f = vector![
             vision_pose_meas.x,
             vision_pose_meas.y,
@@ -91,6 +92,10 @@ impl BodyPoseController {
             gyro_theta_meas,
         ];
         self.robot_model.kf_update(measurement, false, false, false);
+
+        let kf_update_time = Instant::now() - start;
+        start = Instant::now();
+
         // let measurement: Vector5<f32> = Vector5::new(
         //     wheel_velocities_meas[0],
         //     wheel_velocities_meas[1],
@@ -138,13 +143,14 @@ impl BodyPoseController {
         // defmt::info!("State estimate pose: {}, {}, {}", state_estimate.x, state_estimate.y, state_estimate.z);
         // defmt::info!("State estimate twist: {}, {}, {}", state_estimate.w, state_estimate.a, state_estimate.b);
 
-        let start = Instant::now();
-        // Calculate global values
         // Calculate the optimal trajectory to the setpoint
         let traj = ateam_controls::bangbang_trajectory::compute_optimal_bangbang_traj_3d(
             state_estimate, pose_cmd,
         );
-        // defmt::info!("Time elapsed in BodyPoseController control update: {} us", (Instant::now() - start).as_micros());
+
+        let traj_time = Instant::now() - start;
+        start = Instant::now();
+
         // Calculate the acceleration needed to achieve the trajectory right now
         let global_accel_cmd = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_accel_at_t(traj, 0.0);
         // Calculate the twist that should be achieved at the next time step after applying this acceleration
@@ -178,11 +184,24 @@ impl BodyPoseController {
         self.debug_telemetry.wheel_velocity_u.copy_from_slice(self.wheel_vel_cmd.as_slice());
         self.debug_telemetry.wheel_torque_u.copy_from_slice(self.wheel_torque_cmd.as_slice());
 
+        let control_outputs_time = Instant::now() - start;
+        start = Instant::now();
+
         // TODO: kalman filter predict next state
         // // Use control law adjusted value to predict the next cycle's state.
         // self.body_vel_filter.predict(&wheel_vel_output);
 
         self.robot_model.kf_predict(global_accel_cmd);
+
+        let kf_predict_time = Instant::now() - start;
+        if trace {
+            defmt::trace!("CONTROL UPDATE TRACE - KF update: {} us, traj compute: {} us, control outputs: {} us, KF predict: {} us",
+                kf_update_time.as_micros(),
+                traj_time.as_micros(),
+                control_outputs_time.as_micros(),
+                kf_predict_time.as_micros(),
+            );
+        }
     }
 
     pub fn get_wheel_velocities(&self) -> Vector4f {

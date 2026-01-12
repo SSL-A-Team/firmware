@@ -113,7 +113,7 @@ async fn imu_task_entry(
                 GyroMode::ContinuousHighPerformance,
                 GyroRange::PlusMinus2000DegPerSec,
                 Bandwidth3DbCutoffFreq::AccOdrOver2,
-                OutputDataRate::Odr100p0,
+                OutputDataRate::Odr1600p0,
                 DataAveragingWindow::Average2Samples,
             )
             .await;
@@ -133,7 +133,7 @@ async fn imu_task_entry(
                 AccelMode::ContinuousHighPerformance,
                 AccelRange::Range2g,
                 Bandwidth3DbCutoffFreq::AccOdrOver2,
-                OutputDataRate::Odr100p0,
+                OutputDataRate::Odr1600p0,
                 DataAveragingWindow::Average2Samples,
             )
             .await;
@@ -160,12 +160,32 @@ async fn imu_task_entry(
             .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Ok))
             .await;
 
+        //////////////////////// Frequency Measurement Vars //////////////////////////
+        let mut loop_ticks_since_freqeuncy_measurement = 0;
+        let mut frequency_measurement_time_elapsed_sum_ms: f32 = 0.;
+        let frequency_measurement_window_length = 1000;
+        let mut last_frequency_measurement_time = Instant::now();
+        //////////////////////////////////////////////////////////////////////////////
+
         'imu_data_loop: loop {
             // block on gyro interrupt, active low
             match select(gyro_int.wait_for_falling_edge(), Timer::after_millis(1000)).await {
                 Either::First(_) => {
                     // Got an interrupt, so IMU should be working.
                     robot_state.set_imu_inop(false);
+
+                    //////////////////////// Loop Rate Measurement ///////////////////////////////
+                    let frequency_measurement_loop_time_elapsed = ((Instant::now() - last_frequency_measurement_time).as_micros() as f32) / 1000.0;
+                    frequency_measurement_time_elapsed_sum_ms += frequency_measurement_loop_time_elapsed;
+                    if loop_ticks_since_freqeuncy_measurement == frequency_measurement_window_length {
+                        let frequency: f32 = loop_ticks_since_freqeuncy_measurement as f32 / (frequency_measurement_time_elapsed_sum_ms / 1000.0);
+                        defmt::trace!("IMU Frequency - {} hz", frequency);
+                        frequency_measurement_time_elapsed_sum_ms = 0.;
+                        loop_ticks_since_freqeuncy_measurement = 0;
+                    }
+                    last_frequency_measurement_time = Instant::now();
+                    loop_ticks_since_freqeuncy_measurement += 1;
+                    //////////////////////////////////////////////////////////////////////////////
 
                     // read gyro data
                     let imu_data = imu.gyro_get_data_rads().await;

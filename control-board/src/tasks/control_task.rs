@@ -5,8 +5,6 @@ use ateam_common_packets::{
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
 };
-use ateam_controls::robot_model::RobotModel;
-use ateam_controls::robot_physical_params::*;
 use ateam_controls::{Vector3f, Vector4f};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::{usart::Uart, Peri};
@@ -14,14 +12,7 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{
     include_external_cpp_bin,
-    motion::{
-        self,
-        params::robot_physical_params::{
-            WHEEL_ANGLES_DEG, WHEEL_DISTANCE_TO_ROBOT_CENTER_M, WHEEL_RADIUS_M,
-        },
-        robot_controller::BodyPoseController,
-        // robot_model::{RobotConstants, RobotModel},
-    },
+    motion::robot_controller::BodyPoseController,
     parameter_interface::ParameterInterface,
     pins::*,
     robot_state::{RobotState, SharedRobotState},
@@ -46,6 +37,7 @@ static_idle_buffered_uart!(FRONT_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX
 const TICKS_WITHOUT_PACKET_STOP: usize = 200;
 const TICKS_BASIC_TELEM_INTERVAL: usize = 20;  // send basic telem every 10 ticks (100 Hz if loop is 1 kHz)
 const TICKS_EXTENDED_TELEM_INTERVAL: usize = 20;  // send extended telem every 20 ticks (50 Hz if loop is 1 kHz)
+const TICKS_TRACE_PRINT: usize = 1000;  // print trace every 1000 ticks (1 second if loop is 1 kHz)
 
 #[macro_export]
 macro_rules! create_control_task {
@@ -180,6 +172,7 @@ impl<
         vision_pose_meas_instant: Instant,
         gyro_rads_meas: f32,
         controls_enabled: bool,
+        trace: bool,
     ) -> (Vector4f, Vector4f)
 /*
             Provide the motion controller with the current wheel velocities
@@ -213,6 +206,7 @@ impl<
             wheel_vel_meas,
             wheel_torque_meas,
             gyro_rads_meas,
+            trace,
         );
         (robot_controller.get_wheel_velocities(), robot_controller.get_wheel_torques())
     }
@@ -362,16 +356,17 @@ impl<
 
         //////////////////////// Frequency Measurement Vars //////////////////////////
         let mut loop_ticks_since_freqeuncy_measurement = 0;
-        let mut frequency_measurement_time_elapsed_sum_ms = 0;
+        let mut frequency_measurement_time_elapsed_sum_ms: f32 = 0.;
         let frequency_measurement_window_length = 60;
         let mut last_frequency_measurement_time = Instant::now();
         //////////////////////////////////////////////////////////////////////////////
 
-
         let mut last_loop_term_time = Instant::now();
+        let mut ticks_since_trace_print = 0;
 
         loop {
             let loop_start_time = Instant::now();
+            let mut start = loop_start_time;
             let loop_invocation_dead_time = loop_start_time - last_loop_term_time;
             if loop_start_time - last_loop_term_time > Duration::from_micros(1100) {
                 defmt::warn!("control loop scheuling lagged. Expected ~1ms between loop invocations, but got {:?}us", loop_invocation_dead_time.as_micros());
@@ -381,6 +376,9 @@ impl<
             self.motor_bl.process_packets();
             self.motor_br.process_packets();
             self.motor_fr.process_packets();
+
+            let motor_packet_process_time = Instant::now() - start;
+            start = Instant::now();
 
             let cur_state = self.shared_robot_state.get_state();
 
@@ -393,14 +391,13 @@ impl<
             while let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
                 match latest_packet {
                     ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
-                        // defmt::info!("received basic control packet");
                         //////////////////////// Loop Rate Measurement ///////////////////////////////
-                        let frequency_measurement_loop_time_elapsed = (Instant::now() - last_frequency_measurement_time).as_millis();
+                        let frequency_measurement_loop_time_elapsed = ((Instant::now() - last_frequency_measurement_time).as_micros() as f32) / 1000.0;
                         frequency_measurement_time_elapsed_sum_ms += frequency_measurement_loop_time_elapsed;
                         if loop_ticks_since_freqeuncy_measurement == frequency_measurement_window_length {
-                            let frequency: f32 = loop_ticks_since_freqeuncy_measurement as f32 / ((frequency_measurement_time_elapsed_sum_ms as f32) / 1000.0) ;
-                            defmt::info!("Rx Command Frequency - {} hz", frequency);
-                            frequency_measurement_time_elapsed_sum_ms = 0;
+                            let frequency: f32 = loop_ticks_since_freqeuncy_measurement as f32 / (frequency_measurement_time_elapsed_sum_ms / 1000.0);
+                            defmt::debug!("Command RX Frequency - {} hz", frequency);
+                            frequency_measurement_time_elapsed_sum_ms = 0.;
                             loop_ticks_since_freqeuncy_measurement = 0;
                         }
                         last_frequency_measurement_time = Instant::now();
@@ -469,6 +466,9 @@ impl<
                 }
             }
 
+            let command_packet_process_time = Instant::now() - start;
+            start = Instant::now();
+
             // now we have setpoint r(t) in self.cmd
 
             while let Some(gyro_rads) = self.gyro_subscriber.try_next_message_pure() {
@@ -500,7 +500,9 @@ impl<
                 self.stop_wheels() || 
                 ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP
             {
-                defmt::warn!("control task - motor commands locked out");
+                if ticks_since_trace_print >= TICKS_TRACE_PRINT {
+                    defmt::warn!("control task - motor commands locked out");
+                }
                 cmd = Vector3f::default();
                 (Vector4f::default(), Vector4f::default())
             } else {
@@ -513,16 +515,22 @@ impl<
                     last_vision_pose_instant,
                     self.last_gyro_rads,
                     controls_enabled,
+                    ticks_since_trace_print >= TICKS_TRACE_PRINT,
                 )
             };
+
+            let control_update_time = Instant::now() - start;
+            start = Instant::now();
 
             self.motor_fl.set_setpoint(wheel_vel_cmd.x);
             self.motor_bl.set_setpoint(wheel_vel_cmd.y);
             self.motor_br.set_setpoint(wheel_vel_cmd.z);
             self.motor_fr.set_setpoint(wheel_vel_cmd.w);
 
-            // defmt::info!("wheel vels: {} {} {} {}", self.motor_fl.read_encoder_delta(), self.motor_bl.read_encoder_delta(), self.motor_br.read_encoder_delta(), self.motor_fr.read_encoder_delta());
-            // defmt::info!("wheel curr: {} {} {} {}", self.motor_fl.read_current(), self.motor_bl.read_current(), self.motor_br.read_current(), self.motor_fr.read_current());
+            if ticks_since_trace_print >= TICKS_TRACE_PRINT {
+                defmt::trace!("wheel vels: {} {} {} {}", self.motor_fl.read_encoder_delta(), self.motor_bl.read_encoder_delta(), self.motor_br.read_encoder_delta(), self.motor_fr.read_encoder_delta());
+                defmt::trace!("wheel curr: {} {} {} {}", self.motor_fl.read_current(), self.motor_bl.read_current(), self.motor_br.read_current(), self.motor_fr.read_current());
+            }
 
             ///////////////////////////////////
             //  send commands and telemetry  //
@@ -537,14 +545,36 @@ impl<
             // increment seq number
             ctrl_seq_number = (ctrl_seq_number + 1) & 0x00FF;
 
-            let loop_end_time = Instant::now();
-            let loop_execution_time = loop_end_time - loop_start_time;
+            let channel_update_time = Instant::now() - start;
+            start = Instant::now();
+
+            let loop_execution_time = Instant::now() - loop_start_time;
+
+            ticks_since_trace_print += 1;
+            if ticks_since_trace_print > TICKS_TRACE_PRINT {
+                defmt::trace!(
+                    "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
+                    motor_packet_process_time.as_micros(),
+                    command_packet_process_time.as_micros(),
+                    control_update_time.as_micros(),
+                    channel_update_time.as_micros(),
+                );
+                defmt::trace!("TOTAL CONTROL LOOP EXECUTION TIME: {} us", loop_execution_time.as_micros());
+                ticks_since_trace_print = 0;
+            }
+
             if loop_execution_time > Duration::from_micros(200) {
+                defmt::trace!(
+                    "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
+                    motor_packet_process_time.as_micros(),
+                    command_packet_process_time.as_micros(),
+                    control_update_time.as_micros(),
+                    channel_update_time.as_micros(),
+                );
                 defmt::warn!("control loop is taking >200us to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {} us", loop_execution_time.as_micros());
             }
 
             last_loop_term_time = Instant::now();
-
             loop_rate_ticker.next().await;
         }
     }
