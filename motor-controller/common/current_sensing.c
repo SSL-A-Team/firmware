@@ -73,7 +73,7 @@ CS_Status_t currsen_setup(uint16_t motor_adc_ch)
     // Set DMA Channel 1 transfer error interrupt enable.
     DMA1_Channel1->CCR |= DMA_CCR_TEIE;
     // // Set DMA Channel 1 half transfer interrupt and transfer complete interrupt to disable.
-    // // DMA1_Channel1->CCR &= ~(DMA_CCR_HTIE | DMA_CCR_TCIE);
+    // DMA1_Channel1->CCR &= ~(DMA_CCR_HTIE | DMA_CCR_TCIE);
 
     // Set DMA Channel 1 half transfer interrupt to disable.
     DMA1_Channel1->CCR &= ~(DMA_CCR_HTIE);
@@ -212,6 +212,9 @@ CS_Status_t currsen_setup(uint16_t motor_adc_ch)
     // ADC1->ISR |= (ADC_ISR_EOSEQ);
     // NVIC_SetPriority(ADC1_IRQn, 6);
     // NVIC_EnableIRQ(ADC1_IRQn);
+
+    NVIC_SetPriority(DMA1_Ch1_IRQn, 5);
+    NVIC_EnableIRQ(DMA1_Ch1_IRQn);
 
     return status;
 }
@@ -369,6 +372,13 @@ CS_Status_t currsen_adc_dis()
     }
 
     return CS_OK;
+}
+
+uint16_t currsen_get_shunt_raw_adc() {
+    return m_adc_result.Motor_current_raw;
+}
+uint16_t currsen_get_bus_raw_adc() {
+    return m_adc_result.Vbus_raw;
 }
 
 Uint32FixedPoint_t currsen_get_shunt_current_fxpt() {

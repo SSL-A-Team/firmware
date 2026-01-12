@@ -235,20 +235,23 @@ int main() {
 
         // "soft" error conditions zero out the motor setpoint
         if (allow_motor_to_run()) {
-            motor_command_packet.motion_control_type = CCM_MCT_MOTOR_OFF;
             motor_command_packet.current_setpoint_ma = 0;
             motor_command_packet.setpoint = 0.0f;
         }
+
+        motor_command_packet.motion_control_type = CCM_MCT_MOTOR_OFF;
+
 
         // update wheel velocity est
         update_wheel_vel_est();
 
         switch (motor_command_packet.motion_control_type) {
             case CCM_MCT_MOTOR_OFF:
-                pwm6step_set_duty_cycle(0);
+                pwm6step_set_duty_cycle(1200);
                 break;
             case CCM_MCT_DUTY_OPENLOOP:
                 pwm6step_set_duty_cycle_f(motor_command_packet.setpoint);
+                break;
             case CCM_MCT_VOLTAGE_OPENLOOP:
                 pwm6step_set_voltage((int32_t) motor_command_packet.setpoint);
                 break;
@@ -267,7 +270,7 @@ int main() {
                 break;
         }
 
-        response_packet.current_telemetry.bus_voltage_mv = currsen_get_vbus_voltage_mv();
+        response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
 
         // response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
         // response_packet.current_telemetry.current_samples_ma = pwm6step_get_current_log();

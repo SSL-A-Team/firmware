@@ -441,6 +441,8 @@ static void pwm6step_setup_commutation_timer() {
     // enable the channel
     TIM1->CCER |= CCER_TIM4_ADC_TRIG;
 
+    TIM1->CCR4 = 22;
+
     // generate an update event to reload the PSC
     TIM1->EGR |= (TIM_EGR_UG | TIM_EGR_COMG);
 
@@ -594,7 +596,7 @@ void DMA1_Channel1_IRQHandler() {
     //     double_buffer_ind = (double_buffer_ind + 1) & 0x1;
     // }
 
-    // trigger_commutation();
+    trigger_commutation();
 }
 
 /**
@@ -614,6 +616,7 @@ void DMA1_Channel1_IRQHandler() {
 __attribute__((optimize("O0")))
 static void TIM2_IRQHandler_HallTransition() {
     perform_commutation_cycle();
+    // trigger_commutation();
 }
 
 /**
@@ -659,24 +662,24 @@ static uint8_t read_hall() {
     uint8_t hall_value = (GPIOA->IDR & (GPIO_IDR_2 | GPIO_IDR_1 | GPIO_IDR_0));
     
     // check if hall sensor is floating/disconnected, all lines will be 1, 3b'111 = 7
-    if (hall_value == 0x7) {
-        hall_disconnect_error_count += HALL_DISCONNECT_ERROR_INCREMENT;
-        if (hall_disconnect_error_count > HALL_DISCONNECT_MAX_ACCU_ERROR) {
-            hall_disconnect_error_count = HALL_DISCONNECT_MAX_ACCU_ERROR;
-        }
-    } else if (hall_disconnect_error_count > 0) {
-        hall_disconnect_error_count -= HALL_DISCONNECT_ERROR_CLEAR_DECREMENT;
-    }
+    // if (hall_value == 0x7) {
+    //     hall_disconnect_error_count += HALL_DISCONNECT_ERROR_INCREMENT;
+    //     if (hall_disconnect_error_count > HALL_DISCONNECT_MAX_ACCU_ERROR) {
+    //         hall_disconnect_error_count = HALL_DISCONNECT_MAX_ACCU_ERROR;
+    //     }
+    // } else if (hall_disconnect_error_count > 0) {
+    //     hall_disconnect_error_count -= HALL_DISCONNECT_ERROR_CLEAR_DECREMENT;
+    // }
 
-    // check if hall sensor has a power error, pullups will fail all lines will be 0, 3b'000 = 7
-    if (hall_value == 0x0) {
-        hall_power_error_count += HALL_POWER_ERROR_INCREMENT;
-        if (hall_power_error_count > HALL_POWER_MAX_ACCU_ERROR) {
-            hall_power_error_count = HALL_POWER_MAX_ACCU_ERROR;
-        }
-    } else if (hall_power_error_count > 0) {
-        hall_power_error_count -= HALL_POWER_ERROR_CLEAR_DECREMENT;
-    }
+    // // check if hall sensor has a power error, pullups will fail all lines will be 0, 3b'000 = 7
+    // if (hall_value == 0x0) {
+    //     hall_power_error_count += HALL_POWER_ERROR_INCREMENT;
+    //     if (hall_power_error_count > HALL_POWER_MAX_ACCU_ERROR) {
+    //         hall_power_error_count = HALL_POWER_MAX_ACCU_ERROR;
+    //     }
+    // } else if (hall_power_error_count > 0) {
+    //     hall_power_error_count -= HALL_POWER_ERROR_CLEAR_DECREMENT;
+    // }
 
     // update error flags
     motor_errors.hall_power = hall_power_error_count > HALL_POWER_ERROR_THRESHOLD;
@@ -822,7 +825,7 @@ void pwm6step_set_direction(MotorDirection_t motor_direction) {
 }
 
 static void set_duty_cycle(uint16_t duty_cycle) {
-    current_duty_cycle = MAP_MAX_DUTY_TO_ARR_DUTY(duty_cycle);
+    current_duty_cycle = ARR_VALUE - MAP_MAX_DUTY_TO_ARR_DUTY(duty_cycle);
 
     trigger_commutation();
 }
@@ -925,7 +928,7 @@ const MotorErrors_t pwm6step_get_motor_errors() {
 } 
 
 const uint16_t pwm6step_get_current_measurement() {
-    
+    return measured_current;
 }
 
 const uint16_t* pwm6step_get_current_log() {
