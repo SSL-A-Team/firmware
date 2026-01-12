@@ -247,99 +247,27 @@ static void pwm6step_setup_hall_timer() {
     //  TIM2 core setup  //
     ///////////////////////
 
-    // htim2.Init.Prescaler = LF_TIMX_PSC; // 11
-    TIM2->PSC = 11; //div by 11 - 1 = 10, 4.8MHz. Period 208ns 
-    // htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-    TIM2->CR1 &= ~(TIM_CR1_DIR);
-    // htim2.Init.Period = LF_TIMX_ARR; // 24000
-    TIM2->ARR = 24000; // probs wrong, but unused rn
-    // htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-    TIM2->CR1 &= ~(TIM_CR1_CKD_0 | TIM_CR1_CKD_1);
-    // htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-    TIM2->CR1 &= ~(TIM_CR1_ARPE);
-
-    // enable hall sense interface be selecting the XOR function of input 1-3
-    TIM2->CR2 |= TIM_CR2_TI1S;
-    // sSlaveConfig.SlaveMode = TIM_SLAVEMODE_RESET;
-    // clear SMS (required to set TS)
-    TIM2->SMCR &= ~(TIM_SMCR_SMS_Msk);
-    //sSlaveConfig.InputTrigger = TIM_TS_TI1F_ED;
-    TIM2->SMCR &= ~(TIM_SMCR_TS_Msk);
-    TIM2->SMCR |= (0x4 << TIM_SMCR_TS_Pos); // b100 TI1F_ED mode (Timer Input 1 Edge Detect)
-    // now that TS is set, set SMS
-    TIM2->SMCR |= (0x4 << TIM_SMCR_SMS_Pos); // b100 reset mode
-    //sSlaveConfig.TriggerFilter = 8;
-    TIM2->CCER &= ~(TIM_CCER_CC1E);
-    TIM2->CCMR1 &= ~(TIM_CCMR1_IC1F_Msk);
-    TIM2->CCMR1 |= (0xF << TIM_CCMR1_IC1F_Pos);
-
-    // set the master mode output trigger to OC2REF
-    // TIM2 is a master to TIM1, so an event will trigger COM in TIM1
-    // the source of outbound trigger will be Output Compare Channel 2 REF (count down to 0)
-    // this allows us to delay COM until the hall edge detection interrupt finishes
-    TIM2->CR2 &= ~TIM_CR2_MMS;
-    TIM2->CR2 |= (TIM_CR2_MMS_0 | TIM_CR2_MMS_2); // 0b101 OC2REF for TRGO
-    // enable master slave mode 
-    TIM2->SMCR &= ~TIM_SMCR_MSM;
-    TIM2->SMCR |= (TIM_SMCR_MSM);
-
-    ///////////////////////////////////////
-    //  TIM2 CH1 setup as delay capture  //
-    ///////////////////////////////////////
-
-    /* Disable the Channel 1: Reset the CC1E Bit */
-    TIM2->CCER &= ~TIM_CCER_CC1E;
-
-    // only writeable when channel is off
-    // CC1S = 2'b11 -> sets input capture on TRC (internal trigger set by TS bits)
-    // this is done in general config above, TRC source is edge detect
-    TIM2->CCMR1 &= ~TIM_CCMR1_CC1S;
-    TIM2->CCMR1 |= (0x3 << TIM_CCMR1_CC1S_Pos);
-
-    // disable filter, not used when edge detect TRC is selected
-    TIM2->CCMR1 &= ~TIM_CCMR1_IC1F;
-    TIM2->CCMR1 |= ((0x0 << 4U) & TIM_CCMR1_IC1F);
-
-    // set edge detection mode to non-inverted/rising edge.
-    // it is forbidden to use dual edge detect for hall sensing mode
-    TIM2->CCER &= ~(TIM_CCER_CC1P | TIM_CCER_CC1NP);
-    TIM2->CCER |= (0x0U & (TIM_CCER_CC1P | TIM_CCER_CC1NP));
-
-    // set the channel prescaler to 0
-    TIM2->CCMR1 &= ~TIM_CCMR1_IC1PSC;
-    TIM2->CCMR1 |= (0 << TIM_CCMR1_IC1PSC_Pos);
-
-    // enable the interrupt
-    TIM2->DIER |= (TIM_DIER_CC1IE);
-    TIM2->SR &= ~(TIM_SR_CC1IF);
-
-    // enable channel 1
-    TIM2->CCER |= TIM_CCER_CC1E;
-
-    //  Enable in NVIC
+	TIM2->CR1 = 0;
+	// XOR TI1 to TI3, reset signal used as TRGO
+	TIM2->CR2 = TIM_CR2_TI1S;
+	// TI1 (filtered) edge detector as TRGI, slave mode: reset
+	TIM2->SMCR = TIM_SMCR_TS_2 | TIM_SMCR_SMS_2;
+	TIM2->SR = 0;
+	TIM2->DIER = 0;
+	// IC1 is mapped to TI1 filtered (XOR output)
+	TIM2->CCMR1 = TIM_CCMR1_CC1S | (7 << TIM_CCMR1_IC1F_Pos);
+	TIM2->CCMR2 = 0;
+	// CCR1 in input mode, capture all edges of TI1F
+	TIM2->CCER = TIM_CCER_CC1E;
+	TIM2->CNT = 0;
+	TIM2->PSC = 0; // => 48MHz
+	TIM2->ARR = UINT32_MAX;
+	TIM2->EGR = TIM_EGR_UG;
 
     NVIC_SetPriority(TIM2_IRQn, 5);
     NVIC_EnableIRQ(TIM2_IRQn);
 
-    ////////////////////////////////////////
-    //  setup timer for delay triggering  //
-    ////////////////////////////////////////
-
-    // there seems to be chatter when TIM1 COM is triggered
-    // immediated on a hall transition, so we use TIM16 to
-    // create a congiruable delay
-
-    TIM16->SR = 0;
-    // prescaler of 48 -> 1MHz input cleck -> each cycle is 1us
-    TIM16->PSC = 49;
-    TIM16->EGR |= (TIM_EGR_UG);
-    // this might should be a function of velocity (estimated or measured)
-    TIM16->CCR1 = 61; // commutation delay of 20us
-
-    // enable timer delay for commutation
-    TIM16->DIER |= TIM_DIER_CC1IE;
-    NVIC_SetPriority(TIM16_IRQn, 5);
-    NVIC_EnableIRQ(TIM16_IRQn);
+    TIM2->CR1 |= TIM_CR1_CEN;
 }
 
 #define CCMR1_PHASE1_OFF (TIM_CCMR1_OC1PE | TIM_CCMR1_OC1M_2)
@@ -431,67 +359,35 @@ static void pwm6step_setup_commutation_timer() {
 
     TIM1->CR1 = (TIM_CR1_ARPE | TIM_CR1_CMS);
     TIM1->CR2 = (TIM_CR2_CCPC);
-
-    TIM1->CCMR1 = CCMR1_PHASE1_OFF | CCMR1_PHASE2_OFF;
-    TIM1->CCMR2 = CCMR2_PHASE3_OFF;
+	TIM1->SMCR = TIM_SMCR_OCCS | TIM_SMCR_ETF | TIM_SMCR_TS_0;
 
     // set channel 4 PWM mode 1, affects OC4REF as input to ADC
     // should be co triggered with ch1-3 commutation
-    TIM1->CCMR2 |= CCMR2_TIM4_ADC_TRIG;
+    TIM1->CCMR1 = CCMR1_PHASE1_OFF | CCMR1_PHASE2_OFF;
+    TIM1->CCMR2 = CCMR2_PHASE3_OFF | CCMR2_TIM4_ADC_TRIG;
     // enable the channel
-    TIM1->CCER |= CCER_TIM4_ADC_TRIG;
-
+    TIM1->CCER |= CCER_PHASE1_OFF | CCER_PHASE2_OFF | CCER_PHASE3_OFF | CCER_TIM4_ADC_TRIG;
+    // set adc trigger offset
     TIM1->CCR4 = 22;
 
     // generate an update event to reload the PSC
     TIM1->EGR |= (TIM_EGR_UG | TIM_EGR_COMG);
 
-    TIM1->CR1 |= TIM_CR1_CEN;
     TIM1->BDTR |= TIM_BDTR_MOE;
-
-    // enable interrupt to set GPIOB pin 9 on CH2 PWM low -> high transition
-    // used for ADC timing/alignment verification
-    // TIM1->SR = 0;
-    // TIM1->DIER |= TIM_DIER_CC4IE;
-    // NVIC_SetPriority(TIM1_CC_IRQn, 5);
-    // NVIC_EnableIRQ(TIM1_CC_IRQn);
+    TIM1->CR1 |= TIM_CR1_CEN;
 
     perform_commutation_cycle();
     trigger_commutation();
 }
 
-void TIM2_IRQHandler() {
-    // if Capture Compare 1 (hall updated)
-    if (TIM2->SR & TIM_SR_CC1IF) {
-        // enable timer ch 2 delay
-        TIM16->CNT = 0;
-        TIM16->CR1 |= (TIM_CR1_CEN);
-        TIM16->CCER |= (TIM_CCER_CC1E);
+void TIM2_IRQHandler()
+{
+	// hall commutation IRQ
+	TIM2->SR &= ~TIM_SR_UIF;
 
-        // read of CCR1 should clear the int enable (PENDING?) flag
-        // rm0091, SR, pg 442/1004
-        uint32_t hall_transition_elapsed_ticks = TIM2->CCR1;
+    uint32_t hall_transition_elapsed_ticks = TIM2->CCR1;
 
-        // clear interrupt
-        TIM2->SR &= ~(TIM_SR_CC1IF);
-    }
-
-    // handle errors
-}
-
-void TIM16_IRQHandler() {
-    if (TIM16->SR & TIM_SR_CC1IF) {
-        // disable timer
-        TIM16->CCER &= ~(TIM_CCER_CC1E);
-        TIM16->CR1 &= ~(TIM_CR1_CEN);
-        TIM16->CNT = 0;
-
-        // stage and fire commutation
-        TIM2_IRQHandler_HallTransition();
-
-        // clear interrupt
-        TIM16->SR &= ~(TIM_SR_CC1IF);
-    }
+    perform_commutation_cycle();
 }
 
 static uint32_t voltage_filter[4];
@@ -524,40 +420,40 @@ void DMA1_Channel1_IRQHandler() {
     // we need to normalize some values so the fixed point arith has reasonable intermediate computation sizes (32bit)
     // quantize current_measurement to 4096 (12 bits)
     // Max current the sense network should read is ~9A -> 9000mA
-    // if (current_measurement > 9000) {
-    //     current_measurement = 9000;
-    // }
+    if (current_measurement > 9000) {
+        current_measurement = 9000;
+    }
 
-    // // S15F0 * S0F16 = S15F16 >> 19 = S12F0
-    // Uint32FixedPoint_t qtz_current = (current_measurement * S0F16_4096_OVER_9000) >> 19;
+    // S15F0 * S0F16 = S15F16 >> 19 = S12F0
+    Uint32FixedPoint_t qtz_current = (current_measurement * S0F16_4096_OVER_9000) >> 19;
 
-    // // filter current
-    // current_filter[current_filter_ind++] = qtz_current;
-    // current_filter_ind &= 0x7;
+    // filter current
+    current_filter[current_filter_ind++] = qtz_current;
+    current_filter_ind &= 0x7;
 
-    // Uint32FixedPoint_t avg_current = 0;
-    // for (int i = 0; i < sizeof(current_filter) / 4; i++) {
-    //     avg_current += current_filter[i];
-    // }
-    // avg_current >>= 3;  // div 8
+    Uint32FixedPoint_t avg_current = 0;
+    for (int i = 0; i < sizeof(current_filter) / 4; i++) {
+        avg_current += current_filter[i];
+    }
+    avg_current >>= 3;  // div 8
 
     measured_current = current_measurement;
 
     // update bus voltage
 
     uint16_t vbus_mv = currsen_get_vbus_voltage_mv();
-    measured_vbus_voltage = vbus_mv;
+    // measured_vbus_voltage = vbus_mv;
 
-    // voltage_filter[voltage_filter_index++] = vbus_mv;
-    // voltage_filter_index &= 0x3;
+    voltage_filter[voltage_filter_index++] = vbus_mv;
+    voltage_filter_index &= 0x3;
 
-    // uint32_t average_bus_voltage = 0;
-    // for (int i = 0; i < sizeof(voltage_filter) / 4; i++) {
-    //     average_bus_voltage += voltage_filter[i];
-    // }
-    // average_bus_voltage >>= 2;
+    uint32_t average_bus_voltage = 0;
+    for (int i = 0; i < sizeof(voltage_filter) / 4; i++) {
+        average_bus_voltage += voltage_filter[i];
+    }
+    average_bus_voltage >>= 2;
 
-    // measured_vbus_voltage = average_bus_voltage;
+    measured_vbus_voltage = average_bus_voltage;
 
 
     // update PID, maps current to voltage
@@ -602,26 +498,6 @@ void DMA1_Channel1_IRQHandler() {
 /**
  * @brief 
  * 
- * keep this interrupt short so we can minimize the delay between the CC1
- * transition event and delayed required on CC2 to fire the COM event automatically
- * 
- * handle most functionality on the interrupt callback for CC2 which fires *after*
- * the COM event
- * 
- * force apply O0 as we'll need to count the instructions here + ctxswitch to make
- * sure this function completes before the other interrupt fires. Maybe that happens
- * anyway since read of CCR1 clear the IF
- * 
- */
-__attribute__((optimize("O0")))
-static void TIM2_IRQHandler_HallTransition() {
-    perform_commutation_cycle();
-    // trigger_commutation();
-}
-
-/**
- * @brief 
- * 
  */
 static void perform_commutation_cycle() {
     hall_recorded_state_on_transition = read_hall();
@@ -630,7 +506,9 @@ static void perform_commutation_cycle() {
     uint8_t ccw_expected_transition = ccw_expected_hall_transition_table[prev_hall_value];
 
 
-    if (hall_recorded_state_on_transition != cw_expected_transition && hall_recorded_state_on_transition != ccw_expected_transition) {
+    if (hall_recorded_state_on_transition != prev_hall_value 
+            && hall_recorded_state_on_transition != cw_expected_transition 
+            && hall_recorded_state_on_transition != ccw_expected_transition) {
         hall_transition_error_count++;
     } else if (motor_errors.invalid_transitions > 0) {
         hall_transition_error_count--;
@@ -662,24 +540,24 @@ static uint8_t read_hall() {
     uint8_t hall_value = (GPIOA->IDR & (GPIO_IDR_2 | GPIO_IDR_1 | GPIO_IDR_0));
     
     // check if hall sensor is floating/disconnected, all lines will be 1, 3b'111 = 7
-    // if (hall_value == 0x7) {
-    //     hall_disconnect_error_count += HALL_DISCONNECT_ERROR_INCREMENT;
-    //     if (hall_disconnect_error_count > HALL_DISCONNECT_MAX_ACCU_ERROR) {
-    //         hall_disconnect_error_count = HALL_DISCONNECT_MAX_ACCU_ERROR;
-    //     }
-    // } else if (hall_disconnect_error_count > 0) {
-    //     hall_disconnect_error_count -= HALL_DISCONNECT_ERROR_CLEAR_DECREMENT;
-    // }
+    if (hall_value == 0x7) {
+        hall_disconnect_error_count += HALL_DISCONNECT_ERROR_INCREMENT;
+        if (hall_disconnect_error_count > HALL_DISCONNECT_MAX_ACCU_ERROR) {
+            hall_disconnect_error_count = HALL_DISCONNECT_MAX_ACCU_ERROR;
+        }
+    } else if (hall_disconnect_error_count > 0) {
+        hall_disconnect_error_count -= HALL_DISCONNECT_ERROR_CLEAR_DECREMENT;
+    }
 
-    // // check if hall sensor has a power error, pullups will fail all lines will be 0, 3b'000 = 7
-    // if (hall_value == 0x0) {
-    //     hall_power_error_count += HALL_POWER_ERROR_INCREMENT;
-    //     if (hall_power_error_count > HALL_POWER_MAX_ACCU_ERROR) {
-    //         hall_power_error_count = HALL_POWER_MAX_ACCU_ERROR;
-    //     }
-    // } else if (hall_power_error_count > 0) {
-    //     hall_power_error_count -= HALL_POWER_ERROR_CLEAR_DECREMENT;
-    // }
+    // check if hall sensor has a power error, pullups will fail all lines will be 0, 3b'000 = 7
+    if (hall_value == 0x0) {
+        hall_power_error_count += HALL_POWER_ERROR_INCREMENT;
+        if (hall_power_error_count > HALL_POWER_MAX_ACCU_ERROR) {
+            hall_power_error_count = HALL_POWER_MAX_ACCU_ERROR;
+        }
+    } else if (hall_power_error_count > 0) {
+        hall_power_error_count -= HALL_POWER_ERROR_CLEAR_DECREMENT;
+    }
 
     // update error flags
     motor_errors.hall_power = hall_power_error_count > HALL_POWER_ERROR_THRESHOLD;
@@ -730,43 +608,34 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     uint16_t ccmr2 = CCMR2_TIM4_ADC_TRIG;
 
     if (phase1_low) {
-        TIM1->CCR1 = 0;
         ccmr1 |= CCMR1_PHASE1_LOW;
         ccer |= CCER_PHASE1_LOW;
     } else if (phase1_high) {
-        TIM1->CCR1 = current_duty_cycle;
         ccmr1 |= CCMR1_PHASE1_PWM;
         ccer |= CCER_PHASE1_PWM;
     } else {
-        TIM1->CCR1 = 0;
         ccmr1 |= CCMR1_PHASE1_OFF;
         ccer |= CCER_PHASE1_OFF;
     }
 
     if (phase2_low) {
-        TIM1->CCR2 = 0;
         ccmr1 |= CCMR1_PHASE2_LOW;
         ccer |= CCER_PHASE2_LOW;
     } else if (phase2_high) {
-        TIM1->CCR2 = current_duty_cycle;
         ccmr1 |= CCMR1_PHASE2_PWM;
         ccer |= CCER_PHASE2_PWM;
     } else {
-        TIM1->CCR2 = 0;
         ccmr1 |= CCMR1_PHASE2_OFF;
         ccer |= CCER_PHASE2_OFF;
     }
 
     if (phase3_low) {
-        TIM1->CCR3 = 0;
         ccmr2 |= CCMR2_PHASE3_LOW;
         ccer |= CCER_PHASE3_LOW;
     } else if (phase3_high) {
-        TIM1->CCR3 = current_duty_cycle;
         ccmr2 |= CCMR2_PHASE3_PWM;
         ccer |= CCER_PHASE3_PWM;
     } else {
-        TIM1->CCR3 = 0;
         ccmr2 |= CCMR2_PHASE3_OFF;
         ccer |= CCER_PHASE3_OFF;
     }
@@ -805,8 +674,8 @@ void pwm6step_setup() {
     // setup current PI controller
     fxptpi_initialize(&current_controller, &current_controller_constants);
 
-    pwm6step_setup_hall_timer();
     pwm6step_setup_commutation_timer();
+    pwm6step_setup_hall_timer();
 }
 
 /**
@@ -827,7 +696,16 @@ void pwm6step_set_direction(MotorDirection_t motor_direction) {
 static void set_duty_cycle(uint16_t duty_cycle) {
     current_duty_cycle = ARR_VALUE - MAP_MAX_DUTY_TO_ARR_DUTY(duty_cycle);
 
-    trigger_commutation();
+    // set drive registers
+    TIM1->CCR1 = current_duty_cycle;
+    TIM1->CCR2 = current_duty_cycle;
+    TIM1->CCR3 = current_duty_cycle;
+
+    if (TIM2->DIER == 0) {
+        // enable it and force an update
+        TIM2->DIER = TIM_DIER_UIE;
+        TIM2->EGR = TIM_EGR_UG;
+    }
 }
 
 /**

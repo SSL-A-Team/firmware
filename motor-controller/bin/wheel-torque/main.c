@@ -247,7 +247,7 @@ int main() {
 
         switch (motor_command_packet.motion_control_type) {
             case CCM_MCT_MOTOR_OFF:
-                pwm6step_set_duty_cycle(1200);
+                pwm6step_set_duty_cycle(0);
                 break;
             case CCM_MCT_DUTY_OPENLOOP:
                 pwm6step_set_duty_cycle_f(motor_command_packet.setpoint);
@@ -271,6 +271,7 @@ int main() {
         }
 
         response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
+        response_packet.current_telemetry.current_samples_ma[0] = currsen_get_shunt_current_ma();
 
         // response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
         // response_packet.current_telemetry.current_samples_ma = pwm6step_get_current_log();

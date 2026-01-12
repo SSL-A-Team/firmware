@@ -76,5 +76,6 @@ int pwm6step_hall_get_rps_estimate();
 
 // error handling and logging
 const MotorErrors_t pwm6step_get_motor_errors();
+const uint16_t pwm6step_get_current_measurement();
 const uint16_t* pwm6step_get_current_log();
 const uint16_t pwm6step_get_vbus_voltage();

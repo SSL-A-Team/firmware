@@ -452,6 +452,8 @@ impl<
     }
 
     pub fn read_current_estimate_ma(&self) -> u16 {
+        return self.current_state.current_telemetry.current_samples_ma[0];
+
         let mut acc: u32 = 0;
         for sample in self.current_state.current_telemetry.current_samples_ma {
             acc += sample as u32;
