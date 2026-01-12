@@ -563,7 +563,7 @@ impl<
                 ticks_since_trace_print = 0;
             }
 
-            if loop_execution_time.as_micros() > 200 {
+            if loop_execution_time.as_micros() > 300 {
                 defmt::trace!(
                     "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
                     motor_packet_process_time.as_micros(),
@@ -571,7 +571,7 @@ impl<
                     control_update_time.as_micros(),
                     channel_update_time.as_micros(),
                 );
-                defmt::warn!("control loop is taking >200us: {} us (it may be interrupted by higher priority tasks). This is >20% of an execution frame.", loop_execution_time.as_micros());
+                defmt::warn!("control loop is taking >300us: {} us (it may be interrupted by higher priority tasks). This is >30% of an execution frame.", loop_execution_time.as_micros());
             }
 
             last_loop_term_time = Instant::now();
