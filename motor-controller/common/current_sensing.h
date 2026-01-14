@@ -162,7 +162,10 @@ CS_Status_t calculate_motor_zero_current_setpoint();
 uint16_t currsen_get_shunt_raw_adc();
 uint16_t currsen_get_bus_raw_adc();
 
+Uint32FixedPoint_t currsen_get_shunt_voltage_fxpt();
+Uint32FixedPoint_t currsen_get_shunt_voltage_no_bias_fxpt();
 Uint32FixedPoint_t currsen_get_shunt_current_fxpt();
+uint16_t currsen_get_calibrated_bias_mv();
 uint16_t currsen_get_shunt_current_ma();
 uint16_t currsen_get_vbus_voltage_mv();
 
