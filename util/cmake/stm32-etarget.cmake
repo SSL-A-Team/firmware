@@ -58,6 +58,7 @@ macro(ateam_add_targets root_dir linker_file device_prefix)
         target_compile_options(${target_name} PRIVATE
             $<$<COMPILE_LANGUAGE:C>:${${device_prefix}_C_OPTIONS}>
             $<$<COMPILE_LANGUAGE:CXX>:${${device_prefix}_CXX_OPTIONS}>
+            -O3
             -Wdouble-promotion
             -Werror=double-promotion
         ) 

@@ -113,8 +113,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     }
 
 
-    ccm.set_motion_type(CurrentControlledMotor_MotionControlType::CCM_MCT_MOTOR_OFF);
-    ccm.set_setpoint(0.0);
+    ccm.set_motion_type(CurrentControlledMotor_MotionControlType::CCM_MCT_DUTY_OPENLOOP);
+    ccm.set_setpoint(0.1);
     ccm.set_telemetry_enabled(true);
     ccm.set_motion_enabled(true);
 
@@ -130,7 +130,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         let i = ccm.read_current_estimate_ma();
         let w = ccm.read_rads();
 
-        if ctr > 9 {
+        if ctr >= 9 {
             defmt::info!("vrail: {}, current: {}, vel: {}", v, i, w);
             ctr = 0;
         } else {
