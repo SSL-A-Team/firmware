@@ -268,10 +268,7 @@ int main() {
         }
 
         response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
-        response_packet.current_telemetry.current_samples_ma[0] = pwm6step_get_current_measurement();
-
-        // response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
-        // response_packet.current_telemetry.current_samples_ma = pwm6step_get_current_log();
+        memcpy(response_packet.current_telemetry.current_samples_ma, pwm6step_get_current_log(), 40);
 
         // load errors into packets and set LEDs
         update_errors();
