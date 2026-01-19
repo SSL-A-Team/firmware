@@ -44,10 +44,10 @@ static_idle_buffered_uart!(CCM_UART, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PA
 
 // Create embassy-usb DeviceBuilder using the driver and config.
 // It needs some buffers for building the descriptors.
-static mut EP_OUT_BUFFER_CELL: [u8; 256] = [0; 256];
+static mut EP_OUT_BUFFER_CELL: [u8; 4096] = [0; 4096];
 static mut CONFIG_DESCRIPTOR_CELL: [u8; 256] = [0; 256];
 static mut BOS_DESCRIPTOR_CELL: [u8; 256] = [0; 256];
-static mut CONTROL_BUF_CELL: [u8; 64] = [0; 64];
+static mut CONTROL_BUF_CELL: [u8; 4096] = [0; 4096];
 static mut USB_STATE_CELL: State = State::new();
 
 
@@ -126,10 +126,11 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut usb_hw_config = embassy_stm32::usb::Config::default();
     usb_hw_config.vbus_detection = false;
 
-    let ep_out_buffer: &'static mut [u8; 256] = unsafe { &mut (*(&raw mut EP_OUT_BUFFER_CELL)) };
+    let ep_out_buffer: &'static mut [u8; 4096] = unsafe { &mut (*(&raw mut EP_OUT_BUFFER_CELL)) };
 
 
-    let usb_driver = embassy_stm32::usb::Driver::new_hs(p.USB_OTG_HS, Irqs, p.PA12, p.PA11, ep_out_buffer, usb_hw_config);
+    // USB Driver::new_hs() call doesn't work. 
+    let usb_driver = embassy_stm32::usb::Driver::new_fs(p.USB_OTG_HS, Irqs, p.PA12, p.PA11, ep_out_buffer, usb_hw_config);
 
     // Create embassy-usb Config
     let mut usb_config = embassy_usb::Config::new(0xc0de, 0xcafe);
@@ -141,7 +142,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     let config_descriptor: &'static mut [u8; 256] = unsafe { &mut (*(&raw mut CONFIG_DESCRIPTOR_CELL)) };
     let bos_descriptor:  &'static mut [u8; 256] = unsafe { &mut (*(&raw mut BOS_DESCRIPTOR_CELL)) };
-    let control_buf: &'static mut [u8; 64] = unsafe { &mut (*(&raw mut CONTROL_BUF_CELL)) };
+    let control_buf: &'static mut [u8; 4096] = unsafe { &mut (*(&raw mut CONTROL_BUF_CELL)) };
 
     let mut usb_builder = embassy_usb::Builder::new(
         usb_driver,
@@ -164,6 +165,11 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     /////////////////////////////
     //  main task motor logic  //
     /////////////////////////////
+
+    // block main task for trace level usb debugging
+    // loop {
+    //     Timer::after_millis(100).await;
+    // }
 
     let mut ccm = CurrentControlledMotor::new_from_pins(&CCM_UART_IDLE_BUFFERED_UART, CCM_UART_IDLE_BUFFERED_UART.get_uart_read_queue(), CCM_UART_IDLE_BUFFERED_UART.get_uart_write_queue(), p.PG7.into(), p.PG8.into(), CURRENT_CONTROLLED_WHEEL_IMAGE);
 
@@ -197,13 +203,16 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         let i = ccm.read_current_estimate_ma();
         let w = ccm.read_rads();
 
-        if ccm.get_latest_state_seqnum() != last_seq_num {
+        let cur_seq_num = ccm.get_latest_state_seqnum();
+        if cur_seq_num != last_seq_num {
             torque_data_pub.publish_immediate(ccm.get_latest_state());
             // defmt::info!("got a unique state update, sending to usb task");
+
+            last_seq_num = cur_seq_num;
         }
 
         if ctr > 19 {
-            defmt::info!("vrail: {}, current: {}, vel: {}", v, i, w);
+            // defmt::info!("vrail: {}, current: {}, vel: {}", v, i, w);
             ctr = 0;
         } else {
             ctr += 1;
@@ -218,6 +227,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 #[embassy_executor::task]
 async fn usb_ll_driver_task(mut usb_device:  UsbDevice<'static, Driver<'static, USB_OTG_HS>>) {
     loop {
+        defmt::info!("starting USB ll driver core.");
+
         usb_device.run().await;
 
         defmt::panic!("usb device driver task returned!");
@@ -227,22 +238,29 @@ async fn usb_ll_driver_task(mut usb_device:  UsbDevice<'static, Driver<'static, 
 #[embassy_executor::task]
 async fn usb_writer_task(mut usb_class: CdcAcmClass<'static, Driver<'static, USB_OTG_HS>>, mut packet_sub: Subscriber<'static, CriticalSectionRawMutex, CurrentControlledMotor_Telemetry, 3, 1, 1>) {
     loop {
-            defmt::info!("USB task - waiting connection...");
-            usb_class.wait_connection().await;
-            defmt::info!("Connected");
+        defmt::info!("USB task - waiting connection...");
+        usb_class.wait_connection().await;
+        defmt::info!("Connected");
 
-            loop {
-                let feedback_data_packet = packet_sub.next_message_pure().await;
+        loop {
+            let feedback_data_packet = packet_sub.next_message_pure().await;
 
-                let mut buf: [u8; 128] = [0; 128];
+            let buf: [u8; 64] = [0; 64];
 
-                // defmt::info!("writing torque feedback packet to USB...");
-                let res = usb_class.write_packet(&buf).await;
-                if res.is_err() {
-                    defmt::warn!("USB disconnected.");
-                    break;
+            defmt::info!("writing torque feedback packet to USB...");
+            let res = usb_class.write_packet(&buf).await;
+            if res.is_err() {
+                match res.err().unwrap() {
+                    EndpointError::BufferOverflow => {
+                        defmt::error!("USB transmit buffer overflowed");
+                    },
+                    EndpointError::Disabled => {
+                        defmt::warn!("USB disconnected.");
+                        break;
+                    }
                 }
             }
+        }
     }
 }
 

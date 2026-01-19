@@ -436,12 +436,14 @@ static void update_errors() {
     response_packet.gain_stage_index = gspid_get_cur_gain_stage_index(&vel_pid) & 0xFF;
 }
 
+static uint8_t params_seq_ctr = 0;
 static uint8_t seq_ctr = 0;
 static void send_packets() {
     CurrentControlledMotor_Response response_pkt;
     response_pkt.type = CCM_RESP_TELEM;
     response_pkt.timestamp = time_local_epoch_s();
-    response_pkt.seq_num++;  // intentionally overflow
+    response_pkt.seq_num = seq_ctr;  // intentionally overflow
+    seq_ctr++;
 
     response_pkt.data.motion = response_packet;
 
@@ -469,8 +471,8 @@ static void send_packets() {
 
         response_pkt.type = CCM_RESP_PARAMS;
         response_pkt.timestamp = time_local_epoch_s();
-        response_pkt.seq_num++;  // intentionally overflow
-
+        response_pkt.seq_num = params_seq_ctr;  // intentionally overflow
+        params_seq_ctr++;
 
         // responding with firmware image hash, read operation, as a reply message
         response_pkt.data.params.parameter = CCM_PARAM_FIRMWARE_IMAGE_HASH;
