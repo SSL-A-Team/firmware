@@ -31,6 +31,7 @@ pub struct CurrentControlledMotor<
     firmware_image: &'a [u8],
     current_timestamp_ms: u32,
     current_state: CurrentControlledMotor_Telemetry,
+    current_state_seq_num: u8,
     torque_limit: f32,
 
     setpoint: f32,
@@ -68,6 +69,7 @@ impl<
 
             current_timestamp_ms: 0,
             current_state: start_state,
+            current_state_seq_num: 0,
             torque_limit: 0.0,
 
             setpoint: 0.0,
@@ -106,6 +108,7 @@ impl<
 
             current_timestamp_ms: 0,
             current_state: start_state,
+            current_state_seq_num: 0,
             torque_limit: 0.0,
 
             setpoint: 0.0,
@@ -298,6 +301,7 @@ impl<
                 // decode union type, and reinterpret subtype
                 if mrp.type_ == CCM_RESP_TELEM {
                     self.current_state = mrp.data.motion;
+                    self.current_state_seq_num = mrp.seq_num;
 
                     // defmt::info!("got a telem packet!");
 
@@ -404,6 +408,10 @@ impl<
 
     pub fn get_latest_state(&self) -> CurrentControlledMotor_Telemetry {
         self.current_state
+    }
+
+    pub fn get_latest_state_seqnum(&self) -> u8 {
+        self.current_state_seq_num
     }
 
     pub fn set_motion_type(&mut self, motion_type: CurrentControlledMotor_MotionControlType::Type) {

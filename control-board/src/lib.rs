@@ -155,10 +155,10 @@ pub fn get_system_config() -> Config {
     config.rcc.pll3 = Some(Pll {
         source: PllSource::HSE,
         prediv: PllPreDiv::DIV2,
-        mul: PllMul::MUL93,
-        divp: Some(PllDiv::DIV2), // 186 Mhz
-        divq: Some(PllDiv::DIV3), // 124 MHz
-        divr: Some(PllDiv::DIV3), // 124 MHz
+        mul: PllMul::MUL96,
+        divp: Some(PllDiv::DIV2), // 192 Mhz
+        divq: Some(PllDiv::DIV8), // 48 MHz (must be 48 for USB)
+        divr: Some(PllDiv::DIV3), // 128 MHz
     });
 
     // configure core busses
