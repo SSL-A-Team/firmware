@@ -245,10 +245,15 @@ async fn usb_writer_task(mut usb_class: CdcAcmClass<'static, Driver<'static, USB
         loop {
             let feedback_data_packet = packet_sub.next_message_pure().await;
 
-            let buf: [u8; 64] = [0; 64];
+            let struct_bytes = unsafe {
+                core::slice::from_raw_parts(
+                (&feedback_data_packet as *const CurrentControlledMotor_Telemetry) as *const u8,
+                core::mem::size_of::<CurrentControlledMotor_Telemetry>(),
+            )
+            };
 
             defmt::info!("writing torque feedback packet to USB...");
-            let res = usb_class.write_packet(&buf).await;
+            let res = usb_class.write_packet(struct_bytes).await;
             if res.is_err() {
                 match res.err().unwrap() {
                     EndpointError::BufferOverflow => {
