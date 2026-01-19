@@ -15,7 +15,7 @@ use nalgebra::Vector3;
 
 use crate::image_hash;
 use ateam_common_packets::bindings::{
-    CurrentControlledMotor_Command, CurrentControlledMotor_CurrentTelemetry, CurrentControlledMotor_MotionControlType, CurrentControlledMotor_Response, CurrentControlledMotor_ResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM}, CurrentControlledMotor_Telemetry, MotionCommandType::{self, OPEN_LOOP}, MotorCommandPacket, MotorCommandType::{MCP_MOTION, MCP_PARAMS}, MotorResponse, MotorResponseType::{MRP_MOTION, MRP_PARAMS}
+    CurrentControlledMotor_Command, CurrentControlledMotor_CommandType::CCM_CMD_MOTION, CurrentControlledMotor_CurrentTelemetry, CurrentControlledMotor_MotionControlType, CurrentControlledMotor_Response, CurrentControlledMotor_ResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM}, CurrentControlledMotor_Telemetry, MotionCommandType::{self, OPEN_LOOP}, MotorCommandPacket, MotorCommandType::{MCP_MOTION, MCP_PARAMS}, MotorResponse, MotorResponseType::{MRP_MOTION, MRP_PARAMS}
 };
 
 pub struct CurrentControlledMotor<
@@ -385,7 +385,7 @@ impl<
         unsafe {
             let mut cmd: CurrentControlledMotor_Command = { MaybeUninit::zeroed().assume_init() };
 
-            cmd.type_ = MCP_MOTION;
+            cmd.type_ = CCM_CMD_MOTION;
             cmd.crc32 = 0;
             cmd.data.motion.set_reset(self.reset_flagged as u32);
             cmd.data
@@ -393,7 +393,7 @@ impl<
                 .set_enable_telemetry(self.telemetry_enabled as u32);
             cmd.data.motion.motion_control_type = self.motion_type;
             cmd.data.motion.setpoint = self.setpoint;
-            //info!("setpoint: {:?}", cmd.data.motion.setpoint);
+            // info!("setpoint: {:?}", cmd.data.motion.setpoint);
 
             let struct_bytes = core::slice::from_raw_parts(
                 (&cmd as *const CurrentControlledMotor_Command) as *const u8,
@@ -460,8 +460,6 @@ impl<
     }
 
     pub fn read_current_estimate_ma(&self) -> u16 {
-        return self.current_state.current_telemetry.current_samples_ma[0];
-
         let mut acc: u32 = 0;
         for sample in self.current_state.current_telemetry.current_samples_ma {
             acc += sample as u32;

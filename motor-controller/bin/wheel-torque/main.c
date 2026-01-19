@@ -234,13 +234,10 @@ int main() {
         read_packets();
 
         // "soft" error conditions zero out the motor setpoint
-        if (allow_motor_to_run()) {
+        if (!allow_motor_to_run()) {
             motor_command_packet.current_setpoint_ma = 0;
             motor_command_packet.setpoint = 0.0f;
         }
-
-        motor_command_packet.motion_control_type = CCM_MCT_MOTOR_OFF;
-
 
         // update wheel velocity est
         update_wheel_vel_est();
@@ -271,10 +268,7 @@ int main() {
         }
 
         response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
-        response_packet.current_telemetry.current_samples_ma[0] = currsen_get_shunt_current_ma();
-
-        // response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
-        // response_packet.current_telemetry.current_samples_ma = pwm6step_get_current_log();
+        memcpy(response_packet.current_telemetry.current_samples_ma, pwm6step_get_current_log(), 40);
 
         // load errors into packets and set LEDs
         update_errors();
@@ -284,13 +278,8 @@ int main() {
 
         set_leds();
 
-        // TODO sync time from ADC?
-
-        // limit loop rate to smallest time step
-        if (sync_systick()) {
-            // Track if we are slipping control frames.
-            slipped_control_frame_count++;
-        }
+        // sync to ADC
+        while (!pwm6step_1ms_flag()) {}
     }
 }
 

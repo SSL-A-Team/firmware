@@ -24,7 +24,7 @@ typedef enum _MotorControlMode {
     CURRENT = 2,
 } MotorControlMode;
 
-static volatile MotorControlMode motor_control_mode = CURRENT;
+static volatile MotorControlMode motor_control_mode = DUTY;
 static volatile MotorDirection_t commanded_motor_direction = CLOCKWISE;
 static volatile uint16_t current_duty_cycle = 0;
 static volatile uint8_t hall_recorded_state_on_transition = 0;
@@ -393,7 +393,7 @@ void TIM2_IRQHandler()
 static uint32_t voltage_filter[4];
 static size_t voltage_filter_index = 0;
 
-static int32_t current_filter[8];
+static uint32_t current_filter[8];
 static size_t current_filter_ind = 0;
 
 static volatile size_t double_buffer_ind = 0;
@@ -424,11 +424,10 @@ void DMA1_Channel1_IRQHandler() {
         current_measurement = 9000;
     }
 
-    // S15F0 * S0F16 = S15F16 >> 19 = S12F0
-    Uint32FixedPoint_t qtz_current = (current_measurement * S0F16_4096_OVER_9000) >> 19;
+    // this is a 2.2kHz bandwidth filter with sampling freq of 40kHz
 
     // filter current
-    current_filter[current_filter_ind++] = qtz_current;
+    current_filter[current_filter_ind++] = current_measurement;
     current_filter_ind &= 0x7;
 
     Uint32FixedPoint_t avg_current = 0;
@@ -437,7 +436,7 @@ void DMA1_Channel1_IRQHandler() {
     }
     avg_current >>= 3;  // div 8
 
-    measured_current = current_measurement;
+    measured_current = avg_current;
 
     // update bus voltage
 
@@ -455,10 +454,13 @@ void DMA1_Channel1_IRQHandler() {
 
     measured_vbus_voltage = average_bus_voltage;
 
+    // quantize average current to 0-4096 for PID loop
+    // S15F0 * S0F16 = S15F16 >> 19 = S12F0
+    Uint32FixedPoint_t qtz_current = (avg_current * S0F16_4096_OVER_9000) >> 19;
 
     // update PID, maps current to voltage
-    // fxptpi_calculate(&current_controller, current_measurement, 0);
-    // Uint32FixedPoint_t voltage_sp = fxptpi_get_output(&current_controller);
+    fxptpi_calculate(&current_controller, qtz_current, 0);
+    Uint32FixedPoint_t voltage_sp = fxptpi_get_output(&current_controller);
 
     // TODO scale voltage_sp back up to 25200mV
     // note: set_voltage will need to compute a scale from measured voltage
@@ -468,29 +470,27 @@ void DMA1_Channel1_IRQHandler() {
     // we want to correct for this 
 
     // scale from 4096 -> battery voltage
-    // uint16_t voltage_sp_mv = (voltage_sp * BATTERY_VOLTAGE_MV) >> 12;
+    uint16_t voltage_sp_mv = ((uint32_t) voltage_sp * BATTERY_VOLTAGE_MV) >> 12;
 
     // if we're not in CURRENT mode, then the user has directly set the voltage/dc via the public function
     // in that case, this callback is collecting logging data and averaging/update bus voltage for VOLTAGE mode
-    // if (motor_control_mode == CURRENT) {
-    //     set_voltage(voltage_sp_mv);    
-    // }
+    if (motor_control_mode == CURRENT) {
+        set_voltage(voltage_sp_mv);    
+    }
 
-    // if ((adc_callback_ctr & 0x1) == 0) {
-    //     logging_2frame_avg_cur = avg_current;
-    // } else {
-    //     current_data_buffer[double_buffer_ind][adc_callback_ctr / 2] = (uint16_t) ((logging_2frame_avg_cur + (uint32_t) avg_current) >> 1);
-    //     logging_2frame_avg_cur = 0;
-    // }
+    if ((adc_callback_ctr & 0x1) == 0) {
+        logging_2frame_avg_cur = avg_current;
+    } else {
+        current_data_buffer[double_buffer_ind][adc_callback_ctr / 2] = (uint16_t) ((logging_2frame_avg_cur + (uint32_t) avg_current) >> 1);
+    }
 
-    // adc_callback_ctr++;
-    // if (adc_callback_ctr == 40) {
-    //     flag_1ms = true;
+    adc_callback_ctr++;
+    if (adc_callback_ctr == PWM_FREQ_HZ / 1000) {
+        flag_1ms = true;
 
-    //     // 
-    //     adc_callback_ctr = 0;
-    //     double_buffer_ind = (double_buffer_ind + 1) & 0x1;
-    // }
+        adc_callback_ctr = 0;
+        double_buffer_ind = (double_buffer_ind + 1) & 0x1;
+    }
 
     trigger_commutation();
 }

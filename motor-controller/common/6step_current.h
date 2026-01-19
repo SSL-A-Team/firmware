@@ -49,7 +49,7 @@ typedef struct MotorErrors {
 // 0000 0111 = 0x07
 #define DEAD_TIME 0x07
 
-#define NUM_RAW_DC_STEPS ((uint16_t) (F_SYS_CLK_HZ / ((uint32_t) PWM_FREQ_HZ * (PWM_TIM_PRESCALER + 1))))
+#define NUM_RAW_DC_STEPS (((uint16_t) (F_SYS_CLK_HZ / ((uint32_t) PWM_FREQ_HZ * (PWM_TIM_PRESCALER + 1)))) / 2)
 #define SCALING_FACTOR (MAX_DUTYCYCLE_COMMAND / NUM_RAW_DC_STEPS + 1U)
 #define MAP_MAX_DUTY_TO_ARR_DUTY(dc) (dc / SCALING_FACTOR)
 
