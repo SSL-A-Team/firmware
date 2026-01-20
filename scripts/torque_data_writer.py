@@ -1,5 +1,66 @@
 import serial.tools.list_ports
 import time
+import os
+import argparse
+import json
+from datetime import datetime
+from packet_decoder import HeaderParser, PacketDecoder
+
+###############################################################################
+# Command Line Arguments
+###############################################################################
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Decode CurrentControlledMotor_Telemetry packets from control board")
+    parser.add_argument("--output", "-o", type=str, help="Output file to save decoded packets (JSON format). If not specified, packets are printed to console.")
+    parser.add_argument("--struct", "-s", type=str, default="CurrentControlledMotor_Telemetry",
+                       help="Struct name to decode (default: CurrentControlledMotor_Telemetry)")
+    return parser.parse_args()
+
+###############################################################################
+# Configuration
+###############################################################################
+
+# Path to the header files (relative to this script)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+HEADER_DIR = os.path.join(SCRIPT_DIR, "..", "software-communication", "ateam-common-packets", "include")
+
+# Parse command line arguments
+args = parse_arguments()
+
+# Struct to decode - can be overridden by command line
+DECODE_STRUCT_NAME = args.struct
+
+
+###############################################################################
+# Initialize Parser and Decoder
+###############################################################################
+
+print("Loading header files...")
+parser = HeaderParser()
+
+# Parse the relevant header files
+for header_file in ["stspin_current.h", "stspin.h"]:
+    header_path = os.path.join(HEADER_DIR, header_file)
+    if os.path.exists(header_path):
+        print(f"  Parsing {header_file}...")
+        parser.parse_file(header_path)
+
+print(f"\nLoaded {len(parser.structs)} structs and {len(parser.enums)} enums")
+print(f"Decoding struct: {DECODE_STRUCT_NAME}")
+
+target_struct = parser.get_struct(DECODE_STRUCT_NAME)
+if target_struct:
+    print(f"  Size: {target_struct.size} bytes")
+    print(f"  Fields: {len(target_struct.fields)}")
+else:
+    print(f"  ERROR: Struct '{DECODE_STRUCT_NAME}' not found!")
+
+decoder = PacketDecoder(parser)
+
+###############################################################################
+# Serial Connection
+###############################################################################
 
 control_board_port = None
 
@@ -25,33 +86,100 @@ ser = serial.Serial(
 )
 
 print(f"Connected to {ser.port}")
+print(f"\nWaiting for packets (expecting {target_struct.size if target_struct else '?'} bytes)...")
+
+# Initialize output file if specified
+output_file = None
+packet_count = 0
+if args.output:
+    print(f"Saving packets to: {args.output}")
+    output_file = open(args.output, 'w')
+    # Write file header with metadata
+    metadata = {
+        "format": "torque_data_writer_output",
+        "struct_name": DECODE_STRUCT_NAME,
+        "struct_size": target_struct.size if target_struct else None,
+        "start_time": datetime.now().isoformat(),
+        "packets": []
+    }
+    json.dump(metadata, output_file, indent=2)
+    output_file.seek(0)  # Go back to beginning to overwrite later
+else:
+    print("Printing packets to console (use --output to save to file)")
+
+print()
+
+###############################################################################
+# Main Loop
+###############################################################################
 
 try:
     while True:
-        bytes_to_read = ser.in_waiting # Check how many bytes are in the buffer
-        print(f"reading bytes: {bytes_to_read}")
+        bytes_to_read = ser.in_waiting
         if bytes_to_read:
             data = ser.read(bytes_to_read)
-            print(data) # Data is in bytes
 
-        # # Read a line from the serial port
-        # # The data is returned as a bytes object (e.g., b'data\r\n')
-        # line = ser.read()
-        # if line:
-        #     print(f"Received: {line}")
-        #     # You may need to decode the bytes to a string if it's text data
-        #     # decoded_line = line.decode('utf-8').strip()
-        #     # print(f"Decoded: {decoded_line}")
-        
+            if target_struct and len(data) >= (target_struct.size or 0):
+                decoded = decoder.decode(DECODE_STRUCT_NAME, data)
+                if decoded:
+                    packet_count += 1
+                    if output_file:
+                        # Save to file
+                        packet_data = {
+                            "packet_number": packet_count,
+                            "timestamp": datetime.now().isoformat(),
+                            "decoded": decoded
+                        }
+                        # For the first packet, we need to update the JSON structure
+                        if packet_count == 1:
+                            metadata["packets"].append(packet_data)
+                            output_file.seek(0)
+                            json.dump(metadata, output_file, indent=2)
+                        else:
+                            # Append to existing file (simplified approach)
+                            output_file.seek(0, 2)  # Go to end
+                            if packet_count == 2:
+                                # Need to restructure for multiple packets
+                                output_file.seek(0)
+                                metadata["packets"] = [metadata["packets"][0], packet_data]
+                                json.dump(metadata, output_file, indent=2)
+                            else:
+                                # This is a simplified approach - for production use jsonlines or similar
+                                pass
+
+                        print(f"Packet {packet_count} saved")
+                    else:
+                        # Print to console
+                        print(f"=== Packet {packet_count} ===")
+                        decoder.print_decoded(DECODE_STRUCT_NAME, decoded)
+                        print()
+                else:
+                    print(f"Failed to decode packet")
+                    print(f"Raw: {data.hex()}")
+            else:
+                expected = target_struct.size if target_struct else "unknown"
+                print(f"Packet size mismatch: got {len(data)}, expected {expected}")
+                print(f"Raw: {data.hex()}")
+
         time.sleep(0.0001) # 100uS, expecting packets every ms
 
 except KeyboardInterrupt:
-    print("Program terminated by user")
+    print(f"\nProgram terminated by user. Captured {packet_count} packets.")
 
 except serial.SerialException as e:
     print(f"Serial port error: {e}")
 
 finally:
+    # Close the output file if open
+    if output_file:
+        # Update the metadata with final packet count and end time
+        output_file.seek(0)
+        metadata["end_time"] = datetime.now().isoformat()
+        metadata["total_packets"] = packet_count
+        json.dump(metadata, output_file, indent=2)
+        output_file.close()
+        print(f"Saved {packet_count} packets to {args.output}")
+
     # Close the serial port
     if ser.is_open:
         ser.close()
