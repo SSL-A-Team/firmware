@@ -35,6 +35,7 @@ pub struct CurrentControlledMotor<
     torque_limit: f32,
 
     setpoint: f32,
+    current_setpoint_ma: i16,
     motion_type: CurrentControlledMotor_MotionControlType::Type,
     reset_flagged: bool,
     telemetry_enabled: bool,
@@ -73,6 +74,7 @@ impl<
             torque_limit: 0.0,
 
             setpoint: 0.0,
+            current_setpoint_ma: 0,
             motion_type: OPEN_LOOP,
             reset_flagged: false,
             telemetry_enabled: false,
@@ -112,6 +114,7 @@ impl<
             torque_limit: 0.0,
 
             setpoint: 0.0,
+            current_setpoint_ma: 0,
             motion_type: OPEN_LOOP,
             reset_flagged: false,
             telemetry_enabled: false,
@@ -393,6 +396,8 @@ impl<
                 .set_enable_telemetry(self.telemetry_enabled as u32);
             cmd.data.motion.motion_control_type = self.motion_type;
             cmd.data.motion.setpoint = self.setpoint;
+
+            cmd.data.motion.current_setpoint_ma = self.current_setpoint_ma;
             // info!("setpoint: {:?}", cmd.data.motion.setpoint);
 
             let struct_bytes = core::slice::from_raw_parts(
@@ -420,6 +425,10 @@ impl<
 
     pub fn set_setpoint(&mut self, setpoint: f32) {
         self.setpoint = setpoint;
+    }
+
+    pub fn set_current_setpoint(&mut self, setpoint_ma: i16) {
+        self.current_setpoint_ma = setpoint_ma;
     }
 
     pub fn flag_reset(&mut self) {
@@ -474,5 +483,9 @@ impl<
 
     pub fn read_vbus_voltage(&self) -> f32 {
         return self.current_state.current_telemetry.bus_voltage_mv as f32 / 1000.0;
+    }
+
+    pub fn read_vmotor_voltage_mv(&self) -> u16 {
+        return self.current_state.current_telemetry.motor_voltage_cmd_mv;
     }
 }

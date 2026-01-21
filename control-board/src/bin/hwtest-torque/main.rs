@@ -184,8 +184,11 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     }
 
 
-    ccm.set_motion_type(CurrentControlledMotor_MotionControlType::CCM_MCT_VOLTAGE_OPENLOOP);
-    ccm.set_setpoint(2500.0);
+    // ccm.set_motion_type(CurrentControlledMotor_MotionControlType::CCM_MCT_VOLTAGE_OPENLOOP);
+    // ccm.set_setpoint(2000.0);
+    ccm.set_motion_type(CurrentControlledMotor_MotionControlType::CCM_MCT_CURRENT);
+    ccm.set_current_setpoint(100);
+
     ccm.set_telemetry_enabled(true);
     ccm.set_motion_enabled(true);
 
@@ -194,14 +197,21 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     let mut last_seq_num = 0;
 
+    let mut mv_cmd_counting_up = true;
+    let mut mv_cmd = 0.0;
+
+    let mut curr_ctr = 0;
+
     let mut ctr = 0;
     let mut ticker = Ticker::every(Duration::from_micros(500));
     loop {
         ccm.process_packets();
 
         let v = ccm.read_vbus_voltage();
-        let i = ccm.read_current_estimate_ma();
+        let i_sp = ccm.read_current_setpoint_ma();
+        let i_ref = ccm.read_current_estimate_ma();
         let w = ccm.read_rads();
+        let Vm = ccm.read_vmotor_voltage_mv();
 
         let cur_seq_num = ccm.get_latest_state_seqnum();
         if cur_seq_num != last_seq_num {
@@ -212,11 +222,38 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         }
 
         if ctr > 19 {
-            // defmt::info!("vrail: {}, current: {}, vel: {}", v, i, w);
+            defmt::info!("motion control type: {}", ccm.get_latest_state().motion_control_type);
+            defmt::info!("vrail: {}, Isp: {}, Iref: {}, vel: {}, Vmv: {}", v, i_sp, i_ref, w, Vm);
             ctr = 0;
         } else {
             ctr += 1;
         }
+
+        if curr_ctr > 2000 {
+            curr_ctr = 0
+        } else if curr_ctr > 1000 {
+            ccm.set_current_setpoint(200);
+        } else {
+            ccm.set_current_setpoint(100);
+        }
+
+        curr_ctr += 1;
+
+        // if mv_cmd_counting_up {
+        //     mv_cmd += 0.1;
+        // } else {
+        //     mv_cmd -= 0.1;
+        // }
+
+        // if mv_cmd_counting_up && mv_cmd > 12500.0 {
+        //     mv_cmd_counting_up = false;
+        // }
+
+        // if !mv_cmd_counting_up && mv_cmd < 1.0 {
+        //     mv_cmd_counting_up = true;
+        // }
+
+        // ccm.set_setpoint(mv_cmd);
 
         ccm.send_motion_command();
 

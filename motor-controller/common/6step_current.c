@@ -54,18 +54,23 @@ static int hall_transition_error_count = 0;
 const Uint16FixedPoint_t S0F16_4096_OVER_9000 = 29826;
 
 static FixedPointS12F4_PiConstants_t current_controller_constants = {
-    .kP = 338,      // S07F10, 1000Hz BW * 0.33 mH = 0.33
-    .kI = 5791744,  // S05F13, 1000Hz BW * (0.7ohm coil + 0.007 ohm wire) = 707
-    .kI_max = 4 * 707,  // S12F0
-    .kI_min = -(4 * 707),  // S12F0
-    .anti_jitter_thresh = 0,  // S12F0
-    .anti_jitter_thresh_inv = 0,  // S0F12
+    // 1000 Hz bandwidth -> 6283 rads
+    .kP = 338 * 3,      // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
+    // .kI = 0,
+    .kI = 145 * 3,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910 
+    .kI_max = 4095,  // S12F0
+    .kI_min = -(4095),  // S12F0
+    .anti_jitter_thresh = 0,
+    .anti_jitter_thresh_inv = 0,
+    // .anti_jitter_thresh = 30,  // S12F0
+    // .anti_jitter_thresh_inv = 135,  // S0F12
 };
 
 static FixedPointS12F4_PiController_t current_controller;
 
 static volatile uint16_t measured_current = 0;
 static volatile uint16_t measured_vbus_voltage = 0;
+static volatile uint16_t last_voltage_command_mv = 0;
 
 ////////////////////////////////
 //  local data and functions  //
@@ -456,11 +461,14 @@ void DMA1_Channel1_IRQHandler() {
 
     // quantize average current to 0-4096 for PID loop
     // S15F0 * S0F16 = S15F16 >> 19 = S12F0
-    Uint32FixedPoint_t qtz_current = (avg_current * S0F16_4096_OVER_9000) >> 19;
+    Uint32FixedPoint_t qtz_current = (avg_current * S0F16_4096_OVER_9000) >> 16;
 
     // update PID, maps current to voltage
     fxptpi_calculate(&current_controller, qtz_current, 0);
-    Uint32FixedPoint_t voltage_sp = fxptpi_get_output(&current_controller);
+    Int32FixedPoint_t voltage_sp = fxptpi_get_output(&current_controller);
+    if (voltage_sp < 0) {
+        voltage_sp = 0;
+    }
 
     // TODO scale voltage_sp back up to 25200mV
     // note: set_voltage will need to compute a scale from measured voltage
@@ -745,6 +753,8 @@ static void set_voltage(uint16_t voltage_mv) {
         voltage_mv = measured_vbus_voltage;
     }
 
+    last_voltage_command_mv = voltage_mv;
+
     // scale from mv to max duty
     uint32_t voltage_scaled_to_dc = (uint16_t) ((uint32_t) voltage_mv * MAX_DUTYCYCLE_COMMAND / (uint32_t) measured_vbus_voltage);
     pwm6step_set_duty_cycle(voltage_scaled_to_dc);
@@ -766,8 +776,8 @@ void pwm6step_set_voltage(int16_t voltage_mv) {
 
 static void set_current(uint16_t current_ma) {
     // map current_ma to 4096
-    Uint16FixedPoint_t scaled_current = current_ma * S0F16_4096_OVER_9000;
-    fxptpi_setpoint(&current_controller, scaled_current);
+    Uint16FixedPoint_t scaled_current = (current_ma * S0F16_4096_OVER_9000) >> 16;
+    fxptpi_setpoint(&current_controller, (Int16FixedPoint_t) scaled_current);
 }
 
 void pwm6step_set_current(int16_t current_ma) {
@@ -816,5 +826,9 @@ const uint16_t* pwm6step_get_current_log() {
 
 const uint16_t pwm6step_get_vbus_voltage() {
     return measured_vbus_voltage;
-}   
+}  
+
+const uint16_t pwm6step_get_voltage_command() {
+    return last_voltage_command_mv;
+}
 

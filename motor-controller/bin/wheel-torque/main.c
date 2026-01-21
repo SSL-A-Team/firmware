@@ -242,6 +242,8 @@ int main() {
         // update wheel velocity est
         update_wheel_vel_est();
 
+        response_packet.motion_control_type = motor_command_packet.motion_control_type;
+
         switch (motor_command_packet.motion_control_type) {
             case CCM_MCT_MOTOR_OFF:
                 pwm6step_set_duty_cycle(0);
@@ -254,6 +256,7 @@ int main() {
                 break;
             case CCM_MCT_CURRENT:
                 pwm6step_set_current(motor_command_packet.current_setpoint_ma);
+                response_packet.current_telemetry.current_setpoint_ma = motor_command_packet.current_setpoint_ma;
                 break;
             case CCM_MCT_VELOCITY:
                 float dc_f = do_vel_control();
@@ -268,6 +271,8 @@ int main() {
         }
 
         response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
+        response_packet.current_telemetry.motor_voltage_cmd_mv = pwm6step_get_voltage_command();
+
         memcpy(response_packet.current_telemetry.current_samples_ma, pwm6step_get_current_log(), 40);
 
         // load errors into packets and set LEDs
