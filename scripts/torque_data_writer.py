@@ -2,7 +2,7 @@ import serial.tools.list_ports
 import time
 import os
 import argparse
-import json
+import jsonlines
 from datetime import datetime
 from packet_decoder import HeaderParser, PacketDecoder
 
@@ -89,21 +89,22 @@ print(f"Connected to {ser.port}")
 print(f"\nWaiting for packets (expecting {target_struct.size if target_struct else '?'} bytes)...")
 
 # Initialize output file if specified
-output_file = None
+jsonl_writer = None
 packet_count = 0
 if args.output:
     print(f"Saving packets to: {args.output}")
     output_file = open(args.output, 'w')
+    jsonl_writer = jsonlines.Writer(output_file)
     # Write file header with metadata
     metadata = {
+        "type": "metadata",
         "format": "torque_data_writer_output",
         "struct_name": DECODE_STRUCT_NAME,
         "struct_size": target_struct.size if target_struct else None,
-        "start_time": datetime.now().isoformat(),
-        "packets": []
+        "start_time": datetime.now().isoformat()
     }
-    json.dump(metadata, output_file, indent=2)
-    output_file.seek(0)  # Go back to beginning to overwrite later
+    jsonl_writer.write(metadata)
+    output_file.flush()
 else:
     print("Printing packets to console (use --output to save to file)")
 
@@ -123,29 +124,18 @@ try:
                 decoded = decoder.decode(DECODE_STRUCT_NAME, data)
                 if decoded:
                     packet_count += 1
-                    if output_file:
-                        # Save to file
+                    if jsonl_writer:
+                        # Save to file as JSON Lines
                         packet_data = {
+                            "type": "packet",
                             "packet_number": packet_count,
                             "timestamp": datetime.now().isoformat(),
                             "decoded": decoded
                         }
-                        # For the first packet, we need to update the JSON structure
-                        if packet_count == 1:
-                            metadata["packets"].append(packet_data)
-                            output_file.seek(0)
-                            json.dump(metadata, output_file, indent=2)
-                        else:
-                            # Append to existing file (simplified approach)
-                            output_file.seek(0, 2)  # Go to end
-                            if packet_count == 2:
-                                # Need to restructure for multiple packets
-                                output_file.seek(0)
-                                metadata["packets"] = [metadata["packets"][0], packet_data]
-                                json.dump(metadata, output_file, indent=2)
-                            else:
-                                # This is a simplified approach - for production use jsonlines or similar
-                                pass
+
+                        # Append packet as new line
+                        jsonl_writer.write(packet_data)
+                        output_file.flush()
 
                         print(f"Packet {packet_count} saved")
                     else:
@@ -171,13 +161,15 @@ except serial.SerialException as e:
 
 finally:
     # Close the output file if open
-    if output_file:
-        # Update the metadata with final packet count and end time
-        output_file.seek(0)
-        metadata["end_time"] = datetime.now().isoformat()
-        metadata["total_packets"] = packet_count
-        json.dump(metadata, output_file, indent=2)
-        output_file.close()
+    if jsonl_writer:
+        # Write final metadata with end time
+        end_metadata = {
+            "type": "metadata",
+            "end_time": datetime.now().isoformat(),
+            "total_packets": packet_count
+        }
+        jsonl_writer.write(end_metadata)
+        jsonl_writer.close()
         print(f"Saved {packet_count} packets to {args.output}")
 
     # Close the serial port

@@ -8,7 +8,7 @@ plots for visualization and analysis.
 """
 
 import argparse
-import json
+import jsonlines
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 import numpy as np
@@ -180,24 +180,30 @@ def print_summary(metadata, data):
 def main():
     args = parse_arguments()
 
-    # Load JSON file
+    # Load JSON Lines file
     print(f"Loading data from {args.input}...")
     try:
-        with open(args.input, 'r') as f:
-            json_data = json.load(f)
+        with jsonlines.open(args.input) as reader:
+            lines = list(reader)
     except FileNotFoundError:
         print(f"Error: File '{args.input}' not found")
         return
-    except json.JSONDecodeError as e:
-        print(f"Error: Invalid JSON file - {e}")
+    except Exception as e:
+        print(f"Error: Failed to read JSON Lines file - {e}")
         return
 
-    # Extract metadata and packets
-    metadata = {k: v for k, v in json_data.items() if k != 'packets'}
-    packets = json_data.get('packets', [])
+    # Separate metadata and packets
+    metadata = {}
+    packets = []
+
+    for line in lines:
+        if line.get('type') == 'metadata':
+            metadata.update(line)
+        elif line.get('type') == 'packet':
+            packets.append(line)
 
     if not packets:
-        print("Error: No packets found in JSON file")
+        print("Error: No packets found in JSON Lines file")
         return
 
     print(f"Loaded {len(packets)} packets")
