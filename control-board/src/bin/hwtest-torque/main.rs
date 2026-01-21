@@ -184,8 +184,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     }
 
 
-    ccm.set_motion_type(CurrentControlledMotor_MotionControlType::CCM_MCT_DUTY_OPENLOOP);
-    ccm.set_setpoint(0.1);
+    ccm.set_motion_type(CurrentControlledMotor_MotionControlType::CCM_MCT_VOLTAGE_OPENLOOP);
+    ccm.set_setpoint(2500.0);
     ccm.set_telemetry_enabled(true);
     ccm.set_motion_enabled(true);
 
