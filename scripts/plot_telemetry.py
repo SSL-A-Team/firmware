@@ -171,13 +171,14 @@ def plot_current_samples(packets, output_file=None, style="default"):
     SAMPLE_PERIOD_US = 50  # 50 microseconds between samples
     SAMPLE_PERIOD_S = SAMPLE_PERIOD_US * 1e-6  # Convert to seconds
 
-    # Track overall time range
+    # Collect all samples with their absolute times
     all_times = []
     all_values = []
 
     for packet in packets:
         decoded = packet.get('decoded', {})
-        current_samples = decoded.get('current_samples_ma')
+        current_telemetry = decoded.get('current_telemetry', {})
+        current_samples = current_telemetry.get('current_samples_ma')
         timestamp_str = packet.get('timestamp')
 
         if current_samples is None or timestamp_str is None:
@@ -199,9 +200,6 @@ def plot_current_samples(packets, output_file=None, style="default"):
         # times[i] = packet_time - (n_samples - 1 - i) * SAMPLE_PERIOD_S
         sample_times = packet_time - np.arange(n_samples - 1, -1, -1) * SAMPLE_PERIOD_S
 
-        # Plot this packet's samples
-        ax.plot(sample_times, current_samples, linewidth=0.8, alpha=0.7, marker='.', markersize=2)
-
         all_times.extend(sample_times)
         all_values.extend(current_samples)
 
@@ -209,34 +207,20 @@ def plot_current_samples(packets, output_file=None, style="default"):
         print("No current_samples_ma data found in packets")
         return
 
-    # Convert to relative time (seconds from first sample)
+    # Convert to numpy arrays and sort by time
     all_times = np.array(all_times)
     all_values = np.array(all_values)
+
+    # Sort by time (should already be mostly sorted, but ensure it)
+    sort_idx = np.argsort(all_times)
+    all_times = all_times[sort_idx]
+    all_values = all_values[sort_idx]
+
+    # Convert to relative time (seconds from first sample)
     relative_times = all_times - all_times.min()
 
-    # Clear and replot with relative times
-    ax.clear()
-
-    # Replot with relative time
-    for packet in packets:
-        decoded = packet.get('decoded', {})
-        current_samples = decoded.get('current_samples_ma')
-        timestamp_str = packet.get('timestamp')
-
-        if current_samples is None or timestamp_str is None:
-            continue
-
-        try:
-            ts = datetime.fromisoformat(timestamp_str)
-        except:
-            continue
-
-        packet_time = ts.timestamp()
-        n_samples = len(current_samples)
-        sample_times = packet_time - np.arange(n_samples - 1, -1, -1) * SAMPLE_PERIOD_S
-        relative_sample_times = sample_times - all_times.min()
-
-        ax.plot(relative_sample_times, current_samples, linewidth=0.8, alpha=0.7, marker='.', markersize=2)
+    # Plot as single continuous line
+    ax.plot(relative_times, all_values, linewidth=0.8, alpha=0.8)
 
     ax.set_xlabel('Time (seconds)', fontsize=12)
     ax.set_ylabel('Current (mA)', fontsize=12)
