@@ -25,6 +25,8 @@ def parse_arguments():
     parser.add_argument("--style", "-s", type=str, default="default",
                        choices=["default", "seaborn", "ggplot", "dark_background"],
                        help="Matplotlib style to use")
+    parser.add_argument("--current-samples", action="store_true",
+                       help="Plot current_samples_ma array with proper time offsets (50us per sample)")
     return parser.parse_args()
 
 
@@ -154,6 +156,115 @@ def plot_telemetry(data, timestamps, fields_to_plot=None, output_file=None, styl
     plt.close()
 
 
+def plot_current_samples(packets, output_file=None, style="default"):
+    """Plot current_samples_ma arrays with proper time offsets"""
+    from datetime import datetime
+
+    print("Plotting current samples...")
+
+    # Apply style
+    plt.style.use(style)
+
+    fig, ax = plt.subplots(figsize=(14, 6))
+
+    # Constants
+    SAMPLE_PERIOD_US = 50  # 50 microseconds between samples
+    SAMPLE_PERIOD_S = SAMPLE_PERIOD_US * 1e-6  # Convert to seconds
+
+    # Track overall time range
+    all_times = []
+    all_values = []
+
+    for packet in packets:
+        decoded = packet.get('decoded', {})
+        current_samples = decoded.get('current_samples_ma')
+        timestamp_str = packet.get('timestamp')
+
+        if current_samples is None or timestamp_str is None:
+            continue
+
+        # Parse timestamp
+        try:
+            ts = datetime.fromisoformat(timestamp_str)
+        except:
+            continue
+
+        # Convert to seconds since epoch
+        packet_time = ts.timestamp()
+
+        # Number of samples
+        n_samples = len(current_samples)
+
+        # Create time array: last sample is at packet_time, work backwards
+        # times[i] = packet_time - (n_samples - 1 - i) * SAMPLE_PERIOD_S
+        sample_times = packet_time - np.arange(n_samples - 1, -1, -1) * SAMPLE_PERIOD_S
+
+        # Plot this packet's samples
+        ax.plot(sample_times, current_samples, linewidth=0.8, alpha=0.7, marker='.', markersize=2)
+
+        all_times.extend(sample_times)
+        all_values.extend(current_samples)
+
+    if not all_times:
+        print("No current_samples_ma data found in packets")
+        return
+
+    # Convert to relative time (seconds from first sample)
+    all_times = np.array(all_times)
+    all_values = np.array(all_values)
+    relative_times = all_times - all_times.min()
+
+    # Clear and replot with relative times
+    ax.clear()
+
+    # Replot with relative time
+    for packet in packets:
+        decoded = packet.get('decoded', {})
+        current_samples = decoded.get('current_samples_ma')
+        timestamp_str = packet.get('timestamp')
+
+        if current_samples is None or timestamp_str is None:
+            continue
+
+        try:
+            ts = datetime.fromisoformat(timestamp_str)
+        except:
+            continue
+
+        packet_time = ts.timestamp()
+        n_samples = len(current_samples)
+        sample_times = packet_time - np.arange(n_samples - 1, -1, -1) * SAMPLE_PERIOD_S
+        relative_sample_times = sample_times - all_times.min()
+
+        ax.plot(relative_sample_times, current_samples, linewidth=0.8, alpha=0.7, marker='.', markersize=2)
+
+    ax.set_xlabel('Time (seconds)', fontsize=12)
+    ax.set_ylabel('Current (mA)', fontsize=12)
+    ax.set_title('Current Samples (50μs per sample)', fontsize=14, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+
+    # Add statistics
+    mean_val = np.nanmean(all_values)
+    std_val = np.nanstd(all_values)
+    min_val = np.nanmin(all_values)
+    max_val = np.nanmax(all_values)
+
+    stats_text = f'μ={mean_val:.2f} mA\nσ={std_val:.2f} mA\nmin={min_val:.2f} mA\nmax={max_val:.2f} mA\nSamples: {len(all_values)}'
+    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+           verticalalignment='top', fontsize=10,
+           bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7))
+
+    plt.tight_layout()
+
+    if output_file:
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        print(f"Plot saved to {output_file}")
+    else:
+        plt.show()
+
+    plt.close()
+
+
 def print_summary(metadata, data):
     """Print summary statistics"""
     print("\n" + "="*70)
@@ -207,6 +318,13 @@ def main():
         return
 
     print(f"Loaded {len(packets)} packets")
+
+    # Check for current samples mode
+    if args.current_samples:
+        print("Current samples mode enabled")
+        plot_current_samples(packets, args.output, args.style)
+        print("Done!")
+        return
 
     # Extract numeric fields
     print("Extracting numeric fields...")
