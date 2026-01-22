@@ -176,6 +176,7 @@ impl BodyPoseController {
 
         // Copy values to telemetry
         self.debug_telemetry.imu_gyro[2] = gyro_theta_meas;
+        self.debug_telemetry.vision_pose.copy_from_slice(&vision_pose_meas.as_slice());
         self.debug_telemetry.body_cmd.copy_from_slice(pose_cmd.as_slice());
         self.debug_telemetry.kf_body_pose_estimate.copy_from_slice(&state_estimate.as_slice()[0..3]);
         self.debug_telemetry.kf_body_twist_estimate.copy_from_slice(&state_estimate.as_slice()[3..6]);
