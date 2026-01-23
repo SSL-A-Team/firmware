@@ -43,44 +43,49 @@ pub fn clamp_vector_keep_dir<const D: usize>(
 }
 
 
-// TODO: Use CgKalman filter for body velocity estimate
-pub struct BodyPoseController {
+pub struct BodyController {
     robot_model: RobotModel,
-    // body_vel_filter: CgKalmanFilter<'a, 3, 4, 5>,
-    // body_vel_controller: PidController<3>,
-    // body_velocity_limit: Vector3<f32>,
-    // body_acceleration_limit: Vector3<f32>,
-    // body_deceleration_limit: Vector3<f32>,
-    // wheel_acceleration_limits: Vector4<f32>,
-    // prev_output: Vector3<f32>,
+    body_twist_cmd: Vector3f,
+    body_wrench_cmd: Vector3f,
     wheel_vel_cmd: Vector4f,
     wheel_torque_cmd: Vector4f,
     debug_telemetry: ExtendedTelemetry,
+    loop_period: Duration,
 }
 
-impl BodyPoseController {
-    pub fn new(
-    ) -> BodyPoseController {
-        BodyPoseController {
+pub enum BodyControlType {
+    PoseControl(Vector3f),
+    TwistControl(Vector3f),
+    WrenchControl(Vector3f),
+}
+
+impl BodyController {
+    pub fn new(loop_period: Duration) -> BodyController {
+        BodyController {
             robot_model: RobotModel::new_from_constants(0.001),
+            body_twist_cmd: Vector3f::default(),
+            body_wrench_cmd: Vector3f::default(),
             wheel_vel_cmd: Vector4f::default(),
             wheel_torque_cmd: Vector4f::default(),
             debug_telemetry: Default::default(),
+            loop_period,
         }
     }
 
     pub fn control_update(
         &mut self,
-        pose_cmd: Vector3f,
-        loop_period: Duration,
+        body_cmd: Vector3f,
+        body_pose_control_enabled: bool,
+        body_twist_control_enabled: bool,
+        body_wrench_control_enabled: bool,
         vision_pose_meas: Vector3f,
-        vision_pose_meas_instant: Instant,
+        vision_update: bool,
         wheel_vel_meas: Vector4f,
-        wheel_torque_meas: Vector4f,
         gyro_theta_meas: f32,
         trace: bool,
     ) {
         let mut start = Instant::now();
+
         let measurement: Vector8f = vector![
             vision_pose_meas.x,
             vision_pose_meas.y,
@@ -91,79 +96,35 @@ impl BodyPoseController {
             wheel_vel_meas.w,
             gyro_theta_meas,
         ];
-        self.robot_model.kf_update(measurement, false, false, false);
+        self.robot_model.kf_update(measurement, !vision_update, false, false);
 
         let kf_update_time = Instant::now() - start;
         start = Instant::now();
 
-        // let measurement: Vector5<f32> = Vector5::new(
-        //     wheel_velocities_meas[0],
-        //     wheel_velocities_meas[1],
-        //     wheel_velocities_meas[2],
-        //     wheel_velocities_meas[3],
-        //     gyro_meas,
-        // );
-
-        // TODO: Use CgKalman filter for body velocity estimate
-        // // Update measurements process observation input into CGKF.
-        // self.body_vel_filter.update(&measurement);
-
-        // // Read the current body velocity state estimate from the CGKF.
-        // let mut body_vel_estimate = self.body_vel_filter.get_state();
-
-        // // Deadzone the velocity estimate
-        // if libm::fabsf(body_vel_estimate[0]) < 0.05 {
-        //     body_vel_estimate[0] = 0.0;
-        // }
-
-        // if libm::fabsf(body_vel_estimate[1]) < 0.05 {
-        //     body_vel_estimate[1] = 0.0;
-        // }
-
-        // if libm::fabsf(body_vel_estimate[2]) < 0.05 {
-        //     body_vel_estimate[2] = 0.0;
-        // }
-
-        // self.debug_telemetry
-        //     .cgkf_body_velocity_state_estimate
-        //     .copy_from_slice(body_vel_estimate.as_slice());
-
-        // // Use raw wheel readings and vision measurements for state estimate until kalman filter is implemented
-        // let global_twist = self.robot_model.transform_wheel2twist(vision_pose_meas[2]) * wheel_vel_meas;
-
-        // let state_estimate = Vector6f::new(
-        //     vision_pose_meas[0],
-        //     vision_pose_meas[1],
-        //     vision_pose_meas[2],
-        //     global_twist[0],
-        //     global_twist[1],
-        //     global_twist[2],
-        // );
         let state_estimate = self.robot_model.x;
         // defmt::info!("State estimate pose: {}, {}, {}", state_estimate.x, state_estimate.y, state_estimate.z);
         // defmt::info!("State estimate twist: {}, {}, {}", state_estimate.w, state_estimate.a, state_estimate.b);
 
-        // Calculate the optimal trajectory to the setpoint
-        let traj = ateam_controls::bangbang_trajectory::compute_optimal_bangbang_traj_3d(
-            state_estimate, pose_cmd,
-        );
+        if body_pose_control_enabled {
+            self.compute_effort_pose_control(state_estimate, body_cmd);
+        } else if body_twist_control_enabled {
+            self.compute_effort_twist_control(state_estimate, body_cmd);
+        } else if body_wrench_control_enabled {
+            self.compute_effort_wrench_control(state_estimate, body_cmd);
+        } else {
+            self.body_twist_cmd = Vector3f::default();
+            self.body_wrench_cmd = Vector3f::default();
+            self.wheel_vel_cmd = Vector4f::default();
+            self.wheel_torque_cmd = Vector4f::default();
+        }
 
-        let traj_time = Instant::now() - start;
+        let effort_time = Instant::now() - start;
         start = Instant::now();
 
-        // Calculate the acceleration needed to achieve the trajectory right now
-        let global_accel_cmd = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_accel_at_t(traj, 0.0);
-        // Calculate the twist that should be achieved at the next time step after applying this acceleration
-        let next_body_state = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_state_at_t(traj, state_estimate, 0.0, 50.0 * loop_period.as_micros() as f32 * 1e-6);
-        let global_twist_cmd = Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
-
-        // These torques are discretized by the loop rate, but in an ideal world, it would be a continuous command update to reach the next state wheel velocities as theta changes. However, the loop rate should be fast enough that the error due to a change in theta during each control period should be negligible, and the individual wheel velocities are achieved by the next control update
-        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * global_accel_cmd;
-        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * global_twist_cmd;
         // defmt::info!("Wheel Velocity Cmds: {}, {}, {}, {}", self.wheel_vel_cmd.x, self.wheel_vel_cmd.y, self.wheel_vel_cmd.z, self.wheel_vel_cmd.w);
 
         // Safety checks on commands
-        if self.wheel_vel_cmd.x > 50.0 || self.wheel_vel_cmd.y > 50.0 || self.wheel_vel_cmd.z > 50.0 || self.wheel_vel_cmd.w > 50.0 {
+        if self.wheel_vel_cmd.x > 20.0 || self.wheel_vel_cmd.y > 20.0 || self.wheel_vel_cmd.z > 20.0 || self.wheel_vel_cmd.w > 20.0 {
             defmt::warn!("Wheel vel cmd too high: {}, {}, {}, {}", self.wheel_vel_cmd.x, self.wheel_vel_cmd.y, self.wheel_vel_cmd.z, self.wheel_vel_cmd.w);
             self.wheel_vel_cmd = Vector4f::default();
             self.wheel_torque_cmd = Vector4f::default();
@@ -175,13 +136,17 @@ impl BodyPoseController {
         }
 
         // Copy values to telemetry
+        self.debug_telemetry.set_body_pose_control_enabled(body_pose_control_enabled as u32);
+        self.debug_telemetry.set_body_twist_control_enabled(body_twist_control_enabled as u32);
+        self.debug_telemetry.set_body_wrench_control_enabled(body_wrench_control_enabled as u32);
+        self.debug_telemetry.set_vision_update(vision_update as u32);
         self.debug_telemetry.imu_gyro[2] = gyro_theta_meas;
         self.debug_telemetry.vision_pose.copy_from_slice(&vision_pose_meas.as_slice());
-        self.debug_telemetry.body_cmd.copy_from_slice(pose_cmd.as_slice());
+        self.debug_telemetry.body_cmd.copy_from_slice(body_cmd.as_slice());
         self.debug_telemetry.kf_body_pose_estimate.copy_from_slice(&state_estimate.as_slice()[0..3]);
         self.debug_telemetry.kf_body_twist_estimate.copy_from_slice(&state_estimate.as_slice()[3..6]);
-        self.debug_telemetry.body_twist_u.copy_from_slice(global_twist_cmd.as_slice());
-        self.debug_telemetry.body_accel_u.copy_from_slice(global_accel_cmd.as_slice());
+        self.debug_telemetry.body_twist_u.copy_from_slice(self.body_twist_cmd.as_slice());
+        self.debug_telemetry.body_wrench_u.copy_from_slice(self.body_wrench_cmd.as_slice());
         self.debug_telemetry.wheel_velocity_u.copy_from_slice(self.wheel_vel_cmd.as_slice());
         self.debug_telemetry.wheel_torque_u.copy_from_slice(self.wheel_torque_cmd.as_slice());
 
@@ -192,17 +157,54 @@ impl BodyPoseController {
         // // Use control law adjusted value to predict the next cycle's state.
         // self.body_vel_filter.predict(&wheel_vel_output);
 
-        self.robot_model.kf_predict(global_accel_cmd);
+        self.robot_model.kf_predict(self.body_wrench_cmd);
 
         let kf_predict_time = Instant::now() - start;
         if trace {
-            defmt::trace!("CONTROL UPDATE TRACE - KF update: {} us, traj compute: {} us, control outputs: {} us, KF predict: {} us",
+            defmt::trace!("CONTROL UPDATE TRACE - KF update: {} us, effort compute: {} us, control outputs: {} us, KF predict: {} us",
                 kf_update_time.as_micros(),
-                traj_time.as_micros(),
+                effort_time.as_micros(),
                 control_outputs_time.as_micros(),
                 kf_predict_time.as_micros(),
             );
         }
+    }
+
+    pub fn compute_effort_pose_control(&mut self, state_estimate: Vector6f, target_pose: Vector3f) {
+        // Calculate the optimal trajectory to the setpoint
+        let traj = ateam_controls::bangbang_trajectory::compute_optimal_bangbang_traj_3d(
+            state_estimate, target_pose,
+        );
+
+        // Calculate the acceleration needed to achieve the trajectory right now
+        let global_accel_cmd = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_accel_at_t(traj, 0.0);
+        // Calculate the twist that should be achieved at the next time step after applying this acceleration
+        let next_body_state = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_state_at_t(traj, state_estimate, 0.0, 100.0 * self.loop_period.as_micros() as f32 * 1e-6);
+        let global_twist_cmd = Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
+
+        self.body_twist_cmd = global_twist_cmd;
+        self.body_wrench_cmd = global_accel_cmd;
+
+        // These torques are discretized by the loop rate, but in an ideal world, it would be a continuous command update to reach the next state wheel velocities as theta changes. However, the loop rate should be fast enough that the error due to a change in theta during each control period should be negligible, and the individual wheel velocities are achieved by the next control update
+        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * global_twist_cmd;
+        // self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * global_accel_cmd;
+    }
+
+    pub fn compute_effort_twist_control(&mut self, state_estimate: Vector6f, target_twist: Vector3f) {
+        self.body_twist_cmd = target_twist;
+        self.body_wrench_cmd = (target_twist - state_estimate.fixed_rows::<3>(3)) / (self.loop_period.as_micros() as f32 * 1e-6);
+        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * target_twist;
+        // self.wheel_torque_cmd =  // TODO: compute torque command from twist control
+    }
+
+    pub fn compute_effort_wrench_control(&mut self, state_estimate: Vector6f, target_wrench: Vector3f) {
+        todo!();
+        // self.body_wrench_cmd = target_wrench;
+        // let twist_est = state_estimate.fixed_rows::<3>(3);
+        // let target_twist = twist_est + target_wrench * 100.0 * self.loop_period.as_micros() as f32 * 1e-6;
+        // self.body_twist_cmd = target_twist;
+        // self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * target_twist;
+        // self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * target_wrench;
     }
 
     pub fn get_wheel_velocities(&self) -> Vector4f {
@@ -218,7 +220,7 @@ impl BodyPoseController {
     }
 }
 
-impl ParameterInterface for BodyPoseController {
+impl ParameterInterface for BodyController {
     fn processes_cmd(&self, param_cmd: &ParameterCommand) -> bool {
         return self.has_name(param_cmd.parameter_name);
     }

@@ -12,7 +12,7 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{
     include_external_cpp_bin,
-    motion::robot_controller::BodyPoseController,
+    motion::robot_controller::BodyController,
     parameter_interface::ParameterInterface,
     pins::*,
     robot_state::{RobotState, SharedRobotState},
@@ -165,13 +165,14 @@ impl<
 
     fn do_control_update(
         &mut self,
-        robot_controller: &mut BodyPoseController,
+        robot_controller: &mut BodyController,
         cmd: Vector3f,
-        loop_period: Duration,
+        body_pose_control_enabled: bool,
+        body_twist_control_enabled: bool,
+        body_wrench_control_enabled: bool,
         vision_pose_meas: Vector3f,
-        vision_pose_meas_instant: Instant,
+        vision_update: bool,
         gyro_rads_meas: f32,
-        controls_enabled: bool,
         trace: bool,
     ) -> (Vector4f, Vector4f)
 /*
@@ -187,24 +188,25 @@ impl<
             self.motor_fr.read_rads(),
         );
 
-        // torque values are computed on the spin but put in the current variable
-        // TODO update this when packet/var names are updated to match software
-        let wheel_torque_meas = Vector4f::new(
-            self.motor_fl.read_current(),
-            self.motor_bl.read_current(),
-            self.motor_br.read_current(),
-            self.motor_fr.read_current(),
-        );
+        // // torque values are computed on the spin but put in the current variable
+        // // TODO update this when packet/var names are updated to match software
+        // let wheel_torque_meas = Vector4f::new(
+        //     self.motor_fl.read_current(),
+        //     self.motor_bl.read_current(),
+        //     self.motor_br.read_current(),
+        //     self.motor_fr.read_current(),
+        // );
 
         // TODO read from channel or something
 
         robot_controller.control_update(
             cmd,
-            loop_period,
+            body_pose_control_enabled,
+            body_twist_control_enabled,
+            body_wrench_control_enabled,
             vision_pose_meas,
-            vision_pose_meas_instant,
+            vision_update,
             wheel_vel_meas,
-            wheel_torque_meas,
             gyro_rads_meas,
             trace,
         );
@@ -214,7 +216,7 @@ impl<
     fn send_motor_commands_and_telemetry(
         &mut self,
         seq_number: u16,
-        robot_controller: &mut BodyPoseController,
+        robot_controller: &mut BodyController,
         cur_state: RobotState,
     ) {
         self.motor_fl.send_motion_command();
@@ -270,7 +272,9 @@ impl<
                 self.last_kicker_telemetry.error_detected() as u32,
                 false as u32, // chipper available
                 (!cur_state.kicker_inop && self.last_kicker_telemetry.error_detected() == 0) as u32,
-                self.last_command.body_vel_controls_enabled(),
+                self.last_command.body_pose_control_enabled(),
+                self.last_command.body_twist_control_enabled(),
+                self.last_command.body_wrench_control_enabled(),
                 self.last_command.wheel_vel_control_enabled(),
                 self.last_command.wheel_torque_control_enabled(),
                 Default::default(),
@@ -333,25 +337,18 @@ impl<
 
         Timer::after_millis(10).await;
 
-        // let robot_model = RobotModel::new(
-        //     WHEEL_ANGLE_ALPHA, 
-        //     WHEEL_ANGLE_BETA, 
-        //     WHEEL_DISTANCE, 
-        //     WHEEL_RADIUS,
-        //     BODY_MASS,
-        //     BODY_MOMENT_Z,
-        // );
-        let mut robot_controller = BodyPoseController::new();
-        // let mut robot_controller =
-        //     BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
-
         let mut ctrl_seq_number = 0;
         let loop_period = Duration::from_millis(1);  // 1 kHz
         let mut loop_rate_ticker = Ticker::every(loop_period);
 
+        let mut robot_controller = BodyController::new(loop_period);
+
         let mut cmd = Vector3f::default();
+        let mut body_pose_control_enabled = false;
+        let mut body_twist_control_enabled = false;
+        let mut body_wrench_control_enabled = false;
         let mut last_vision_pose_meas = Vector3f::default();
-        let mut last_vision_pose_instant = Instant::from_micros(0);
+        let mut vision_update = false;
         let mut ticks_since_control_packet = 0;
 
         //////////////////////// Frequency Measurement Vars //////////////////////////
@@ -417,17 +414,15 @@ impl<
                             latest_control.y_linear_cmd,
                             latest_control.z_angular_cmd,
                         );
+                        body_pose_control_enabled = latest_control.body_pose_control_enabled() != 0;
+                        body_twist_control_enabled = latest_control.body_twist_control_enabled() != 0;
+                        body_wrench_control_enabled = latest_control.body_wrench_control_enabled() != 0;
                         last_vision_pose_meas = Vector3f::new(
                             latest_control.pose_x_linear_vision,
                             latest_control.pose_y_linear_vision,
                             latest_control.pose_z_angular_vision,
                         );
-                        // TODO: time sync on boot to get this value and grab it from shared_robot_state
-                        let us_since_unix_epoch_at_sys_boot = Duration::from_micros(0);
-                        let us_since_unix_epoch_at_meas = Duration::from_micros(
-                            (latest_control.last_vision_update_us_hi as u64) << 32 | (latest_control.last_vision_update_us_lo as u64)
-                        );
-                        last_vision_pose_instant = Instant::from_micros((us_since_unix_epoch_at_meas - us_since_unix_epoch_at_sys_boot).as_micros());
+                        vision_update = latest_control.vision_update() != 0;
 
                         if latest_control.request_shutdown() != 0 {
                             self.shared_robot_state.flag_shutdown_requested();
@@ -506,18 +501,19 @@ impl<
                 cmd = Vector3f::default();
                 (Vector4f::default(), Vector4f::default())
             } else {
-                let controls_enabled = self.last_command.body_vel_controls_enabled() != 0;
                 self.do_control_update(
                     &mut robot_controller,
                     cmd,
-                    loop_period,
+                    body_pose_control_enabled,
+                    body_twist_control_enabled,
+                    body_wrench_control_enabled,
                     last_vision_pose_meas,
-                    last_vision_pose_instant,
+                    vision_update,
                     self.last_gyro_rads,
-                    controls_enabled,
                     ticks_since_trace_print >= TICKS_TRACE_PRINT,
                 )
             };
+            vision_update = false;  // reset vision update flag after use
 
             let control_update_time = Instant::now() - start;
             start = Instant::now();
