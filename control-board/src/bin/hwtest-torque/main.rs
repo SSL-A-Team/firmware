@@ -107,9 +107,24 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         initial_motor_controller_uart_conifg,
     ).unwrap();
 
+    // let front_right_uart = Uart::new(
+    //     p.USART3,
+    //     p.PD9,
+    //     p.PD8,
+    //     SystemIrqs,
+    //     p.DMA1_CH0,
+    //     p.DMA1_CH1,
+    //     initial_motor_controller_uart_conifg,
+    // ).unwrap();
+
     CCM_UART_IDLE_BUFFERED_UART.init();
 
     idle_buffered_uart_spawn_tasks!(uart_queue_spawner, CCM_UART, back_right_uart);
+
+    let mut ccm = CurrentControlledMotor::new_from_pins(&CCM_UART_IDLE_BUFFERED_UART, CCM_UART_IDLE_BUFFERED_UART.get_uart_read_queue(), CCM_UART_IDLE_BUFFERED_UART.get_uart_write_queue(), p.PG7.into(), p.PG8.into(), CURRENT_CONTROLLED_WHEEL_IMAGE);
+
+    // let mut ccm = CurrentControlledMotor::new_from_pins(&CCM_UART_IDLE_BUFFERED_UART, CCM_UART_IDLE_BUFFERED_UART.get_uart_read_queue(), CCM_UART_IDLE_BUFFERED_UART.get_uart_write_queue(), p.PB12.into(), p.PB13.into(), CURRENT_CONTROLLED_WHEEL_IMAGE);
+
 
     //////////////////////////////
     //  setup pub sub channels  //
@@ -166,13 +181,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  main task motor logic  //
     /////////////////////////////
 
-    // block main task for trace level usb debugging
-    // loop {
-    //     Timer::after_millis(100).await;
-    // }
-
-    let mut ccm = CurrentControlledMotor::new_from_pins(&CCM_UART_IDLE_BUFFERED_UART, CCM_UART_IDLE_BUFFERED_UART.get_uart_read_queue(), CCM_UART_IDLE_BUFFERED_UART.get_uart_write_queue(), p.PG7.into(), p.PG8.into(), CURRENT_CONTROLLED_WHEEL_IMAGE);
-
     defmt::info!("flasing motor...");
 
     let res = ccm.init_default_firmware_image(true).await;
@@ -185,9 +193,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
 
     // ccm.set_motion_type(CurrentControlledMotor_MotionControlType::CCM_MCT_VOLTAGE_OPENLOOP);
-    // ccm.set_setpoint(2000.0);
+    // ccm.set_setpoint(12500.0);
     ccm.set_motion_type(CurrentControlledMotor_MotionControlType::CCM_MCT_CURRENT);
-    ccm.set_current_setpoint(100);
+    ccm.set_current_setpoint(200);
 
     ccm.set_telemetry_enabled(true);
     ccm.set_motion_enabled(true);
@@ -232,9 +240,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         if curr_ctr > 2000 {
             curr_ctr = 0
         } else if curr_ctr > 1000 {
-            ccm.set_current_setpoint(200);
+            ccm.set_current_setpoint(300);
         } else {
-            ccm.set_current_setpoint(100);
+            ccm.set_current_setpoint(200);
         }
 
         curr_ctr += 1;

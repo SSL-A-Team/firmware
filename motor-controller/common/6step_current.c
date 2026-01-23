@@ -55,8 +55,12 @@ const Uint16FixedPoint_t S0F16_4096_OVER_9000 = 29826;
 
 static FixedPointS12F4_PiConstants_t current_controller_constants = {
     // 1000 Hz bandwidth -> 6283 rads
+
+    // .kP = 2123,
+    // .kI = 910,
+
+    // KNOWN GOOD
     .kP = 338 * 3,      // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
-    // .kI = 0,
     .kI = 145 * 3,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910 
     .kI_max = 4095,  // S12F0
     .kI_min = -(4095),  // S12F0
@@ -398,7 +402,7 @@ void TIM2_IRQHandler()
 static uint32_t voltage_filter[4];
 static size_t voltage_filter_index = 0;
 
-static uint32_t current_filter[8];
+static uint32_t current_filter[32];
 static size_t current_filter_ind = 0;
 
 static volatile size_t double_buffer_ind = 0;
@@ -433,13 +437,16 @@ void DMA1_Channel1_IRQHandler() {
 
     // filter current
     current_filter[current_filter_ind++] = current_measurement;
-    current_filter_ind &= 0x7;
+    // current_filter_ind &= 0x7;
+    // current_filter_ind &= 0xF;
+    current_filter_ind &= 0x1F;
+
 
     Uint32FixedPoint_t avg_current = 0;
     for (int i = 0; i < sizeof(current_filter) / 4; i++) {
         avg_current += current_filter[i];
     }
-    avg_current >>= 3;  // div 8
+    avg_current >>= 5;  // div 16
 
     measured_current = avg_current;
 
