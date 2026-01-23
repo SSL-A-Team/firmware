@@ -26,7 +26,7 @@ use credentials::private_credentials::wifi::wifi_credentials;
 #[cfg(feature = "no-private-credentials")]
 use credentials::public_credentials::wifi::wifi_credentials;
 
-use embassy_time::{Instant, Ticker};
+use embassy_time::{Instant, Ticker, Timer};
 use libm::sinf;
 // provide embedded panic probe
 use panic_probe as _;
@@ -197,8 +197,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let loop_period = embassy_time::Duration::from_millis(1);
     let mut loop_rate_ticker = Ticker::every(loop_period);
 
-    let w = 2.0 * PI / 5.0; // 5 second period
-    let a = 1.0;  // 1 rad/s amplitude
+    let w = 2.0 * PI / 3.0; // 3 second period
+    let a = 5.0;  // 5 rad/s amplitude
 
     let request_shutdown = 0;
     let reboot_robot = 0;
@@ -227,6 +227,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         dribbler_speed: 0.0,
         kick_request: KickRequest::KR_DISABLE,
     };
+
+    Timer::after_secs(5).await;
 
     let mut last_loop_start = Instant::now();
     let mut t = 0.0;
