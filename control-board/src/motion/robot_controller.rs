@@ -126,7 +126,7 @@ impl BodyController {
         // defmt::info!("Wheel Velocity Cmds: {}, {}, {}, {}", self.wheel_vel_cmd.x, self.wheel_vel_cmd.y, self.wheel_vel_cmd.z, self.wheel_vel_cmd.w);
 
         // Safety checks on commands
-        let max_wheel_vel = 10.0; // rad/s
+        let max_wheel_vel = 15.0; // rad/s
         if self.wheel_vel_cmd.x.abs() > max_wheel_vel || self.wheel_vel_cmd.y.abs() > max_wheel_vel || self.wheel_vel_cmd.z.abs() > max_wheel_vel || self.wheel_vel_cmd.w.abs() > max_wheel_vel {
             defmt::warn!("Wheel vel cmd too high: {}, {}, {}, {}", self.wheel_vel_cmd.x, self.wheel_vel_cmd.y, self.wheel_vel_cmd.z, self.wheel_vel_cmd.w);
             self.wheel_vel_cmd = Vector4f::default();
@@ -152,8 +152,8 @@ impl BodyController {
         self.debug_telemetry.kf_body_twist_estimate.copy_from_slice(&state_estimate.as_slice()[3..6]);
         self.debug_telemetry.body_twist_u.copy_from_slice(self.body_twist_cmd.as_slice());
         self.debug_telemetry.body_wrench_u.copy_from_slice(self.body_wrench_cmd.as_slice());
-        self.debug_telemetry.wheel_velocity_u.copy_from_slice(self.wheel_vel_cmd.as_slice());
-        self.debug_telemetry.wheel_torque_u.copy_from_slice(self.wheel_torque_cmd.as_slice());
+        // self.debug_telemetry.wheel_velocity_u.copy_from_slice(self.wheel_vel_cmd.as_slice());
+        // self.debug_telemetry.wheel_torque_u.copy_from_slice(self.wheel_torque_cmd.as_slice());
 
         let control_outputs_time = Instant::now() - start;
         start = Instant::now();
