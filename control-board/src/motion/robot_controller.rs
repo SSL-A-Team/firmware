@@ -86,6 +86,8 @@ impl BodyController {
     ) {
         let mut start = Instant::now();
 
+        let state_prediction = self.robot_model.x;
+
         let measurement: Vector8f = vector![
             vision_pose_meas.x,
             vision_pose_meas.y,
@@ -124,7 +126,8 @@ impl BodyController {
         // defmt::info!("Wheel Velocity Cmds: {}, {}, {}, {}", self.wheel_vel_cmd.x, self.wheel_vel_cmd.y, self.wheel_vel_cmd.z, self.wheel_vel_cmd.w);
 
         // Safety checks on commands
-        if self.wheel_vel_cmd.x > 20.0 || self.wheel_vel_cmd.y > 20.0 || self.wheel_vel_cmd.z > 20.0 || self.wheel_vel_cmd.w > 20.0 {
+        let max_wheel_vel = 10.0; // rad/s
+        if self.wheel_vel_cmd.x.abs() > max_wheel_vel || self.wheel_vel_cmd.y.abs() > max_wheel_vel || self.wheel_vel_cmd.z.abs() > max_wheel_vel || self.wheel_vel_cmd.w.abs() > max_wheel_vel {
             defmt::warn!("Wheel vel cmd too high: {}, {}, {}, {}", self.wheel_vel_cmd.x, self.wheel_vel_cmd.y, self.wheel_vel_cmd.z, self.wheel_vel_cmd.w);
             self.wheel_vel_cmd = Vector4f::default();
             self.wheel_torque_cmd = Vector4f::default();
@@ -143,6 +146,8 @@ impl BodyController {
         self.debug_telemetry.imu_gyro[2] = gyro_theta_meas;
         self.debug_telemetry.vision_pose.copy_from_slice(&vision_pose_meas.as_slice());
         self.debug_telemetry.body_cmd.copy_from_slice(body_cmd.as_slice());
+        self.debug_telemetry.kf_body_pose_prediction.copy_from_slice(&state_prediction.as_slice()[0..3]);
+        self.debug_telemetry.kf_body_twist_prediction.copy_from_slice(&state_prediction.as_slice()[3..6]);
         self.debug_telemetry.kf_body_pose_estimate.copy_from_slice(&state_estimate.as_slice()[0..3]);
         self.debug_telemetry.kf_body_twist_estimate.copy_from_slice(&state_estimate.as_slice()[3..6]);
         self.debug_telemetry.body_twist_u.copy_from_slice(self.body_twist_cmd.as_slice());
