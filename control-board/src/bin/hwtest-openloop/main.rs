@@ -27,7 +27,7 @@ use credentials::private_credentials::wifi::wifi_credentials;
 use credentials::public_credentials::wifi::wifi_credentials;
 
 use embassy_time::{Instant, Ticker, Timer};
-use libm::sinf;
+use libm::{cosf, sinf};
 // provide embedded panic probe
 use panic_probe as _;
 use static_cell::ConstStaticCell;
@@ -198,7 +198,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut loop_rate_ticker = Ticker::every(loop_period);
 
     let w = 2.0 * PI / 3.0; // 3 second period
-    let a = 5.0;  // 5 rad/s amplitude
+    let a_angular = 5.0;  // rad/s amplitude
+    let a_linear = 0.5;  // m/s amplitude
 
     let request_shutdown = 0;
     let reboot_robot = 0;
@@ -236,7 +237,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         t += Instant::now().checked_duration_since(last_loop_start).unwrap().as_micros() as f32 / 1_000_000.0;
         last_loop_start = Instant::now();
 
-        control.z_angular_cmd = a * sinf(w * t);
+        control.z_angular_cmd = a_angular * sinf(w * t);
+        // control.x_linear_cmd = a_linear * cosf(w * t);
+        // control.y_linear_cmd = a_linear * sinf(w * t);
 
         // Extract any vision updates
         while let Some(latest_packet) = radio_dummy_command_subscriber.try_next_message_pure() {
