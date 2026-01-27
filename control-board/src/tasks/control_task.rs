@@ -5,8 +5,6 @@ use ateam_common_packets::{
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
 };
-use ateam_controls::robot_model::RobotModel;
-use ateam_controls::robot_physical_params::*;
 use ateam_controls::{Vector3f, Vector4f};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::{usart::Uart, Peri};
@@ -14,14 +12,7 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{
     include_external_cpp_bin,
-    motion::{
-        self,
-        params::robot_physical_params::{
-            WHEEL_ANGLES_DEG, WHEEL_DISTANCE_TO_ROBOT_CENTER_M, WHEEL_RADIUS_M,
-        },
-        robot_controller::BodyPoseController,
-        // robot_model::{RobotConstants, RobotModel},
-    },
+    motion::robot_controller::BodyController,
     parameter_interface::ParameterInterface,
     pins::*,
     robot_state::{RobotState, SharedRobotState},
@@ -46,6 +37,7 @@ static_idle_buffered_uart!(FRONT_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX
 const TICKS_WITHOUT_PACKET_STOP: usize = 200;
 const TICKS_BASIC_TELEM_INTERVAL: usize = 20;  // send basic telem every 10 ticks (100 Hz if loop is 1 kHz)
 const TICKS_EXTENDED_TELEM_INTERVAL: usize = 20;  // send extended telem every 20 ticks (50 Hz if loop is 1 kHz)
+const TICKS_TRACE_PRINT: usize = 1000;  // print trace every 1000 ticks (1 second if loop is 1 kHz)
 
 #[macro_export]
 macro_rules! create_control_task {
@@ -173,13 +165,15 @@ impl<
 
     fn do_control_update(
         &mut self,
-        robot_controller: &mut BodyPoseController,
+        robot_controller: &mut BodyController,
         cmd: Vector3f,
-        loop_period: Duration,
+        body_pose_control_enabled: bool,
+        body_twist_control_enabled: bool,
+        body_wrench_control_enabled: bool,
         vision_pose_meas: Vector3f,
-        vision_pose_meas_instant: Instant,
+        vision_update: bool,
         gyro_rads_meas: f32,
-        controls_enabled: bool,
+        trace: bool,
     ) -> (Vector4f, Vector4f)
 /*
             Provide the motion controller with the current wheel velocities
@@ -194,25 +188,27 @@ impl<
             self.motor_fr.read_rads(),
         );
 
-        // torque values are computed on the spin but put in the current variable
-        // TODO update this when packet/var names are updated to match software
-        let wheel_torque_meas = Vector4f::new(
-            self.motor_fl.read_current_estimate_ma() as f32,
-            self.motor_bl.read_current_estimate_ma() as f32,
-            self.motor_br.read_current_estimate_ma() as f32,
-            self.motor_fr.read_current_estimate_ma() as f32,
-        );
+        // // torque values are computed on the spin but put in the current variable
+        // // TODO update this when packet/var names are updated to match software
+        // let wheel_torque_meas = Vector4f::new(
+        //     self.motor_fl.read_current_estimate_ma() as f32,
+        //     self.motor_bl.read_current_estimate_ma() as f32,
+        //     self.motor_br.read_current_estimate_ma() as f32,
+        //     self.motor_fr.read_current_estimate_ma() as f32,
+        // );
 
         // TODO read from channel or something
 
         robot_controller.control_update(
             cmd,
-            loop_period,
+            body_pose_control_enabled,
+            body_twist_control_enabled,
+            body_wrench_control_enabled,
             vision_pose_meas,
-            vision_pose_meas_instant,
+            vision_update,
             wheel_vel_meas,
-            wheel_torque_meas,
             gyro_rads_meas,
+            trace,
         );
         (robot_controller.get_wheel_velocities(), robot_controller.get_wheel_torques())
     }
@@ -220,7 +216,7 @@ impl<
     fn send_motor_commands_and_telemetry(
         &mut self,
         seq_number: u16,
-        robot_controller: &mut BodyPoseController,
+        robot_controller: &mut BodyController,
         cur_state: RobotState,
     ) {
         self.motor_fl.send_motion_command();
@@ -276,7 +272,9 @@ impl<
                 self.last_kicker_telemetry.error_detected() as u32,
                 false as u32, // chipper available
                 (!cur_state.kicker_inop && self.last_kicker_telemetry.error_detected() == 0) as u32,
-                self.last_command.body_vel_controls_enabled(),
+                self.last_command.body_pose_control_enabled(),
+                self.last_command.body_twist_control_enabled(),
+                self.last_command.body_wrench_control_enabled(),
                 self.last_command.wheel_vel_control_enabled(),
                 self.last_command.wheel_torque_control_enabled(),
                 Default::default(),
@@ -292,6 +290,10 @@ impl<
         }
 
         let mut control_debug_telem = robot_controller.get_control_debug_telem();
+
+        let timestamp = Instant::now();
+        control_debug_telem.timestamp_us_lo = (timestamp.as_micros() & 0xFFFFFFFF) as u32;
+        control_debug_telem.timestamp_us_hi = ((timestamp.as_micros() >> 32) & 0xFFFFFFFF) as u32;
 
         control_debug_telem.front_left_motor = self.motor_fl.get_latest_state();
         control_debug_telem.back_left_motor = self.motor_bl.get_latest_state();
@@ -339,39 +341,33 @@ impl<
 
         Timer::after_millis(10).await;
 
-        // let robot_model = RobotModel::new(
-        //     WHEEL_ANGLE_ALPHA, 
-        //     WHEEL_ANGLE_BETA, 
-        //     WHEEL_DISTANCE, 
-        //     WHEEL_RADIUS,
-        //     BODY_MASS,
-        //     BODY_MOMENT_Z,
-        // );
-        let mut robot_controller = BodyPoseController::new();
-        // let mut robot_controller =
-        //     BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
-
         let mut ctrl_seq_number = 0;
         let loop_period = Duration::from_millis(1);  // 1 kHz
         let mut loop_rate_ticker = Ticker::every(loop_period);
 
+        let mut robot_controller = BodyController::new(loop_period);
+
         let mut cmd = Vector3f::default();
+        let mut body_pose_control_enabled = false;
+        let mut body_twist_control_enabled = false;
+        let mut body_wrench_control_enabled = false;
         let mut last_vision_pose_meas = Vector3f::default();
-        let mut last_vision_pose_instant = Instant::from_micros(0);
+        let mut vision_update = false;
         let mut ticks_since_control_packet = 0;
 
         //////////////////////// Frequency Measurement Vars //////////////////////////
         let mut loop_ticks_since_freqeuncy_measurement = 0;
-        let mut frequency_measurement_time_elapsed_sum_ms = 0;
+        let mut frequency_measurement_time_elapsed_sum_ms: f32 = 0.;
         let frequency_measurement_window_length = 60;
         let mut last_frequency_measurement_time = Instant::now();
         //////////////////////////////////////////////////////////////////////////////
 
-
         let mut last_loop_term_time = Instant::now();
+        let mut ticks_since_trace_print = 0;
 
         loop {
             let loop_start_time = Instant::now();
+            let mut start = loop_start_time;
             let loop_invocation_dead_time = loop_start_time - last_loop_term_time;
             if loop_start_time - last_loop_term_time > Duration::from_micros(1100) {
                 defmt::warn!("control loop scheuling lagged. Expected ~1ms between loop invocations, but got {:?}us", loop_invocation_dead_time.as_micros());
@@ -381,6 +377,9 @@ impl<
             self.motor_bl.process_packets();
             self.motor_br.process_packets();
             self.motor_fr.process_packets();
+
+            let motor_packet_process_time = Instant::now() - start;
+            start = Instant::now();
 
             let cur_state = self.shared_robot_state.get_state();
 
@@ -393,14 +392,13 @@ impl<
             while let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
                 match latest_packet {
                     ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
-                        // defmt::info!("received basic control packet");
                         //////////////////////// Loop Rate Measurement ///////////////////////////////
-                        let frequency_measurement_loop_time_elapsed = (Instant::now() - last_frequency_measurement_time).as_millis();
+                        let frequency_measurement_loop_time_elapsed = ((Instant::now() - last_frequency_measurement_time).as_micros() as f32) / 1000.0;
                         frequency_measurement_time_elapsed_sum_ms += frequency_measurement_loop_time_elapsed;
                         if loop_ticks_since_freqeuncy_measurement == frequency_measurement_window_length {
-                            let frequency: f32 = loop_ticks_since_freqeuncy_measurement as f32 / ((frequency_measurement_time_elapsed_sum_ms as f32) / 1000.0) ;
-                            defmt::info!("Rx Command Frequency - {} hz", frequency);
-                            frequency_measurement_time_elapsed_sum_ms = 0;
+                            let frequency: f32 = loop_ticks_since_freqeuncy_measurement as f32 / (frequency_measurement_time_elapsed_sum_ms / 1000.0);
+                            defmt::debug!("Command RX Frequency - {} hz", frequency);
+                            frequency_measurement_time_elapsed_sum_ms = 0.;
                             loop_ticks_since_freqeuncy_measurement = 0;
                         }
                         last_frequency_measurement_time = Instant::now();
@@ -420,17 +418,15 @@ impl<
                             latest_control.y_linear_cmd,
                             latest_control.z_angular_cmd,
                         );
+                        body_pose_control_enabled = latest_control.body_pose_control_enabled() != 0;
+                        body_twist_control_enabled = latest_control.body_twist_control_enabled() != 0;
+                        body_wrench_control_enabled = latest_control.body_wrench_control_enabled() != 0;
                         last_vision_pose_meas = Vector3f::new(
                             latest_control.pose_x_linear_vision,
                             latest_control.pose_y_linear_vision,
                             latest_control.pose_z_angular_vision,
                         );
-                        // TODO: time sync on boot to get this value and grab it from shared_robot_state
-                        let us_since_unix_epoch_at_sys_boot = Duration::from_micros(0);
-                        let us_since_unix_epoch_at_meas = Duration::from_micros(
-                            (latest_control.last_vision_update_us_hi as u64) << 32 | (latest_control.last_vision_update_us_lo as u64)
-                        );
-                        last_vision_pose_instant = Instant::from_micros((us_since_unix_epoch_at_meas - us_since_unix_epoch_at_sys_boot).as_micros());
+                        vision_update = latest_control.vision_update() != 0;
 
                         if latest_control.request_shutdown() != 0 {
                             self.shared_robot_state.flag_shutdown_requested();
@@ -469,6 +465,9 @@ impl<
                 }
             }
 
+            let command_packet_process_time = Instant::now() - start;
+            start = Instant::now();
+
             // now we have setpoint r(t) in self.cmd
 
             while let Some(gyro_rads) = self.gyro_subscriber.try_next_message_pure() {
@@ -500,21 +499,28 @@ impl<
                 self.stop_wheels() || 
                 ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP
             {
-                defmt::warn!("control task - motor commands locked out");
+                if ticks_since_trace_print >= TICKS_TRACE_PRINT {
+                    defmt::warn!("control task - motor commands locked out");
+                }
                 cmd = Vector3f::default();
                 (Vector4f::default(), Vector4f::default())
             } else {
-                let controls_enabled = self.last_command.body_vel_controls_enabled() != 0;
                 self.do_control_update(
                     &mut robot_controller,
                     cmd,
-                    loop_period,
+                    body_pose_control_enabled,
+                    body_twist_control_enabled,
+                    body_wrench_control_enabled,
                     last_vision_pose_meas,
-                    last_vision_pose_instant,
+                    vision_update,
                     self.last_gyro_rads,
-                    controls_enabled,
+                    ticks_since_trace_print >= TICKS_TRACE_PRINT,
                 )
             };
+            vision_update = false;  // reset vision update flag after use
+
+            let control_update_time = Instant::now() - start;
+            start = Instant::now();
 
             // self.motor_fl.set_setpoint(wheel_vel_cmd.x);
             // self.motor_bl.set_setpoint(wheel_vel_cmd.y);
@@ -525,20 +531,22 @@ impl<
             self.motor_br.set_setpoint(wheel_torque_cmd.z);
             self.motor_fr.set_setpoint(wheel_torque_cmd.w);
 
-            defmt::trace!(
-                "wheel vels: {} {} {} {}",
-                self.motor_fl.read_rads(),
-                self.motor_bl.read_rads(),
-                self.motor_br.read_rads(),
-                self.motor_fr.read_rads()
-            );
-            defmt::trace!(
-                "wheel curr: {} {} {} {}",
-                self.motor_fl.read_current_estimate_ma(),
-                self.motor_bl.read_current_estimate_ma(),
-                self.motor_br.read_current_estimate_ma(),
-                self.motor_fr.read_current_estimate_ma()
-            );
+            if ticks_since_trace_print >= TICKS_TRACE_PRINT {
+                defmt::trace!(
+                    "wheel vels: {} {} {} {}",
+                    self.motor_fl.read_rads(),
+                    self.motor_bl.read_rads(),
+                    self.motor_br.read_rads(),
+                    self.motor_fr.read_rads()
+                );
+                defmt::trace!(
+                    "wheel curr: {} {} {} {}",
+                    self.motor_fl.read_current_estimate_ma(),
+                    self.motor_bl.read_current_estimate_ma(),
+                    self.motor_br.read_current_estimate_ma(),
+                    self.motor_fr.read_current_estimate_ma()
+                );
+            }
 
             ///////////////////////////////////
             //  send commands and telemetry  //
@@ -553,14 +561,36 @@ impl<
             // increment seq number
             ctrl_seq_number = (ctrl_seq_number + 1) & 0x00FF;
 
-            let loop_end_time = Instant::now();
-            let loop_execution_time = loop_end_time - loop_start_time;
-            if loop_execution_time > Duration::from_micros(200) {
-                defmt::warn!("control loop is taking >200us to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {} us", loop_execution_time.as_micros());
+            let channel_update_time = Instant::now() - start;
+            start = Instant::now();
+
+            let loop_execution_time = Instant::now() - loop_start_time;
+
+            ticks_since_trace_print += 1;
+            if ticks_since_trace_print > TICKS_TRACE_PRINT {
+                defmt::trace!(
+                    "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
+                    motor_packet_process_time.as_micros(),
+                    command_packet_process_time.as_micros(),
+                    control_update_time.as_micros(),
+                    channel_update_time.as_micros(),
+                );
+                defmt::trace!("TOTAL CONTROL LOOP EXECUTION TIME: {} us", loop_execution_time.as_micros());
+                ticks_since_trace_print = 0;
+            }
+
+            if loop_execution_time.as_micros() > 300 {
+                defmt::trace!(
+                    "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
+                    motor_packet_process_time.as_micros(),
+                    command_packet_process_time.as_micros(),
+                    control_update_time.as_micros(),
+                    channel_update_time.as_micros(),
+                );
+                defmt::warn!("control loop is taking >300us: {} us (it may be interrupted by higher priority tasks). This is >30% of an execution frame.", loop_execution_time.as_micros());
             }
 
             last_loop_term_time = Instant::now();
-
             loop_rate_ticker.next().await;
         }
     }

@@ -116,6 +116,11 @@ test = false
 harness = false
 
 [[bin]]
+name = "hwtest-openloop"
+test = false
+harness = false
+
+[[bin]]
 name = "hwtest-piezo"
 test = false
 harness = false
