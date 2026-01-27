@@ -162,7 +162,7 @@ control_openocd_cfg_file := board/st_nucleo_h743zi.cfg
 
 define create-control-board-rust-targets
 .PHONY: .$1-$2-cargo-build
-.$1-$2-cargo-build: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel
+.$1-$2-cargo-build: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel motor-controller--wheel-torque
 	cd $1/ && \
 	cargo build $(additional_control_cargo_flags) --target thumbv7em-none-eabihf --release --bin $2
 

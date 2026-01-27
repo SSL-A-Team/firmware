@@ -18,7 +18,7 @@ use embassy_stm32::{
     rcc::{
         mux::{Adcsel, Saisel, Sdmmcsel, Spi6sel, Usart16910sel, Usart234578sel, Usbsel},
         AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllDiv, PllMul, PllPreDiv, PllSource,
-        Sysclk, VoltageScale,
+        Sysclk, VoltageScale, Hsi48Config 
     },
     time::Hertz,
     usart, Config,
@@ -132,7 +132,7 @@ pub fn get_system_config() -> Config {
     config.rcc.csi = true;
 
     // turn on the hsi48 as a primordial ADC source
-    config.rcc.hsi48 = Some(Default::default());
+    config.rcc.hsi48 = Some(Hsi48Config { sync_from_usb: true });
 
     // configure the PLLs
     // validated in ST Cube MX
@@ -155,10 +155,10 @@ pub fn get_system_config() -> Config {
     config.rcc.pll3 = Some(Pll {
         source: PllSource::HSE,
         prediv: PllPreDiv::DIV2,
-        mul: PllMul::MUL93,
-        divp: Some(PllDiv::DIV2), // 186 Mhz
-        divq: Some(PllDiv::DIV3), // 124 MHz
-        divr: Some(PllDiv::DIV3), // 124 MHz
+        mul: PllMul::MUL96,
+        divp: Some(PllDiv::DIV2), // 192 Mhz
+        divq: Some(PllDiv::DIV8), // 48 MHz (must be 48 for USB)
+        divr: Some(PllDiv::DIV3), // 128 MHz
     });
 
     // configure core busses

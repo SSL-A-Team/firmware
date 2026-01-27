@@ -26,6 +26,7 @@ static bool m_adc_calibrated = false;
 static bool m_motor_adc_offset_set = false;
 static size_t m_motor_adc_offset_ctr = 0;
 static float m_motor_adc_offset = 0.0f;
+static Uint32FixedPoint_t m_motor_adc_offset_mv_fxpt = 0;
 
 void currsen_enable_ht() {
     ADC1->CR |= ADC_CR_ADSTART;
@@ -35,9 +36,10 @@ void currsen_read_dma() {
     ADC1->CR |= ADC_CR_ADSTART;
 }
 
-void DMA1_Channel1_IRQHandler() {
-    DMA1->IFCR |= DMA_IFCR_CGIF1;
-}
+// now defined by 6step controller
+// void DMA1_Channel1_IRQHandler() {
+//     DMA1->IFCR |= DMA_IFCR_CGIF1;
+// }
 
 /**
  * @brief configure, calibrate, and enable the ADC
@@ -71,8 +73,13 @@ CS_Status_t currsen_setup(uint16_t motor_adc_ch)
     DMA1_Channel1->CCR |= DMA_CCR_MINC;
     // Set DMA Channel 1 transfer error interrupt enable.
     DMA1_Channel1->CCR |= DMA_CCR_TEIE;
-    // Set DMA Channel 1 half transfer interrupt and transfer complete interrupt to disable.
-    DMA1_Channel1->CCR &= ~(DMA_CCR_HTIE | DMA_CCR_TCIE);
+    // // Set DMA Channel 1 half transfer interrupt and transfer complete interrupt to disable.
+    // DMA1_Channel1->CCR &= ~(DMA_CCR_HTIE | DMA_CCR_TCIE);
+
+    // Set DMA Channel 1 half transfer interrupt to disable.
+    DMA1_Channel1->CCR &= ~(DMA_CCR_HTIE);
+    DMA1_Channel1->CCR |= (DMA_CCR_TCIE);
+
     // Set DMA Channel 1 direction to read from peripheral.
     DMA1_Channel1->CCR &= ~DMA_CCR_DIR;
     // Set DMA Channel 1 priority to very high.
@@ -206,6 +213,9 @@ CS_Status_t currsen_setup(uint16_t motor_adc_ch)
     // ADC1->ISR |= (ADC_ISR_EOSEQ);
     // NVIC_SetPriority(ADC1_IRQn, 6);
     // NVIC_EnableIRQ(ADC1_IRQn);
+
+    NVIC_SetPriority(DMA1_Ch1_IRQn, 5);
+    NVIC_EnableIRQ(DMA1_Ch1_IRQn);
 
     return status;
 }
@@ -365,22 +375,47 @@ CS_Status_t currsen_adc_dis()
     return CS_OK;
 }
 
-Uint32FixedPoint_t currsen_get_shunt_current_fxpt() {
-    const Int32FixedPoint_t ADC_RAW_TO_MV_S0F16 = 48012;  // S0F16
-    const Int32FixedPoint_t ADC_CALIB_OFFSET_S10F16 = 16384000;  // S10F16
-    const Int32FixedPoint_t AMP_INV_GAIN_S0F10 = 186;  // 0.18181818: S0F10
-    const Int32FixedPoint_t R_SHUNT_INV_S6F0 = 20;  // 20: S6F0
-    const Int32FixedPoint_t AMP_R_SHUNT_INV_S2F12 = 14894;  // 3.6363: S2F12
+uint16_t currsen_get_shunt_raw_adc() {
+    return m_adc_result.Motor_current_raw;
+}
+uint16_t currsen_get_bus_raw_adc() {
+    return m_adc_result.Vbus_raw;
+}
 
+Uint32FixedPoint_t currsen_get_shunt_voltage_fxpt() {
+    const Int32FixedPoint_t ADC_RAW_TO_MV_S0F16 = 48012;  // S0F16
+    
     // S12F16 = S12F0 * S0F16;
-    Int32FixedPoint_t v_adc_raw = m_adc_result.Motor_current_raw * ADC_RAW_TO_MV_S0F16;
+    Uint32FixedPoint_t v_adc_raw = (Uint32FixedPoint_t) m_adc_result.Motor_current_raw * ADC_RAW_TO_MV_S0F16;
+
+    // S12F16
+    return (Uint32FixedPoint_t) v_adc_raw;
+}
+
+Uint32FixedPoint_t currsen_get_shunt_voltage_no_bias_fxpt() {
+    const Int32FixedPoint_t ADC_CALIB_OFFSET_S10F16 = 16384000;  // S10F16A
+    
+    Int32FixedPoint_t v_adc_raw = (Int32FixedPoint_t) currsen_get_shunt_voltage_fxpt();
 
     // S13F16 = S12F16 - S12F16
-    Int32FixedPoint_t v_adc_no_bias = v_adc_raw - ADC_CALIB_OFFSET_S10F16;
+    // Int32FixedPoint_t v_adc_no_bias = v_adc_raw - ADC_CALIB_OFFSET_S10F16;
+    Int32FixedPoint_t v_adc_no_bias = v_adc_raw - (Int32FixedPoint_t) m_motor_adc_offset_mv_fxpt;
 
     if (v_adc_no_bias < 0) {
         v_adc_no_bias = 0;
     }
+
+    // S13F16
+    return (Uint32FixedPoint_t) v_adc_no_bias;
+}
+
+Uint32FixedPoint_t currsen_get_shunt_current_fxpt() {
+    const Int32FixedPoint_t AMP_INV_GAIN_S0F10 = 186;  // 0.18181818: S0F10
+    const Int32FixedPoint_t R_SHUNT_INV_S6F0 = 20;  // 20: S6F0
+    const Uint32FixedPoint_t AMP_R_SHUNT_INV_S2F12 = 14894;  // 3.6363: S2F12
+
+    // S13F16
+    Uint32FixedPoint_t v_adc_no_bias = currsen_get_shunt_voltage_no_bias_fxpt();
 
     // I = v_adc_no_bias * (1 / GAIN) * (1 / R_shunt)
 
@@ -393,22 +428,22 @@ Uint32FixedPoint_t currsen_get_shunt_current_fxpt() {
 
     // S15F12 = S13F16 * S2F12
     // S15F16 = S13F4 * S2F12
-    Int32FixedPoint_t i_shunt = (v_adc_no_bias >> 12) * AMP_R_SHUNT_INV_S2F12;
+    Uint32FixedPoint_t i_shunt = ((Uint32FixedPoint_t) v_adc_no_bias >> 12) * AMP_R_SHUNT_INV_S2F12;
 
     // S15F16
     return i_shunt;
 }
 
+uint16_t currsen_get_calibrated_bias_mv() {
+    return (uint16_t) (m_motor_adc_offset_mv_fxpt >> 16);
+}
+
 uint16_t currsen_get_shunt_current_ma() {
-    currsen_get_shunt_current_fxpt() >> 16;
+    return currsen_get_shunt_current_fxpt() >> 16;
 }
 
 uint16_t currsen_get_vbus_voltage_mv() {
     return (uint16_t) ((((uint32_t) m_adc_result.Vbus_raw) * 37500U) >> 12U);
-}
-
-Uint32FixedPoint_t currsen_get_shunt_voltage_fxpt() {
-
 }
 
 float currsen_get_shunt_voltage_raw() {
@@ -474,6 +509,8 @@ bool currsen_calibrate_sense()
 
     if (m_motor_adc_offset_ctr >= 10) {
         m_motor_adc_offset /= 10.0f;
+
+        m_motor_adc_offset_mv_fxpt = ((Uint32FixedPoint_t) (m_motor_adc_offset * 1000.0f)) << 16;
         m_motor_adc_offset_set = true;
     }
 

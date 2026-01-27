@@ -13,12 +13,12 @@
         "aarch64-darwin"
         "x86_64-darwin"
         "x86_64-linux" ]
-    (system: 
-      let 
+    (system:
+      let
         overlays = [ (import rust-overlay) ];
 
         pkgs = import nixpkgs {
-          inherit system overlays; 
+          inherit system overlays;
         };
 
         python = "python312";
@@ -55,7 +55,7 @@
 
             # Python
             (pkgs.${python}.withPackages
-              (ps: with ps; [ numpy matplotlib ]))
+              (ps: with ps; [ numpy matplotlib jsonlines ]))
           ];
         };
       }

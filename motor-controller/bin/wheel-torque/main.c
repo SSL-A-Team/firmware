@@ -234,38 +234,46 @@ int main() {
         read_packets();
 
         // "soft" error conditions zero out the motor setpoint
-        if (allow_motor_to_run()) {
-            motor_command_packet.motion_control_type = MOTOR_OFF;
+        if (!allow_motor_to_run()) {
             motor_command_packet.current_setpoint_ma = 0;
-            motor_command_packet.velocity_setpoint_rads = 0.0f;
+            motor_command_packet.setpoint = 0.0f;
         }
 
         // update wheel velocity est
         update_wheel_vel_est();
 
+        response_packet.motion_control_type = motor_command_packet.motion_control_type;
+
         switch (motor_command_packet.motion_control_type) {
-            case MOTOR_OFF:
+            case CCM_MCT_MOTOR_OFF:
                 pwm6step_set_duty_cycle(0);
                 break;
-            case DUTY_OPENLOOP:
-                pwm6step_set_duty_cycle_f(motor_command_packet.duty_setpoint_f);
-            case VOLTAGE_OPENLOOP:
-                pwm6step_set_voltage((int32_t) motor_command_packet.voltage_setpoint_mv);
+            case CCM_MCT_DUTY_OPENLOOP:
+                pwm6step_set_duty_cycle_f(motor_command_packet.setpoint);
                 break;
-            case CURRENT:
+            case CCM_MCT_VOLTAGE_OPENLOOP:
+                pwm6step_set_voltage((int32_t) motor_command_packet.setpoint);
+                break;
+            case CCM_MCT_CURRENT:
                 pwm6step_set_current(motor_command_packet.current_setpoint_ma);
+                response_packet.current_telemetry.current_setpoint_ma = motor_command_packet.current_setpoint_ma;
                 break;
-            case VELOCITY:
+            case CCM_MCT_VELOCITY:
                 float dc_f = do_vel_control();
                 pwm6step_set_duty_cycle_f(dc_f);
 
                 break;
-            case VELOCITY_CURRENT:
+            case CCM_MCT_VELOCITY_CURRENT:
                 pwm6step_set_current(motor_command_packet.current_setpoint_ma);
 
                 do_vel_cur_control();
                 break;
         }
+
+        response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
+        response_packet.current_telemetry.motor_voltage_cmd_mv = pwm6step_get_voltage_command();
+
+        memcpy(response_packet.current_telemetry.current_samples_ma, pwm6step_get_current_log(), 40);
 
         // load errors into packets and set LEDs
         update_errors();
@@ -275,13 +283,8 @@ int main() {
 
         set_leds();
 
-        // TODO sync time from ADC?
-
-        // limit loop rate to smallest time step
-        if (sync_systick()) {
-            // Track if we are slipping control frames.
-            slipped_control_frame_count++;
-        }
+        // sync to ADC
+        while (!pwm6step_1ms_flag()) {}
     }
 }
 
@@ -358,7 +361,7 @@ static void do_vel_cur_control() {
 }
 
 static float do_vel_control() {
-    float r_motor_board = motor_command_packet.velocity_setpoint_rads;
+    float r_motor_board = motor_command_packet.setpoint;
     float cur_wheel_vel_est_rads = response_packet.velocity_telemetry.wheel_vel_rads;
     static float control_setpoint_vel_rads_prev = 0.0f;
 
@@ -438,12 +441,16 @@ static void update_errors() {
     response_packet.gain_stage_index = gspid_get_cur_gain_stage_index(&vel_pid) & 0xFF;
 }
 
+static uint8_t params_seq_ctr = 0;
+static uint8_t seq_ctr = 0;
 static void send_packets() {
     CurrentControlledMotor_Response response_pkt;
     response_pkt.type = CCM_RESP_TELEM;
-
     response_pkt.timestamp = time_local_epoch_s();
+    response_pkt.seq_num = seq_ctr;  // intentionally overflow
+    seq_ctr++;
 
+    response_pkt.data.motion = response_packet;
 
     // If previous UART transmit is still occurring,
     // wait for it to finish.
@@ -468,6 +475,9 @@ static void send_packets() {
         params_return_packet_requested = false;
 
         response_pkt.type = CCM_RESP_PARAMS;
+        response_pkt.timestamp = time_local_epoch_s();
+        response_pkt.seq_num = params_seq_ctr;  // intentionally overflow
+        params_seq_ctr++;
 
         // responding with firmware image hash, read operation, as a reply message
         response_pkt.data.params.parameter = CCM_PARAM_FIRMWARE_IMAGE_HASH;
