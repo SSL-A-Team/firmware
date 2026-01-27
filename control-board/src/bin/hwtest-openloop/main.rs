@@ -198,7 +198,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut loop_rate_ticker = Ticker::every(loop_period);
 
     let w = 2.0 * PI / 3.0; // 3 second period
-    let a_angular = 5.0;  // rad/s amplitude
+    // let a_angular = 5.0;  // rad/s amplitude
+    let a_angular = 2.0;  // rad/s^2 amplitude
     let a_linear = 0.5;  // m/s amplitude
 
     let request_shutdown = 0;
@@ -238,13 +239,13 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         last_loop_start = Instant::now();
 
 
-        if t < 0.1 {
-            control.z_angular_cmd = 0.0;
-        } else {
-            control.z_angular_cmd = 0.0;
-        }
+        // if t < 3.0 {
+        //     control.z_angular_cmd = 2.0;
+        // } else {
+        //     control.z_angular_cmd = 0.0;
+        // }
 
-        // control.z_angular_cmd = a_angular * sinf(w * t);
+        control.z_angular_cmd = a_angular * sinf(w * t);
         // control.x_linear_cmd = a_linear * cosf(w * t);
         // control.y_linear_cmd = a_linear * sinf(w * t);
 

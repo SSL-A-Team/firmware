@@ -208,7 +208,22 @@ impl BodyController {
         // let target_twist = twist_est + target_wrench * 100.0 * self.loop_period.as_micros() as f32 * 1e-6;
         // self.body_twist_cmd = target_twist;
         // self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * target_twist;
-        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * target_wrench;
+        let transform = self.robot_model.transform_accel2wheel(state_estimate.z);
+        self.wheel_torque_cmd = transform * target_wrench;
+        // defmt::info!("M matrix: ");
+        // for i in 0..3 {
+        //     defmt::info!("{}, {}, {}, {}", self.robot_model.m[(i, 0)], self.robot_model.m[(i, 1)], self.robot_model.m[(i, 2)], self.robot_model.m[(i, 3)]);
+        // }
+        // defmt::info!("M inverse matrix: ");
+        // for i in 0..4 {
+        //     defmt::info!("{}, {}, {}", self.robot_model.m_inv[(i, 0)], self.robot_model.m_inv[(i, 1)], self.robot_model.m_inv[(i, 2)]);
+        // }
+        // defmt::info!("Transform: {}, {}, {}", transform[(0, 0)], transform[(0, 1)], transform[(0, 2)]);
+        // defmt::info!("Transform: {}, {}, {}", transform[(1, 0)], transform[(1, 1)], transform[(1, 2)]);
+        // defmt::info!("Transform: {}, {}, {}", transform[(2, 0)], transform[(2, 1)], transform[(2, 2)]);
+        // defmt::info!("Transform: {}, {}, {}", transform[(3, 0)], transform[(3, 1)], transform[(3, 2)]);
+        // defmt::info!("Target wrench: {}, {}, {}", target_wrench.x, target_wrench.y, target_wrench.z);
+        // defmt::info!("Torque command: {}, {}, {}, {}", self.wheel_torque_cmd.x, self.wheel_torque_cmd.y, self.wheel_torque_cmd.z, self.wheel_torque_cmd.w);
     }
 
     pub fn get_wheel_velocities(&self) -> Vector4f {

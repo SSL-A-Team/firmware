@@ -37,7 +37,8 @@ static_idle_buffered_uart!(FRONT_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX
 const TICKS_WITHOUT_PACKET_STOP: usize = 200;
 const TICKS_BASIC_TELEM_INTERVAL: usize = 20;  // send basic telem every 10 ticks (100 Hz if loop is 1 kHz)
 const TICKS_EXTENDED_TELEM_INTERVAL: usize = 20;  // send extended telem every 20 ticks (50 Hz if loop is 1 kHz)
-const TICKS_TRACE_PRINT: usize = 1000;  // print trace every 1000 ticks (1 second if loop is 1 kHz)
+// const TICKS_TRACE_PRINT: usize = 1000;  // print trace every 1000 ticks (1 second if loop is 1 kHz)
+const TICKS_TRACE_PRINT: usize = 100;  // print trace every 100 ticks (0.1 second if loop is 1 kHz)
 
 #[macro_export]
 macro_rules! create_control_task {
@@ -533,23 +534,26 @@ impl<
             // self.motor_br.set_setpoint(wheel_vel_cmd.z);
             // self.motor_fr.set_setpoint(wheel_vel_cmd.w);
 
+            let TORQUE_CONSTANT = 0.0335; // Nm/A
+            let wheel_ma = wheel_torque_cmd / TORQUE_CONSTANT * 1000.0;
+
             if ticks_since_trace_print >= TICKS_TRACE_PRINT {
                 defmt::info!(
-                    "wheel cmds: {} {} {} {}",
-                    wheel_torque_cmd.x,
-                    wheel_torque_cmd.y,
-                    wheel_torque_cmd.z,
-                    wheel_torque_cmd.w
+                    "wheel_ma cmd: {} {} {} {}",
+                    wheel_ma.x as i16,
+                    wheel_ma.y as i16,
+                    wheel_ma.z as i16,
+                    wheel_ma.w as i16
                 );
             }
-            // self.motor_fl.set_current_setpoint(wheel_torque_cmd.x as i16);
-            // self.motor_bl.set_current_setpoint(wheel_torque_cmd.y as i16);
-            // self.motor_br.set_current_setpoint(wheel_torque_cmd.z as i16);
-            // self.motor_fr.set_current_setpoint(wheel_torque_cmd.w as i16);
-            self.motor_fl.set_current_setpoint(0);
-            self.motor_bl.set_current_setpoint(0);
-            self.motor_br.set_current_setpoint(0);
-            self.motor_fr.set_current_setpoint(0);
+            self.motor_fl.set_current_setpoint(wheel_ma.x as i16);
+            self.motor_bl.set_current_setpoint(wheel_ma.y as i16);
+            self.motor_br.set_current_setpoint(wheel_ma.z as i16);
+            self.motor_fr.set_current_setpoint(wheel_ma.w as i16);
+            // self.motor_fl.set_current_setpoint(0);
+            // self.motor_bl.set_current_setpoint(0);
+            // self.motor_br.set_current_setpoint(0);
+            // self.motor_fr.set_current_setpoint(0);
 
             if ticks_since_trace_print >= TICKS_TRACE_PRINT {
                 defmt::trace!(
