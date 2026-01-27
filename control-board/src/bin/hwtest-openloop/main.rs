@@ -206,10 +206,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let game_state_in_stop = 0;
     let emergency_stop = 0;
     let body_pose_control_enabled = 0;
-    let body_twist_control_enabled = 1;
-    let body_wrench_control_enabled = 0;
-    let wheel_vel_control_enabled = 1;
-    let wheel_torque_control_enabled = 0;
+    let body_twist_control_enabled = 0;
+    let body_wrench_control_enabled = 1;
+    let wheel_vel_control_enabled = 0;
+    let wheel_torque_control_enabled = 1;
     let vision_update = 0;
     let dribbler_multiplier = 0;
     let reserved = 0;
@@ -237,7 +237,14 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         t += Instant::now().checked_duration_since(last_loop_start).unwrap().as_micros() as f32 / 1_000_000.0;
         last_loop_start = Instant::now();
 
-        control.z_angular_cmd = a_angular * sinf(w * t);
+
+        if t < 0.1 {
+            control.z_angular_cmd = 0.0;
+        } else {
+            control.z_angular_cmd = 0.0;
+        }
+
+        // control.z_angular_cmd = a_angular * sinf(w * t);
         // control.x_linear_cmd = a_linear * cosf(w * t);
         // control.y_linear_cmd = a_linear * sinf(w * t);
 

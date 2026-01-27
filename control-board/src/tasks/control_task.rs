@@ -1,5 +1,5 @@
 use ateam_common_packets::{
-    bindings::{BasicControl, BasicTelemetry, KickerTelemetry, MotionCommandType, PowerTelemetry},
+    bindings::{BasicControl, BasicTelemetry, CurrentControlledMotor_MotionControlType, KickerTelemetry, MotionCommandType, PowerTelemetry},
     radio::TelemetryPacket,
 };
 use ateam_lib_stm32::{
@@ -20,7 +20,7 @@ use crate::{
     SystemIrqs, DEBUG_MOTOR_UART_QUEUES, ROBOT_VERSION_MAJOR, ROBOT_VERSION_MINOR,
 };
 
-include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
+include_external_cpp_bin! {WHEEL_FW_IMG, "wheel-torque.bin"}
 
 const MAX_TX_PACKET_SIZE: usize = 80;
 const TX_BUF_DEPTH: usize = 3;
@@ -28,7 +28,7 @@ const MAX_RX_PACKET_SIZE: usize = 80;
 const RX_BUF_DEPTH: usize = 20;
 
 type ControlWheelMotor =
-    CurrentControlledMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>;
+    CurrentControlledMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES>;
 static_idle_buffered_uart!(FRONT_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(BACK_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
@@ -436,16 +436,22 @@ impl<
                             self.last_command.wheel_vel_control_enabled() != 0,
                             self.last_command.wheel_torque_control_enabled() != 0,
                         ) {
-                            (true, true) => MotionCommandType::BOTH,
-                            (true, false) => MotionCommandType::VELOCITY,
-                            (false, true) => MotionCommandType::TORQUE,
-                            (false, false) => MotionCommandType::OPEN_LOOP,
+                            (true, true) => CurrentControlledMotor_MotionControlType::CCM_MCT_VELOCITY_CURRENT,
+                            (true, false) => CurrentControlledMotor_MotionControlType::CCM_MCT_VELOCITY,
+                            (false, true) => CurrentControlledMotor_MotionControlType::CCM_MCT_CURRENT,
+                            (false, false) => CurrentControlledMotor_MotionControlType::CCM_MCT_MOTOR_OFF,
                         };
 
                         self.motor_fl.set_motion_type(wheel_motion_type);
                         self.motor_bl.set_motion_type(wheel_motion_type);
                         self.motor_br.set_motion_type(wheel_motion_type);
                         self.motor_fr.set_motion_type(wheel_motion_type);
+
+                        let motion_enabled = wheel_motion_type != CurrentControlledMotor_MotionControlType::CCM_MCT_MOTOR_OFF;
+                        self.motor_fl.set_motion_enabled(motion_enabled);
+                        self.motor_bl.set_motion_enabled(motion_enabled);
+                        self.motor_br.set_motion_enabled(motion_enabled);
+                        self.motor_fr.set_motion_enabled(motion_enabled);
 
                         self.last_command = latest_control;
                     }
@@ -526,10 +532,24 @@ impl<
             // self.motor_bl.set_setpoint(wheel_vel_cmd.y);
             // self.motor_br.set_setpoint(wheel_vel_cmd.z);
             // self.motor_fr.set_setpoint(wheel_vel_cmd.w);
-            self.motor_fl.set_setpoint(wheel_torque_cmd.x);
-            self.motor_bl.set_setpoint(wheel_torque_cmd.y);
-            self.motor_br.set_setpoint(wheel_torque_cmd.z);
-            self.motor_fr.set_setpoint(wheel_torque_cmd.w);
+
+            if ticks_since_trace_print >= TICKS_TRACE_PRINT {
+                defmt::info!(
+                    "wheel cmds: {} {} {} {}",
+                    wheel_torque_cmd.x,
+                    wheel_torque_cmd.y,
+                    wheel_torque_cmd.z,
+                    wheel_torque_cmd.w
+                );
+            }
+            // self.motor_fl.set_current_setpoint(wheel_torque_cmd.x as i16);
+            // self.motor_bl.set_current_setpoint(wheel_torque_cmd.y as i16);
+            // self.motor_br.set_current_setpoint(wheel_torque_cmd.z as i16);
+            // self.motor_fr.set_current_setpoint(wheel_torque_cmd.w as i16);
+            self.motor_fl.set_current_setpoint(0);
+            self.motor_bl.set_current_setpoint(0);
+            self.motor_br.set_current_setpoint(0);
+            self.motor_fr.set_current_setpoint(0);
 
             if ticks_since_trace_print >= TICKS_TRACE_PRINT {
                 defmt::trace!(

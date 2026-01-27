@@ -203,13 +203,12 @@ impl BodyController {
     }
 
     pub fn compute_effort_wrench_control(&mut self, state_estimate: Vector6f, target_wrench: Vector3f) {
-        todo!();
-        // self.body_wrench_cmd = target_wrench;
+        self.body_wrench_cmd = target_wrench;
         // let twist_est = state_estimate.fixed_rows::<3>(3);
         // let target_twist = twist_est + target_wrench * 100.0 * self.loop_period.as_micros() as f32 * 1e-6;
         // self.body_twist_cmd = target_twist;
         // self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * target_twist;
-        // self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * target_wrench;
+        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * target_wrench;
     }
 
     pub fn get_wheel_velocities(&self) -> Vector4f {
