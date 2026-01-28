@@ -535,7 +535,18 @@ impl<
             // self.motor_fr.set_setpoint(wheel_vel_cmd.w);
 
             let TORQUE_CONSTANT = 0.0335; // Nm/A
-            let wheel_ma = wheel_torque_cmd / TORQUE_CONSTANT * 1000.0;
+            let mut wheel_ma = wheel_torque_cmd / TORQUE_CONSTANT * 1000.0;
+
+            if wheel_ma.x.abs() > 100.0 || wheel_ma.y.abs() > 100.0 || wheel_ma.z.abs() > 100.0 || wheel_ma.w.abs() > 100.0 {
+                defmt::warn!(
+                    "high wheel current command detected: {} {} {} {}",
+                    wheel_ma.x as i16,
+                    wheel_ma.y as i16,
+                    wheel_ma.z as i16,
+                    wheel_ma.w as i16
+                );
+                wheel_ma = Vector4f::default();
+            }
 
             if ticks_since_trace_print >= TICKS_TRACE_PRINT {
                 defmt::info!(
@@ -546,14 +557,14 @@ impl<
                     wheel_ma.w as i16
                 );
             }
-            self.motor_fl.set_current_setpoint(wheel_ma.x as i16);
-            self.motor_bl.set_current_setpoint(wheel_ma.y as i16);
-            self.motor_br.set_current_setpoint(wheel_ma.z as i16);
-            self.motor_fr.set_current_setpoint(wheel_ma.w as i16);
-            // self.motor_fl.set_current_setpoint(0);
-            // self.motor_bl.set_current_setpoint(0);
-            // self.motor_br.set_current_setpoint(0);
-            // self.motor_fr.set_current_setpoint(0);
+            // self.motor_fl.set_current_setpoint(wheel_ma.x as i16);
+            // self.motor_bl.set_current_setpoint(wheel_ma.y as i16);
+            // self.motor_br.set_current_setpoint(wheel_ma.z as i16);
+            // self.motor_fr.set_current_setpoint(wheel_ma.w as i16);
+            self.motor_fl.set_current_setpoint(0);
+            self.motor_bl.set_current_setpoint(0);
+            self.motor_br.set_current_setpoint(0);
+            self.motor_fr.set_current_setpoint(0);
 
             if ticks_since_trace_print >= TICKS_TRACE_PRINT {
                 defmt::trace!(

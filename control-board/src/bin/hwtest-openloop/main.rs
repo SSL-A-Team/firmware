@@ -199,7 +199,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     let w = 2.0 * PI / 3.0; // 3 second period
     // let a_angular = 5.0;  // rad/s amplitude
-    let a_angular = 2.0;  // rad/s^2 amplitude
+    let a_angular = 5.0;  // rad/s^2 amplitude
     let a_linear = 0.5;  // m/s amplitude
 
     let request_shutdown = 0;
@@ -230,7 +230,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         kick_request: KickRequest::KR_DISABLE,
     };
 
-    Timer::after_secs(5).await;
+    Timer::after_secs(3).await;
 
     let mut last_loop_start = Instant::now();
     let mut t = 0.0;

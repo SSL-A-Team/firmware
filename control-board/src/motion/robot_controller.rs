@@ -187,12 +187,12 @@ impl BodyController {
         let next_body_state = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_state_at_t(traj, state_estimate, 0.0, 100.0 * self.loop_period.as_micros() as f32 * 1e-6);
         let global_twist_cmd = Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
 
-        self.body_twist_cmd = global_twist_cmd;
+        // self.body_twist_cmd = global_twist_cmd;
         self.body_wrench_cmd = global_accel_cmd;
 
         // These torques are discretized by the loop rate, but in an ideal world, it would be a continuous command update to reach the next state wheel velocities as theta changes. However, the loop rate should be fast enough that the error due to a change in theta during each control period should be negligible, and the individual wheel velocities are achieved by the next control update
-        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * global_twist_cmd;
-        // self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * global_accel_cmd;
+        // self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * global_twist_cmd;
+        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * global_accel_cmd;
     }
 
     pub fn compute_effort_twist_control(&mut self, state_estimate: Vector6f, target_twist: Vector3f) {
