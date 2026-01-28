@@ -296,10 +296,10 @@ impl<
         control_debug_telem.timestamp_us_lo = (timestamp.as_micros() & 0xFFFFFFFF) as u32;
         control_debug_telem.timestamp_us_hi = ((timestamp.as_micros() >> 32) & 0xFFFFFFFF) as u32;
 
-        control_debug_telem.front_left_motor = self.motor_fl.get_latest_state();
-        control_debug_telem.back_left_motor = self.motor_bl.get_latest_state();
-        control_debug_telem.back_right_motor = self.motor_br.get_latest_state();
-        control_debug_telem.front_right_motor = self.motor_fr.get_latest_state();
+        // control_debug_telem.front_left_motor = self.motor_fl.get_latest_state();
+        // control_debug_telem.back_left_motor = self.motor_bl.get_latest_state();
+        // control_debug_telem.back_right_motor = self.motor_br.get_latest_state();
+        // control_debug_telem.front_right_motor = self.motor_fr.get_latest_state();
 
         control_debug_telem.imu_accel[0] = self.last_accel_x_ms;
         control_debug_telem.imu_accel[1] = self.last_accel_y_ms;
@@ -433,15 +433,16 @@ impl<
                             self.shared_robot_state.flag_shutdown_requested();
                         }
 
-                        let wheel_motion_type = match (
-                            self.last_command.wheel_vel_control_enabled() != 0,
-                            self.last_command.wheel_torque_control_enabled() != 0,
-                        ) {
-                            (true, true) => CurrentControlledMotor_MotionControlType::CCM_MCT_VELOCITY_CURRENT,
-                            (true, false) => CurrentControlledMotor_MotionControlType::CCM_MCT_VELOCITY,
-                            (false, true) => CurrentControlledMotor_MotionControlType::CCM_MCT_CURRENT,
-                            (false, false) => CurrentControlledMotor_MotionControlType::CCM_MCT_MOTOR_OFF,
-                        };
+                        // let wheel_motion_type = match (
+                        //     self.last_command.wheel_vel_control_enabled() != 0,
+                        //     self.last_command.wheel_torque_control_enabled() != 0,
+                        // ) {
+                        //     (true, true) => CurrentControlledMotor_MotionControlType::CCM_MCT_VELOCITY_CURRENT,
+                        //     (true, false) => CurrentControlledMotor_MotionControlType::CCM_MCT_VELOCITY,
+                        //     (false, true) => CurrentControlledMotor_MotionControlType::CCM_MCT_CURRENT,
+                        //     (false, false) => CurrentControlledMotor_MotionControlType::CCM_MCT_MOTOR_OFF,
+                        // };
+                        let wheel_motion_type = CurrentControlledMotor_MotionControlType::CCM_MCT_CURRENT;
 
                         self.motor_fl.set_motion_type(wheel_motion_type);
                         self.motor_bl.set_motion_type(wheel_motion_type);
@@ -537,7 +538,7 @@ impl<
             let TORQUE_CONSTANT = 0.0335; // Nm/A
             let mut wheel_ma = wheel_torque_cmd / TORQUE_CONSTANT * 1000.0;
 
-            if wheel_ma.x.abs() > 100.0 || wheel_ma.y.abs() > 100.0 || wheel_ma.z.abs() > 100.0 || wheel_ma.w.abs() > 100.0 {
+            if wheel_ma.x.abs() > 150.0 || wheel_ma.y.abs() > 150.0 || wheel_ma.z.abs() > 150.0 || wheel_ma.w.abs() > 150.0 {
                 defmt::warn!(
                     "high wheel current command detected: {} {} {} {}",
                     wheel_ma.x as i16,
@@ -557,14 +558,14 @@ impl<
                     wheel_ma.w as i16
                 );
             }
-            // self.motor_fl.set_current_setpoint(wheel_ma.x as i16);
-            // self.motor_bl.set_current_setpoint(wheel_ma.y as i16);
-            // self.motor_br.set_current_setpoint(wheel_ma.z as i16);
-            // self.motor_fr.set_current_setpoint(wheel_ma.w as i16);
-            self.motor_fl.set_current_setpoint(0);
-            self.motor_bl.set_current_setpoint(0);
-            self.motor_br.set_current_setpoint(0);
-            self.motor_fr.set_current_setpoint(0);
+            self.motor_fl.set_current_setpoint(wheel_ma.x as i16);
+            self.motor_bl.set_current_setpoint(wheel_ma.y as i16);
+            self.motor_br.set_current_setpoint(wheel_ma.z as i16);
+            self.motor_fr.set_current_setpoint(wheel_ma.w as i16);
+            // self.motor_fl.set_current_setpoint(0);
+            // self.motor_bl.set_current_setpoint(0);
+            // self.motor_br.set_current_setpoint(0);
+            // self.motor_fr.set_current_setpoint(0);
 
             if ticks_since_trace_print >= TICKS_TRACE_PRINT {
                 defmt::trace!(
