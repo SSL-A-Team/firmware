@@ -11,11 +11,10 @@ use embassy_stm32::{
     Peri,
 };
 use embassy_time::{with_timeout, Duration, Timer};
-use nalgebra::Vector3;
 
 use crate::image_hash;
 use ateam_common_packets::bindings::{
-    CurrentControlledMotor_Command, CurrentControlledMotor_CommandType::CCM_CMD_MOTION, CurrentControlledMotor_CurrentTelemetry, CurrentControlledMotor_MotionControlType, CurrentControlledMotor_Response, CurrentControlledMotor_ResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM}, CurrentControlledMotor_Telemetry, MotionCommandType::{self, OPEN_LOOP}, MotorCommandPacket, MotorCommandType::{MCP_MOTION, MCP_PARAMS}, MotorResponse, MotorResponseType::{MRP_MOTION, MRP_PARAMS}
+    CcmCommand, CcmCommandType::CCM_CMD_MOTION, CcmMotionControlType, CcmResponse, CcmResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM}, CcmTelemetry, MotionCommandType::OPEN_LOOP, MotorCommandPacket, MotorCommandType::MCP_PARAMS
 };
 
 pub struct CurrentControlledMotor<
@@ -30,13 +29,13 @@ pub struct CurrentControlledMotor<
         Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES>,
     firmware_image: &'a [u8],
     current_timestamp_ms: u32,
-    current_state: CurrentControlledMotor_Telemetry,
+    current_state: CcmTelemetry,
     current_state_seq_num: u8,
     torque_limit: f32,
 
     setpoint: f32,
     current_setpoint_ma: i16,
-    motion_type: CurrentControlledMotor_MotionControlType::Type,
+    motion_type: CcmMotionControlType::Type,
     reset_flagged: bool,
     telemetry_enabled: bool,
     motion_enabled: bool,
@@ -62,7 +61,7 @@ impl<
         >,
         firmware_image: &'a [u8],
     ) -> CurrentControlledMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES> {
-        let start_state: CurrentControlledMotor_Telemetry = Default::default();
+        let start_state: CcmTelemetry = Default::default();
 
         CurrentControlledMotor {
             stm32_uart_interface: stm32_interface,
@@ -101,8 +100,8 @@ impl<
             true,
         );
 
-        let start_state: CurrentControlledMotor_Telemetry = Default::default();
-        let start_params_state: CurrentControlledMotor_Response = Default::default();
+        let start_state: CcmTelemetry = Default::default();
+        let start_params_state: CcmResponse = Default::default();
 
         CurrentControlledMotor {
             stm32_uart_interface: stm32_interface,
@@ -278,11 +277,11 @@ impl<
         while let Ok(res) = self.stm32_uart_interface.try_read_data() {
             let buf = res.data();
 
-            if buf.len() != core::mem::size_of::<CurrentControlledMotor_Response>() {
+            if buf.len() != core::mem::size_of::<CcmResponse>() {
                 defmt::warn!(
                     "Drive Motor - Got invalid packet of len {:?} (expected {:?}) data: {:?}",
                     buf.len(),
-                    core::mem::size_of::<CurrentControlledMotor_Response>(),
+                    core::mem::size_of::<CcmResponse>(),
                     buf
                 );
                 continue;
@@ -291,11 +290,11 @@ impl<
             // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
             unsafe {
                 // zero initialize a local response packet
-                let mut mrp: CurrentControlledMotor_Response = Default::default();
+                let mut mrp: CcmResponse = Default::default();
 
                 // copy receieved uart bytes into packet
                 let state = &mut mrp as *mut _ as *mut u8;
-                for i in 0..core::mem::size_of::<CurrentControlledMotor_Response>() {
+                for i in 0..core::mem::size_of::<CcmResponse>() {
                     *state.offset(i as isize) = buf[i];
                 }
 
@@ -386,7 +385,7 @@ impl<
 
     pub fn send_motion_command(&mut self) {
         unsafe {
-            let mut cmd: CurrentControlledMotor_Command = { MaybeUninit::zeroed().assume_init() };
+            let mut cmd: CcmCommand = { MaybeUninit::zeroed().assume_init() };
 
             cmd.type_ = CCM_CMD_MOTION;
             cmd.crc32 = 0;
@@ -401,8 +400,8 @@ impl<
             // info!("setpoint: {:?}", cmd.data.motion.setpoint);
 
             let struct_bytes = core::slice::from_raw_parts(
-                (&cmd as *const CurrentControlledMotor_Command) as *const u8,
-                core::mem::size_of::<CurrentControlledMotor_Command>(),
+                (&cmd as *const CcmCommand) as *const u8,
+                core::mem::size_of::<CcmCommand>(),
             );
 
             self.stm32_uart_interface.send_or_discard_data(struct_bytes);
@@ -411,7 +410,7 @@ impl<
         self.reset_flagged = false;
     }
 
-    pub fn get_latest_state(&self) -> CurrentControlledMotor_Telemetry {
+    pub fn get_latest_state(&self) -> CcmTelemetry {
         self.current_state
     }
 
@@ -419,7 +418,7 @@ impl<
         self.current_state_seq_num
     }
 
-    pub fn set_motion_type(&mut self, motion_type: CurrentControlledMotor_MotionControlType::Type) {
+    pub fn set_motion_type(&mut self, motion_type: CcmMotionControlType::Type) {
         self.motion_type = motion_type;
     }
 

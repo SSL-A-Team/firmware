@@ -43,8 +43,8 @@ static volatile ImgHash_t wheel_img_hash_struct = {
 };
 
 // communications data
-static CurrentControlledMotor_MotionCommand motor_command_packet;
-static CurrentControlledMotor_Telemetry response_packet;
+static CcmMotionCommand motor_command_packet;
+static CcmTelemetry response_packet;
 static uart_logging_status_rx_t uart_logging_status_receive;
 static uart_logging_status_tx_t uart_logging_status_send;
 static bool params_return_packet_requested = false;
@@ -121,8 +121,8 @@ int main() {
     setup();
 
     // zero out packet initial states
-    memset(&motor_command_packet, 0, sizeof(CurrentControlledMotor_Command));
-    memset(&response_packet, 0, sizeof(CurrentControlledMotor_Response));
+    memset(&motor_command_packet, 0, sizeof(CcmCommand));
+    memset(&response_packet, 0, sizeof(CcmResponse));
 
 #ifdef UART_ENABLED
     // Initialize UART and logging status.
@@ -235,34 +235,34 @@ int main() {
 
         // "soft" error conditions zero out the motor setpoint
         if (allow_motor_to_run()) {
-            motor_command_packet.motion_control_type = MOTOR_OFF;
+            motor_command_packet.motion_control_type = CCM_MCT_MOTOR_OFF;
             motor_command_packet.current_setpoint_ma = 0;
-            motor_command_packet.velocity_setpoint_rads = 0.0f;
+            motor_command_packet.setpoint = 0.0f;
         }
 
         // update wheel velocity est
         update_wheel_vel_est();
 
-        motor_command_packet.motion_control_type = DUTY_OPENLOOP;
-        motor_command_packet.duty_setpoint_f = 0.1f;
+        motor_command_packet.motion_control_type = CCM_MCT_DUTY_OPENLOOP;
+        motor_command_packet.setpoint = 0.1f;
         switch (motor_command_packet.motion_control_type) {
-            case MOTOR_OFF:
+            case CCM_MCT_MOTOR_OFF:
                 pwm6step_set_duty_cycle(0);
                 break;
-            case DUTY_OPENLOOP:
-                pwm6step_set_duty_cycle_f(motor_command_packet.duty_setpoint_f);
-            case VOLTAGE_OPENLOOP:
-                pwm6step_set_voltage((int32_t) motor_command_packet.voltage_setpoint_mv);
+            case CCM_MCT_DUTY_OPENLOOP:
+                pwm6step_set_duty_cycle_f(motor_command_packet.setpoint);
+            case CCM_MCT_VOLTAGE_OPENLOOP:
+                pwm6step_set_voltage((int32_t) motor_command_packet.setpoint);
                 break;
-            case CURRENT:
+            case CCM_MCT_CURRENT:
                 pwm6step_set_current(motor_command_packet.current_setpoint_ma);
                 break;
-            case VELOCITY:
+            case CCM_MCT_VELOCITY:
                 float dc_f = do_vel_control();
                 pwm6step_set_duty_cycle_f(dc_f);
 
                 break;
-            case VELOCITY_CURRENT:
+            case CCM_MCT_VELOCITY_CURRENT:
                 pwm6step_set_current(motor_command_packet.current_setpoint_ma);
 
                 do_vel_cur_control();
@@ -297,12 +297,12 @@ static bool allow_motor_to_run() {
 
 static void read_packets() {
     // process all available packets
-    CurrentControlledMotor_Command command_packet;
+    CcmCommand command_packet;
     // memset(&command_packet, 0, sizeof(CurrentControlledMotor_Command));
 
     while (uart_can_read()) {
         // Read in the new packet data.
-        uart_read(&command_packet, sizeof(CurrentControlledMotor_Command));
+        uart_read(&command_packet, sizeof(CcmCommand));
 
         // If something goes wrong with the UART, we need to flag it.
         if (uart_rx_get_logging_status() != UART_LOGGING_OK) {
@@ -360,7 +360,7 @@ static void do_vel_cur_control() {
 }
 
 static float do_vel_control() {
-    float r_motor_board = motor_command_packet.velocity_setpoint_rads;
+    float r_motor_board = motor_command_packet.setpoint;
     float cur_wheel_vel_est_rads = response_packet.velocity_telemetry.wheel_vel_rads;
     static float control_setpoint_vel_rads_prev = 0.0f;
 
@@ -441,7 +441,7 @@ static void update_errors() {
 }
 
 static void send_packets() {
-    CurrentControlledMotor_Response response_pkt;
+    CcmResponse response_pkt;
     response_pkt.type = CCM_RESP_TELEM;
 
     response_pkt.timestamp = time_local_epoch_s();
@@ -451,7 +451,7 @@ static void send_packets() {
     // wait for it to finish.
     uart_wait_for_transmission();
     // takes ~270uS, mostly hardware DMA, but should be cleared out by now.
-    uart_transmit((uint8_t *) &response_pkt, sizeof(CurrentControlledMotor_Response));
+    uart_transmit((uint8_t *) &response_pkt, sizeof(CcmResponse));
     // Capture the status for the response packet / LED.
     if (uart_tx_get_logging_status() != UART_LOGGING_OK) {
         uart_logging_status_send = uart_tx_get_logging_status();
@@ -480,7 +480,7 @@ static void send_packets() {
         memcpy(response_pkt.data.params.value.val_u8x4, wheel_img_hash_struct.img_hash, sizeof(response_pkt.data.params.value));
 
         // send the packet
-        uart_transmit((uint8_t *) &response_pkt, sizeof(CurrentControlledMotor_Response));
+        uart_transmit((uint8_t *) &response_pkt, sizeof(CcmResponse));
 
         // TODO check if this works, uart_transmit doesn't block so status may be stale
         // Capture the status for the response packet / LED.

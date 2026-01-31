@@ -3,9 +3,9 @@
 
 #![feature(sync_unsafe_cell)]
 
-use embassy_stm32::{peripherals::USB_OTG_HS, usb::{DmPin, DpPin, Driver, Instance}, Peri};
-use ateam_common_packets::{bindings::{BasicControl, CurrentControlledMotor_MotionControlType, CurrentControlledMotor_Telemetry, KickRequest}, radio::DataPacket};
-use ateam_lib_stm32::{drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart, uart::queue::IdleBufferedUart};
+use embassy_stm32::{peripherals::USB_OTG_HS, usb::Driver};
+use ateam_common_packets::bindings::{CcmMotionControlType, CcmTelemetry};
+use ateam_lib_stm32::{drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart};
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{interrupt, pac::Interrupt, usart::Uart, peripherals, bind_interrupts};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, pubsub::{PubSubChannel, Subscriber}};
@@ -13,16 +13,13 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, pubsub::{PubSub
 use defmt_rtt as _;
 
 use ateam_control_board::{
-    create_control_task, create_imu_task, create_io_task, get_system_config, include_external_cpp_bin, motor::CurrentControlledMotor, pins::{
-        AccelDataPubSub, CommandsPubSub, GyroDataPubSub, KickerTelemetryPubSub, LedCommandPubSub,
-        PowerTelemetryPubSub, TelemetryPubSub,
-    }, robot_state::SharedRobotState, SystemIrqs
+    get_system_config, include_external_cpp_bin, motor::CurrentControlledMotor, robot_state::SharedRobotState, SystemIrqs
 };
 
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Duration, Ticker};
 // provide embedded panic probe
 use panic_probe as _;
-use static_cell::{ConstStaticCell, StaticCell};
+use static_cell::ConstStaticCell;
 
 use embassy_usb::{class::cdc_acm::{CdcAcmClass, State}, UsbDevice};
 use embassy_usb::driver::EndpointError;
@@ -67,7 +64,7 @@ unsafe fn CORDIC() {
     RADIO_UART_QUEUE_EXECUTOR.on_interrupt();
 }
 
-static MOTOR_FB_PUBSUB: PubSubChannel<CriticalSectionRawMutex, CurrentControlledMotor_Telemetry, 3, 1, 1> = PubSubChannel::new();
+static MOTOR_FB_PUBSUB: PubSubChannel<CriticalSectionRawMutex, CcmTelemetry, 3, 1, 1> = PubSubChannel::new();
 
 #[embassy_executor::main]
 async fn main(main_spawner: embassy_executor::Spawner) {
@@ -194,7 +191,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     // ccm.set_motion_type(CurrentControlledMotor_MotionControlType::CCM_MCT_VOLTAGE_OPENLOOP);
     // ccm.set_setpoint(12500.0);
-    ccm.set_motion_type(CurrentControlledMotor_MotionControlType::CCM_MCT_CURRENT);
+    ccm.set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
     ccm.set_current_setpoint(200);
 
     ccm.set_telemetry_enabled(true);
@@ -281,7 +278,7 @@ async fn usb_ll_driver_task(mut usb_device:  UsbDevice<'static, Driver<'static, 
 }
 
 #[embassy_executor::task]
-async fn usb_writer_task(mut usb_class: CdcAcmClass<'static, Driver<'static, USB_OTG_HS>>, mut packet_sub: Subscriber<'static, CriticalSectionRawMutex, CurrentControlledMotor_Telemetry, 3, 1, 1>) {
+async fn usb_writer_task(mut usb_class: CdcAcmClass<'static, Driver<'static, USB_OTG_HS>>, mut packet_sub: Subscriber<'static, CriticalSectionRawMutex, CcmTelemetry, 3, 1, 1>) {
     loop {
         defmt::info!("USB task - waiting connection...");
         usb_class.wait_connection().await;
@@ -292,8 +289,8 @@ async fn usb_writer_task(mut usb_class: CdcAcmClass<'static, Driver<'static, USB
 
             let struct_bytes = unsafe {
                 core::slice::from_raw_parts(
-                (&feedback_data_packet as *const CurrentControlledMotor_Telemetry) as *const u8,
-                core::mem::size_of::<CurrentControlledMotor_Telemetry>(),
+                (&feedback_data_packet as *const CcmTelemetry) as *const u8,
+                core::mem::size_of::<CcmTelemetry>(),
             )
             };
 
