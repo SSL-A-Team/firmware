@@ -189,8 +189,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     }
 
 
-    // ccm.set_motion_type(CurrentControlledMotor_MotionControlType::CCM_MCT_VOLTAGE_OPENLOOP);
-    // ccm.set_setpoint(12500.0);
+    // ccm.set_motion_type(CcmMotionControlType::CCM_MCT_VOLTAGE_OPENLOOP);
+    // ccm.set_setpoint(2500.0);
     ccm.set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
     ccm.set_current_setpoint(200);
 
@@ -238,8 +238,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             curr_ctr = 0
         } else if curr_ctr > 1000 {
             ccm.set_current_setpoint(300);
+            // ccm.set_setpoint(2500.0);
         } else {
             ccm.set_current_setpoint(200);
+            // ccm.set_setpoint(0.0);
         }
 
         curr_ctr += 1;
