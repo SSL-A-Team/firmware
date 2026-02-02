@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-use core::f32::consts::PI;
 
 use ateam_common_packets::{bindings::{BasicControl, KickRequest}, radio::DataPacket};
 use embassy_executor::InterruptExecutor;
@@ -27,6 +26,7 @@ use credentials::private_credentials::wifi::wifi_credentials;
 use credentials::public_credentials::wifi::wifi_credentials;
 
 use embassy_time::{Instant, Ticker, Timer};
+use core::f32::consts::PI;
 use libm::{cosf, sinf};
 // provide embedded panic probe
 use panic_probe as _;
@@ -197,10 +197,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let loop_period = embassy_time::Duration::from_millis(1);
     let mut loop_rate_ticker = Ticker::every(loop_period);
 
-    let w = 2.0 * PI / 3.0; // 3 second period
-    // let a_angular = 5.0;  // rad/s amplitude
-    let a_angular = 5.0;  // rad/s^2 amplitude
-    let a_linear = 0.5;  // m/s amplitude
+    // let w = 2.0 * PI / 3.0; // 3 second period
+    // // let a_angular = 5.0;  // rad/s amplitude
+    // let a_angular = 5.0;  // rad/s^2 amplitude
+    // let a_linear = 0.5;  // m/s amplitude
 
     let request_shutdown = 0;
     let reboot_robot = 0;
@@ -235,17 +235,17 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut last_loop_start = Instant::now();
     let mut t = 0.0;
     loop {
-        t += Instant::now().checked_duration_since(last_loop_start).unwrap().as_micros() as f32 / 1_000_000.0;
+        t += Instant::now().checked_duration_since(last_loop_start).unwrap().as_micros() as f32 * 1e-6;
         last_loop_start = Instant::now();
 
 
-        // if t < 3.0 {
-        //     control.z_angular_cmd = 2.0;
-        // } else {
-        //     control.z_angular_cmd = 0.0;
-        // }
+        if t < 0.5 {
+            control.x_linear_cmd = 0.5;
+        } else {
+            control.x_linear_cmd = 0.0;
+        }
 
-        control.z_angular_cmd = a_angular * sinf(w * t);
+        // control.z_angular_cmd = a_angular * sinf(w * t);
         // control.x_linear_cmd = a_linear * cosf(w * t);
         // control.y_linear_cmd = a_linear * sinf(w * t);
 

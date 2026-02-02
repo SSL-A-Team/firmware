@@ -127,8 +127,6 @@ impl BodyController {
         self.debug_telemetry.kf_body_twist_estimate.copy_from_slice(&state_estimate.as_slice()[3..6]);
         self.debug_telemetry.body_twist_u.copy_from_slice(self.body_twist_cmd.as_slice());
         self.debug_telemetry.body_accel_u.copy_from_slice(self.body_accel_cmd.as_slice());
-        // self.debug_telemetry.wheel_velocity_u.copy_from_slice(self.wheel_vel_cmd.as_slice());
-        // self.debug_telemetry.wheel_torque_u.copy_from_slice(self.wheel_torque_cmd.as_slice());
 
         let control_outputs_time = Instant::now() - start;
         start = Instant::now();

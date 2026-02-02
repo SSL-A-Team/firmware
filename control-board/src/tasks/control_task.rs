@@ -299,9 +299,6 @@ impl<
         let mut robot_controller = BodyController::new(loop_period);
 
         let mut cmd = Vector3f::default();
-        let mut body_pose_control_enabled = false;
-        let mut body_twist_control_enabled = false;
-        let mut body_accel_control_enabled = false;
         let mut last_vision_pose_meas = Vector3f::default();
         let mut vision_update = false;
         let mut ticks_since_control_packet = 0;
@@ -362,16 +359,11 @@ impl<
                             }
                         }
 
-                        ticks_since_control_packet = 0;
-
                         cmd = Vector3f::new(
                             latest_control.x_linear_cmd,
                             latest_control.y_linear_cmd,
                             latest_control.z_angular_cmd,
                         );
-                        body_pose_control_enabled = latest_control.body_pose_control_enabled() != 0;
-                        body_twist_control_enabled = latest_control.body_twist_control_enabled() != 0;
-                        body_accel_control_enabled = latest_control.body_accel_control_enabled() != 0;
                         last_vision_pose_meas = Vector3f::new(
                             latest_control.pose_x_linear_vision,
                             latest_control.pose_y_linear_vision,
@@ -383,16 +375,15 @@ impl<
                             self.shared_robot_state.flag_shutdown_requested();
                         }
 
-                        // let wheel_motion_type = match (
-                        //     self.last_command.wheel_vel_control_enabled() != 0,
-                        //     self.last_command.wheel_torque_control_enabled() != 0,
-                        // ) {
-                        //     (true, true) => CurrentControlledMotor_MotionControlType::CCM_MCT_VELOCITY_CURRENT,
-                        //     (true, false) => CurrentControlledMotor_MotionControlType::CCM_MCT_VELOCITY,
-                        //     (false, true) => CurrentControlledMotor_MotionControlType::CCM_MCT_CURRENT,
-                        //     (false, false) => CurrentControlledMotor_MotionControlType::CCM_MCT_MOTOR_OFF,
-                        // };
-                        let wheel_motion_type = CurrentControlledMotor_MotionControlType::CCM_MCT_CURRENT;
+                        let wheel_motion_type = match (
+                            self.last_command.wheel_vel_control_enabled() != 0,
+                            self.last_command.wheel_torque_control_enabled() != 0,
+                        ) {
+                            (true, true) => CurrentControlledMotor_MotionControlType::CCM_MCT_VELOCITY_CURRENT,
+                            (true, false) => CurrentControlledMotor_MotionControlType::CCM_MCT_VELOCITY,
+                            (false, true) => CurrentControlledMotor_MotionControlType::CCM_MCT_CURRENT,
+                            (false, false) => CurrentControlledMotor_MotionControlType::CCM_MCT_MOTOR_OFF,
+                        };
 
                         self.motor_fl.set_motion_type(wheel_motion_type);
                         self.motor_bl.set_motion_type(wheel_motion_type);
@@ -406,6 +397,7 @@ impl<
                         self.motor_fr.set_motion_enabled(motion_enabled);
 
                         self.last_command = latest_control;
+                        ticks_since_control_packet = 0;
                     }
                     ateam_common_packets::radio::DataPacket::ParameterCommand(latest_param_cmd) => {
                         let param_cmd_resp = robot_controller.apply_command(&latest_param_cmd);
@@ -460,9 +452,9 @@ impl<
 
             robot_controller.control_update(
                 cmd,
-                body_pose_control_enabled,
-                body_twist_control_enabled,
-                body_accel_control_enabled,
+                self.last_command.body_pose_control_enabled() != 0,
+                self.last_command.body_twist_control_enabled() != 0,
+                self.last_command.body_accel_control_enabled() != 0,
                 last_vision_pose_meas,
                 vision_update,
                 wheel_vel_meas,
