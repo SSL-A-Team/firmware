@@ -1,5 +1,5 @@
 use ateam_common_packets::{
-    bindings::{BasicControl, BasicTelemetry, CurrentControlledMotor_MotionControlType, KickerTelemetry, MotionCommandType, PowerTelemetry},
+    bindings::{BasicControl, BasicTelemetry, CcmMotionControlType, KickerTelemetry, MotionCommandType, PowerTelemetry},
     radio::TelemetryPacket,
 };
 use ateam_lib_stm32::{
@@ -379,10 +379,10 @@ impl<
                             self.last_command.wheel_vel_control_enabled() != 0,
                             self.last_command.wheel_torque_control_enabled() != 0,
                         ) {
-                            (true, true) => CurrentControlledMotor_MotionControlType::CCM_MCT_VELOCITY_CURRENT,
-                            (true, false) => CurrentControlledMotor_MotionControlType::CCM_MCT_VELOCITY,
-                            (false, true) => CurrentControlledMotor_MotionControlType::CCM_MCT_CURRENT,
-                            (false, false) => CurrentControlledMotor_MotionControlType::CCM_MCT_MOTOR_OFF,
+                            (true, true) => CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT,
+                            (true, false) => CcmMotionControlType::CCM_MCT_VELOCITY,
+                            (false, true) => CcmMotionControlType::CCM_MCT_CURRENT,
+                            (false, false) => CcmMotionControlType::CCM_MCT_MOTOR_OFF,
                         };
 
                         self.motor_fl.set_motion_type(wheel_motion_type);
@@ -390,7 +390,7 @@ impl<
                         self.motor_br.set_motion_type(wheel_motion_type);
                         self.motor_fr.set_motion_type(wheel_motion_type);
 
-                        let motion_enabled = wheel_motion_type != CurrentControlledMotor_MotionControlType::CCM_MCT_MOTOR_OFF;
+                        let motion_enabled = wheel_motion_type != CcmMotionControlType::CCM_MCT_MOTOR_OFF;
                         self.motor_fl.set_motion_enabled(motion_enabled);
                         self.motor_bl.set_motion_enabled(motion_enabled);
                         self.motor_br.set_motion_enabled(motion_enabled);
