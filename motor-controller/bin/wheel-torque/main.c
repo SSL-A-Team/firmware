@@ -43,8 +43,8 @@ static volatile ImgHash_t wheel_img_hash_struct = {
 };
 
 // communications data
-static CurrentControlledMotor_MotionCommand motor_command_packet;
-static CurrentControlledMotor_Telemetry response_packet;
+static CcmMotionCommand motor_command_packet;
+static CcmTelemetry response_packet;
 static uart_logging_status_rx_t uart_logging_status_receive;
 static uart_logging_status_tx_t uart_logging_status_send;
 static bool params_return_packet_requested = false;
@@ -121,8 +121,8 @@ int main() {
     setup();
 
     // zero out packet initial states
-    memset(&motor_command_packet, 0, sizeof(CurrentControlledMotor_Command));
-    memset(&response_packet, 0, sizeof(CurrentControlledMotor_Response));
+    memset(&motor_command_packet, 0, sizeof(CcmCommand));
+    memset(&response_packet, 0, sizeof(CcmResponse));
 
 #ifdef UART_ENABLED
     // Initialize UART and logging status.
@@ -298,12 +298,12 @@ static bool allow_motor_to_run() {
 
 static void read_packets() {
     // process all available packets
-    CurrentControlledMotor_Command command_packet;
+    CcmCommand command_packet;
     // memset(&command_packet, 0, sizeof(CurrentControlledMotor_Command));
 
     while (uart_can_read()) {
         // Read in the new packet data.
-        uart_read(&command_packet, sizeof(CurrentControlledMotor_Command));
+        uart_read(&command_packet, sizeof(CcmCommand));
 
         // If something goes wrong with the UART, we need to flag it.
         if (uart_rx_get_logging_status() != UART_LOGGING_OK) {
@@ -444,7 +444,7 @@ static void update_errors() {
 static uint8_t params_seq_ctr = 0;
 static uint8_t seq_ctr = 0;
 static void send_packets() {
-    CurrentControlledMotor_Response response_pkt;
+    CcmResponse response_pkt;
     response_pkt.type = CCM_RESP_TELEM;
     response_pkt.timestamp = time_local_epoch_s();
     response_pkt.seq_num = seq_ctr;  // intentionally overflow
@@ -456,7 +456,7 @@ static void send_packets() {
     // wait for it to finish.
     uart_wait_for_transmission();
     // takes ~270uS, mostly hardware DMA, but should be cleared out by now.
-    uart_transmit((uint8_t *) &response_pkt, sizeof(CurrentControlledMotor_Response));
+    uart_transmit((uint8_t *) &response_pkt, sizeof(CcmResponse));
     // Capture the status for the response packet / LED.
     if (uart_tx_get_logging_status() != UART_LOGGING_OK) {
         uart_logging_status_send = uart_tx_get_logging_status();
@@ -488,7 +488,7 @@ static void send_packets() {
         memcpy(response_pkt.data.params.value.val_u8x4, wheel_img_hash_struct.img_hash, sizeof(response_pkt.data.params.value));
 
         // send the packet
-        uart_transmit((uint8_t *) &response_pkt, sizeof(CurrentControlledMotor_Response));
+        uart_transmit((uint8_t *) &response_pkt, sizeof(CcmResponse));
 
         // TODO check if this works, uart_transmit doesn't block so status may be stale
         // Capture the status for the response packet / LED.

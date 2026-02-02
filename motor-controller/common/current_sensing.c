@@ -211,10 +211,10 @@ CS_Status_t currsen_setup(uint16_t motor_adc_ch)
     // used for current sampling/timing verification
     // ADC1->IER |= (ADC_IER_EOSEQIE);
     // ADC1->ISR |= (ADC_ISR_EOSEQ);
-    // NVIC_SetPriority(ADC1_IRQn, 6);
+    // NVIC_SetPriority(ADC1_IRQn, 1);
     // NVIC_EnableIRQ(ADC1_IRQn);
 
-    NVIC_SetPriority(DMA1_Ch1_IRQn, 5);
+    NVIC_SetPriority(DMA1_Ch1_IRQn, 2);
     NVIC_EnableIRQ(DMA1_Ch1_IRQn);
 
     return status;

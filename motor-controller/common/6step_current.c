@@ -75,6 +75,7 @@ static FixedPointS12F4_PiController_t current_controller;
 static volatile uint16_t measured_current = 0;
 static volatile uint16_t measured_vbus_voltage = 0;
 static volatile uint16_t last_voltage_command_mv = 0;
+static volatile int32_t dvdt_limited_voltage_command_mv = 0;
 
 ////////////////////////////////
 //  local data and functions  //
@@ -226,6 +227,7 @@ static void set_commutation_for_hall(uint8_t hall_value, bool estop);
 static void trigger_commutation();
 
 static void set_duty_cycle(uint16_t duty_cycle);
+static void apply_voltage(uint16_t voltage_mv);
 static void set_voltage(uint16_t voltage_mv);
 static void set_current(uint16_t current_ma);
 
@@ -273,7 +275,7 @@ static void pwm6step_setup_hall_timer() {
 	TIM2->ARR = UINT32_MAX;
 	TIM2->EGR = TIM_EGR_UG;
 
-    NVIC_SetPriority(TIM2_IRQn, 5);
+    NVIC_SetPriority(TIM2_IRQn, 0);
     NVIC_EnableIRQ(TIM2_IRQn);
 
     TIM2->CR1 |= TIM_CR1_CEN;
@@ -286,6 +288,7 @@ static void pwm6step_setup_hall_timer() {
 #define CCMR1_PHASE1_HIGH (TIM_CCMR1_OC1PE | TIM_CCMR1_OC1M_0 | TIM_CCMR1_OC1M_2)
 #define  CCER_PHASE1_HIGH (TIM_CCER_CC1E)
 #define CCMR1_PHASE1_PWM (TIM_CCMR1_OC1PE | TIM_CCMR1_OC1M_0 | TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1CE)
+// #define CCMR1_PHASE1_PWM (TIM_CCMR1_OC1PE | TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1CE)
 #define  CCER_PHASE1_PWM (TIM_CCER_CC1E | TIM_CCER_CC1NE)
 #define CCMR1_PHASE1_PWM_BRAKE (TIM_CCMR1_OC1PE | TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1CE)
 #define  CCER_PHASE1_PWM_BRAKE (TIM_CCER_CC1NE)
@@ -297,6 +300,7 @@ static void pwm6step_setup_hall_timer() {
 #define CCMR1_PHASE2_HIGH (TIM_CCMR1_OC2PE | TIM_CCMR1_OC2M_0 | TIM_CCMR1_OC2M_2)
 #define  CCER_PHASE2_HIGH (TIM_CCER_CC2E)
 #define CCMR1_PHASE2_PWM (TIM_CCMR1_OC2PE | TIM_CCMR1_OC2M_0 | TIM_CCMR1_OC2M_1 | TIM_CCMR1_OC2M_2 | TIM_CCMR1_OC2CE)
+// #define CCMR1_PHASE2_PWM (TIM_CCMR1_OC2PE | TIM_CCMR1_OC2M_1 | TIM_CCMR1_OC2M_2 | TIM_CCMR1_OC2CE)
 #define  CCER_PHASE2_PWM (TIM_CCER_CC2E | TIM_CCER_CC2NE)
 #define CCMR1_PHASE2_PWM_BRAKE (TIM_CCMR1_OC2PE | TIM_CCMR1_OC2M_1 | TIM_CCMR1_OC2M_2 | TIM_CCMR1_OC2CE)
 #define  CCER_PHASE2_PWM_BRAKE (TIM_CCER_CC2NE)
@@ -308,11 +312,13 @@ static void pwm6step_setup_hall_timer() {
 #define CCMR2_PHASE3_HIGH (TIM_CCMR2_OC3PE | TIM_CCMR2_OC3M_0 | TIM_CCMR2_OC3M_2)
 #define  CCER_PHASE3_HIGH (TIM_CCER_CC3E)
 #define CCMR2_PHASE3_PWM (TIM_CCMR2_OC3PE | TIM_CCMR2_OC3M_0 | TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC3M_2 | TIM_CCMR2_OC3CE)
+// #define CCMR2_PHASE3_PWM (TIM_CCMR2_OC3PE | TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC3M_2 | TIM_CCMR2_OC3CE)
 #define  CCER_PHASE3_PWM (TIM_CCER_CC3E | TIM_CCER_CC3NE)
 #define CCMR2_PHASE3_PWM_BRAKE (TIM_CCMR2_OC3PE | TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC3M_2 | TIM_CCMR2_OC3CE)
 #define  CCER_PHASE3_PWM_BRAKE (TIM_CCER_CC3NE)
 
-#define CCMR2_TIM4_ADC_TRIG (TIM_CCMR2_OC4PE | TIM_CCMR2_OC4M_2 | TIM_CCMR2_OC4M_1 | TIM_CCMR2_OC4CE);
+// #define CCMR2_TIM4_ADC_TRIG (TIM_CCMR2_OC4PE | TIM_CCMR2_OC4M_2 | TIM_CCMR2_OC4M_1 | TIM_CCMR2_OC4CE);
+#define CCMR2_TIM4_ADC_TRIG (TIM_CCMR2_OC4M_2 | TIM_CCMR2_OC4M_1);
 #define CCER_TIM4_ADC_TRIG (TIM_CCER_CC4E)
 
 /**
@@ -491,6 +497,26 @@ void DMA1_Channel1_IRQHandler() {
     // in that case, this callback is collecting logging data and averaging/update bus voltage for VOLTAGE mode
     if (motor_control_mode == CURRENT) {
         set_voltage(voltage_sp_mv);    
+    }
+
+    if (motor_control_mode == VOLTAGE || motor_control_mode == CURRENT) {
+        int32_t desired_dv = (int32_t) last_voltage_command_mv - dvdt_limited_voltage_command_mv;
+        // limit dvVt bandwidth to 8Khz (40kHz / 5)
+        // 25200 mV / 5 = 5040
+        if (desired_dv < -5040) {
+            desired_dv = -5040;
+        } else if (desired_dv > 5040) {
+            desired_dv = 5040;
+        }
+
+        dvdt_limited_voltage_command_mv += desired_dv;
+
+        // should never happen, but would be bad if it did
+        if (dvdt_limited_voltage_command_mv < 0) {
+            dvdt_limited_voltage_command_mv = 0;
+        }
+
+        apply_voltage((uint16_t) dvdt_limited_voltage_command_mv);
     }
 
     if ((adc_callback_ctr & 0x1) == 0) {
@@ -710,6 +736,7 @@ void pwm6step_set_direction(MotorDirection_t motor_direction) {
 
 static void set_duty_cycle(uint16_t duty_cycle) {
     current_duty_cycle = ARR_VALUE - MAP_MAX_DUTY_TO_ARR_DUTY(duty_cycle);
+    // current_duty_cycle = MAP_MAX_DUTY_TO_ARR_DUTY(duty_cycle);
 
     // set drive registers
     TIM1->CCR1 = current_duty_cycle;
@@ -752,6 +779,12 @@ void pwm6step_set_duty_cycle_f(float duty_cycle_pct) {
     pwm6step_set_duty_cycle((uint16_t) (duty_cycle_pct * (float) MAX_DUTYCYCLE_COMMAND));
 }
 
+static void apply_voltage(uint16_t voltage_mv) {
+    // scale from mv to max duty
+    uint32_t voltage_scaled_to_dc = (uint16_t) ((uint32_t) voltage_mv * MAX_DUTYCYCLE_COMMAND / (uint32_t) measured_vbus_voltage);
+    pwm6step_set_duty_cycle(voltage_scaled_to_dc);
+}
+
 static void set_voltage(uint16_t voltage_mv) {
     // we can't command more than the battery can currently offer
     // set it to the max we can offer (gets more effective PWM range
@@ -761,10 +794,6 @@ static void set_voltage(uint16_t voltage_mv) {
     }
 
     last_voltage_command_mv = voltage_mv;
-
-    // scale from mv to max duty
-    uint32_t voltage_scaled_to_dc = (uint16_t) ((uint32_t) voltage_mv * MAX_DUTYCYCLE_COMMAND / (uint32_t) measured_vbus_voltage);
-    pwm6step_set_duty_cycle(voltage_scaled_to_dc);
 }
 
 void pwm6step_set_voltage(int16_t voltage_mv) {
@@ -779,6 +808,12 @@ void pwm6step_set_voltage(int16_t voltage_mv) {
 
     uint16_t abs_voltage_mv = abs(voltage_mv);
     set_voltage(abs_voltage_mv);
+
+    if (TIM2->DIER == 0) {
+        // enable it and force an update
+        TIM2->DIER = TIM_DIER_UIE;
+        TIM2->EGR = TIM_EGR_UG;
+    }
 }
 
 static void set_current(uint16_t current_ma) {
@@ -798,6 +833,12 @@ void pwm6step_set_current(int16_t current_ma) {
 
     uint16_t abs_current_ma = abs(current_ma);
     set_current(abs_current_ma);
+
+    if (TIM2->DIER == 0) {
+        // enable it and force an update
+        TIM2->DIER = TIM_DIER_UIE;
+        TIM2->EGR = TIM_EGR_UG;
+    }
 }
 
 bool pwm6step_1ms_flag() {
