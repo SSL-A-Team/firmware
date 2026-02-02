@@ -225,7 +225,7 @@ impl<
                 (!cur_state.kicker_inop && self.last_kicker_telemetry.error_detected() == 0) as u32,
                 self.last_command.body_pose_control_enabled(),
                 self.last_command.body_twist_control_enabled(),
-                self.last_command.body_wrench_control_enabled(),
+                self.last_command.body_accel_control_enabled(),
                 self.last_command.wheel_vel_control_enabled(),
                 self.last_command.wheel_torque_control_enabled(),
                 Default::default(),
@@ -301,7 +301,7 @@ impl<
         let mut cmd = Vector3f::default();
         let mut body_pose_control_enabled = false;
         let mut body_twist_control_enabled = false;
-        let mut body_wrench_control_enabled = false;
+        let mut body_accel_control_enabled = false;
         let mut last_vision_pose_meas = Vector3f::default();
         let mut vision_update = false;
         let mut ticks_since_control_packet = 0;
@@ -371,7 +371,7 @@ impl<
                         );
                         body_pose_control_enabled = latest_control.body_pose_control_enabled() != 0;
                         body_twist_control_enabled = latest_control.body_twist_control_enabled() != 0;
-                        body_wrench_control_enabled = latest_control.body_wrench_control_enabled() != 0;
+                        body_accel_control_enabled = latest_control.body_accel_control_enabled() != 0;
                         last_vision_pose_meas = Vector3f::new(
                             latest_control.pose_x_linear_vision,
                             latest_control.pose_y_linear_vision,
@@ -462,7 +462,7 @@ impl<
                 cmd,
                 body_pose_control_enabled,
                 body_twist_control_enabled,
-                body_wrench_control_enabled,
+                body_accel_control_enabled,
                 last_vision_pose_meas,
                 vision_update,
                 wheel_vel_meas,
@@ -481,6 +481,8 @@ impl<
                 wheel_torque_cmd = robot_controller.get_wheel_torques();
                 wheel_vel_cmd = robot_controller.get_wheel_velocities();
             }
+            
+            ////////////////// TODO: Move this/delete this //////////////////////
 
             let TORQUE_CONSTANT = 0.0335; // Nm/A
             let mut wheel_ma = wheel_torque_cmd / TORQUE_CONSTANT * 1000.0;
@@ -515,6 +517,8 @@ impl<
                     wheel_ma.w as i16,
                 );
             }
+
+            /////////////////////////////////////////////////////////???????????
 
             self.motor_fl.set_setpoint(wheel_vel_cmd.x);
             self.motor_bl.set_setpoint(wheel_vel_cmd.y);

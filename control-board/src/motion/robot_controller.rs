@@ -27,17 +27,11 @@ pub fn clamp_vector_keep_dir<const D: usize>(
 pub struct BodyController {
     robot_model: RobotModel,
     body_twist_cmd: Vector3f,
-    body_wrench_cmd: Vector3f,
+    body_accel_cmd: Vector3f,
     wheel_vel_cmd: Vector4f,
     wheel_torque_cmd: Vector4f,
     debug_telemetry: ExtendedTelemetry,
     loop_period: Duration,
-}
-
-pub enum BodyControlType {
-    PoseControl(Vector3f),
-    TwistControl(Vector3f),
-    WrenchControl(Vector3f),
 }
 
 impl BodyController {
@@ -45,7 +39,7 @@ impl BodyController {
         BodyController {
             robot_model: RobotModel::new_from_constants(0.001),
             body_twist_cmd: Vector3f::default(),
-            body_wrench_cmd: Vector3f::default(),
+            body_accel_cmd: Vector3f::default(),
             wheel_vel_cmd: Vector4f::default(),
             wheel_torque_cmd: Vector4f::default(),
             debug_telemetry: Default::default(),
@@ -58,7 +52,7 @@ impl BodyController {
         body_cmd: Vector3f,
         body_pose_control_enabled: bool,
         body_twist_control_enabled: bool,
-        body_wrench_control_enabled: bool,
+        body_accel_control_enabled: bool,
         vision_pose_meas: Vector3f,
         vision_update: bool,
         wheel_vel_meas: Vector4f,
@@ -92,11 +86,11 @@ impl BodyController {
             self.compute_effort_pose_control(state_estimate, body_cmd);
         } else if body_twist_control_enabled {
             self.compute_effort_twist_control(state_estimate, body_cmd);
-        } else if body_wrench_control_enabled {
-            self.compute_effort_wrench_control(state_estimate, body_cmd);
+        } else if body_accel_control_enabled {
+            self.compute_effort_accel_control(state_estimate, body_cmd);
         } else {
             self.body_twist_cmd = Vector3f::default();
-            self.body_wrench_cmd = Vector3f::default();
+            self.body_accel_cmd = Vector3f::default();
             self.wheel_vel_cmd = Vector4f::default();
             self.wheel_torque_cmd = Vector4f::default();
         }
@@ -122,7 +116,7 @@ impl BodyController {
         // Copy values to telemetry
         self.debug_telemetry.set_body_pose_control_enabled(body_pose_control_enabled as u32);
         self.debug_telemetry.set_body_twist_control_enabled(body_twist_control_enabled as u32);
-        self.debug_telemetry.set_body_wrench_control_enabled(body_wrench_control_enabled as u32);
+        self.debug_telemetry.set_body_accel_control_enabled(body_accel_control_enabled as u32);
         self.debug_telemetry.set_vision_update(vision_update as u32);
         self.debug_telemetry.imu_gyro[2] = gyro_theta_meas;
         self.debug_telemetry.vision_pose.copy_from_slice(&vision_pose_meas.as_slice());
@@ -132,7 +126,7 @@ impl BodyController {
         self.debug_telemetry.kf_body_pose_estimate.copy_from_slice(&state_estimate.as_slice()[0..3]);
         self.debug_telemetry.kf_body_twist_estimate.copy_from_slice(&state_estimate.as_slice()[3..6]);
         self.debug_telemetry.body_twist_u.copy_from_slice(self.body_twist_cmd.as_slice());
-        self.debug_telemetry.body_wrench_u.copy_from_slice(self.body_wrench_cmd.as_slice());
+        self.debug_telemetry.body_accel_u.copy_from_slice(self.body_accel_cmd.as_slice());
         // self.debug_telemetry.wheel_velocity_u.copy_from_slice(self.wheel_vel_cmd.as_slice());
         // self.debug_telemetry.wheel_torque_u.copy_from_slice(self.wheel_torque_cmd.as_slice());
 
@@ -143,7 +137,7 @@ impl BodyController {
         // // Use control law adjusted value to predict the next cycle's state.
         // self.body_vel_filter.predict(&wheel_vel_output);
 
-        self.robot_model.kf_predict(self.body_wrench_cmd);
+        self.robot_model.kf_predict(self.body_accel_cmd);
 
         let kf_predict_time = Instant::now() - start;
         if trace {
@@ -170,7 +164,7 @@ impl BodyController {
 
         // These torques are discretized by the loop rate, but in an ideal world, it would be a continuous command update to reach the next state wheel velocities as theta changes. However, the loop rate should be fast enough that the error due to a change in theta during each control period should be negligible, and the individual wheel velocities are achieved by the next control update
         self.body_twist_cmd = global_twist_cmd;
-        self.body_wrench_cmd = global_accel_cmd;
+        self.body_accel_cmd = global_accel_cmd;
         self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * global_twist_cmd;
         self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * global_accel_cmd;
     }
@@ -186,18 +180,18 @@ impl BodyController {
         let global_accel_cmd = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_accel_at_t(traj, 0.0);
 
         self.body_twist_cmd = global_twist_cmd;
-        self.body_wrench_cmd = global_accel_cmd;
+        self.body_accel_cmd = global_accel_cmd;
         self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * global_twist_cmd;
         self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * global_accel_cmd;
     }
 
-    pub fn compute_effort_wrench_control(&mut self, state_estimate: Vector6f, target_wrench: Vector3f) {
-        let next_state = self.robot_model.a * state_estimate + self.robot_model.b * target_wrench;
+    pub fn compute_effort_accel_control(&mut self, state_estimate: Vector6f, target_accel: Vector3f) {
+        let next_state = self.robot_model.a * state_estimate + self.robot_model.b * target_accel;
         let global_twist_cmd = next_state.fixed_rows::<3>(3).into();
-        let global_accel_cmd = target_wrench;
+        let global_accel_cmd = target_accel;
 
         self.body_twist_cmd = global_twist_cmd;
-        self.body_wrench_cmd = global_accel_cmd;
+        self.body_accel_cmd = global_accel_cmd;
         self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * global_twist_cmd;
         self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * global_accel_cmd;
     }

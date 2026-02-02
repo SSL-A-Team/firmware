@@ -208,7 +208,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let emergency_stop = 0;
     let body_pose_control_enabled = 0;
     let body_twist_control_enabled = 0;
-    let body_wrench_control_enabled = 1;
+    let body_accel_control_enabled = 1;
     let wheel_vel_control_enabled = 0;
     let wheel_torque_control_enabled = 1;
     let vision_update = 0;
@@ -217,7 +217,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let play_song = 0;
 
     let mut control = BasicControl {
-        _bitfield_1: BasicControl::new_bitfield_1(request_shutdown, reboot_robot, game_state_in_stop, emergency_stop, body_pose_control_enabled, body_twist_control_enabled, body_wrench_control_enabled, wheel_vel_control_enabled, wheel_torque_control_enabled, vision_update, dribbler_multiplier, reserved, play_song),
+        _bitfield_1: BasicControl::new_bitfield_1(request_shutdown, reboot_robot, game_state_in_stop, emergency_stop, body_pose_control_enabled, body_twist_control_enabled, body_accel_control_enabled, wheel_vel_control_enabled, wheel_torque_control_enabled, vision_update, dribbler_multiplier, reserved, play_song),
         _bitfield_align_1: Default::default(),
         pose_x_linear_vision: 0.0,
         pose_y_linear_vision: 0.0,
