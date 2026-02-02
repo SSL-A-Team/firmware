@@ -246,10 +246,10 @@ impl<
         control_debug_telem.timestamp_us_lo = (timestamp.as_micros() & 0xFFFFFFFF) as u32;
         control_debug_telem.timestamp_us_hi = ((timestamp.as_micros() >> 32) & 0xFFFFFFFF) as u32;
 
-        // control_debug_telem.front_left_motor = self.motor_fl.get_latest_state();
-        // control_debug_telem.back_left_motor = self.motor_bl.get_latest_state();
-        // control_debug_telem.back_right_motor = self.motor_br.get_latest_state();
-        // control_debug_telem.front_right_motor = self.motor_fr.get_latest_state();
+        control_debug_telem.front_left_motor = self.motor_fl.get_latest_state();
+        control_debug_telem.back_left_motor = self.motor_bl.get_latest_state();
+        control_debug_telem.back_right_motor = self.motor_br.get_latest_state();
+        control_debug_telem.front_right_motor = self.motor_fr.get_latest_state();
 
         control_debug_telem.imu_accel[0] = self.last_accel_x_ms;
         control_debug_telem.imu_accel[1] = self.last_accel_y_ms;
