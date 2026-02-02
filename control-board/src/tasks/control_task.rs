@@ -164,56 +164,6 @@ impl<
         }
     }
 
-    fn do_control_update(
-        &mut self,
-        robot_controller: &mut BodyController,
-        cmd: Vector3f,
-        body_pose_control_enabled: bool,
-        body_twist_control_enabled: bool,
-        body_wrench_control_enabled: bool,
-        vision_pose_meas: Vector3f,
-        vision_update: bool,
-        gyro_rads_meas: f32,
-        trace: bool,
-    ) -> (Vector4f, Vector4f)
-/*
-            Provide the motion controller with the current wheel velocities
-            and torques from the appropriate sensors, then get a set of wheel
-            velocities to apply based on the controller's current state.
-         */ {
-
-        let wheel_vel_meas = Vector4f::new(
-            self.motor_fl.read_rads(),
-            self.motor_bl.read_rads(),
-            self.motor_br.read_rads(),
-            self.motor_fr.read_rads(),
-        );
-
-        // // torque values are computed on the spin but put in the current variable
-        // // TODO update this when packet/var names are updated to match software
-        // let wheel_torque_meas = Vector4f::new(
-        //     self.motor_fl.read_current_estimate_ma() as f32,
-        //     self.motor_bl.read_current_estimate_ma() as f32,
-        //     self.motor_br.read_current_estimate_ma() as f32,
-        //     self.motor_fr.read_current_estimate_ma() as f32,
-        // );
-
-        // TODO read from channel or something
-
-        robot_controller.control_update(
-            cmd,
-            body_pose_control_enabled,
-            body_twist_control_enabled,
-            body_wrench_control_enabled,
-            vision_pose_meas,
-            vision_update,
-            wheel_vel_meas,
-            gyro_rads_meas,
-            trace,
-        );
-        (robot_controller.get_wheel_velocities(), robot_controller.get_wheel_torques())
-    }
-
     fn send_motor_commands_and_telemetry(
         &mut self,
         seq_number: u16,
@@ -476,7 +426,12 @@ impl<
             let command_packet_process_time = Instant::now() - start;
             start = Instant::now();
 
-            // now we have setpoint r(t) in self.cmd
+            let wheel_vel_meas = Vector4f::new(
+                self.motor_fl.read_rads(),
+                self.motor_bl.read_rads(),
+                self.motor_br.read_rads(),
+                self.motor_fr.read_rads(),
+            );
 
             while let Some(gyro_rads) = self.gyro_subscriber.try_next_message_pure() {
                 self.last_gyro_rads = gyro_rads[2];
@@ -503,41 +458,34 @@ impl<
                 // TODO impl 1.5m/s clamping or something
             }
 
-            let (wheel_vel_cmd, wheel_torque_cmd) = if 
-                self.stop_wheels() || 
-                ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP
-            {
+            robot_controller.control_update(
+                cmd,
+                body_pose_control_enabled,
+                body_twist_control_enabled,
+                body_wrench_control_enabled,
+                last_vision_pose_meas,
+                vision_update,
+                wheel_vel_meas,
+                self.last_gyro_rads,
+                ticks_since_trace_print >= TICKS_TRACE_PRINT,
+            );
+            vision_update = false;  // reset vision update flag after use
+
+            let mut wheel_torque_cmd = Vector4f::default();
+            let mut wheel_vel_cmd = Vector4f::default();
+            if self.stop_wheels() || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
                 if ticks_since_trace_print >= TICKS_TRACE_PRINT {
                     defmt::warn!("control task - motor commands locked out");
                 }
-                cmd = Vector3f::default();
-                (Vector4f::default(), Vector4f::default())
             } else {
-                self.do_control_update(
-                    &mut robot_controller,
-                    cmd,
-                    body_pose_control_enabled,
-                    body_twist_control_enabled,
-                    body_wrench_control_enabled,
-                    last_vision_pose_meas,
-                    vision_update,
-                    self.last_gyro_rads,
-                    ticks_since_trace_print >= TICKS_TRACE_PRINT,
-                )
-            };
-            vision_update = false;  // reset vision update flag after use
-
-            let control_update_time = Instant::now() - start;
-            start = Instant::now();
-
-            // self.motor_fl.set_setpoint(wheel_vel_cmd.x);
-            // self.motor_bl.set_setpoint(wheel_vel_cmd.y);
-            // self.motor_br.set_setpoint(wheel_vel_cmd.z);
-            // self.motor_fr.set_setpoint(wheel_vel_cmd.w);
+                wheel_torque_cmd = robot_controller.get_wheel_torques();
+                wheel_vel_cmd = robot_controller.get_wheel_velocities();
+            }
 
             let TORQUE_CONSTANT = 0.0335; // Nm/A
             let mut wheel_ma = wheel_torque_cmd / TORQUE_CONSTANT * 1000.0;
 
+            // TODO: remove this safety clamp after testing
             if wheel_ma.x.abs() > 150.0 || wheel_ma.y.abs() > 150.0 || wheel_ma.z.abs() > 150.0 || wheel_ma.w.abs() > 150.0 {
                 defmt::warn!(
                     "high wheel current command detected: {} {} {} {}",
@@ -551,13 +499,28 @@ impl<
 
             if ticks_since_trace_print >= TICKS_TRACE_PRINT {
                 defmt::info!(
+                    "wheel vel cmd: {} {} {} {}",
+                    wheel_vel_cmd.x,
+                    wheel_vel_cmd.y,
+                    wheel_vel_cmd.z,
+                    wheel_vel_cmd.w,
+                );
+            }
+            if ticks_since_trace_print >= TICKS_TRACE_PRINT {
+                defmt::info!(
                     "wheel_ma cmd: {} {} {} {}",
                     wheel_ma.x as i16,
                     wheel_ma.y as i16,
                     wheel_ma.z as i16,
-                    wheel_ma.w as i16
+                    wheel_ma.w as i16,
                 );
             }
+
+            self.motor_fl.set_setpoint(wheel_vel_cmd.x);
+            self.motor_bl.set_setpoint(wheel_vel_cmd.y);
+            self.motor_br.set_setpoint(wheel_vel_cmd.z);
+            self.motor_fr.set_setpoint(wheel_vel_cmd.w);
+
             self.motor_fl.set_current_setpoint(wheel_ma.x as i16);
             self.motor_bl.set_current_setpoint(wheel_ma.y as i16);
             self.motor_br.set_current_setpoint(wheel_ma.z as i16);
@@ -567,22 +530,8 @@ impl<
             // self.motor_br.set_current_setpoint(0);
             // self.motor_fr.set_current_setpoint(0);
 
-            if ticks_since_trace_print >= TICKS_TRACE_PRINT {
-                defmt::trace!(
-                    "wheel vels: {} {} {} {}",
-                    self.motor_fl.read_rads(),
-                    self.motor_bl.read_rads(),
-                    self.motor_br.read_rads(),
-                    self.motor_fr.read_rads()
-                );
-                defmt::trace!(
-                    "wheel curr: {} {} {} {}",
-                    self.motor_fl.read_current_estimate_ma(),
-                    self.motor_bl.read_current_estimate_ma(),
-                    self.motor_br.read_current_estimate_ma(),
-                    self.motor_fr.read_current_estimate_ma()
-                );
-            }
+            let control_update_time = Instant::now() - start;
+            start = Instant::now();
 
             ///////////////////////////////////
             //  send commands and telemetry  //
@@ -600,10 +549,8 @@ impl<
             let channel_update_time = Instant::now() - start;
             start = Instant::now();
 
-            let loop_execution_time = Instant::now() - loop_start_time;
-
-            ticks_since_trace_print += 1;
-            if ticks_since_trace_print > TICKS_TRACE_PRINT {
+            let loop_execution_time_us = Instant::now().duration_since(loop_start_time).as_micros();
+            if ticks_since_trace_print > TICKS_TRACE_PRINT || loop_execution_time_us > 300 {
                 defmt::trace!(
                     "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
                     motor_packet_process_time.as_micros(),
@@ -611,20 +558,17 @@ impl<
                     control_update_time.as_micros(),
                     channel_update_time.as_micros(),
                 );
-                defmt::trace!("TOTAL CONTROL LOOP EXECUTION TIME: {} us", loop_execution_time.as_micros());
+                defmt::trace!("TOTAL CONTROL LOOP EXECUTION TIME: {} us", loop_execution_time_us);
+            }
+
+            if loop_execution_time_us > 300 {
+                defmt::warn!("control loop is taking >300us: {} us (it may be interrupted by higher priority tasks). This is >30% of an execution frame.", loop_execution_time_us);
+            }
+
+            if ticks_since_trace_print > TICKS_TRACE_PRINT {
                 ticks_since_trace_print = 0;
             }
-
-            if loop_execution_time.as_micros() > 300 {
-                defmt::trace!(
-                    "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
-                    motor_packet_process_time.as_micros(),
-                    command_packet_process_time.as_micros(),
-                    control_update_time.as_micros(),
-                    channel_update_time.as_micros(),
-                );
-                defmt::warn!("control loop is taking >300us: {} us (it may be interrupted by higher priority tasks). This is >30% of an execution frame.", loop_execution_time.as_micros());
-            }
+            ticks_since_trace_print += 1;
 
             last_loop_term_time = Instant::now();
             loop_rate_ticker.next().await;
