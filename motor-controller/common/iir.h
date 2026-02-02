@@ -6,6 +6,8 @@ typedef struct IIRFilter {
     float previous_value;
 } IIRFilter_t;
 
+float iir_filter_alpha_from_bw_rads(float bw_rads, float Ts);
+float iir_filter_alpha_from_bw_hz(float bw_hz, float Ts);
 float iir_filter_alpha_from_Tf(float Tf, float Ts);
 
 void iir_filter_init(IIRFilter_t *iir_filter, float alpha);

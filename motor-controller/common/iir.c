@@ -1,5 +1,21 @@
+#include <math.h>
 
 #include "iir.h"
+
+const float PI = 3.1415927f;
+
+float iir_filter_alpha_from_bw_rads(float bw_rads, float Ts) {
+    float sample_rate = 1.0f / Ts;
+    float wc = bw_rads / sample_rate; // wc is in radians/sample
+
+    float alpha = (cosf(wc) - sinf(wc) + 1.0f) / (cosf(wc) + sinf(wc) + 1.0f);
+
+    return alpha;
+}
+
+float iir_filter_alpha_from_bw_hz(float bw_hz, float Ts) {
+    return iir_filter_alpha_from_bw_rads(bw_hz * 2.0f * PI, Ts);
+}
 
 float iir_filter_alpha_from_Tf(float Tf, float Ts) {
     return (Tf / (Tf + Ts));

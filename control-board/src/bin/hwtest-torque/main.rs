@@ -192,7 +192,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     // ccm.set_motion_type(CcmMotionControlType::CCM_MCT_VOLTAGE_OPENLOOP);
     // ccm.set_setpoint(2500.0);
     ccm.set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
-    ccm.set_current_setpoint(200);
+    ccm.set_current_setpoint(0);
 
     ccm.set_telemetry_enabled(true);
     ccm.set_motion_enabled(true);
@@ -234,13 +234,13 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             ctr += 1;
         }
 
-        if curr_ctr > 2000 {
+        if curr_ctr > 20000 {
             curr_ctr = 0
-        } else if curr_ctr > 1000 {
-            ccm.set_current_setpoint(300);
+        } else if curr_ctr > 10000 {
+            ccm.set_current_setpoint(40);
             // ccm.set_setpoint(2500.0);
         } else {
-            ccm.set_current_setpoint(200);
+            ccm.set_current_setpoint(0);
             // ccm.set_setpoint(0.0);
         }
 

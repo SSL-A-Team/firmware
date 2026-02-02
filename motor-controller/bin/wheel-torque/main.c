@@ -55,6 +55,35 @@ static IIRFilter_t encoder_filter;
 // motor model
 static MotorModel_t df45_model;
 
+// joint velocity + current controller
+// static FixedPointS12F4_PiConstants_t vel_curvel_controller_constants = {
+//     // 1000 Hz bandwidth -> 6283 rads
+
+//     // .kP = 2123,
+//     // .kI = 910,
+
+//     // KNOWN GOOD
+//     .kP = 338 * 3,      // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
+//     .kI = 145 * 3,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910 
+//     .kI_max = 4095,  // S12F0
+//     .kI_min = -(4095),  // S12F0
+//     .anti_jitter_thresh = 0,
+//     .anti_jitter_thresh_inv = 0,
+// };
+
+// static FixedPointS12F4_PiController_t vel_curvel_controller;
+
+const PidConstants_t vel_velcur_controller_constants = {
+    .kP = 0.1f,
+    .kI = 0.0f,
+    .kD = 0.0f,
+    .kI_max = 0.0f,
+    .kI_min = 0.0f,
+};
+
+static Pid_t vel_velcur_controller;
+static float vel_cur_component = 0.0;
+
 // legacy velocity control model
 static GainScheduledPid_t vel_pid;
 const PidConstants_t vel_gains[3] = {
@@ -143,6 +172,7 @@ int main() {
     quadenc_reset_encoder_delta();
 
     // setup the velocity filter
+    // iir_filter_init(&encoder_filter, iir_filter_alpha_from_bw_hz(100.0f, VELOCITY_LOOP_RATE_S));
     iir_filter_init(&encoder_filter, iir_filter_alpha_from_Tf(ENCODER_IIR_TF_MS, VELOCITY_LOOP_RATE_MS));
 
     ////////////////////////////////////
@@ -210,6 +240,8 @@ int main() {
         IWDG->KR = 0x0000AAAA; // feed the watchdog
     }
 
+    pid_initialize(&vel_velcur_controller, &vel_velcur_controller_constants);
+
     // Turn off Red/Yellow LED after booting.
     turn_off_red_led();
     turn_off_yellow_led();
@@ -264,9 +296,13 @@ int main() {
 
                 break;
             case CCM_MCT_VELOCITY_CURRENT:
-                pwm6step_set_current(motor_command_packet.current_setpoint_ma);
-
                 do_vel_cur_control();
+
+                // add the feedforward current to the velocity PID output
+                int16_t motor_current = motor_command_packet.current_setpoint_ma + (int16_t) vel_cur_component;
+
+                pwm6step_set_current(motor_current);
+
                 break;
         }
 
@@ -357,7 +393,7 @@ static void update_wheel_vel_est() {
 }
 
 static void do_vel_cur_control() {
-
+    vel_cur_component = pid_calculate(&vel_velcur_controller, 0, response_packet.velocity_telemetry.wheel_vel_rads, VELOCITY_LOOP_RATE_S);
 }
 
 static float do_vel_control() {
