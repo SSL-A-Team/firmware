@@ -254,8 +254,8 @@ impl<
         control_debug_telem.imu_accel[0] = self.last_accel_x_ms;
         control_debug_telem.imu_accel[1] = self.last_accel_y_ms;
 
-        control_debug_telem.kicker_status = self.last_kicker_telemetry;
-        control_debug_telem.power_status = self.last_power_telemetry;
+        // control_debug_telem.kicker_status = self.last_kicker_telemetry;
+        // control_debug_telem.power_status = self.last_power_telemetry;
 
         let control_debug_telem = TelemetryPacket::Extended(control_debug_telem);
         self.ticks_since_extended_telem += 1;
