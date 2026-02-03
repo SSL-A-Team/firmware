@@ -150,8 +150,8 @@ int main() {
     setup();
 
     // zero out packet initial states
-    memset(&motor_command_packet, 0, sizeof(CcmCommand));
-    memset(&response_packet, 0, sizeof(CcmResponse));
+    memset(&motor_command_packet, 0, sizeof(CcmMotionCommand));
+    memset(&response_packet, 0, sizeof(CcmTelemetry));
 
 #ifdef UART_ENABLED
     // Initialize UART and logging status.
@@ -172,8 +172,8 @@ int main() {
     quadenc_reset_encoder_delta();
 
     // setup the velocity filter
-    // iir_filter_init(&encoder_filter, iir_filter_alpha_from_bw_hz(100.0f, VELOCITY_LOOP_RATE_S));
-    iir_filter_init(&encoder_filter, iir_filter_alpha_from_Tf(ENCODER_IIR_TF_MS, VELOCITY_LOOP_RATE_MS));
+    iir_filter_init(&encoder_filter, iir_filter_alpha_from_bw_hz(200.0f, VELOCITY_LOOP_RATE_S));
+    // iir_filter_init(&encoder_filter, iir_filter_alpha_from_Tf(ENCODER_IIR_TF_MS, VELOCITY_LOOP_RATE_MS));
 
     ////////////////////////////////////
     //  Current Sense Initialization  //
