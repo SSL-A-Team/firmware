@@ -116,10 +116,10 @@ int main() {
 
     // setup the velocity filter
     IIRFilter_t encoder_filter;
-    iir_filter_init(&encoder_filter, iir_filter_alpha_from_Tf(ENCODER_IIR_TF_MS, VELOCITY_LOOP_RATE_MS));
+    iir_filter_init(&encoder_filter, iir_filter_alpha_from_cutoff_hz(200.0f, VELOCITY_LOOP_RATE_MS));
 
     IIRFilter_t torque_filter;
-    iir_filter_init(&torque_filter, iir_filter_alpha_from_Tf(TORQUE_IIR_TF_MS, TORQUE_LOOP_RATE_MS));
+    iir_filter_init(&torque_filter, iir_filter_alpha_from_cutoff_hz(5000.0f, TORQUE_LOOP_RATE_MS));
 
     // set the default command mode to open loop (no PID)
     MotionCommandType motion_control_type = OPEN_LOOP;
