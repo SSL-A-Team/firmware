@@ -283,7 +283,7 @@ int main() {
                 pwm6step_set_duty_cycle_f(motor_command_packet.setpoint);
                 break;
             case CCM_MCT_VOLTAGE_OPENLOOP:
-                pwm6step_set_voltage((int32_t) motor_command_packet.setpoint);
+                pwm6step_set_voltage((int16_t) motor_command_packet.setpoint);
                 break;
             case CCM_MCT_CURRENT:
                 pwm6step_set_current(motor_command_packet.current_setpoint_ma);
