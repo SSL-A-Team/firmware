@@ -74,11 +74,11 @@ static MotorModel_t df45_model;
 // static FixedPointS12F4_PiController_t vel_curvel_controller;
 
 const PidConstants_t vel_velcur_controller_constants = {
-    .kP = 0.1f,
-    .kI = 0.0f,
+    .kP = 10.0f,
+    .kI = 5.0f,
     .kD = 0.0f,
-    .kI_max = 0.0f,
-    .kI_min = 0.0f,
+    .kI_max = 100.0f,
+    .kI_min = -100.0f,
 };
 
 static Pid_t vel_velcur_controller;
@@ -299,6 +299,7 @@ int main() {
 
                 // add the feedforward current to the velocity PID output
                 int16_t motor_current = motor_command_packet.current_setpoint_ma + (int16_t) vel_cur_component;
+                response_packet.current_telemetry.current_setpoint_ma = motor_current;
 
                 pwm6step_set_current(motor_current);
 
@@ -392,7 +393,7 @@ static void update_wheel_vel_est() {
 }
 
 static void do_vel_cur_control() {
-    vel_cur_component = pid_calculate(&vel_velcur_controller, 0, response_packet.velocity_telemetry.wheel_vel_rads, VELOCITY_LOOP_RATE_S);
+    vel_cur_component = pid_calculate(&vel_velcur_controller, motor_command_packet.setpoint, response_packet.velocity_telemetry.wheel_vel_rads, VELOCITY_LOOP_RATE_S);
 }
 
 static float do_vel_control() {
