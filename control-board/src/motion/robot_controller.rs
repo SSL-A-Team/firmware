@@ -78,7 +78,20 @@ impl BodyController {
         let kf_update_time = Instant::now() - start;
         start = Instant::now();
 
-        let state_estimate = self.robot_model.x;
+        let mut state_estimate = self.robot_model.x;
+        ///////////////// REMOVE AFTER TESTING ////////////////////////
+        // state_estimate.z = 0.0;
+        //////////////////////////////////////////////////////////////
+        if trace {
+            defmt::info!("State Estimate: [{}, {}, {}, {}, {}, {}]",
+                state_estimate.x,
+                state_estimate.y,
+                state_estimate.z,
+                state_estimate.w,
+                state_estimate.a,
+                state_estimate.b,
+            );
+        }
         // defmt::info!("State estimate pose: {}, {}, {}", state_estimate.x, state_estimate.y, state_estimate.z);
         // defmt::info!("State estimate twist: {}, {}, {}", state_estimate.w, state_estimate.a, state_estimate.b);
 
@@ -103,9 +116,9 @@ impl BodyController {
         // Safety checks on commands
         let max_wheel_vel = 30.0; // rad/s
         if self.wheel_vel_cmd.x.abs() > max_wheel_vel || self.wheel_vel_cmd.y.abs() > max_wheel_vel || self.wheel_vel_cmd.z.abs() > max_wheel_vel || self.wheel_vel_cmd.w.abs() > max_wheel_vel {
-            defmt::warn!("Wheel vel cmd too high: {}, {}, {}, {}", self.wheel_vel_cmd.x, self.wheel_vel_cmd.y, self.wheel_vel_cmd.z, self.wheel_vel_cmd.w);
-            self.wheel_vel_cmd = Vector4f::default();
-            self.wheel_torque_cmd = Vector4f::default();
+            // defmt::warn!("Wheel vel cmd too high: {}, {}, {}, {}", self.wheel_vel_cmd.x, self.wheel_vel_cmd.y, self.wheel_vel_cmd.z, self.wheel_vel_cmd.w);
+            // self.wheel_vel_cmd = Vector4f::default();
+            // self.wheel_torque_cmd = Vector4f::default();
         }
         if self.wheel_torque_cmd.x > 1.0 || self.wheel_torque_cmd.y > 1.0 || self.wheel_torque_cmd.z > 1.0 || self.wheel_torque_cmd.w > 1.0 {
             defmt::warn!("Wheel torque cmd too high: {}, {}, {}, {}", self.wheel_torque_cmd.x, self.wheel_torque_cmd.y, self.wheel_torque_cmd.z, self.wheel_torque_cmd.w);

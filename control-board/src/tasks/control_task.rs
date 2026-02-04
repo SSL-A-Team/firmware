@@ -167,6 +167,7 @@ impl<
     fn send_motor_commands_and_telemetry(
         &mut self,
         seq_number: u16,
+        timestamp_us: u64,
         robot_controller: &mut BodyController,
         cur_state: RobotState,
     ) {
@@ -242,9 +243,8 @@ impl<
 
         let mut control_debug_telem = robot_controller.get_control_debug_telem();
 
-        let timestamp = Instant::now();
-        control_debug_telem.timestamp_us_lo = (timestamp.as_micros() & 0xFFFFFFFF) as u32;
-        control_debug_telem.timestamp_us_hi = ((timestamp.as_micros() >> 32) & 0xFFFFFFFF) as u32;
+        control_debug_telem.timestamp_us_lo = (timestamp_us & 0xFFFFFFFF) as u32;
+        control_debug_telem.timestamp_us_hi = ((timestamp_us >> 32) & 0xFFFFFFFF) as u32;
 
         control_debug_telem.front_left_motor = self.motor_fl.get_latest_state();
         control_debug_telem.back_left_motor = self.motor_bl.get_latest_state();
@@ -310,14 +310,17 @@ impl<
         let mut last_frequency_measurement_time = Instant::now();
         //////////////////////////////////////////////////////////////////////////////
 
+        let mut last_loop_start_time = Instant::now();
         let mut last_loop_term_time = Instant::now();
         let mut ticks_since_trace_print = 0;
+        let mut t_us_at_loop_start = 0u64;
 
         loop {
-            let loop_start_time = Instant::now();
-            let mut start = loop_start_time;
-            let loop_invocation_dead_time = loop_start_time - last_loop_term_time;
-            if loop_start_time - last_loop_term_time > Duration::from_micros(1100) {
+            t_us_at_loop_start += (Instant::now() - last_loop_start_time).as_micros() as u64;
+            let last_loop_start_time = Instant::now();
+            let mut start = last_loop_start_time;
+            let loop_invocation_dead_time = last_loop_start_time - last_loop_term_time;
+            if loop_invocation_dead_time > Duration::from_micros(1100) {
                 defmt::warn!("control loop scheuling lagged. Expected ~1ms between loop invocations, but got {:?}us", loop_invocation_dead_time.as_micros());
             }
 
@@ -479,8 +482,9 @@ impl<
             let TORQUE_CONSTANT = 0.0335; // Nm/A
             let mut wheel_ma = wheel_torque_cmd / TORQUE_CONSTANT * 1000.0;
 
+            let MAX_CURRENT_MA = 300.0; // mA
             // TODO: remove this safety clamp after testing
-            if wheel_ma.x.abs() > 150.0 || wheel_ma.y.abs() > 150.0 || wheel_ma.z.abs() > 150.0 || wheel_ma.w.abs() > 150.0 {
+            if wheel_ma.x.abs() > MAX_CURRENT_MA || wheel_ma.y.abs() > MAX_CURRENT_MA || wheel_ma.z.abs() > MAX_CURRENT_MA || wheel_ma.w.abs() > MAX_CURRENT_MA {
                 defmt::warn!(
                     "high wheel current command detected: {} {} {} {}",
                     wheel_ma.x as i16,
@@ -533,8 +537,10 @@ impl<
             //  send commands and telemetry  //
             ///////////////////////////////////
 
+            let timestamp_us = t_us_at_loop_start + (Instant::now() - last_loop_start_time).as_micros() as u64;
             self.send_motor_commands_and_telemetry(
                 ctrl_seq_number,
+                timestamp_us,
                 &mut robot_controller,
                 cur_state,
             );
@@ -545,7 +551,7 @@ impl<
             let channel_update_time = Instant::now() - start;
             start = Instant::now();
 
-            let loop_execution_time_us = Instant::now().duration_since(loop_start_time).as_micros();
+            let loop_execution_time_us = Instant::now().duration_since(last_loop_start_time).as_micros();
             if ticks_since_trace_print > TICKS_TRACE_PRINT || loop_execution_time_us > 300 {
                 defmt::trace!(
                     "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
