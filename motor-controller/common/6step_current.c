@@ -60,8 +60,8 @@ static FixedPointS12F4_PiConstants_t current_controller_constants = {
     // .kI = 910,
 
     // KNOWN GOOD
-    .kP = 338 * 3,      // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
-    .kI = 145 * 3,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910 
+    .kP = 338 * 5,      // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
+    .kI = 145 * 5,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910 
     .kI_max = 4095,  // S12F0
     .kI_min = -(4095),  // S12F0
     .anti_jitter_thresh = 0,

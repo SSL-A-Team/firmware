@@ -11,10 +11,10 @@ from packet_decoder import HeaderParser, PacketDecoder
 ###############################################################################
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Decode CurrentControlledMotor_Telemetry packets from control board")
+    parser = argparse.ArgumentParser(description="Decode CcmTelemetry packets from control board")
     parser.add_argument("--output", "-o", type=str, help="Output file to save decoded packets (JSON format). If not specified, packets are printed to console.")
-    parser.add_argument("--struct", "-s", type=str, default="CurrentControlledMotor_Telemetry",
-                       help="Struct name to decode (default: CurrentControlledMotor_Telemetry)")
+    parser.add_argument("--struct", "-s", type=str, default="CcmTelemetry",
+                       help="Struct name to decode (default: CcmTelemetry)")
     return parser.parse_args()
 
 ###############################################################################
