@@ -194,21 +194,24 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p
     );
 
-    let loop_period = embassy_time::Duration::from_millis(1);
+    let loop_period = embassy_time::Duration::from_millis(10);  // 100 Hz loop
     let mut loop_rate_ticker = Ticker::every(loop_period);
 
-    // let w = 2.0 * PI / 3.0; // 3 second period
+    let w = 2.0 * PI / 3.0; // 3 second period
     // // let a_angular = 5.0;  // rad/s amplitude
     // let a_angular = 5.0;  // rad/s^2 amplitude
-    // let a_linear = 0.5;  // m/s amplitude
+    // let a_linear = 0.05;  // m/s amplitude
+    let a_linear = 0.025;  // m/s^2 amplitude
 
     let request_shutdown = 0;
     let reboot_robot = 0;
     let game_state_in_stop = 0;
     let emergency_stop = 0;
     let body_pose_control_enabled = 0;
+    // let body_pose_control_enabled = 1;
     let body_twist_control_enabled = 0;
     let body_accel_control_enabled = 1;
+    // let body_accel_control_enabled = 0;
     let wheel_vel_control_enabled = 0;
     let wheel_torque_control_enabled = 1;
     let vision_update = 0;
@@ -230,7 +233,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         kick_request: KickRequest::KR_DISABLE,
     };
 
-    Timer::after_secs(3).await;
+    Timer::after_secs(5).await;
 
     let mut last_loop_start = Instant::now();
     let mut t = 0.0;
@@ -239,14 +242,14 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         last_loop_start = Instant::now();
 
 
-        if t < 0.5 {
-            control.x_linear_cmd = 0.5;
-        } else {
-            control.x_linear_cmd = 0.0;
-        }
+        // if t < 5. {
+        //     control.x_linear_cmd = 0.01;
+        // } else {
+        //     control.x_linear_cmd = 0.0;
+        // }
 
         // control.z_angular_cmd = a_angular * sinf(w * t);
-        // control.x_linear_cmd = a_linear * cosf(w * t);
+        control.x_linear_cmd = a_linear * cosf(w * t);
         // control.y_linear_cmd = a_linear * sinf(w * t);
 
         // Extract any vision updates
