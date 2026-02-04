@@ -476,7 +476,7 @@ impl<
         return (acc / self.current_state.current_telemetry.current_samples_ma.len() as u32) as u16
     }
 
-    pub fn read_current_setpoint_ma(&self) -> u16 {
+    pub fn read_current_setpoint_ma(&self) -> i16 {
         return self.current_state.current_telemetry.current_setpoint_ma;
     }
 
