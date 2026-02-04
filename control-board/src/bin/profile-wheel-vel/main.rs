@@ -189,7 +189,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     }
 
 
-    // ccm.set_motion_type(CcmMotionControlType::CCM_MCT_DUTY_OPENLOOP);
     // ccm.set_motion_type(CcmMotionControlType::CCM_MCT_VOLTAGE_OPENLOOP);
     // ccm.set_setpoint(2500.0);
     ccm.set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
@@ -219,8 +218,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         let w = ccm.read_rads();
         let Vm = ccm.read_vmotor_voltage_mv();
 
-        let Vsp = ccm.read_vel_setpoint();
-
         let cur_seq_num = ccm.get_latest_state_seqnum();
         if cur_seq_num != last_seq_num {
             torque_data_pub.publish_immediate(ccm.get_latest_state());
@@ -232,18 +229,16 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         if ctr > 19 {
             defmt::info!("motion control type: {}", ccm.get_latest_state().motion_control_type);
             defmt::info!("vrail: {}, Isp: {}, Iref: {}, vel: {}, Vmv: {}", v, i_sp, i_ref, w, Vm);
-            // defmt::info!("Vsp: {}, Vref: {}", Vsp, w);
             ctr = 0;
         } else {
             ctr += 1;
         }
 
-        if curr_ctr > 5000 {
+        if curr_ctr > 20000 {
             curr_ctr = 0
-        } else if curr_ctr > 2500 {
-            ccm.set_current_setpoint(-40);
-            // ccm.set_setpoint(-2500.0);
-            // ccm.set_setpoint(-0.1);
+        } else if curr_ctr > 10000 {
+            ccm.set_current_setpoint(40);
+            // ccm.set_setpoint(2500.0);
         } else {
             ccm.set_current_setpoint(0);
             // ccm.set_setpoint(0.0);
@@ -267,9 +262,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
         // ccm.set_setpoint(mv_cmd);
 
-        if ctr % 2 == 0 {
-            ccm.send_motion_command();
-        }
+        ccm.send_motion_command();
 
         ticker.next().await;
     }

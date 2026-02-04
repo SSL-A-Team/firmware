@@ -60,8 +60,8 @@ static FixedPointS12F4_PiConstants_t current_controller_constants = {
     // .kI = 910,
 
     // KNOWN GOOD
-    .kP = 338 * 3,      // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
-    .kI = 145 * 3,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910 
+    .kP = 338 * 5,      // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
+    .kI = 145 * 5,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910 
     .kI_max = 4095,  // S12F0
     .kI_min = -(4095),  // S12F0
     .anti_jitter_thresh = 0,
@@ -500,7 +500,7 @@ void DMA1_Channel1_IRQHandler() {
     }
 
     if (motor_control_mode == VOLTAGE || motor_control_mode == CURRENT) {
-        int32_t desired_dv = (int32_t) last_voltage_command_mv - dvdt_limited_voltage_command_mv;
+        int32_t desired_dv = ((int32_t) last_voltage_command_mv) - dvdt_limited_voltage_command_mv;
         // limit dvVt bandwidth to 8Khz (40kHz / 5)
         // 25200 mV / 5 = 5040
         if (desired_dv < -5040) {
@@ -782,7 +782,7 @@ void pwm6step_set_duty_cycle_f(float duty_cycle_pct) {
 static void apply_voltage(uint16_t voltage_mv) {
     // scale from mv to max duty
     uint32_t voltage_scaled_to_dc = (uint16_t) ((uint32_t) voltage_mv * MAX_DUTYCYCLE_COMMAND / (uint32_t) measured_vbus_voltage);
-    pwm6step_set_duty_cycle(voltage_scaled_to_dc);
+    set_duty_cycle(voltage_scaled_to_dc);
 }
 
 static void set_voltage(uint16_t voltage_mv) {
@@ -806,7 +806,7 @@ void pwm6step_set_voltage(int16_t voltage_mv) {
     // public function was called, set control mode to voltage
     motor_control_mode = VOLTAGE;
 
-    uint16_t abs_voltage_mv = abs(voltage_mv);
+    uint16_t abs_voltage_mv = (uint16_t) abs((int) voltage_mv);
     set_voltage(abs_voltage_mv);
 
     if (TIM2->DIER == 0) {
@@ -831,7 +831,7 @@ void pwm6step_set_current(int16_t current_ma) {
 
     motor_control_mode = CURRENT;
 
-    uint16_t abs_current_ma = abs(current_ma);
+    uint16_t abs_current_ma = (uint16_t) abs((int) current_ma);
     set_current(abs_current_ma);
 
     if (TIM2->DIER == 0) {

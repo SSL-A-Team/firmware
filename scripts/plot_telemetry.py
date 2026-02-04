@@ -171,56 +171,41 @@ def plot_current_samples(packets, output_file=None, style="default"):
     SAMPLE_PERIOD_US = 50  # 50 microseconds between samples
     SAMPLE_PERIOD_S = SAMPLE_PERIOD_US * 1e-6  # Convert to seconds
 
-    # Collect all samples with their absolute times
+    # Collect all samples with constantly increasing time from 0
     all_times = []
     all_values = []
+    current_time = 0.0  # Start at 0 seconds
 
     for packet in packets:
         decoded = packet.get('decoded', {})
         current_telemetry = decoded.get('current_telemetry', {})
         current_samples = current_telemetry.get('current_samples_ma')
-        timestamp_str = packet.get('timestamp')
 
-        if current_samples is None or timestamp_str is None:
+        if current_samples is None:
             continue
-
-        # Parse timestamp
-        try:
-            ts = datetime.fromisoformat(timestamp_str)
-        except:
-            continue
-
-        # Convert to seconds since epoch
-        packet_time = ts.timestamp()
 
         # Number of samples
         n_samples = len(current_samples)
 
-        # Create time array: last sample is at packet_time, work backwards
-        # times[i] = packet_time - (n_samples - 1 - i) * SAMPLE_PERIOD_S
-        sample_times = packet_time - np.arange(n_samples - 1, -1, -1) * SAMPLE_PERIOD_S
+        # Generate times: start from current_time, increment by SAMPLE_PERIOD_S
+        sample_times = current_time + np.arange(n_samples) * SAMPLE_PERIOD_S
 
         all_times.extend(sample_times)
         all_values.extend(current_samples)
+
+        # Update current time for next packet
+        current_time += n_samples * SAMPLE_PERIOD_S
 
     if not all_times:
         print("No current_samples_ma data found in packets")
         return
 
-    # Convert to numpy arrays and sort by time
+    # Convert to numpy arrays
     all_times = np.array(all_times)
     all_values = np.array(all_values)
 
-    # Sort by time (should already be mostly sorted, but ensure it)
-    sort_idx = np.argsort(all_times)
-    all_times = all_times[sort_idx]
-    all_values = all_values[sort_idx]
-
-    # Convert to relative time (seconds from first sample)
-    relative_times = all_times - all_times.min()
-
     # Plot as single continuous line
-    ax.plot(relative_times, all_values, linewidth=0.8, alpha=0.8)
+    ax.plot(all_times, all_values, linewidth=0.8, alpha=0.8)
 
     ax.set_xlabel('Time (seconds)', fontsize=12)
     ax.set_ylabel('Current (mA)', fontsize=12)
