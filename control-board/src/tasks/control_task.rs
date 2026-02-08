@@ -482,7 +482,7 @@ impl<
             let TORQUE_CONSTANT = 0.0335; // Nm/A
             let mut wheel_ma = wheel_torque_cmd / TORQUE_CONSTANT * 1000.0;
 
-            let MAX_CURRENT_MA = 300.0; // mA
+            let MAX_CURRENT_MA = 750.0; // mA
             // TODO: remove this safety clamp after testing
             if wheel_ma.x.abs() > MAX_CURRENT_MA || wheel_ma.y.abs() > MAX_CURRENT_MA || wheel_ma.z.abs() > MAX_CURRENT_MA || wheel_ma.w.abs() > MAX_CURRENT_MA {
                 defmt::warn!(
