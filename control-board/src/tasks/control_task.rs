@@ -317,7 +317,7 @@ impl<
 
         loop {
             t_us_at_loop_start += (Instant::now() - last_loop_start_time).as_micros() as u64;
-            let last_loop_start_time = Instant::now();
+            last_loop_start_time = Instant::now();
             let mut start = last_loop_start_time;
             let loop_invocation_dead_time = last_loop_start_time - last_loop_term_time;
             if loop_invocation_dead_time > Duration::from_micros(1100) {
