@@ -257,9 +257,11 @@ impl<
         // control_debug_telem.kicker_status = self.last_kicker_telemetry;
         // control_debug_telem.power_status = self.last_power_telemetry;
 
+        // Send extended telemetry if vision update was received, or if the extended telemetry interval has elapsed
+        let vision_update = control_debug_telem.vision_update() != 0;
         let control_debug_telem = TelemetryPacket::Extended(control_debug_telem);
         self.ticks_since_extended_telem += 1;
-        if cur_state.radio_bridge_ok && self.ticks_since_extended_telem >= TICKS_EXTENDED_TELEM_INTERVAL {
+        if cur_state.radio_bridge_ok && (self.ticks_since_extended_telem >= TICKS_EXTENDED_TELEM_INTERVAL || vision_update) {
             self.telemetry_publisher
                 .publish_immediate(control_debug_telem);
             self.ticks_since_extended_telem = 0;
