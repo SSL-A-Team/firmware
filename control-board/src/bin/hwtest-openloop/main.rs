@@ -242,14 +242,14 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         last_loop_start = Instant::now();
 
 
-        // if t < 5. {
-        //     control.x_linear_cmd = 0.01;
-        // } else {
-        //     control.x_linear_cmd = 0.0;
-        // }
+        if t < 5. {
+            control.x_linear_cmd = 0.02;
+        } else {
+            control.x_linear_cmd = 0.0;
+        }
 
         // control.z_angular_cmd = a_angular * sinf(w * t);
-        control.x_linear_cmd = a_linear * cosf(w * t);
+        // control.x_linear_cmd = a_linear * cosf(w * t);
         // control.y_linear_cmd = a_linear * sinf(w * t);
 
         // Extract any vision updates

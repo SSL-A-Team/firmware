@@ -1,7 +1,6 @@
 use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::{
-    ParameterCommandCode::*,
-    ParameterName,
+    ParameterCommandCode::*, ParameterDataFormat, ParameterName
 };
 use ateam_controls::{Vector3f, Vector4f, Vector6f, Vector8f};
 use ateam_controls::robot_model::RobotModel;
@@ -37,7 +36,7 @@ pub struct BodyController {
 impl BodyController {
     pub fn new(loop_period: Duration) -> BodyController {
         BodyController {
-            robot_model: RobotModel::new_from_constants(0.001),
+            robot_model: RobotModel::new_from_default_params(0.001),
             body_twist_cmd: Vector3f::default(),
             body_accel_cmd: Vector3f::default(),
             wheel_vel_cmd: Vector4f::default(),
@@ -227,6 +226,7 @@ impl ParameterInterface for BodyController {
 
     fn has_name(&self, param_name: ParameterName::Type) -> bool {
         return match param_name {
+            ParameterName::ENCODER_STD => true,
             _ => false,
         };
     }
@@ -255,6 +255,12 @@ impl ParameterInterface for BodyController {
 
         if param_cmd.command_code == PCC_READ {
             match param_cmd.parameter_name {
+                ParameterName::ENCODER_STD => {
+                    reply_cmd.data_format = ParameterDataFormat::F32;
+                    reply_cmd.data.f32_ = self.robot_model.kf_params.measurement_noise_std_encoder_vel_angular;
+                    reply_cmd.command_code = PCC_ACK;
+                    return Ok(reply_cmd);
+                },
                 _ => {
                     defmt::debug!("unimplemented key read in RobotController");
                     reply_cmd.command_code = PCC_NACK_INVALID_NAME;
@@ -263,6 +269,18 @@ impl ParameterInterface for BodyController {
             }
         } else if param_cmd.command_code == PCC_WRITE {
             match param_cmd.parameter_name {
+                ParameterName::ENCODER_STD => {
+                    if param_cmd.data_format == ParameterDataFormat::F32 {
+                        let mut kf_params = self.robot_model.kf_params;
+                        kf_params.measurement_noise_std_encoder_vel_angular = unsafe { param_cmd.data.f32_ };
+                        self.robot_model.update_kf_params(kf_params);
+                        reply_cmd.data.f32_ = self.robot_model.kf_params.measurement_noise_std_encoder_vel_angular;
+                        reply_cmd.command_code = PCC_ACK;
+                    } else {
+                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                        return Err(reply_cmd);
+                    }
+                },
                 _ => {
                     defmt::debug!("unimplemented key write in RobotController");
                     reply_cmd.command_code = PCC_NACK_INVALID_NAME;
