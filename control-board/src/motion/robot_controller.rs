@@ -226,7 +226,7 @@ impl ParameterInterface for BodyController {
 
     fn has_name(&self, param_name: ParameterName::Type) -> bool {
         return match param_name {
-            ParameterName::ENCODER_STD => true,
+            ParameterName::KF_ENCODER_STD_ANGULAR => true,
             _ => false,
         };
     }
@@ -255,7 +255,8 @@ impl ParameterInterface for BodyController {
 
         if param_cmd.command_code == PCC_READ {
             match param_cmd.parameter_name {
-                ParameterName::ENCODER_STD => {
+                ParameterName::KF_ENCODER_STD_ANGULAR => {
+                    defmt::info!("Reading KF_ENCODER_STD_ANGULAR: {}", self.robot_model.kf_params.measurement_noise_std_encoder_vel_angular);
                     reply_cmd.data_format = ParameterDataFormat::F32;
                     reply_cmd.data.f32_ = self.robot_model.kf_params.measurement_noise_std_encoder_vel_angular;
                     reply_cmd.command_code = PCC_ACK;
@@ -269,7 +270,8 @@ impl ParameterInterface for BodyController {
             }
         } else if param_cmd.command_code == PCC_WRITE {
             match param_cmd.parameter_name {
-                ParameterName::ENCODER_STD => {
+                ParameterName::KF_ENCODER_STD_ANGULAR => {
+                    defmt::info!("Writing KF_ENCODER_STD_ANGULAR: {}", unsafe { param_cmd.data.f32_ });
                     if param_cmd.data_format == ParameterDataFormat::F32 {
                         let mut kf_params = self.robot_model.kf_params;
                         kf_params.measurement_noise_std_encoder_vel_angular = unsafe { param_cmd.data.f32_ };
