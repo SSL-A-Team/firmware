@@ -268,9 +268,8 @@ impl<
             // kicker and radio loop rates are both 100Hz, so 10ms packet interval
             // if we miss 10 in a row, something has gone quite wrong
             // override commands to safe ones
-            if Instant::now() - self.last_command_received_time.unwrap_or(Instant::now())
-                > Duration::from_millis(500)
-            {
+            let now = Instant::now();
+            if now - self.last_command_received_time.unwrap_or(now) > Duration::from_millis(500) {
                 // Avoid spamming logs while the system starts up
                 defmt::error!("Kicker Interface - Kicker task has stopped receiving commands from the radio task and will de-arm the kicker board");
                 self.kicker_driver.set_kick_strength(0.0);
@@ -301,7 +300,7 @@ impl<
     async fn connected_poll_loop(&mut self) {
         self.kicker_driver.set_telemetry_enabled(true);
 
-        if let Some(pkt) = self.commands_subscriber.try_next_message() {
+        while let Some(pkt) = self.commands_subscriber.try_next_message() {
             match pkt {
                 WaitResult::Lagged(amnt) => {
                     if amnt > 3 {
