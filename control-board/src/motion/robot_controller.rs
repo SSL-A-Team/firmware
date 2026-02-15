@@ -82,7 +82,7 @@ impl BodyController {
         // state_estimate.z = 0.0;
         //////////////////////////////////////////////////////////////
         if trace {
-            defmt::info!("State Estimate: [{}, {}, {}, {}, {}, {}]",
+            defmt::trace!("State Estimate: [{}, {}, {}, {}, {}, {}]",
                 state_estimate.x,
                 state_estimate.y,
                 state_estimate.z,
@@ -226,7 +226,24 @@ impl ParameterInterface for BodyController {
 
     fn has_name(&self, param_name: ParameterName::Type) -> bool {
         return match param_name {
+            ParameterName::KF_PROCESS_STD_POS_LINEAR => true,
+            ParameterName::KF_PROCESS_STD_POS_ANGULAR => true,
+            ParameterName::KF_PROCESS_STD_VEL_LINEAR => true,
+            ParameterName::KF_PROCESS_STD_VEL_ANGULAR => true,
+            ParameterName::KF_VISION_STD_LINEAR => true,
+            ParameterName::KF_VISION_STD_ANGULAR => true,
             ParameterName::KF_ENCODER_STD_ANGULAR => true,
+            ParameterName::KF_GYRO_STD_ANGULAR => true,
+            ParameterName::KF_MAX_POS_LINEAR => true,
+            ParameterName::KF_MAX_POS_ANGULAR => true,
+            ParameterName::KF_MAX_VEL_LINEAR => true,
+            ParameterName::KF_MAX_VEL_ANGULAR => true,
+            ParameterName::PHYS_WHEEL_ANGLE_ALPHA => true,
+            ParameterName::PHYS_WHEEL_ANGLE_BETA => true,
+            ParameterName::PHYS_WHEEL_DISTANCE => true,
+            ParameterName::PHYS_WHEEL_RADIUS => true,
+            ParameterName::PHYS_BODY_MASS => true,
+            ParameterName::PHYS_BODY_MOMENT_Z => true,
             _ => false,
         };
     }
@@ -254,34 +271,91 @@ impl ParameterInterface for BodyController {
         }
 
         if param_cmd.command_code == PCC_READ {
-            match param_cmd.parameter_name {
-                ParameterName::KF_ENCODER_STD_ANGULAR => {
-                    defmt::info!("Reading KF_ENCODER_STD_ANGULAR: {}", self.robot_model.kf_params.measurement_noise_std_encoder_vel_angular);
-                    reply_cmd.data_format = ParameterDataFormat::F32;
-                    reply_cmd.data.f32_ = self.robot_model.kf_params.measurement_noise_std_encoder_vel_angular;
-                    reply_cmd.command_code = PCC_ACK;
-                    return Ok(reply_cmd);
-                },
+            let value = match param_cmd.parameter_name {
+                ParameterName::KF_PROCESS_STD_POS_LINEAR => self.robot_model.kf_params.process_noise_std_pos_linear,
+                ParameterName::KF_PROCESS_STD_POS_ANGULAR => self.robot_model.kf_params.process_noise_std_pos_angular,
+                ParameterName::KF_PROCESS_STD_VEL_LINEAR => self.robot_model.kf_params.process_noise_std_vel_linear,
+                ParameterName::KF_PROCESS_STD_VEL_ANGULAR => self.robot_model.kf_params.process_noise_std_vel_angular,
+                ParameterName::KF_VISION_STD_LINEAR => self.robot_model.kf_params.measurement_noise_std_vision_pos_linear,
+                ParameterName::KF_VISION_STD_ANGULAR => self.robot_model.kf_params.measurement_noise_std_vision_pos_angular,
+                ParameterName::KF_ENCODER_STD_ANGULAR => self.robot_model.kf_params.measurement_noise_std_encoder_vel_angular,
+                ParameterName::KF_GYRO_STD_ANGULAR => self.robot_model.kf_params.measurement_noise_std_gyro_vel_angular,
+                ParameterName::KF_MAX_POS_LINEAR => self.robot_model.kf_params.max_pos_linear,
+                ParameterName::KF_MAX_POS_ANGULAR => self.robot_model.kf_params.max_pos_angular,
+                ParameterName::KF_MAX_VEL_LINEAR => self.robot_model.kf_params.max_vel_linear,
+                ParameterName::KF_MAX_VEL_ANGULAR => self.robot_model.kf_params.max_vel_angular,
+                ParameterName::PHYS_WHEEL_ANGLE_ALPHA => self.robot_model.physical_params.alpha,
+                ParameterName::PHYS_WHEEL_ANGLE_BETA => self.robot_model.physical_params.beta,
+                ParameterName::PHYS_WHEEL_DISTANCE => self.robot_model.physical_params.l,
+                ParameterName::PHYS_WHEEL_RADIUS => self.robot_model.physical_params.r,
+                ParameterName::PHYS_BODY_MASS => self.robot_model.physical_params.mass,
+                ParameterName::PHYS_BODY_MOMENT_Z => self.robot_model.physical_params.iz,
                 _ => {
                     defmt::debug!("unimplemented key read in RobotController");
                     reply_cmd.command_code = PCC_NACK_INVALID_NAME;
                     return Err(reply_cmd);
                 }
-            }
+            };
+            defmt::info!("Reading parameter {}: {}", param_cmd.parameter_name, value);
+            reply_cmd.data_format = ParameterDataFormat::F32;
+            reply_cmd.data.f32_ = value;
+            reply_cmd.command_code = PCC_ACK;
+            return Ok(reply_cmd);
         } else if param_cmd.command_code == PCC_WRITE {
+            if param_cmd.data_format != ParameterDataFormat::F32 {
+                reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                return Err(reply_cmd);
+            }
+            let write_value = unsafe { param_cmd.data.f32_ };
+            defmt::info!("Writing parameter {}: {}", param_cmd.parameter_name, write_value);
             match param_cmd.parameter_name {
-                ParameterName::KF_ENCODER_STD_ANGULAR => {
-                    defmt::info!("Writing KF_ENCODER_STD_ANGULAR: {}", unsafe { param_cmd.data.f32_ });
-                    if param_cmd.data_format == ParameterDataFormat::F32 {
-                        let mut kf_params = self.robot_model.kf_params;
-                        kf_params.measurement_noise_std_encoder_vel_angular = unsafe { param_cmd.data.f32_ };
-                        self.robot_model.update_kf_params(kf_params);
-                        reply_cmd.data.f32_ = self.robot_model.kf_params.measurement_noise_std_encoder_vel_angular;
-                        reply_cmd.command_code = PCC_ACK;
-                    } else {
-                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
-                        return Err(reply_cmd);
+                ParameterName::KF_PROCESS_STD_POS_LINEAR
+                | ParameterName::KF_PROCESS_STD_POS_ANGULAR
+                | ParameterName::KF_PROCESS_STD_VEL_LINEAR
+                | ParameterName::KF_PROCESS_STD_VEL_ANGULAR
+                | ParameterName::KF_VISION_STD_LINEAR
+                | ParameterName::KF_VISION_STD_ANGULAR
+                | ParameterName::KF_ENCODER_STD_ANGULAR
+                | ParameterName::KF_GYRO_STD_ANGULAR
+                | ParameterName::KF_MAX_POS_LINEAR
+                | ParameterName::KF_MAX_POS_ANGULAR
+                | ParameterName::KF_MAX_VEL_LINEAR
+                | ParameterName::KF_MAX_VEL_ANGULAR => {
+                    let mut kf_params = self.robot_model.kf_params;
+                    match param_cmd.parameter_name {
+                        ParameterName::KF_PROCESS_STD_POS_LINEAR => kf_params.process_noise_std_pos_linear = write_value,
+                        ParameterName::KF_PROCESS_STD_POS_ANGULAR => kf_params.process_noise_std_pos_angular = write_value,
+                        ParameterName::KF_PROCESS_STD_VEL_LINEAR => kf_params.process_noise_std_vel_linear = write_value,
+                        ParameterName::KF_PROCESS_STD_VEL_ANGULAR => kf_params.process_noise_std_vel_angular = write_value,
+                        ParameterName::KF_VISION_STD_LINEAR => kf_params.measurement_noise_std_vision_pos_linear = write_value,
+                        ParameterName::KF_VISION_STD_ANGULAR => kf_params.measurement_noise_std_vision_pos_angular = write_value,
+                        ParameterName::KF_ENCODER_STD_ANGULAR => kf_params.measurement_noise_std_encoder_vel_angular = write_value,
+                        ParameterName::KF_GYRO_STD_ANGULAR => kf_params.measurement_noise_std_gyro_vel_angular = write_value,
+                        ParameterName::KF_MAX_POS_LINEAR => kf_params.max_pos_linear = write_value,
+                        ParameterName::KF_MAX_POS_ANGULAR => kf_params.max_pos_angular = write_value,
+                        ParameterName::KF_MAX_VEL_LINEAR => kf_params.max_vel_linear = write_value,
+                        ParameterName::KF_MAX_VEL_ANGULAR => kf_params.max_vel_angular = write_value,
+                        _ => unreachable!(),
                     }
+                    self.robot_model.update_kf_params(kf_params);
+                },
+                ParameterName::PHYS_WHEEL_ANGLE_ALPHA
+                | ParameterName::PHYS_WHEEL_ANGLE_BETA
+                | ParameterName::PHYS_WHEEL_DISTANCE
+                | ParameterName::PHYS_WHEEL_RADIUS
+                | ParameterName::PHYS_BODY_MASS
+                | ParameterName::PHYS_BODY_MOMENT_Z => {
+                    let mut physical_params = self.robot_model.physical_params;
+                    match param_cmd.parameter_name {
+                        ParameterName::PHYS_WHEEL_ANGLE_ALPHA => physical_params.alpha = write_value,
+                        ParameterName::PHYS_WHEEL_ANGLE_BETA => physical_params.beta = write_value,
+                        ParameterName::PHYS_WHEEL_DISTANCE => physical_params.l = write_value,
+                        ParameterName::PHYS_WHEEL_RADIUS => physical_params.r = write_value,
+                        ParameterName::PHYS_BODY_MASS => physical_params.mass = write_value,
+                        ParameterName::PHYS_BODY_MOMENT_Z => physical_params.iz = write_value,
+                        _ => unreachable!(),
+                    }
+                    self.robot_model.update_physical_params(physical_params);
                 },
                 _ => {
                     defmt::debug!("unimplemented key write in RobotController");
@@ -289,6 +363,8 @@ impl ParameterInterface for BodyController {
                     return Err(reply_cmd);
                 }
             }
+            reply_cmd.data.f32_ = write_value;
+            reply_cmd.command_code = PCC_ACK;
         }
 
         return Ok(reply_cmd);

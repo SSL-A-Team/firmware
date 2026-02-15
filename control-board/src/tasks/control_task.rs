@@ -305,12 +305,12 @@ impl<
         let mut vision_update = false;
         let mut ticks_since_control_packet = 0;
 
-        //////////////////////// Frequency Measurement Vars //////////////////////////
-        let mut loop_ticks_since_freqeuncy_measurement = 0;
-        let mut frequency_measurement_time_elapsed_sum_ms: f32 = 0.;
-        let frequency_measurement_window_length = 60;
-        let mut last_frequency_measurement_time = Instant::now();
-        //////////////////////////////////////////////////////////////////////////////
+        // //////////////////////// Frequency Measurement Vars //////////////////////////
+        // let mut loop_ticks_since_freqeuncy_measurement = 0;
+        // let mut frequency_measurement_time_elapsed_sum_ms: f32 = 0.;
+        // let frequency_measurement_window_length = 60;
+        // let mut last_frequency_measurement_time = Instant::now();
+        // //////////////////////////////////////////////////////////////////////////////
 
         let mut last_loop_start_time = Instant::now();
         let mut last_loop_term_time = Instant::now();
@@ -345,18 +345,18 @@ impl<
             while let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
                 match latest_packet {
                     ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
-                        //////////////////////// Loop Rate Measurement ///////////////////////////////
-                        let frequency_measurement_loop_time_elapsed = ((Instant::now() - last_frequency_measurement_time).as_micros() as f32) / 1000.0;
-                        frequency_measurement_time_elapsed_sum_ms += frequency_measurement_loop_time_elapsed;
-                        if loop_ticks_since_freqeuncy_measurement == frequency_measurement_window_length {
-                            let frequency: f32 = loop_ticks_since_freqeuncy_measurement as f32 / (frequency_measurement_time_elapsed_sum_ms / 1000.0);
-                            defmt::debug!("Command RX Frequency - {} hz", frequency);
-                            frequency_measurement_time_elapsed_sum_ms = 0.;
-                            loop_ticks_since_freqeuncy_measurement = 0;
-                        }
-                        last_frequency_measurement_time = Instant::now();
-                        loop_ticks_since_freqeuncy_measurement += 1;
-                        //////////////////////////////////////////////////////////////////////////////
+                        // //////////////////////// Loop Rate Measurement ///////////////////////////////
+                        // let frequency_measurement_loop_time_elapsed = ((Instant::now() - last_frequency_measurement_time).as_micros() as f32) / 1000.0;
+                        // frequency_measurement_time_elapsed_sum_ms += frequency_measurement_loop_time_elapsed;
+                        // if loop_ticks_since_freqeuncy_measurement == frequency_measurement_window_length {
+                        //     let frequency: f32 = loop_ticks_since_freqeuncy_measurement as f32 / (frequency_measurement_time_elapsed_sum_ms / 1000.0);
+                        //     defmt::debug!("Command RX Frequency - {} hz", frequency);
+                        //     frequency_measurement_time_elapsed_sum_ms = 0.;
+                        //     loop_ticks_since_freqeuncy_measurement = 0;
+                        // }
+                        // last_frequency_measurement_time = Instant::now();
+                        // loop_ticks_since_freqeuncy_measurement += 1;
+                        // //////////////////////////////////////////////////////////////////////////////
 
                         if latest_control.reboot_robot() != 0 {
                             loop {
@@ -471,9 +471,10 @@ impl<
             let mut wheel_torque_cmd = Vector4f::default();
             let mut wheel_vel_cmd = Vector4f::default();
             if self.stop_wheels() || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
-                if ticks_since_trace_print >= TICKS_TRACE_PRINT {
-                    defmt::warn!("control task - motor commands locked out");
-                }
+                // if ticks_since_trace_print >= TICKS_TRACE_PRINT {
+                //     defmt::warn!("control task - motor commands locked out");
+                // }
+                defmt::warn!("control task - motor commands locked out");
             } else {
                 wheel_torque_cmd = robot_controller.get_wheel_torques();
                 wheel_vel_cmd = robot_controller.get_wheel_velocities();
@@ -497,24 +498,24 @@ impl<
                 wheel_ma = Vector4f::default();
             }
 
-            if ticks_since_trace_print >= TICKS_TRACE_PRINT {
-                defmt::info!(
-                    "wheel vel cmd: {} {} {} {}",
-                    wheel_vel_cmd.x,
-                    wheel_vel_cmd.y,
-                    wheel_vel_cmd.z,
-                    wheel_vel_cmd.w,
-                );
-            }
-            if ticks_since_trace_print >= TICKS_TRACE_PRINT {
-                defmt::info!(
-                    "wheel_ma cmd: {} {} {} {}",
-                    wheel_ma.x as i16,
-                    wheel_ma.y as i16,
-                    wheel_ma.z as i16,
-                    wheel_ma.w as i16,
-                );
-            }
+            // if ticks_since_trace_print >= TICKS_TRACE_PRINT {
+            //     defmt::info!(
+            //         "wheel vel cmd: {} {} {} {}",
+            //         wheel_vel_cmd.x,
+            //         wheel_vel_cmd.y,
+            //         wheel_vel_cmd.z,
+            //         wheel_vel_cmd.w,
+            //     );
+            // }
+            // if ticks_since_trace_print >= TICKS_TRACE_PRINT {
+            //     defmt::info!(
+            //         "wheel_ma cmd: {} {} {} {}",
+            //         wheel_ma.x as i16,
+            //         wheel_ma.y as i16,
+            //         wheel_ma.z as i16,
+            //         wheel_ma.w as i16,
+            //     );
+            // }
 
             /////////////////////////////////////////////////////////???????????
 
