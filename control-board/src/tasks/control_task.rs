@@ -498,24 +498,25 @@ impl<
                 wheel_ma = Vector4f::default();
             }
 
-            // if ticks_since_trace_print >= TICKS_TRACE_PRINT {
-            //     defmt::info!(
-            //         "wheel vel cmd: {} {} {} {}",
-            //         wheel_vel_cmd.x,
-            //         wheel_vel_cmd.y,
-            //         wheel_vel_cmd.z,
-            //         wheel_vel_cmd.w,
-            //     );
-            // }
-            // if ticks_since_trace_print >= TICKS_TRACE_PRINT {
-            //     defmt::info!(
-            //         "wheel_ma cmd: {} {} {} {}",
-            //         wheel_ma.x as i16,
-            //         wheel_ma.y as i16,
-            //         wheel_ma.z as i16,
-            //         wheel_ma.w as i16,
-            //     );
-            // }
+            if ticks_since_trace_print >= TICKS_TRACE_PRINT {
+                defmt::info!("state position: {}, {}, {}", robot_controller.robot_model.x[(0, 0)], robot_controller.robot_model.x[(1, 0)], robot_controller.robot_model.x[(2, 0)]);
+                defmt::info!("state velocity: {}, {}, {}", robot_controller.robot_model.x[(3, 0)], robot_controller.robot_model.x[(4, 0)], robot_controller.robot_model.x[(5, 0)]);
+                defmt::info!("wheel torque cmd: {} {} {} {}", wheel_torque_cmd.x, wheel_torque_cmd.y, wheel_torque_cmd.z, wheel_torque_cmd.w);
+                defmt::info!(
+                    "wheel vel cmd: {} {} {} {}",
+                    wheel_vel_cmd.x,
+                    wheel_vel_cmd.y,
+                    wheel_vel_cmd.z,
+                    wheel_vel_cmd.w,
+                );
+                defmt::info!(
+                    "wheel_ma cmd: {} {} {} {}",
+                    wheel_ma.x as i16,
+                    wheel_ma.y as i16,
+                    wheel_ma.z as i16,
+                    wheel_ma.w as i16,
+                );
+            }
 
             /////////////////////////////////////////////////////////???????????
 

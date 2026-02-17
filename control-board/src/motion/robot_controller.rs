@@ -26,26 +26,32 @@ pub fn clamp_vector_keep_dir<const D: usize>(
 
 
 pub struct BodyController {
-    robot_model: RobotModel,
-    pid_controller: PidController<3>,
-    body_twist_cmd: Vector3f,
-    body_accel_cmd: Vector3f,
-    wheel_vel_cmd: Vector4f,
-    wheel_torque_cmd: Vector4f,
-    debug_telemetry: ExtendedTelemetry,
-    loop_period: Duration,
+    pub robot_model: RobotModel,
+    pub pid_controller: PidController<3>,
+    pub body_twist_cmd: Vector3f,
+    pub body_accel_cmd: Vector3f,
+    pub wheel_vel_cmd: Vector4f,
+    pub wheel_torque_cmd: Vector4f,
+    pub debug_telemetry: ExtendedTelemetry,
+    pub loop_period: Duration,
 }
 
 impl BodyController {
     pub fn new(loop_period: Duration) -> BodyController {
+        // let pid_gains = nalgebra::matrix![
+        //     // P,    I,    D,    I_min, I_max
+        //      2.0,  0.5,  0.0, -0.1,   0.1;   // X
+        //      2.0,  0.5,  0.0, -0.1,   0.1;   // Y
+        //      3.0,  0.5,  0.0, -PI/2., PI/2.;   // Theta
+        // ];
         let pid_gains = nalgebra::matrix![
             // P,    I,    D,    I_min, I_max
-             2.0,  0.5,  0.0, -0.1,   0.1;   // X
-             2.0,  0.5,  0.0, -0.1,   0.1;   // Y
-             3.0,  0.5,  0.0, -PI/2., PI/2.;   // Theta
+             1.5,  0.5,  0.0, -0.2,   0.1;   // X
+             1.5,  0.5,  0.0, -0.2,   0.1;   // Y
+             1.0,  0.5,  0.0, -1.0,   1.0;   // Theta
         ];
         BodyController {
-            robot_model: RobotModel::new_from_default_params(0.001),
+            robot_model: RobotModel::new_from_default_params(loop_period.as_micros() as f32 * 1e-6),
             pid_controller: PidController::from_gains_matrix(&pid_gains),
             body_twist_cmd: Vector3f::default(),
             body_accel_cmd: Vector3f::default(),
