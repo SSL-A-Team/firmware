@@ -232,8 +232,14 @@ impl BodyController {
         self.wheel_vel_cmd
     }
 
+    /// Get the 4 wheel torque commands in Nm
     pub fn get_wheel_torques(&self) -> Vector4f {
         self.wheel_torque_cmd
+    }
+
+    /// Get the 4 wheel currents in amps
+    pub fn get_wheel_currents(&self) -> Vector4f {
+        self.robot_model.torques_to_currents(self.wheel_torque_cmd)
     }
 
     pub fn get_control_debug_telem(&self) -> ExtendedTelemetry {
@@ -315,7 +321,8 @@ impl ParameterInterface for BodyController {
                 | ParameterName::PHYS_WHEEL_DISTANCE
                 | ParameterName::PHYS_WHEEL_RADIUS
                 | ParameterName::PHYS_BODY_MASS
-                | ParameterName::PHYS_BODY_MOMENT_Z => {
+                | ParameterName::PHYS_BODY_MOMENT_Z 
+                | ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => {
                     reply_cmd.data_format = ParameterDataFormat::F32;
                     reply_cmd.data.f32_ = match param_cmd.parameter_name {
                         ParameterName::KF_PROCESS_STD_POS_LINEAR => self.robot_model.kf_params.process_noise_std_pos_linear,
@@ -336,6 +343,7 @@ impl ParameterInterface for BodyController {
                         ParameterName::PHYS_WHEEL_RADIUS => self.robot_model.physical_params.r,
                         ParameterName::PHYS_BODY_MASS => self.robot_model.physical_params.mass,
                         ParameterName::PHYS_BODY_MOMENT_Z => self.robot_model.physical_params.iz,
+                        ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => self.robot_model.physical_params.motor_efficiency_factor,
                         _ => unreachable!(),
                     };
                 },
@@ -403,7 +411,7 @@ impl ParameterInterface for BodyController {
                 | ParameterName::PHYS_WHEEL_DISTANCE
                 | ParameterName::PHYS_WHEEL_RADIUS
                 | ParameterName::PHYS_BODY_MASS
-                | ParameterName::PHYS_BODY_MOMENT_Z => {
+                | ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => {
                     if param_cmd.data_format != ParameterDataFormat::F32 {
                         reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
                         return Err(reply_cmd);
@@ -417,6 +425,7 @@ impl ParameterInterface for BodyController {
                         ParameterName::PHYS_WHEEL_RADIUS => physical_params.r = write_value,
                         ParameterName::PHYS_BODY_MASS => physical_params.mass = write_value,
                         ParameterName::PHYS_BODY_MOMENT_Z => physical_params.iz = write_value,
+                        ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => physical_params.motor_efficiency_factor = write_value,
                         _ => unreachable!(),
                     }
                     self.robot_model.update_physical_params(physical_params);

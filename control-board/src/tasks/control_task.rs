@@ -468,7 +468,7 @@ impl<
             );
             vision_update = false;  // reset vision update flag after use
 
-            let mut wheel_torque_cmd = Vector4f::default();
+            let mut wheel_current_cmd = Vector4f::default();
             let mut wheel_vel_cmd = Vector4f::default();
             if self.stop_wheels() || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
                 // if ticks_since_trace_print >= TICKS_TRACE_PRINT {
@@ -476,15 +476,13 @@ impl<
                 // }
                 defmt::warn!("control task - motor commands locked out");
             } else {
-                wheel_torque_cmd = robot_controller.get_wheel_torques();
+                wheel_current_cmd = robot_controller.get_wheel_currents();
                 wheel_vel_cmd = robot_controller.get_wheel_velocities();
             }
             
             ////////////////// TODO: Move this/delete this //////////////////////
 
-            let TORQUE_CONSTANT = 0.0335; // Nm/A
-            let mut wheel_ma = wheel_torque_cmd / TORQUE_CONSTANT * 1000.0;
-
+            let mut wheel_ma = wheel_current_cmd * 1000.0;
             let MAX_CURRENT_MA = 750.0; // mA
             // TODO: remove this safety clamp after testing
             if wheel_ma.x.abs() > MAX_CURRENT_MA || wheel_ma.y.abs() > MAX_CURRENT_MA || wheel_ma.z.abs() > MAX_CURRENT_MA || wheel_ma.w.abs() > MAX_CURRENT_MA {
@@ -499,9 +497,11 @@ impl<
             }
 
             if ticks_since_trace_print >= TICKS_TRACE_PRINT {
-                defmt::info!("state position: {}, {}, {}", robot_controller.robot_model.x[(0, 0)], robot_controller.robot_model.x[(1, 0)], robot_controller.robot_model.x[(2, 0)]);
-                defmt::info!("state velocity: {}, {}, {}", robot_controller.robot_model.x[(3, 0)], robot_controller.robot_model.x[(4, 0)], robot_controller.robot_model.x[(5, 0)]);
-                defmt::info!("wheel torque cmd: {} {} {} {}", wheel_torque_cmd.x, wheel_torque_cmd.y, wheel_torque_cmd.z, wheel_torque_cmd.w);
+                let state = robot_controller.robot_model.x;
+                let wheel_torques = robot_controller.get_wheel_torques();
+                defmt::info!("state position: {}, {}, {}", state[(0, 0)], state[(1, 0)], state[(2, 0)]);
+                defmt::info!("state velocity: {}, {}, {}", state[(3, 0)], state[(4, 0)], state[(5, 0)]);
+                defmt::info!("wheel torque cmd: {} {} {} {}", wheel_torques.x, wheel_torques.y, wheel_torques.z, wheel_torques.w);
                 defmt::info!(
                     "wheel vel cmd: {} {} {} {}",
                     wheel_vel_cmd.x,
