@@ -22,6 +22,8 @@ use crate::{
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel-torque.bin"}
 
+const MAX_CURRENT_MA: f32 = 1500.0; // mA
+
 const MAX_TX_PACKET_SIZE: usize = 80;
 const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 80;
@@ -483,7 +485,6 @@ impl<
             ////////////////// TODO: Move this/delete this //////////////////////
 
             let mut wheel_ma = wheel_current_cmd * 1000.0;
-            let MAX_CURRENT_MA = 750.0; // mA
             // TODO: remove this safety clamp after testing
             if wheel_ma.x.abs() > MAX_CURRENT_MA || wheel_ma.y.abs() > MAX_CURRENT_MA || wheel_ma.z.abs() > MAX_CURRENT_MA || wheel_ma.w.abs() > MAX_CURRENT_MA {
                 defmt::warn!(

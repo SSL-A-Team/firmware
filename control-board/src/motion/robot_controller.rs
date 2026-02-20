@@ -272,6 +272,8 @@ impl ParameterInterface for BodyController {
             ParameterName::PHYS_WHEEL_RADIUS => true,
             ParameterName::PHYS_BODY_MASS => true,
             ParameterName::PHYS_BODY_MOMENT_Z => true,
+            ParameterName::PHYS_MOTOR_TORQUE_CONSTANT => true,
+            ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => true,
             ParameterName::PIDII_X => true,
             ParameterName::PIDII_Y => true,
             ParameterName::PIDII_THETA => true,
@@ -322,6 +324,7 @@ impl ParameterInterface for BodyController {
                 | ParameterName::PHYS_WHEEL_RADIUS
                 | ParameterName::PHYS_BODY_MASS
                 | ParameterName::PHYS_BODY_MOMENT_Z 
+                | ParameterName::PHYS_MOTOR_TORQUE_CONSTANT
                 | ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => {
                     reply_cmd.data_format = ParameterDataFormat::F32;
                     reply_cmd.data.f32_ = match param_cmd.parameter_name {
@@ -343,6 +346,7 @@ impl ParameterInterface for BodyController {
                         ParameterName::PHYS_WHEEL_RADIUS => self.robot_model.physical_params.r,
                         ParameterName::PHYS_BODY_MASS => self.robot_model.physical_params.mass,
                         ParameterName::PHYS_BODY_MOMENT_Z => self.robot_model.physical_params.iz,
+                        ParameterName::PHYS_MOTOR_TORQUE_CONSTANT => self.robot_model.physical_params.motor_torque_constant,
                         ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => self.robot_model.physical_params.motor_efficiency_factor,
                         _ => unreachable!(),
                     };
@@ -411,6 +415,8 @@ impl ParameterInterface for BodyController {
                 | ParameterName::PHYS_WHEEL_DISTANCE
                 | ParameterName::PHYS_WHEEL_RADIUS
                 | ParameterName::PHYS_BODY_MASS
+                | ParameterName::PHYS_BODY_MOMENT_Z
+                | ParameterName::PHYS_MOTOR_TORQUE_CONSTANT
                 | ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => {
                     if param_cmd.data_format != ParameterDataFormat::F32 {
                         reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
@@ -425,6 +431,7 @@ impl ParameterInterface for BodyController {
                         ParameterName::PHYS_WHEEL_RADIUS => physical_params.r = write_value,
                         ParameterName::PHYS_BODY_MASS => physical_params.mass = write_value,
                         ParameterName::PHYS_BODY_MOMENT_Z => physical_params.iz = write_value,
+                        ParameterName::PHYS_MOTOR_TORQUE_CONSTANT => physical_params.motor_torque_constant = write_value,
                         ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => physical_params.motor_efficiency_factor = write_value,
                         _ => unreachable!(),
                     }
