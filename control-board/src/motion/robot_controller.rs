@@ -6,6 +6,7 @@ use ateam_common_packets::bindings::{
     ParameterCommandCode::*, ParameterDataFormat, ParameterName
 };
 use ateam_controls::{Vector3f, Vector4f, Vector6f, Vector8f};
+use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
 use ateam_controls::robot_model::RobotModel;
 use embassy_time::{Duration, Instant};
 use nalgebra::{vector, SVector};
@@ -28,6 +29,7 @@ pub fn clamp_vector_keep_dir<const D: usize>(
 pub struct BodyController {
     pub robot_model: RobotModel,
     pub pid_controller: PidController<3>,
+    pub trajectory_params: TrajectoryParams,
     pub body_twist_cmd: Vector3f,
     pub body_accel_cmd: Vector3f,
     pub wheel_vel_cmd: Vector4f,
@@ -53,6 +55,7 @@ impl BodyController {
         BodyController {
             robot_model: RobotModel::new_from_default_params(loop_period.as_micros() as f32 * 1e-6),
             pid_controller: PidController::from_gains_matrix(&pid_gains),
+            trajectory_params: TrajectoryParams::default(),
             body_twist_cmd: Vector3f::default(),
             body_accel_cmd: Vector3f::default(),
             wheel_vel_cmd: Vector4f::default(),
@@ -185,13 +188,13 @@ impl BodyController {
         let global_twist_cmd = state_estimate.fixed_rows::<3>(3) + self.body_accel_cmd * (self.loop_period.as_micros() as f32 * 1e-6);
 
         // // Calculate the optimal trajectory to the setpoint
-        // let traj = ateam_controls::bangbang_trajectory::compute_optimal_bangbang_traj_3d_pose(
-        //     state_estimate, target_pose,
+        // let traj = BangBangTraj3D::from_target_pose(
+        //     state_estimate, target_pose, self.trajectory_params,
         // );
         // // Calculate the acceleration needed to achieve the trajectory right now
-        // let global_accel_cmd = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_accel_at_t(traj, 0.0);
+        // let global_accel_cmd = traj.accel_at(0.0);
         // // Calculate the twist that should be achieved at the next time step after applying this acceleration
-        // let next_body_state = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_state_at_t(traj, state_estimate, 0.0, self.loop_period.as_micros() as f32 * 1e-6);
+        // let next_body_state = traj.state_at(state_estimate, 0.0, self.loop_period.as_micros() as f32 * 1e-6);
         // let global_twist_cmd = Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
 
         // These torques are discretized by the loop rate, but in an ideal world, it would be a continuous command update to reach the next state wheel velocities as theta changes. However, the loop rate should be fast enough that the error due to a change in theta during each control period should be negligible, and the individual wheel velocities are achieved by the next control update
@@ -203,13 +206,14 @@ impl BodyController {
 
     pub fn compute_effort_twist_control(&mut self, state_estimate: Vector6f, target_twist: Vector3f) {
         let init_twist: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-        let traj = ateam_controls::bangbang_trajectory::compute_optimal_bangbang_traj_3d_twist(
+        let traj = BangBangTraj3D::from_target_twist(
             init_twist, 
-            target_twist
+            target_twist,
+            self.trajectory_params,
         );
-        let next_state = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_state_at_t(traj, state_estimate, 0.0, self.loop_period.as_micros() as f32 * 1e-6);
+        let next_state = traj.state_at(state_estimate, 0.0, self.loop_period.as_micros() as f32 * 1e-6);
         let global_twist_cmd: Vector3f = next_state.fixed_rows::<3>(3).into();
-        let global_accel_cmd = ateam_controls::bangbang_trajectory::compute_bangbang_traj_3d_accel_at_t(traj, 0.0);
+        let global_accel_cmd = traj.accel_at(0.0);
 
         self.body_twist_cmd = global_twist_cmd;
         self.body_accel_cmd = global_accel_cmd;
@@ -277,6 +281,12 @@ impl ParameterInterface for BodyController {
             ParameterName::PIDII_X => true,
             ParameterName::PIDII_Y => true,
             ParameterName::PIDII_THETA => true,
+            ParameterName::TRAJ_MAX_TRANSLATIONAL_VELOCITY => true,
+            ParameterName::TRAJ_MAX_TRANSLATIONAL_ACCELERATION => true,
+            ParameterName::TRAJ_MAX_ROTATIONAL_VELOCITY => true,
+            ParameterName::TRAJ_MAX_ROTATIONAL_ACCELERATION => true,
+            ParameterName::TRAJ_ALLOWABLE_ERROR_POS => true,
+            ParameterName::TRAJ_ALLOWABLE_ERROR_VEL => true,
             _ => false,
         };
     }
@@ -325,7 +335,13 @@ impl ParameterInterface for BodyController {
                 | ParameterName::PHYS_BODY_MASS
                 | ParameterName::PHYS_BODY_MOMENT_Z 
                 | ParameterName::PHYS_MOTOR_TORQUE_CONSTANT
-                | ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => {
+                | ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR
+                | ParameterName::TRAJ_MAX_TRANSLATIONAL_VELOCITY
+                | ParameterName::TRAJ_MAX_TRANSLATIONAL_ACCELERATION
+                | ParameterName::TRAJ_MAX_ROTATIONAL_VELOCITY
+                | ParameterName::TRAJ_MAX_ROTATIONAL_ACCELERATION
+                | ParameterName::TRAJ_ALLOWABLE_ERROR_POS
+                | ParameterName::TRAJ_ALLOWABLE_ERROR_VEL => {
                     reply_cmd.data_format = ParameterDataFormat::F32;
                     reply_cmd.data.f32_ = match param_cmd.parameter_name {
                         ParameterName::KF_PROCESS_STD_POS_LINEAR => self.robot_model.kf_params.process_noise_std_pos_linear,
@@ -348,6 +364,12 @@ impl ParameterInterface for BodyController {
                         ParameterName::PHYS_BODY_MOMENT_Z => self.robot_model.physical_params.iz,
                         ParameterName::PHYS_MOTOR_TORQUE_CONSTANT => self.robot_model.physical_params.motor_torque_constant,
                         ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => self.robot_model.physical_params.motor_efficiency_factor,
+                        ParameterName::TRAJ_MAX_TRANSLATIONAL_VELOCITY => self.trajectory_params.max_translational_velocity,
+                        ParameterName::TRAJ_MAX_TRANSLATIONAL_ACCELERATION => self.trajectory_params.max_translational_acceleration,
+                        ParameterName::TRAJ_MAX_ROTATIONAL_VELOCITY => self.trajectory_params.max_rotational_velocity,
+                        ParameterName::TRAJ_MAX_ROTATIONAL_ACCELERATION => self.trajectory_params.max_rotational_acceleration,
+                        ParameterName::TRAJ_ALLOWABLE_ERROR_POS => self.trajectory_params.allowable_error_pos,
+                        ParameterName::TRAJ_ALLOWABLE_ERROR_VEL => self.trajectory_params.allowable_error_vel,
                         _ => unreachable!(),
                     };
                 },
@@ -436,6 +458,27 @@ impl ParameterInterface for BodyController {
                         _ => unreachable!(),
                     }
                     self.robot_model.update_physical_params(physical_params);
+                },
+                ParameterName::TRAJ_MAX_TRANSLATIONAL_VELOCITY
+                | ParameterName::TRAJ_MAX_TRANSLATIONAL_ACCELERATION
+                | ParameterName::TRAJ_MAX_ROTATIONAL_VELOCITY
+                | ParameterName::TRAJ_MAX_ROTATIONAL_ACCELERATION
+                | ParameterName::TRAJ_ALLOWABLE_ERROR_POS
+                | ParameterName::TRAJ_ALLOWABLE_ERROR_VEL => {
+                    if param_cmd.data_format != ParameterDataFormat::F32 {
+                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                        return Err(reply_cmd);
+                    }
+                    let write_value = unsafe { param_cmd.data.f32_ };
+                    match param_cmd.parameter_name {
+                        ParameterName::TRAJ_MAX_TRANSLATIONAL_VELOCITY => self.trajectory_params.max_translational_velocity = write_value,
+                        ParameterName::TRAJ_MAX_TRANSLATIONAL_ACCELERATION => self.trajectory_params.max_translational_acceleration = write_value,
+                        ParameterName::TRAJ_MAX_ROTATIONAL_VELOCITY => self.trajectory_params.max_rotational_velocity = write_value,
+                        ParameterName::TRAJ_MAX_ROTATIONAL_ACCELERATION => self.trajectory_params.max_rotational_acceleration = write_value,
+                        ParameterName::TRAJ_ALLOWABLE_ERROR_POS => self.trajectory_params.allowable_error_pos = write_value,
+                        ParameterName::TRAJ_ALLOWABLE_ERROR_VEL => self.trajectory_params.allowable_error_vel = write_value,
+                        _ => unreachable!(),
+                    }
                 },
                 ParameterName::PIDII_X
                 | ParameterName::PIDII_Y
