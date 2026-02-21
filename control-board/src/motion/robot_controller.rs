@@ -281,12 +281,14 @@ impl ParameterInterface for BodyController {
             ParameterName::PIDII_X => true,
             ParameterName::PIDII_Y => true,
             ParameterName::PIDII_THETA => true,
-            ParameterName::TRAJ_MAX_TRANSLATIONAL_VELOCITY => true,
-            ParameterName::TRAJ_MAX_TRANSLATIONAL_ACCELERATION => true,
-            ParameterName::TRAJ_MAX_ROTATIONAL_VELOCITY => true,
-            ParameterName::TRAJ_MAX_ROTATIONAL_ACCELERATION => true,
-            ParameterName::TRAJ_ALLOWABLE_ERROR_POS => true,
-            ParameterName::TRAJ_ALLOWABLE_ERROR_VEL => true,
+            ParameterName::TRAJ_ALLOWABLE_ERROR_POS_LINEAR => true,
+            ParameterName::TRAJ_ALLOWABLE_ERROR_POS_ANGULAR => true,
+            ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_LINEAR => true,
+            ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_ANGULAR => true,
+            ParameterName::TRAJ_MAX_VEL_LINEAR => true,
+            ParameterName::TRAJ_MAX_VEL_ANGULAR => true,
+            ParameterName::TRAJ_MAX_ACCEL_LINEAR => true,
+            ParameterName::TRAJ_MAX_ACCEL_ANGULAR => true,
             _ => false,
         };
     }
@@ -336,12 +338,14 @@ impl ParameterInterface for BodyController {
                 | ParameterName::PHYS_BODY_MOMENT_Z 
                 | ParameterName::PHYS_MOTOR_TORQUE_CONSTANT
                 | ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR
-                | ParameterName::TRAJ_MAX_TRANSLATIONAL_VELOCITY
-                | ParameterName::TRAJ_MAX_TRANSLATIONAL_ACCELERATION
-                | ParameterName::TRAJ_MAX_ROTATIONAL_VELOCITY
-                | ParameterName::TRAJ_MAX_ROTATIONAL_ACCELERATION
-                | ParameterName::TRAJ_ALLOWABLE_ERROR_POS
-                | ParameterName::TRAJ_ALLOWABLE_ERROR_VEL => {
+                | ParameterName::TRAJ_ALLOWABLE_ERROR_POS_LINEAR
+                | ParameterName::TRAJ_ALLOWABLE_ERROR_POS_ANGULAR
+                | ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_LINEAR
+                | ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_ANGULAR
+                | ParameterName::TRAJ_MAX_VEL_LINEAR
+                | ParameterName::TRAJ_MAX_VEL_ANGULAR
+                | ParameterName::TRAJ_MAX_ACCEL_LINEAR
+                | ParameterName::TRAJ_MAX_ACCEL_ANGULAR => {
                     reply_cmd.data_format = ParameterDataFormat::F32;
                     reply_cmd.data.f32_ = match param_cmd.parameter_name {
                         ParameterName::KF_PROCESS_STD_POS_LINEAR => self.robot_model.kf_params.process_noise_std_pos_linear,
@@ -364,12 +368,14 @@ impl ParameterInterface for BodyController {
                         ParameterName::PHYS_BODY_MOMENT_Z => self.robot_model.physical_params.iz,
                         ParameterName::PHYS_MOTOR_TORQUE_CONSTANT => self.robot_model.physical_params.motor_torque_constant,
                         ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => self.robot_model.physical_params.motor_efficiency_factor,
-                        ParameterName::TRAJ_MAX_TRANSLATIONAL_VELOCITY => self.trajectory_params.max_translational_velocity,
-                        ParameterName::TRAJ_MAX_TRANSLATIONAL_ACCELERATION => self.trajectory_params.max_translational_acceleration,
-                        ParameterName::TRAJ_MAX_ROTATIONAL_VELOCITY => self.trajectory_params.max_rotational_velocity,
-                        ParameterName::TRAJ_MAX_ROTATIONAL_ACCELERATION => self.trajectory_params.max_rotational_acceleration,
-                        ParameterName::TRAJ_ALLOWABLE_ERROR_POS => self.trajectory_params.allowable_error_pos,
-                        ParameterName::TRAJ_ALLOWABLE_ERROR_VEL => self.trajectory_params.allowable_error_vel,
+                        ParameterName::TRAJ_ALLOWABLE_ERROR_POS_LINEAR => self.trajectory_params.allowable_error_pos_linear,
+                        ParameterName::TRAJ_ALLOWABLE_ERROR_POS_ANGULAR => self.trajectory_params.allowable_error_pos_angular,
+                        ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_LINEAR => self.trajectory_params.allowable_error_vel_linear,
+                        ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_ANGULAR => self.trajectory_params.allowable_error_vel_angular,
+                        ParameterName::TRAJ_MAX_VEL_LINEAR => self.trajectory_params.max_vel_linear,
+                        ParameterName::TRAJ_MAX_VEL_ANGULAR => self.trajectory_params.max_vel_angular,
+                        ParameterName::TRAJ_MAX_ACCEL_LINEAR => self.trajectory_params.max_accel_linear,
+                        ParameterName::TRAJ_MAX_ACCEL_ANGULAR => self.trajectory_params.max_accel_angular,
                         _ => unreachable!(),
                     };
                 },
@@ -459,24 +465,28 @@ impl ParameterInterface for BodyController {
                     }
                     self.robot_model.update_physical_params(physical_params);
                 },
-                ParameterName::TRAJ_MAX_TRANSLATIONAL_VELOCITY
-                | ParameterName::TRAJ_MAX_TRANSLATIONAL_ACCELERATION
-                | ParameterName::TRAJ_MAX_ROTATIONAL_VELOCITY
-                | ParameterName::TRAJ_MAX_ROTATIONAL_ACCELERATION
-                | ParameterName::TRAJ_ALLOWABLE_ERROR_POS
-                | ParameterName::TRAJ_ALLOWABLE_ERROR_VEL => {
+                ParameterName::TRAJ_ALLOWABLE_ERROR_POS_LINEAR
+                | ParameterName::TRAJ_ALLOWABLE_ERROR_POS_ANGULAR
+                | ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_LINEAR
+                | ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_ANGULAR
+                | ParameterName::TRAJ_MAX_VEL_LINEAR
+                | ParameterName::TRAJ_MAX_VEL_ANGULAR
+                | ParameterName::TRAJ_MAX_ACCEL_LINEAR
+                | ParameterName::TRAJ_MAX_ACCEL_ANGULAR => {
                     if param_cmd.data_format != ParameterDataFormat::F32 {
                         reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
                         return Err(reply_cmd);
                     }
                     let write_value = unsafe { param_cmd.data.f32_ };
                     match param_cmd.parameter_name {
-                        ParameterName::TRAJ_MAX_TRANSLATIONAL_VELOCITY => self.trajectory_params.max_translational_velocity = write_value,
-                        ParameterName::TRAJ_MAX_TRANSLATIONAL_ACCELERATION => self.trajectory_params.max_translational_acceleration = write_value,
-                        ParameterName::TRAJ_MAX_ROTATIONAL_VELOCITY => self.trajectory_params.max_rotational_velocity = write_value,
-                        ParameterName::TRAJ_MAX_ROTATIONAL_ACCELERATION => self.trajectory_params.max_rotational_acceleration = write_value,
-                        ParameterName::TRAJ_ALLOWABLE_ERROR_POS => self.trajectory_params.allowable_error_pos = write_value,
-                        ParameterName::TRAJ_ALLOWABLE_ERROR_VEL => self.trajectory_params.allowable_error_vel = write_value,
+                        ParameterName::TRAJ_ALLOWABLE_ERROR_POS_LINEAR => self.trajectory_params.allowable_error_pos_linear = write_value,
+                        ParameterName::TRAJ_ALLOWABLE_ERROR_POS_ANGULAR => self.trajectory_params.allowable_error_pos_angular = write_value,
+                        ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_LINEAR => self.trajectory_params.allowable_error_vel_linear = write_value,
+                        ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_ANGULAR => self.trajectory_params.allowable_error_vel_angular = write_value,
+                        ParameterName::TRAJ_MAX_VEL_LINEAR => self.trajectory_params.max_vel_linear = write_value,
+                        ParameterName::TRAJ_MAX_VEL_ANGULAR => self.trajectory_params.max_vel_angular = write_value,
+                        ParameterName::TRAJ_MAX_ACCEL_LINEAR => self.trajectory_params.max_accel_linear = write_value,
+                        ParameterName::TRAJ_MAX_ACCEL_ANGULAR => self.trajectory_params.max_accel_angular = write_value,
                         _ => unreachable!(),
                     }
                 },
