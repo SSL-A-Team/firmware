@@ -34,6 +34,14 @@ pub struct PoseControlHysteresis {
     pub pid_exit_error_pos_linear: f32,
     /// Angular position error above which we switch from PID back to bang-bang
     pub pid_exit_error_pos_angular: f32,
+    /// Linear velocity error below which we switch from bang-bang to PID
+    pub pid_enter_error_vel_linear: f32,
+    /// Angular velocity error below which we switch from bang-bang to PID
+    pub pid_enter_error_vel_angular: f32,
+    /// Linear velocity error above which we switch from PID back to bang-bang
+    pub pid_exit_error_vel_linear: f32,
+    /// Angular velocity error above which we switch from PID back to bang-bang
+    pub pid_exit_error_vel_angular: f32,
 }
 
 impl Default for PoseControlHysteresis {
@@ -43,6 +51,10 @@ impl Default for PoseControlHysteresis {
             pid_enter_error_pos_angular: 0.15,  // radians
             pid_exit_error_pos_linear: 0.2,     // meters (larger than enter for hysteresis)
             pid_exit_error_pos_angular: 0.3,    // radians (larger than enter for hysteresis)
+            pid_enter_error_vel_linear: 0.5,    // m/s
+            pid_enter_error_vel_angular: 1.0,   // rad/s
+            pid_exit_error_vel_linear: 1.0,     // m/s (larger than enter for hysteresis)
+            pid_exit_error_vel_angular: 2.0,    // rad/s (larger than enter for hysteresis)
         }
     }
 }
@@ -220,19 +232,25 @@ impl BodyController {
     pub fn compute_effort_pose_control(&mut self, state_estimate: Vector6f, target_pose: Vector3f) {
         let dt = self.loop_period.as_micros() as f32 * 1e-6;
         let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
+        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
         let pose_error = target_pose - pose_estimate;
         let linear_error = sqrtf(pose_error.x * pose_error.x + pose_error.y * pose_error.y);
         let angular_error = pose_error.z.abs();
+        // Target pose implies zero velocity, so velocity error is the current velocity magnitude
+        let linear_vel_error = sqrtf(twist_estimate.x * twist_estimate.x + twist_estimate.y * twist_estimate.y);
+        let angular_vel_error = twist_estimate.z.abs();
 
         let hyst = &self.pose_control_hysteresis;
 
         // Dual-mode switching with hysteresis:
-        //  - Switch to PID when error drops below the enter thresholds
-        //  - Switch back to bang-bang when error rises above the exit thresholds
+        //  - Switch to PID when both position and velocity errors drop below the enter thresholds
+        //  - Switch back to bang-bang when any position or velocity error rises above the exit thresholds
         match self.pose_control_mode {
             PoseControlMode::BangBang => {
                 if linear_error < hyst.pid_enter_error_pos_linear
                     && angular_error < hyst.pid_enter_error_pos_angular
+                    && linear_vel_error < hyst.pid_enter_error_vel_linear
+                    && angular_vel_error < hyst.pid_enter_error_vel_angular
                 {
                     self.pose_control_mode = PoseControlMode::Pid;
                     self.pid_controller.reset();
@@ -241,6 +259,8 @@ impl BodyController {
             PoseControlMode::Pid => {
                 if linear_error > hyst.pid_exit_error_pos_linear
                     || angular_error > hyst.pid_exit_error_pos_angular
+                    || linear_vel_error > hyst.pid_exit_error_vel_linear
+                    || angular_vel_error > hyst.pid_exit_error_vel_angular
                 {
                     self.pose_control_mode = PoseControlMode::BangBang;
                 }
@@ -368,6 +388,10 @@ impl ParameterInterface for BodyController {
             ParameterName::CTRL_PID_ENTER_ERROR_POS_ANGULAR => true,
             ParameterName::CTRL_PID_EXIT_ERROR_POS_LINEAR => true,
             ParameterName::CTRL_PID_EXIT_ERROR_POS_ANGULAR => true,
+            ParameterName::CTRL_PID_ENTER_ERROR_VEL_LINEAR => true,
+            ParameterName::CTRL_PID_ENTER_ERROR_VEL_ANGULAR => true,
+            ParameterName::CTRL_PID_EXIT_ERROR_VEL_LINEAR => true,
+            ParameterName::CTRL_PID_EXIT_ERROR_VEL_ANGULAR => true,
             _ => false,
         };
     }
@@ -428,7 +452,11 @@ impl ParameterInterface for BodyController {
                 | ParameterName::CTRL_PID_ENTER_ERROR_POS_LINEAR
                 | ParameterName::CTRL_PID_ENTER_ERROR_POS_ANGULAR
                 | ParameterName::CTRL_PID_EXIT_ERROR_POS_LINEAR
-                | ParameterName::CTRL_PID_EXIT_ERROR_POS_ANGULAR => {
+                | ParameterName::CTRL_PID_EXIT_ERROR_POS_ANGULAR
+                | ParameterName::CTRL_PID_ENTER_ERROR_VEL_LINEAR
+                | ParameterName::CTRL_PID_ENTER_ERROR_VEL_ANGULAR
+                | ParameterName::CTRL_PID_EXIT_ERROR_VEL_LINEAR
+                | ParameterName::CTRL_PID_EXIT_ERROR_VEL_ANGULAR => {
                     reply_cmd.data_format = ParameterDataFormat::F32;
                     reply_cmd.data.f32_ = match param_cmd.parameter_name {
                         ParameterName::KF_PROCESS_STD_POS_LINEAR => self.robot_model.kf_params.process_noise_std_pos_linear,
@@ -463,6 +491,10 @@ impl ParameterInterface for BodyController {
                         ParameterName::CTRL_PID_ENTER_ERROR_POS_ANGULAR => self.pose_control_hysteresis.pid_enter_error_pos_angular,
                         ParameterName::CTRL_PID_EXIT_ERROR_POS_LINEAR => self.pose_control_hysteresis.pid_exit_error_pos_linear,
                         ParameterName::CTRL_PID_EXIT_ERROR_POS_ANGULAR => self.pose_control_hysteresis.pid_exit_error_pos_angular,
+                        ParameterName::CTRL_PID_ENTER_ERROR_VEL_LINEAR => self.pose_control_hysteresis.pid_enter_error_vel_linear,
+                        ParameterName::CTRL_PID_ENTER_ERROR_VEL_ANGULAR => self.pose_control_hysteresis.pid_enter_error_vel_angular,
+                        ParameterName::CTRL_PID_EXIT_ERROR_VEL_LINEAR => self.pose_control_hysteresis.pid_exit_error_vel_linear,
+                        ParameterName::CTRL_PID_EXIT_ERROR_VEL_ANGULAR => self.pose_control_hysteresis.pid_exit_error_vel_angular,
                         _ => unreachable!(),
                     };
                 },
@@ -580,7 +612,11 @@ impl ParameterInterface for BodyController {
                 ParameterName::CTRL_PID_ENTER_ERROR_POS_LINEAR
                 | ParameterName::CTRL_PID_ENTER_ERROR_POS_ANGULAR
                 | ParameterName::CTRL_PID_EXIT_ERROR_POS_LINEAR
-                | ParameterName::CTRL_PID_EXIT_ERROR_POS_ANGULAR => {
+                | ParameterName::CTRL_PID_EXIT_ERROR_POS_ANGULAR
+                | ParameterName::CTRL_PID_ENTER_ERROR_VEL_LINEAR
+                | ParameterName::CTRL_PID_ENTER_ERROR_VEL_ANGULAR
+                | ParameterName::CTRL_PID_EXIT_ERROR_VEL_LINEAR
+                | ParameterName::CTRL_PID_EXIT_ERROR_VEL_ANGULAR => {
                     if param_cmd.data_format != ParameterDataFormat::F32 {
                         reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
                         return Err(reply_cmd);
@@ -591,6 +627,10 @@ impl ParameterInterface for BodyController {
                         ParameterName::CTRL_PID_ENTER_ERROR_POS_ANGULAR => self.pose_control_hysteresis.pid_enter_error_pos_angular = write_value,
                         ParameterName::CTRL_PID_EXIT_ERROR_POS_LINEAR => self.pose_control_hysteresis.pid_exit_error_pos_linear = write_value,
                         ParameterName::CTRL_PID_EXIT_ERROR_POS_ANGULAR => self.pose_control_hysteresis.pid_exit_error_pos_angular = write_value,
+                        ParameterName::CTRL_PID_ENTER_ERROR_VEL_LINEAR => self.pose_control_hysteresis.pid_enter_error_vel_linear = write_value,
+                        ParameterName::CTRL_PID_ENTER_ERROR_VEL_ANGULAR => self.pose_control_hysteresis.pid_enter_error_vel_angular = write_value,
+                        ParameterName::CTRL_PID_EXIT_ERROR_VEL_LINEAR => self.pose_control_hysteresis.pid_exit_error_vel_linear = write_value,
+                        ParameterName::CTRL_PID_EXIT_ERROR_VEL_ANGULAR => self.pose_control_hysteresis.pid_exit_error_vel_angular = write_value,
                         _ => unreachable!(),
                     }
                 },
