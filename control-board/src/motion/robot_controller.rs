@@ -233,64 +233,82 @@ impl BodyController {
         let dt = self.loop_period.as_micros() as f32 * 1e-6;
         let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-        let pose_error = target_pose - pose_estimate;
-        let linear_error = sqrtf(pose_error.x * pose_error.x + pose_error.y * pose_error.y);
-        let angular_error = pose_error.z.abs();
-        // Target pose implies zero velocity, so velocity error is the current velocity magnitude
-        let linear_vel_error = sqrtf(twist_estimate.x * twist_estimate.x + twist_estimate.y * twist_estimate.y);
-        let angular_vel_error = twist_estimate.z.abs();
 
-        let hyst = &self.pose_control_hysteresis;
+        ///////////////////////////////////
+        // Calculate the optimal trajectory to the setpoint
+        let traj = BangBangTraj3D::from_target_pose(
+            state_estimate, target_pose, self.trajectory_params,
+        );
+        // Calculate the twist that should be achieved at the next time step
+        let next_body_state = traj.state_at(state_estimate, 0.0, dt);
+        let global_twist_cmd = Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
+
+        // Now use PID to calculate an acceleration command to achieve the next body state, which should help smooth out the trajectory and mitigate modeling errors.
+        let global_accel_cmd = self.pid_controller.calculate(
+            &next_body_state.fixed_rows::<3>(0).into(),
+            &pose_estimate,
+            dt,
+        );
+        ///////////////////////////////////
+
+        // let pose_error = target_pose - pose_estimate;
+        // let linear_error = sqrtf(pose_error.x * pose_error.x + pose_error.y * pose_error.y);
+        // let angular_error = pose_error.z.abs();
+        // // Target pose implies zero velocity, so velocity error is the current velocity magnitude
+        // let linear_vel_error = sqrtf(twist_estimate.x * twist_estimate.x + twist_estimate.y * twist_estimate.y);
+        // let angular_vel_error = twist_estimate.z.abs();
+
+        // let hyst = &self.pose_control_hysteresis;
 
         // Dual-mode switching with hysteresis:
         //  - Switch to PID when both position and velocity errors drop below the enter thresholds
         //  - Switch back to bang-bang when any position or velocity error rises above the exit thresholds
-        match self.pose_control_mode {
-            PoseControlMode::BangBang => {
-                if linear_error < hyst.pid_enter_error_pos_linear
-                    && angular_error < hyst.pid_enter_error_pos_angular
-                    && linear_vel_error < hyst.pid_enter_error_vel_linear
-                    && angular_vel_error < hyst.pid_enter_error_vel_angular
-                {
-                    self.pose_control_mode = PoseControlMode::Pid;
-                    self.pid_controller.reset();
-                }
-            }
-            PoseControlMode::Pid => {
-                if linear_error > hyst.pid_exit_error_pos_linear
-                    || angular_error > hyst.pid_exit_error_pos_angular
-                    || linear_vel_error > hyst.pid_exit_error_vel_linear
-                    || angular_vel_error > hyst.pid_exit_error_vel_angular
-                {
-                    self.pose_control_mode = PoseControlMode::BangBang;
-                }
-            }
-        }
+        // match self.pose_control_mode {
+        //     PoseControlMode::BangBang => {
+        //         if linear_error < hyst.pid_enter_error_pos_linear
+        //             && angular_error < hyst.pid_enter_error_pos_angular
+        //             && linear_vel_error < hyst.pid_enter_error_vel_linear
+        //             && angular_vel_error < hyst.pid_enter_error_vel_angular
+        //         {
+        //             self.pose_control_mode = PoseControlMode::Pid;
+        //             self.pid_controller.reset();
+        //         }
+        //     }
+        //     PoseControlMode::Pid => {
+        //         if linear_error > hyst.pid_exit_error_pos_linear
+        //             || angular_error > hyst.pid_exit_error_pos_angular
+        //             || linear_vel_error > hyst.pid_exit_error_vel_linear
+        //             || angular_vel_error > hyst.pid_exit_error_vel_angular
+        //         {
+        //             self.pose_control_mode = PoseControlMode::BangBang;
+        //         }
+        //     }
+        // }
 
-        let (global_accel_cmd, global_twist_cmd) = match self.pose_control_mode {
-            PoseControlMode::BangBang => {
-                // Calculate the optimal trajectory to the setpoint
-                let traj = BangBangTraj3D::from_target_pose(
-                    state_estimate, target_pose, self.trajectory_params,
-                );
-                // Calculate the acceleration needed to achieve the trajectory right now
-                let accel = traj.accel_at(0.0);
-                // Calculate the twist that should be achieved at the next time step
-                let next_body_state = traj.state_at(state_estimate, 0.0, dt);
-                let twist = Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
-                (accel, twist)
-            }
-            PoseControlMode::Pid => {
-                let accel = self.pid_controller.calculate(
-                    &target_pose,
-                    &pose_estimate,
-                    dt,
-                );
-                let twist: Vector3f = state_estimate.fixed_rows::<3>(3)
-                    + accel * dt;
-                (accel, twist)
-            }
-        };
+        // let (global_accel_cmd, global_twist_cmd) = match self.pose_control_mode {
+        //     PoseControlMode::BangBang => {
+        //         // Calculate the optimal trajectory to the setpoint
+        //         let traj = BangBangTraj3D::from_target_pose(
+        //             state_estimate, target_pose, self.trajectory_params,
+        //         );
+        //         // Calculate the acceleration needed to achieve the trajectory right now
+        //         let accel = traj.accel_at(0.0);
+        //         // Calculate the twist that should be achieved at the next time step
+        //         let next_body_state = traj.state_at(state_estimate, 0.0, dt);
+        //         let twist = Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
+        //         (accel, twist)
+        //     }
+        //     PoseControlMode::Pid => {
+        //         let accel = self.pid_controller.calculate(
+        //             &target_pose,
+        //             &pose_estimate,
+        //             dt,
+        //         );
+        //         let twist: Vector3f = state_estimate.fixed_rows::<3>(3)
+        //             + accel * dt;
+        //         (accel, twist)
+        //     }
+        // };
 
         // These torques are discretized by the loop rate, but in an ideal world, it would be a continuous command update to reach the next state wheel velocities as theta changes. However, the loop rate should be fast enough that the error due to a change in theta during each control period should be negligible, and the individual wheel velocities are achieved by the next control update
         self.body_twist_cmd = global_twist_cmd;
