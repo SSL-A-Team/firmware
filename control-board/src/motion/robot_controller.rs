@@ -47,14 +47,14 @@ pub struct PoseControlHysteresis {
 impl Default for PoseControlHysteresis {
     fn default() -> Self {
         PoseControlHysteresis {
-            pid_enter_error_pos_linear: 0.1,    // meters
-            pid_enter_error_pos_angular: 0.15,  // radians
-            pid_exit_error_pos_linear: 0.2,     // meters (larger than enter for hysteresis)
-            pid_exit_error_pos_angular: 0.3,    // radians (larger than enter for hysteresis)
-            pid_enter_error_vel_linear: 0.5,    // m/s
-            pid_enter_error_vel_angular: 1.0,   // rad/s
-            pid_exit_error_vel_linear: 1.0,     // m/s (larger than enter for hysteresis)
-            pid_exit_error_vel_angular: 2.0,    // rad/s (larger than enter for hysteresis)
+            pid_enter_error_pos_linear: 0.05,    // meters
+            pid_enter_error_pos_angular: 0.2,  // radians
+            pid_exit_error_pos_linear: 0.1,     // meters (larger than enter for hysteresis)
+            pid_exit_error_pos_angular: 0.4,    // radians (larger than enter for hysteresis)
+            pid_enter_error_vel_linear: 0.2,    // m/s
+            pid_enter_error_vel_angular: 0.5,   // rad/s
+            pid_exit_error_vel_linear: 0.4,     // m/s (larger than enter for hysteresis)
+            pid_exit_error_vel_angular: 0.8,    // rad/s (larger than enter for hysteresis)
         }
     }
 }
