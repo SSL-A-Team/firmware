@@ -470,18 +470,14 @@ impl<
             );
             vision_update = false;  // reset vision update flag after use
 
-            let mut wheel_current_cmd = Vector4f::default();
-            let mut wheel_vel_cmd = Vector4f::default();
-            if self.stop_wheels() || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
-                // if ticks_since_trace_print >= TICKS_TRACE_PRINT {
-                //     defmt::warn!("control task - motor commands locked out");
-                // }
+            let (wheel_current_cmd, wheel_vel_cmd) = if self.stop_wheels() || 
+                ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
                 defmt::warn!("control task - motor commands locked out");
+                (Vector4f::default(), Vector4f::default())
             } else {
-                wheel_current_cmd = robot_controller.get_wheel_currents();
-                wheel_vel_cmd = robot_controller.get_wheel_velocities();
-            }
-            
+                (robot_controller.get_wheel_currents(), robot_controller.get_wheel_velocities())
+            };
+
             ////////////////// TODO: Move this/delete this //////////////////////
 
             let mut wheel_ma = wheel_current_cmd * 1000.0;
@@ -530,10 +526,6 @@ impl<
             self.motor_bl.set_current_setpoint(wheel_ma.y as i16);
             self.motor_br.set_current_setpoint(wheel_ma.z as i16);
             self.motor_fr.set_current_setpoint(wheel_ma.w as i16);
-            // self.motor_fl.set_current_setpoint(0);
-            // self.motor_bl.set_current_setpoint(0);
-            // self.motor_br.set_current_setpoint(0);
-            // self.motor_fr.set_current_setpoint(0);
 
             let control_update_time = Instant::now() - start;
             start = Instant::now();

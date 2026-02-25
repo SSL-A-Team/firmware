@@ -9,8 +9,8 @@ use ateam_controls::{Vector3f, Vector4f, Vector6f, Vector8f};
 use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
 use ateam_controls::robot_model::RobotModel;
 use embassy_time::{Duration, Instant};
-use libm::sqrtf;
-use nalgebra::{vector, SVector};
+use libm::{sqrtf, fabsf};
+use nalgebra::{vector, Matrix3x5, SVector};
 
 use ateam_common_packets::bindings::{ExtendedTelemetry, ParameterCommand};
 
@@ -74,7 +74,8 @@ pub fn clamp_vector_keep_dir<const D: usize>(
 
 pub struct BodyController {
     pub robot_model: RobotModel,
-    pub pid_controller: PidController<3>,
+    pub pose_pid_controller: PidController<3>,
+    pub twist_pid_controller: PidController<3>,
     pub trajectory_params: TrajectoryParams,
     pub pose_control_mode: PoseControlMode,
     pub pose_control_hysteresis: PoseControlHysteresis,
@@ -88,21 +89,10 @@ pub struct BodyController {
 
 impl BodyController {
     pub fn new(loop_period: Duration) -> BodyController {
-        // let pid_gains = nalgebra::matrix![
-        //     // P,    I,    D,    I_min, I_max
-        //      2.0,  0.5,  0.0, -0.1,   0.1;   // X
-        //      2.0,  0.5,  0.0, -0.1,   0.1;   // Y
-        //      3.0,  0.5,  0.0, -PI/2., PI/2.;   // Theta
-        // ];
-        let pid_gains = nalgebra::matrix![
-            // P,    I,    D,    I_min, I_max
-             1.5,  0.5,  0.0, -0.2,   0.1;   // X
-             1.5,  0.5,  0.0, -0.2,   0.1;   // Y
-             1.0,  0.5,  0.0, -1.0,   1.0;   // Theta
-        ];
         BodyController {
             robot_model: RobotModel::new_from_default_params(loop_period.as_micros() as f32 * 1e-6),
-            pid_controller: PidController::from_gains_matrix(&pid_gains),
+            pose_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
+            twist_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
             trajectory_params: TrajectoryParams::default(),
             pose_control_mode: PoseControlMode::BangBang,
             pose_control_hysteresis: PoseControlHysteresis::default(),
@@ -141,15 +131,26 @@ impl BodyController {
             wheel_vel_meas.w,
             gyro_theta_meas,
         ];
+
         self.robot_model.kf_update(measurement, !vision_update, false, false);
+        let mut state_estimate = self.robot_model.x.clone();
+
+        // Deadzone the velocity estimate
+        if fabsf(state_estimate[3]) < 0.05 {
+            state_estimate[3] = 0.0;
+        }
+        if fabsf(state_estimate[4]) < 0.05 {
+            state_estimate[4] = 0.0;
+        }
+        if fabsf(state_estimate[5]) < 0.05 {
+            state_estimate[5] = 0.0;
+        }
 
         let kf_update_time = Instant::now() - start;
         start = Instant::now();
 
-        let mut state_estimate = self.robot_model.x;
-        ///////////////// REMOVE AFTER TESTING ////////////////////////
-        // state_estimate.z = 0.0;
-        //////////////////////////////////////////////////////////////
+        let state_estimate = self.robot_model.x;
+
         if trace {
             defmt::trace!("State Estimate: [{}, {}, {}, {}, {}, {}]",
                 state_estimate.x,
@@ -160,8 +161,6 @@ impl BodyController {
                 state_estimate.b,
             );
         }
-        // defmt::info!("State estimate pose: {}, {}, {}", state_estimate.x, state_estimate.y, state_estimate.z);
-        // defmt::info!("State estimate twist: {}, {}, {}", state_estimate.w, state_estimate.a, state_estimate.b);
 
         if body_pose_control_enabled {
             self.compute_effort_pose_control(state_estimate, body_cmd);
@@ -230,119 +229,26 @@ impl BodyController {
     }
 
     pub fn compute_effort_pose_control(&mut self, state_estimate: Vector6f, target_pose: Vector3f) {
-        let dt = self.loop_period.as_micros() as f32 * 1e-6;
-        let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
-        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-
-        ///////////////////////////////////
-        // Calculate the optimal trajectory to the setpoint
-        let traj = BangBangTraj3D::from_target_pose(
-            state_estimate, target_pose, self.trajectory_params,
-        );
-        // Calculate the twist that should be achieved at the next time step
-        let next_body_state = traj.state_at(state_estimate, 0.0, dt);
-        let global_twist_cmd = Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
-
-        // Now use PID to calculate an acceleration command to achieve the next body state, which should help smooth out the trajectory and mitigate modeling errors.
-        let global_accel_cmd = self.pid_controller.calculate(
-            &next_body_state.fixed_rows::<3>(0).into(),
-            &pose_estimate,
-            dt,
-        );
-        ///////////////////////////////////
-
-        // let pose_error = target_pose - pose_estimate;
-        // let linear_error = sqrtf(pose_error.x * pose_error.x + pose_error.y * pose_error.y);
-        // let angular_error = pose_error.z.abs();
-        // // Target pose implies zero velocity, so velocity error is the current velocity magnitude
-        // let linear_vel_error = sqrtf(twist_estimate.x * twist_estimate.x + twist_estimate.y * twist_estimate.y);
-        // let angular_vel_error = twist_estimate.z.abs();
-
-        // let hyst = &self.pose_control_hysteresis;
-
-        // Dual-mode switching with hysteresis:
-        //  - Switch to PID when both position and velocity errors drop below the enter thresholds
-        //  - Switch back to bang-bang when any position or velocity error rises above the exit thresholds
-        // match self.pose_control_mode {
-        //     PoseControlMode::BangBang => {
-        //         if linear_error < hyst.pid_enter_error_pos_linear
-        //             && angular_error < hyst.pid_enter_error_pos_angular
-        //             && linear_vel_error < hyst.pid_enter_error_vel_linear
-        //             && angular_vel_error < hyst.pid_enter_error_vel_angular
-        //         {
-        //             self.pose_control_mode = PoseControlMode::Pid;
-        //             self.pid_controller.reset();
-        //         }
-        //     }
-        //     PoseControlMode::Pid => {
-        //         if linear_error > hyst.pid_exit_error_pos_linear
-        //             || angular_error > hyst.pid_exit_error_pos_angular
-        //             || linear_vel_error > hyst.pid_exit_error_vel_linear
-        //             || angular_vel_error > hyst.pid_exit_error_vel_angular
-        //         {
-        //             self.pose_control_mode = PoseControlMode::BangBang;
-        //         }
-        //     }
-        // }
-
-        // let (global_accel_cmd, global_twist_cmd) = match self.pose_control_mode {
-        //     PoseControlMode::BangBang => {
-        //         // Calculate the optimal trajectory to the setpoint
-        //         let traj = BangBangTraj3D::from_target_pose(
-        //             state_estimate, target_pose, self.trajectory_params,
-        //         );
-        //         // Calculate the acceleration needed to achieve the trajectory right now
-        //         let accel = traj.accel_at(0.0);
-        //         // Calculate the twist that should be achieved at the next time step
-        //         let next_body_state = traj.state_at(state_estimate, 0.0, dt);
-        //         let twist = Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
-        //         (accel, twist)
-        //     }
-        //     PoseControlMode::Pid => {
-        //         let accel = self.pid_controller.calculate(
-        //             &target_pose,
-        //             &pose_estimate,
-        //             dt,
-        //         );
-        //         let twist: Vector3f = state_estimate.fixed_rows::<3>(3)
-        //             + accel * dt;
-        //         (accel, twist)
-        //     }
-        // };
-
-        // These torques are discretized by the loop rate, but in an ideal world, it would be a continuous command update to reach the next state wheel velocities as theta changes. However, the loop rate should be fast enough that the error due to a change in theta during each control period should be negligible, and the individual wheel velocities are achieved by the next control update
-        self.body_twist_cmd = global_twist_cmd;
-        self.body_accel_cmd = global_accel_cmd;
-        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * global_twist_cmd;
-        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * global_accel_cmd;
+        (self.body_twist_cmd, self.body_accel_cmd) = self.pose_pid_control(state_estimate, target_pose);
+        // (self.body_twist_cmd, self.body_accel_cmd) = self.pose_bangbang_control(state_estimate, target_pose);
+        // (self.body_twist_cmd, self.body_accel_cmd) = self.pose_dualmode_control(state_estimate, target_pose);
+        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_cmd;
+        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * self.body_accel_cmd;
     }
 
     pub fn compute_effort_twist_control(&mut self, state_estimate: Vector6f, target_twist: Vector3f) {
-        let init_twist: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-        let traj = BangBangTraj3D::from_target_twist(
-            init_twist, 
-            target_twist,
-            self.trajectory_params,
-        );
-        let next_state = traj.state_at(state_estimate, 0.0, self.loop_period.as_micros() as f32 * 1e-6);
-        let global_twist_cmd: Vector3f = next_state.fixed_rows::<3>(3).into();
-        let global_accel_cmd = traj.accel_at(0.0);
-
-        self.body_twist_cmd = global_twist_cmd;
-        self.body_accel_cmd = global_accel_cmd;
-        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * global_twist_cmd;
-        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * global_accel_cmd;
+        // (self.body_twist_cmd, self.body_accel_cmd) = self.twist_bangbang_control(state_estimate, target_twist);
+        (self.body_twist_cmd, self.body_accel_cmd) = self.twist_pid_control(state_estimate, target_twist);
+        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_cmd;
+        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * self.body_accel_cmd;
     }
 
     pub fn compute_effort_accel_control(&mut self, state_estimate: Vector6f, target_accel: Vector3f) {
         let next_state = self.robot_model.a * state_estimate + self.robot_model.b * target_accel;
-        let global_twist_cmd = next_state.fixed_rows::<3>(3).into();
-        let global_accel_cmd = target_accel;
-
-        self.body_twist_cmd = global_twist_cmd;
-        self.body_accel_cmd = global_accel_cmd;
-        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * global_twist_cmd;
-        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * global_accel_cmd;
+        self.body_twist_cmd = next_state.fixed_rows::<3>(3).into();
+        self.body_accel_cmd = target_accel;
+        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_cmd;
+        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * self.body_accel_cmd;
     }
 
     pub fn get_wheel_velocities(&self) -> Vector4f {
@@ -361,6 +267,128 @@ impl BodyController {
 
     pub fn get_control_debug_telem(&self) -> ExtendedTelemetry {
         self.debug_telemetry
+    }
+
+    fn pose_pid_control(&mut self, state_estimate: Vector6f, target_pose: Vector3f) -> (Vector3f, Vector3f) {
+        let global_accel_cmd = self.pose_pid_controller.calculate(
+            &target_pose, 
+            &state_estimate.fixed_rows::<3>(0).into(),
+            self.loop_period.as_micros() as f32 * 1e-6
+        );
+        let global_twist_cmd = state_estimate.fixed_rows::<3>(3) + self.body_accel_cmd * (self.loop_period.as_micros() as f32 * 1e-6);
+        (global_accel_cmd, global_twist_cmd)
+    }
+
+    fn pose_bangbang_control(&mut self, state_estimate: Vector6f, target_pose: Vector3f) -> (Vector3f, Vector3f) {
+        // Calculate the optimal trajectory to the setpoint
+        let traj = BangBangTraj3D::from_target_pose(
+            state_estimate, target_pose, self.trajectory_params,
+        );
+        // Calculate the acceleration needed to achieve the trajectory right now
+        let global_accel_cmd = traj.accel_at(0.0);
+        // Calculate the twist that should be achieved at the next time step after applying this acceleration
+        let next_body_state = traj.state_at(state_estimate, 0.0, self.loop_period.as_micros() as f32 * 1e-6);
+        let global_twist_cmd = Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
+        (global_accel_cmd, global_twist_cmd)
+    }
+
+    fn pose_dualmode_control(&mut self, state_estimate: Vector6f, target_pose: Vector3f) -> (Vector3f, Vector3f) {
+        let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
+        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+        let dt = self.loop_period.as_micros() as f32 * 1e-6;
+
+        let pose_error: Vector3f = target_pose - pose_estimate;
+        let linear_error = sqrtf(pose_error.x * pose_error.x + pose_error.y * pose_error.y);
+        let angular_error = pose_error.z.abs();
+        // Target pose implies zero velocity, so velocity error is the current velocity magnitude
+        let linear_vel_error = sqrtf(twist_estimate.x * twist_estimate.x + twist_estimate.y * twist_estimate.y);
+        let angular_vel_error = twist_estimate.z.abs();
+
+        let hyst = &self.pose_control_hysteresis;
+
+        // Dual-mode switching with hysteresis:
+        //  - Switch to PID when both position and velocity errors drop below the enter thresholds
+        //  - Switch back to bang-bang when any position or velocity error rises above the exit thresholds
+        match self.pose_control_mode {
+            PoseControlMode::BangBang => {
+                if linear_error < hyst.pid_enter_error_pos_linear
+                    && angular_error < hyst.pid_enter_error_pos_angular
+                    && linear_vel_error < hyst.pid_enter_error_vel_linear
+                    && angular_vel_error < hyst.pid_enter_error_vel_angular
+                {
+                    self.pose_control_mode = PoseControlMode::Pid;
+                    self.pose_pid_controller.reset();
+                }
+            }
+            PoseControlMode::Pid => {
+                if linear_error > hyst.pid_exit_error_pos_linear
+                    || angular_error > hyst.pid_exit_error_pos_angular
+                    || linear_vel_error > hyst.pid_exit_error_vel_linear
+                    || angular_vel_error > hyst.pid_exit_error_vel_angular
+                {
+                    self.pose_control_mode = PoseControlMode::BangBang;
+                }
+            }
+        }
+
+        match self.pose_control_mode {
+            PoseControlMode::BangBang => {
+                self.pose_bangbang_control(state_estimate, target_pose)
+            }
+            PoseControlMode::Pid => {
+                self.pose_pid_control(state_estimate, target_pose)
+            }
+        }
+    }
+
+    fn twist_bangbang_control(&mut self, state_estimate: Vector6f, target_twist: Vector3f) -> (Vector3f, Vector3f) {
+        let traj = BangBangTraj3D::from_target_twist(
+            state_estimate.fixed_rows::<3>(3).into(),
+            target_twist,
+            self.trajectory_params,
+        );
+        let next_state = traj.state_at(state_estimate, 0.0, self.loop_period.as_micros() as f32 * 1e-6);
+        let global_twist_cmd: Vector3f = next_state.fixed_rows::<3>(3).into();
+        let global_accel_cmd = traj.accel_at(0.0);
+        (global_accel_cmd, global_twist_cmd)
+    }
+
+    fn twist_pid_control(&mut self, state_estimate: Vector6f, target_twist: Vector3f) -> (Vector3f, Vector3f) {
+        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+        let body_twist_pid = self.twist_pid_controller.calculate(&target_twist, &twist_estimate, self.loop_period.as_micros() as f32 * 1e-6);
+        let global_twist_cmd = target_twist + body_twist_pid;
+        let global_accel_cmd = Vector3f::default();
+
+        // // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
+        // // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
+        // let body_acc_output = (body_vel_output - self.prev_output) / self.loop_dt_s;
+        // // Make a copy of acceleration to swap out with decel parts.
+        // let mut temp_accel_decel_holder: Vector3<f32> = Vector3::zeros();
+        // temp_accel_decel_holder.copy_from_slice(self.body_acceleration_limit.as_slice());
+        // // Check if each part is decel (sign of acceleration != est velocity)
+        // if (body_acc_output[0] > 0.0) != (body_vel_estimate[0] > 0.0) {
+        //     temp_accel_decel_holder[0] = self.body_deceleration_limit[0];
+        // }
+
+        // if (body_acc_output[1] > 0.0) != (body_vel_estimate[1] > 0.0) {
+        //     temp_accel_decel_holder[1] = self.body_deceleration_limit[1];
+        // }
+
+        // if (body_acc_output[2] > 0.0) != (body_vel_estimate[2] > 0.0) {
+        //     temp_accel_decel_holder[2] = self.body_deceleration_limit[2];
+        // }
+
+        // let body_acc_output_clamp = clamp_vector_keep_dir(&body_acc_output, &temp_accel_decel_holder);
+
+        // // Convert back to body velocity
+        // let body_vel_output_acc_clamp = self.prev_output + (body_acc_output_clamp * self.loop_dt_s);
+
+        // // Clamp and maintain direction of control body velocity.
+        // let body_vel_output_full_clamp = clamp_vector_keep_dir(&body_vel_output_acc_clamp, &self.body_velocity_limit);
+        // self.prev_output.copy_from_slice(body_vel_output_full_clamp.as_slice());
+        // self.debug_telemetry.clamped_commanded_body_velocity.copy_from_slice(body_vel_output_full_clamp.as_slice());
+
+        (global_accel_cmd, global_twist_cmd)
     }
 }
 
@@ -394,6 +422,9 @@ impl ParameterInterface for BodyController {
             ParameterName::PIDII_X => true,
             ParameterName::PIDII_Y => true,
             ParameterName::PIDII_THETA => true,
+            ParameterName::PIDII_XD => true,
+            ParameterName::PIDII_YD => true,
+            ParameterName::PIDII_THETAD => true,
             ParameterName::TRAJ_ALLOWABLE_ERROR_POS_LINEAR => true,
             ParameterName::TRAJ_ALLOWABLE_ERROR_POS_ANGULAR => true,
             ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_LINEAR => true,
@@ -402,14 +433,14 @@ impl ParameterInterface for BodyController {
             ParameterName::TRAJ_MAX_VEL_ANGULAR => true,
             ParameterName::TRAJ_MAX_ACCEL_LINEAR => true,
             ParameterName::TRAJ_MAX_ACCEL_ANGULAR => true,
-            ParameterName::CTRL_PID_ENTER_ERROR_POS_LINEAR => true,
-            ParameterName::CTRL_PID_ENTER_ERROR_POS_ANGULAR => true,
-            ParameterName::CTRL_PID_EXIT_ERROR_POS_LINEAR => true,
-            ParameterName::CTRL_PID_EXIT_ERROR_POS_ANGULAR => true,
-            ParameterName::CTRL_PID_ENTER_ERROR_VEL_LINEAR => true,
-            ParameterName::CTRL_PID_ENTER_ERROR_VEL_ANGULAR => true,
-            ParameterName::CTRL_PID_EXIT_ERROR_VEL_LINEAR => true,
-            ParameterName::CTRL_PID_EXIT_ERROR_VEL_ANGULAR => true,
+            ParameterName::HYST_PID_ENTER_ERROR_POS_LINEAR => true,
+            ParameterName::HYST_PID_ENTER_ERROR_POS_ANGULAR => true,
+            ParameterName::HYST_PID_EXIT_ERROR_POS_LINEAR => true,
+            ParameterName::HYST_PID_EXIT_ERROR_POS_ANGULAR => true,
+            ParameterName::HYST_PID_ENTER_ERROR_VEL_LINEAR => true,
+            ParameterName::HYST_PID_ENTER_ERROR_VEL_ANGULAR => true,
+            ParameterName::HYST_PID_EXIT_ERROR_VEL_LINEAR => true,
+            ParameterName::HYST_PID_EXIT_ERROR_VEL_ANGULAR => true,
             _ => false,
         };
     }
@@ -467,14 +498,14 @@ impl ParameterInterface for BodyController {
                 | ParameterName::TRAJ_MAX_VEL_ANGULAR
                 | ParameterName::TRAJ_MAX_ACCEL_LINEAR
                 | ParameterName::TRAJ_MAX_ACCEL_ANGULAR
-                | ParameterName::CTRL_PID_ENTER_ERROR_POS_LINEAR
-                | ParameterName::CTRL_PID_ENTER_ERROR_POS_ANGULAR
-                | ParameterName::CTRL_PID_EXIT_ERROR_POS_LINEAR
-                | ParameterName::CTRL_PID_EXIT_ERROR_POS_ANGULAR
-                | ParameterName::CTRL_PID_ENTER_ERROR_VEL_LINEAR
-                | ParameterName::CTRL_PID_ENTER_ERROR_VEL_ANGULAR
-                | ParameterName::CTRL_PID_EXIT_ERROR_VEL_LINEAR
-                | ParameterName::CTRL_PID_EXIT_ERROR_VEL_ANGULAR => {
+                | ParameterName::HYST_PID_ENTER_ERROR_POS_LINEAR
+                | ParameterName::HYST_PID_ENTER_ERROR_POS_ANGULAR
+                | ParameterName::HYST_PID_EXIT_ERROR_POS_LINEAR
+                | ParameterName::HYST_PID_EXIT_ERROR_POS_ANGULAR
+                | ParameterName::HYST_PID_ENTER_ERROR_VEL_LINEAR
+                | ParameterName::HYST_PID_ENTER_ERROR_VEL_ANGULAR
+                | ParameterName::HYST_PID_EXIT_ERROR_VEL_LINEAR
+                | ParameterName::HYST_PID_EXIT_ERROR_VEL_ANGULAR => {
                     reply_cmd.data_format = ParameterDataFormat::F32;
                     reply_cmd.data.f32_ = match param_cmd.parameter_name {
                         ParameterName::KF_PROCESS_STD_POS_LINEAR => self.robot_model.kf_params.process_noise_std_pos_linear,
@@ -505,14 +536,14 @@ impl ParameterInterface for BodyController {
                         ParameterName::TRAJ_MAX_VEL_ANGULAR => self.trajectory_params.max_vel_angular,
                         ParameterName::TRAJ_MAX_ACCEL_LINEAR => self.trajectory_params.max_accel_linear,
                         ParameterName::TRAJ_MAX_ACCEL_ANGULAR => self.trajectory_params.max_accel_angular,
-                        ParameterName::CTRL_PID_ENTER_ERROR_POS_LINEAR => self.pose_control_hysteresis.pid_enter_error_pos_linear,
-                        ParameterName::CTRL_PID_ENTER_ERROR_POS_ANGULAR => self.pose_control_hysteresis.pid_enter_error_pos_angular,
-                        ParameterName::CTRL_PID_EXIT_ERROR_POS_LINEAR => self.pose_control_hysteresis.pid_exit_error_pos_linear,
-                        ParameterName::CTRL_PID_EXIT_ERROR_POS_ANGULAR => self.pose_control_hysteresis.pid_exit_error_pos_angular,
-                        ParameterName::CTRL_PID_ENTER_ERROR_VEL_LINEAR => self.pose_control_hysteresis.pid_enter_error_vel_linear,
-                        ParameterName::CTRL_PID_ENTER_ERROR_VEL_ANGULAR => self.pose_control_hysteresis.pid_enter_error_vel_angular,
-                        ParameterName::CTRL_PID_EXIT_ERROR_VEL_LINEAR => self.pose_control_hysteresis.pid_exit_error_vel_linear,
-                        ParameterName::CTRL_PID_EXIT_ERROR_VEL_ANGULAR => self.pose_control_hysteresis.pid_exit_error_vel_angular,
+                        ParameterName::HYST_PID_ENTER_ERROR_POS_LINEAR => self.pose_control_hysteresis.pid_enter_error_pos_linear,
+                        ParameterName::HYST_PID_ENTER_ERROR_POS_ANGULAR => self.pose_control_hysteresis.pid_enter_error_pos_angular,
+                        ParameterName::HYST_PID_EXIT_ERROR_POS_LINEAR => self.pose_control_hysteresis.pid_exit_error_pos_linear,
+                        ParameterName::HYST_PID_EXIT_ERROR_POS_ANGULAR => self.pose_control_hysteresis.pid_exit_error_pos_angular,
+                        ParameterName::HYST_PID_ENTER_ERROR_VEL_LINEAR => self.pose_control_hysteresis.pid_enter_error_vel_linear,
+                        ParameterName::HYST_PID_ENTER_ERROR_VEL_ANGULAR => self.pose_control_hysteresis.pid_enter_error_vel_angular,
+                        ParameterName::HYST_PID_EXIT_ERROR_VEL_LINEAR => self.pose_control_hysteresis.pid_exit_error_vel_linear,
+                        ParameterName::HYST_PID_EXIT_ERROR_VEL_ANGULAR => self.pose_control_hysteresis.pid_exit_error_vel_angular,
                         _ => unreachable!(),
                     };
                 },
@@ -520,11 +551,24 @@ impl ParameterInterface for BodyController {
                 | ParameterName::PIDII_Y
                 | ParameterName::PIDII_THETA => {
                     reply_cmd.data_format = ParameterDataFormat::PID_LIMITED_INTEGRAL_F32;
-                    let gain = self.pid_controller.get_gain();
+                    let gain = self.pose_pid_controller.get_gain();
                     let row = match param_cmd.parameter_name {
                         ParameterName::PIDII_X => 0,
                         ParameterName::PIDII_Y => 1,
                         ParameterName::PIDII_THETA => 2,
+                        _ => unreachable!(),
+                    };
+                    reply_cmd.data.pidii_f32 = [gain[(row, 0)], gain[(row, 1)], gain[(row, 2)], gain[(row, 3)], gain[(row, 4)]];
+                },
+                ParameterName::PIDII_XD
+                | ParameterName::PIDII_YD
+                | ParameterName::PIDII_THETAD => {
+                    reply_cmd.data_format = ParameterDataFormat::PID_LIMITED_INTEGRAL_F32;
+                    let gain = self.twist_pid_controller.get_gain();
+                    let row = match param_cmd.parameter_name {
+                        ParameterName::PIDII_XD => 0,
+                        ParameterName::PIDII_YD => 1,
+                        ParameterName::PIDII_THETAD => 2,
                         _ => unreachable!(),
                     };
                     reply_cmd.data.pidii_f32 = [gain[(row, 0)], gain[(row, 1)], gain[(row, 2)], gain[(row, 3)], gain[(row, 4)]];
@@ -627,28 +671,28 @@ impl ParameterInterface for BodyController {
                         _ => unreachable!(),
                     }
                 },
-                ParameterName::CTRL_PID_ENTER_ERROR_POS_LINEAR
-                | ParameterName::CTRL_PID_ENTER_ERROR_POS_ANGULAR
-                | ParameterName::CTRL_PID_EXIT_ERROR_POS_LINEAR
-                | ParameterName::CTRL_PID_EXIT_ERROR_POS_ANGULAR
-                | ParameterName::CTRL_PID_ENTER_ERROR_VEL_LINEAR
-                | ParameterName::CTRL_PID_ENTER_ERROR_VEL_ANGULAR
-                | ParameterName::CTRL_PID_EXIT_ERROR_VEL_LINEAR
-                | ParameterName::CTRL_PID_EXIT_ERROR_VEL_ANGULAR => {
+                ParameterName::HYST_PID_ENTER_ERROR_POS_LINEAR
+                | ParameterName::HYST_PID_ENTER_ERROR_POS_ANGULAR
+                | ParameterName::HYST_PID_EXIT_ERROR_POS_LINEAR
+                | ParameterName::HYST_PID_EXIT_ERROR_POS_ANGULAR
+                | ParameterName::HYST_PID_ENTER_ERROR_VEL_LINEAR
+                | ParameterName::HYST_PID_ENTER_ERROR_VEL_ANGULAR
+                | ParameterName::HYST_PID_EXIT_ERROR_VEL_LINEAR
+                | ParameterName::HYST_PID_EXIT_ERROR_VEL_ANGULAR => {
                     if param_cmd.data_format != ParameterDataFormat::F32 {
                         reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
                         return Err(reply_cmd);
                     }
                     let write_value = unsafe { param_cmd.data.f32_ };
                     match param_cmd.parameter_name {
-                        ParameterName::CTRL_PID_ENTER_ERROR_POS_LINEAR => self.pose_control_hysteresis.pid_enter_error_pos_linear = write_value,
-                        ParameterName::CTRL_PID_ENTER_ERROR_POS_ANGULAR => self.pose_control_hysteresis.pid_enter_error_pos_angular = write_value,
-                        ParameterName::CTRL_PID_EXIT_ERROR_POS_LINEAR => self.pose_control_hysteresis.pid_exit_error_pos_linear = write_value,
-                        ParameterName::CTRL_PID_EXIT_ERROR_POS_ANGULAR => self.pose_control_hysteresis.pid_exit_error_pos_angular = write_value,
-                        ParameterName::CTRL_PID_ENTER_ERROR_VEL_LINEAR => self.pose_control_hysteresis.pid_enter_error_vel_linear = write_value,
-                        ParameterName::CTRL_PID_ENTER_ERROR_VEL_ANGULAR => self.pose_control_hysteresis.pid_enter_error_vel_angular = write_value,
-                        ParameterName::CTRL_PID_EXIT_ERROR_VEL_LINEAR => self.pose_control_hysteresis.pid_exit_error_vel_linear = write_value,
-                        ParameterName::CTRL_PID_EXIT_ERROR_VEL_ANGULAR => self.pose_control_hysteresis.pid_exit_error_vel_angular = write_value,
+                        ParameterName::HYST_PID_ENTER_ERROR_POS_LINEAR => self.pose_control_hysteresis.pid_enter_error_pos_linear = write_value,
+                        ParameterName::HYST_PID_ENTER_ERROR_POS_ANGULAR => self.pose_control_hysteresis.pid_enter_error_pos_angular = write_value,
+                        ParameterName::HYST_PID_EXIT_ERROR_POS_LINEAR => self.pose_control_hysteresis.pid_exit_error_pos_linear = write_value,
+                        ParameterName::HYST_PID_EXIT_ERROR_POS_ANGULAR => self.pose_control_hysteresis.pid_exit_error_pos_angular = write_value,
+                        ParameterName::HYST_PID_ENTER_ERROR_VEL_LINEAR => self.pose_control_hysteresis.pid_enter_error_vel_linear = write_value,
+                        ParameterName::HYST_PID_ENTER_ERROR_VEL_ANGULAR => self.pose_control_hysteresis.pid_enter_error_vel_angular = write_value,
+                        ParameterName::HYST_PID_EXIT_ERROR_VEL_LINEAR => self.pose_control_hysteresis.pid_exit_error_vel_linear = write_value,
+                        ParameterName::HYST_PID_EXIT_ERROR_VEL_ANGULAR => self.pose_control_hysteresis.pid_exit_error_vel_angular = write_value,
                         _ => unreachable!(),
                     }
                 },
@@ -666,12 +710,34 @@ impl ParameterInterface for BodyController {
                         ParameterName::PIDII_THETA => 2,
                         _ => unreachable!(),
                     };
-                    let mut gain = self.pid_controller.get_gain();
+                    let mut gain = self.pose_pid_controller.get_gain();
                     for col in 0..5 {
                         gain[(row, col)] = write_values[col];
                     }
-                    self.pid_controller.set_gain(gain);
-                    self.pid_controller.reset();
+                    self.pose_pid_controller.set_gain(gain);
+                    self.pose_pid_controller.reset();
+                    reply_cmd.data.pidii_f32 = write_values;
+                },
+                ParameterName::PIDII_XD
+                | ParameterName::PIDII_YD
+                | ParameterName::PIDII_THETAD => {
+                    if param_cmd.data_format != ParameterDataFormat::PID_LIMITED_INTEGRAL_F32 {
+                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                        return Err(reply_cmd);
+                    }
+                    let write_values = unsafe { param_cmd.data.pidii_f32 };
+                    let row = match param_cmd.parameter_name {
+                        ParameterName::PIDII_XD => 0,
+                        ParameterName::PIDII_YD => 1,
+                        ParameterName::PIDII_THETAD => 2,
+                        _ => unreachable!(),
+                    };
+                    let mut gain = self.twist_pid_controller.get_gain();
+                    for col in 0..5 {
+                        gain[(row, col)] = write_values[col];
+                    }
+                    self.twist_pid_controller.set_gain(gain);
+                    self.twist_pid_controller.reset();
                     reply_cmd.data.pidii_f32 = write_values;
                 },
                 _ => {
