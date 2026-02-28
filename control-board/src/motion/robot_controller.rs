@@ -8,9 +8,9 @@ use ateam_common_packets::bindings::{
 use ateam_controls::{Vector3f, Vector4f, Vector6f, Vector8f};
 use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
 use ateam_controls::robot_model::RobotModel;
-use embassy_time::{Duration, Instant};
+use embassy_time::Instant;
 use libm::{sqrtf, fabsf};
-use nalgebra::{vector, Matrix3x5, SVector};
+use nalgebra::{vector, Matrix3x5};
 
 use ateam_common_packets::bindings::{ExtendedTelemetry, ParameterCommand};
 
@@ -59,18 +59,6 @@ impl Default for PoseControlHysteresis {
     }
 }
 
-// TODO find some general numeric type trait(s) for D
-// Clamp the vector, but keep the direction consistent.
-pub fn clamp_vector_keep_dir<const D: usize>(
-    vec: &SVector<f32, D>,
-    limits_abs: &SVector<f32, D>,
-) -> SVector<f32, D> {
-    // Applies the clamping in a sign-less way by getting the scale of the vector compared to absolute value clamp region.
-    let scales: SVector<f32, D> = vec.abs().component_div(limits_abs);
-    // To maintain direction, do a scalar divison of the max of the scales. Limit to make sure to only scale down.
-    vec / f32::max(1.0, scales.max())
-}
-
 
 pub struct BodyController {
     pub robot_model: RobotModel,
@@ -81,16 +69,17 @@ pub struct BodyController {
     pub pose_control_hysteresis: PoseControlHysteresis,
     pub body_twist_cmd: Vector3f,
     pub body_accel_cmd: Vector3f,
+    pub prev_body_twist_cmd: Vector3f,  // Used for twist PID control
     pub wheel_vel_cmd: Vector4f,
     pub wheel_torque_cmd: Vector4f,
     pub debug_telemetry: ExtendedTelemetry,
-    pub loop_period: Duration,
+    pub dt: f32,
 }
 
 impl BodyController {
-    pub fn new(loop_period: Duration) -> BodyController {
+    pub fn new(dt: f32) -> BodyController {
         BodyController {
-            robot_model: RobotModel::new_from_default_params(loop_period.as_micros() as f32 * 1e-6),
+            robot_model: RobotModel::new_from_default_params(dt),
             pose_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
             twist_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
             trajectory_params: TrajectoryParams::default(),
@@ -98,10 +87,11 @@ impl BodyController {
             pose_control_hysteresis: PoseControlHysteresis::default(),
             body_twist_cmd: Vector3f::default(),
             body_accel_cmd: Vector3f::default(),
+            prev_body_twist_cmd: Vector3f::default(),
             wheel_vel_cmd: Vector4f::default(),
             wheel_torque_cmd: Vector4f::default(),
             debug_telemetry: Default::default(),
-            loop_period,
+            dt,
         }
     }
 
@@ -273,10 +263,10 @@ impl BodyController {
         let global_accel_cmd = self.pose_pid_controller.calculate(
             &target_pose, 
             &state_estimate.fixed_rows::<3>(0).into(),
-            self.loop_period.as_micros() as f32 * 1e-6
+            self.dt
         );
-        let global_twist_cmd = state_estimate.fixed_rows::<3>(3) + self.body_accel_cmd * (self.loop_period.as_micros() as f32 * 1e-6);
-        (global_accel_cmd, global_twist_cmd)
+        let global_twist_cmd = state_estimate.fixed_rows::<3>(3) + self.body_accel_cmd * self.dt;
+        (global_twist_cmd, global_accel_cmd)
     }
 
     fn pose_bangbang_control(&mut self, state_estimate: Vector6f, target_pose: Vector3f) -> (Vector3f, Vector3f) {
@@ -287,15 +277,14 @@ impl BodyController {
         // Calculate the acceleration needed to achieve the trajectory right now
         let global_accel_cmd = traj.accel_at(0.0);
         // Calculate the twist that should be achieved at the next time step after applying this acceleration
-        let next_body_state = traj.state_at(state_estimate, 0.0, self.loop_period.as_micros() as f32 * 1e-6);
+        let next_body_state = traj.state_at(state_estimate, 0.0, self.dt);
         let global_twist_cmd = Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
-        (global_accel_cmd, global_twist_cmd)
+        (global_twist_cmd, global_accel_cmd)
     }
 
     fn pose_dualmode_control(&mut self, state_estimate: Vector6f, target_pose: Vector3f) -> (Vector3f, Vector3f) {
         let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-        let dt = self.loop_period.as_micros() as f32 * 1e-6;
 
         let pose_error: Vector3f = target_pose - pose_estimate;
         let linear_error = sqrtf(pose_error.x * pose_error.x + pose_error.y * pose_error.y);
@@ -347,48 +336,53 @@ impl BodyController {
             target_twist,
             self.trajectory_params,
         );
-        let next_state = traj.state_at(state_estimate, 0.0, self.loop_period.as_micros() as f32 * 1e-6);
+        let next_state = traj.state_at(state_estimate, 0.0, self.dt);
         let global_twist_cmd: Vector3f = next_state.fixed_rows::<3>(3).into();
         let global_accel_cmd = traj.accel_at(0.0);
-        (global_accel_cmd, global_twist_cmd)
+        (global_twist_cmd, global_accel_cmd)
     }
 
     fn twist_pid_control(&mut self, state_estimate: Vector6f, target_twist: Vector3f) -> (Vector3f, Vector3f) {
         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-        let body_twist_pid = self.twist_pid_controller.calculate(&target_twist, &twist_estimate, self.loop_period.as_micros() as f32 * 1e-6);
-        let global_twist_cmd = target_twist + body_twist_pid;
-        let global_accel_cmd = Vector3f::default();
+        let body_twist_pid = self.twist_pid_controller.calculate(&target_twist, &twist_estimate, self.dt);
+        let mut global_twist_cmd = target_twist + body_twist_pid;
 
-        // // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
-        // // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
-        // let body_acc_output = (body_vel_output - self.prev_output) / self.loop_dt_s;
-        // // Make a copy of acceleration to swap out with decel parts.
-        // let mut temp_accel_decel_holder: Vector3<f32> = Vector3::zeros();
-        // temp_accel_decel_holder.copy_from_slice(self.body_acceleration_limit.as_slice());
-        // // Check if each part is decel (sign of acceleration != est velocity)
-        // if (body_acc_output[0] > 0.0) != (body_vel_estimate[0] > 0.0) {
-        //     temp_accel_decel_holder[0] = self.body_deceleration_limit[0];
-        // }
+        // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
+        // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
+        let mut global_accel_cmd = (global_twist_cmd - self.prev_body_twist_cmd) / self.dt;
 
-        // if (body_acc_output[1] > 0.0) != (body_vel_estimate[1] > 0.0) {
-        //     temp_accel_decel_holder[1] = self.body_deceleration_limit[1];
-        // }
+        let max_accel_linear = self.trajectory_params.max_accel_linear;
+        let max_accel_angular = self.trajectory_params.max_accel_angular;
+        let max_vel_linear = self.trajectory_params.max_vel_linear;
+        let max_vel_angular = self.trajectory_params.max_vel_angular;
 
-        // if (body_acc_output[2] > 0.0) != (body_vel_estimate[2] > 0.0) {
-        //     temp_accel_decel_holder[2] = self.body_deceleration_limit[2];
-        // }
+        // Clamp acceleration: linear magnitude and angular independently
+        let accel_linear_mag = sqrtf(global_accel_cmd.x * global_accel_cmd.x + global_accel_cmd.y * global_accel_cmd.y);
+        if accel_linear_mag > max_accel_linear {
+            let scale = max_accel_linear / accel_linear_mag;
+            global_accel_cmd.x *= scale;
+            global_accel_cmd.y *= scale;
+        }
+        global_accel_cmd.z = global_accel_cmd.z.clamp(-max_accel_angular, max_accel_angular);
 
-        // let body_acc_output_clamp = clamp_vector_keep_dir(&body_acc_output, &temp_accel_decel_holder);
+        // Recompute twist from clamped acceleration
+        global_twist_cmd = self.prev_body_twist_cmd + (global_accel_cmd * self.dt);
 
-        // // Convert back to body velocity
-        // let body_vel_output_acc_clamp = self.prev_output + (body_acc_output_clamp * self.loop_dt_s);
+        // Clamp twist: linear magnitude and angular independently
+        let twist_linear_mag = sqrtf(global_twist_cmd.x * global_twist_cmd.x + global_twist_cmd.y * global_twist_cmd.y);
+        if twist_linear_mag > max_vel_linear {
+            let scale = max_vel_linear / twist_linear_mag;
+            global_twist_cmd.x *= scale;
+            global_twist_cmd.y *= scale;
+        }
+        global_twist_cmd.z = global_twist_cmd.z.clamp(-max_vel_angular, max_vel_angular);
 
-        // // Clamp and maintain direction of control body velocity.
-        // let body_vel_output_full_clamp = clamp_vector_keep_dir(&body_vel_output_acc_clamp, &self.body_velocity_limit);
-        // self.prev_output.copy_from_slice(body_vel_output_full_clamp.as_slice());
-        // self.debug_telemetry.clamped_commanded_body_velocity.copy_from_slice(body_vel_output_full_clamp.as_slice());
+        // Recompute accel to stay consistent with the clamped twist
+        global_accel_cmd = (global_twist_cmd - self.prev_body_twist_cmd) / self.dt;
 
-        (global_accel_cmd, global_twist_cmd)
+        self.prev_body_twist_cmd.copy_from_slice(global_twist_cmd.as_slice());
+
+        (global_twist_cmd, global_accel_cmd)
     }
 }
 

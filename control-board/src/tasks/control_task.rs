@@ -300,7 +300,7 @@ impl<
         let loop_period = Duration::from_millis(1);  // 1 kHz
         let mut loop_rate_ticker = Ticker::every(loop_period);
 
-        let mut robot_controller = BodyController::new(loop_period);
+        let mut robot_controller = BodyController::new(loop_period.as_micros() as f32 * 1e-6);
 
         let mut cmd = Vector3f::default();
         let mut last_vision_pose_meas = Vector3f::default();
