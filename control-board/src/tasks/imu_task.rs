@@ -113,7 +113,7 @@ async fn imu_task_entry(
                 GyroMode::ContinuousHighPerformance,
                 GyroRange::PlusMinus2000DegPerSec,
                 Bandwidth3DbCutoffFreq::AccOdrOver2,
-                OutputDataRate::Odr100p0,
+                OutputDataRate::Odr1600p0,
                 DataAveragingWindow::Average2Samples,
             )
             .await;
@@ -133,7 +133,7 @@ async fn imu_task_entry(
                 AccelMode::ContinuousHighPerformance,
                 AccelRange::Range2g,
                 Bandwidth3DbCutoffFreq::AccOdrOver2,
-                OutputDataRate::Odr100p0,
+                OutputDataRate::Odr1600p0,
                 DataAveragingWindow::Average2Samples,
             )
             .await;
