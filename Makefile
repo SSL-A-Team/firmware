@@ -78,8 +78,7 @@ common--clean:
 #  motor controller binaries  #
 ###############################
 
-.PHONY: .motor-controller-setup
-.motor-controller-setup:
+ motor-controller/build/CMakeCache.txt: motor-controller/CMakeLists.txt
 	cd motor-controller/ && \
 	cmake -B build/ \
 
@@ -87,7 +86,7 @@ common--clean:
 motor_controller_binaries := ${shell cd motor-controller/bin && ls -d * && cd ../..}
 
 define create-motor-controller-targets
-$1--$2: .motor-controller-setup
+$1--$2: motor-controller/build/CMakeCache.txt
 	cd $1/build/ && \
 	make $2
 $1--all:: $1--$2
