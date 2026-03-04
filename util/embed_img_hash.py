@@ -15,12 +15,11 @@ out for the computation.
 import os
 import subprocess
 import binascii
-import traceback
 from pathlib import Path
+from argparse import ArgumentParser
 
 
-firmware_dir_path = (Path(__file__) / ".." / "..").absolute().resolve()
-control_bin_path = firmware_dir_path / "control-board" / "target" / "thumbv7em-none-eabihf" / "release" / "control.bin"
+firmware_dir_path = (Path(__file__) / ".." / "..").resolve()
 kicker_bin_path = firmware_dir_path / "kicker-board" / "target" / "thumbv7em-none-eabihf" / "release" / "kicker.bin"
 wheel_bin_path = firmware_dir_path / "motor-controller" / "build" / "bin" / "wheel.bin"
 dribbler_bin_path = firmware_dir_path / "motor-controller" / "build" / "bin" / "dribbler.bin"
@@ -75,16 +74,37 @@ def try_embed_img_hash(embed_img_path, img_path, img_hash_magic):
             raise Exception(f"img_path - path not found '{img_path}'")
         img_hash = get_img_hash(img_path)
         embed_img_hash(embed_img_path, img_hash_magic, img_hash)
-        print(f"embed_git_status.py - SUCCESS - Embedded hash of '{img_path}' into '{embed_img_path}'")
-    except:
-        print(f"embed_git_status.py - WARNING - Unable to embed hash of '{img_path}' into '{embed_img_path}'")
-        print(traceback.format_exc())
+    except Exception:
+        return False
+    return True
 
 
 if __name__ == "__main__":
-    try_embed_img_hash(control_bin_path, wheel_bin_path, wheel_img_hash_magic_ctrl)
-    try_embed_img_hash(control_bin_path, wheel_bin_path, wheel_img_hash_magic_weel)
-    try_embed_img_hash(control_bin_path, kicker_bin_path, kicker_img_hash_magic_ctrl)
-    try_embed_img_hash(control_bin_path, kicker_bin_path, kicker_img_hash_magic_kick)
-    try_embed_img_hash(control_bin_path, dribbler_bin_path, dribbler_img_hash_magic_kick)
-    try_embed_img_hash(control_bin_path, dribbler_bin_path, dribbler_img_hash_magic_drbl)
+    parser = ArgumentParser()
+    parser.add_argument("--bin", required=True, help="Path to the target binary to embed image hashes in")
+    args = parser.parse_args()
+    target_bin = Path(args.bin)
+    if not target_bin.exists():
+        print(f"embed_git_status.py - ERROR - Could not find target binary at path '{target_bin}'")
+        exit(1)
+    success_files = set()
+    failure_files = set()
+    for source_bin, magic_bytes in [
+        (wheel_bin_path,    wheel_img_hash_magic_ctrl),
+        (wheel_bin_path,    wheel_img_hash_magic_weel),
+        (kicker_bin_path,   kicker_img_hash_magic_ctrl),
+        (kicker_bin_path,   kicker_img_hash_magic_kick),
+        (dribbler_bin_path, dribbler_img_hash_magic_kick),
+        (dribbler_bin_path, dribbler_img_hash_magic_drbl),
+    ]:
+        result = try_embed_img_hash(target_bin, source_bin, magic_bytes)
+        if result:
+            success_files.add(source_bin)
+        else:
+            failure_files.add(source_bin)
+            if source_bin in success_files:
+                success_files.remove(source_bin)
+    if len(success_files) > 0:
+        print(f"embed_git_status.py - SUCCESS - Embedded hash of binary files {', '.join("'" + file.name + "'" for file in success_files)} in binary file '{target_bin.name}'")
+    if len(failure_files) > 0:
+        print(f"embed_git_status.py - WARNING - Unable to embed hash of binary files {', '.join("'" + file.name + "'" for file in failure_files)} in binary file '{target_bin.name}'. This is expected if the sub-firmware image isn't include in the target binary.")
