@@ -77,6 +77,7 @@ version = "0.1.0"
 dependencies = [
  "apa102-spi",
  "ateam-common-packets",
+ "ateam-controls",
  "ateam-lib-stm32",
  "const_format",
  "cortex-m",
@@ -99,6 +100,14 @@ dependencies = [
  "panic-probe",
  "smart-leds",
  "static_cell",
+]
+
+[[package]]
+name = "ateam-controls"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "nalgebra",
 ]
 
 [[package]]

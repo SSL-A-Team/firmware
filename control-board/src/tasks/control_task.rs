@@ -1,33 +1,28 @@
 use ateam_common_packets::{
-    bindings::{BasicControl, BasicTelemetry, KickerTelemetry, MotionCommandType, PowerTelemetry},
+    bindings::{BasicControl, BasicTelemetry, CcmMotionControlType, KickerTelemetry, MotionCommandType, PowerTelemetry},
     radio::TelemetryPacket,
 };
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
 };
+use ateam_controls::{Vector3f, Vector4f};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::{usart::Uart, Peri};
 use embassy_time::{Duration, Instant, Ticker, Timer};
-use nalgebra::{Vector3, Vector4};
 
 use crate::{
     include_external_cpp_bin,
-    motion::{
-        self,
-        params::robot_physical_params::{
-            WHEEL_ANGLES_DEG, WHEEL_DISTANCE_TO_ROBOT_CENTER_M, WHEEL_RADIUS_M,
-        },
-        robot_controller::BodyVelocityController,
-        robot_model::{RobotConstants, RobotModel},
-    },
+    motion::robot_controller::BodyController,
     parameter_interface::ParameterInterface,
     pins::*,
     robot_state::{RobotState, SharedRobotState},
-    stspin_motor::WheelMotor,
+    motor::CurrentControlledMotor,
     SystemIrqs, DEBUG_MOTOR_UART_QUEUES, ROBOT_VERSION_MAJOR, ROBOT_VERSION_MINOR,
 };
 
-include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
+include_external_cpp_bin! {WHEEL_FW_IMG, "wheel-torque.bin"}
+
+const MAX_CURRENT_MA: f32 = 1500.0; // mA
 
 const MAX_TX_PACKET_SIZE: usize = 80;
 const TX_BUF_DEPTH: usize = 3;
@@ -35,13 +30,17 @@ const MAX_RX_PACKET_SIZE: usize = 80;
 const RX_BUF_DEPTH: usize = 20;
 
 type ControlWheelMotor =
-    WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>;
+    CurrentControlledMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES>;
 static_idle_buffered_uart!(FRONT_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(BACK_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(FRONT_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
-const TICKS_WITHOUT_PACKET_STOP: usize = 20;
+const TICKS_WITHOUT_PACKET_STOP: usize = 200;
+const TICKS_BASIC_TELEM_INTERVAL: usize = 20;  // send basic telem every 10 ticks (100 Hz if loop is 1 kHz)
+const TICKS_EXTENDED_TELEM_INTERVAL: usize = 20;  // send extended telem every 20 ticks (50 Hz if loop is 1 kHz)
+// const TICKS_TRACE_PRINT: usize = 1000;  // print trace every 1000 ticks (1 second if loop is 1 kHz)
+const TICKS_TRACE_PRINT: usize = 100;  // print trace every 100 ticks (0.1 second if loop is 1 kHz)
 
 #[macro_export]
 macro_rules! create_control_task {
@@ -115,6 +114,9 @@ pub struct ControlTask<
     last_power_telemetry: PowerTelemetry,
     last_kicker_telemetry: KickerTelemetry,
 
+    ticks_since_extended_telem: usize,
+    ticks_since_basic_telem: usize,
+
     motor_fl: ControlWheelMotor,
     motor_bl: ControlWheelMotor,
     motor_br: ControlWheelMotor,
@@ -155,6 +157,8 @@ impl<
             last_command: Default::default(),
             last_power_telemetry: Default::default(),
             last_kicker_telemetry: Default::default(),
+            ticks_since_basic_telem: 0,
+            ticks_since_extended_telem: 0,
             motor_fl: motor_fl,
             motor_bl: motor_bl,
             motor_br: motor_br,
@@ -162,50 +166,11 @@ impl<
         }
     }
 
-    fn do_control_update(
-        &mut self,
-        robot_controller: &mut BodyVelocityController,
-        cmd_vel: Vector3<f32>,
-        gyro_rads: f32,
-        controls_enabled: bool,
-    ) -> Vector4<f32>
-/*
-            Provide the motion controller with the current wheel velocities
-            and torques from the appropriate sensors, then get a set of wheel
-            velocities to apply based on the controller's current state.
-         */ {
-        let wheel_vels = Vector4::new(
-            self.motor_fl.read_rads(),
-            self.motor_bl.read_rads(),
-            self.motor_br.read_rads(),
-            self.motor_fr.read_rads(),
-        );
-
-        // torque values are computed on the spin but put in the current variable
-        // TODO update this when packet/var names are updated to match software
-        let wheel_torques = Vector4::new(
-            self.motor_fl.read_current(),
-            self.motor_bl.read_current(),
-            self.motor_br.read_current(),
-            self.motor_fr.read_current(),
-        );
-
-        // TODO read from channel or something
-
-        robot_controller.control_update(
-            &cmd_vel,
-            &wheel_vels,
-            &wheel_torques,
-            gyro_rads,
-            controls_enabled,
-        );
-        robot_controller.get_wheel_velocities()
-    }
-
     fn send_motor_commands_and_telemetry(
         &mut self,
         seq_number: u16,
-        robot_controller: &mut BodyVelocityController,
+        timestamp_us: u64,
+        robot_controller: &mut BodyController,
         cur_state: RobotState,
     ) {
         self.motor_fl.send_motion_command();
@@ -261,7 +226,9 @@ impl<
                 self.last_kicker_telemetry.error_detected() as u32,
                 false as u32, // chipper available
                 (!cur_state.kicker_inop && self.last_kicker_telemetry.error_detected() == 0) as u32,
-                self.last_command.body_vel_controls_enabled(),
+                self.last_command.body_pose_control_enabled(),
+                self.last_command.body_twist_control_enabled(),
+                self.last_command.body_accel_control_enabled(),
                 self.last_command.wheel_vel_control_enabled(),
                 self.last_command.wheel_torque_control_enabled(),
                 Default::default(),
@@ -270,11 +237,16 @@ impl<
             kicker_charge_percent: self.last_kicker_telemetry.charge_pct,
         });
 
-        if cur_state.radio_bridge_ok {
+        self.ticks_since_basic_telem += 1;
+        if cur_state.radio_bridge_ok && self.ticks_since_basic_telem >= TICKS_BASIC_TELEM_INTERVAL {
             self.telemetry_publisher.publish_immediate(basic_telem);
+            self.ticks_since_basic_telem = 0;
         }
 
         let mut control_debug_telem = robot_controller.get_control_debug_telem();
+
+        control_debug_telem.timestamp_us_lo = (timestamp_us & 0xFFFFFFFF) as u32;
+        control_debug_telem.timestamp_us_hi = ((timestamp_us >> 32) & 0xFFFFFFFF) as u32;
 
         control_debug_telem.front_left_motor = self.motor_fl.get_latest_state();
         control_debug_telem.back_left_motor = self.motor_bl.get_latest_state();
@@ -284,13 +256,17 @@ impl<
         control_debug_telem.imu_accel[0] = self.last_accel_x_ms;
         control_debug_telem.imu_accel[1] = self.last_accel_y_ms;
 
-        control_debug_telem.kicker_status = self.last_kicker_telemetry;
-        control_debug_telem.power_status = self.last_power_telemetry;
+        // control_debug_telem.kicker_status = self.last_kicker_telemetry;
+        // control_debug_telem.power_status = self.last_power_telemetry;
 
+        // Send extended telemetry if vision update was received, or if the extended telemetry interval has elapsed
+        let vision_update = control_debug_telem.vision_update() != 0;
         let control_debug_telem = TelemetryPacket::Extended(control_debug_telem);
-        if cur_state.radio_bridge_ok {
+        self.ticks_since_extended_telem += 1;
+        if cur_state.radio_bridge_ok && (self.ticks_since_extended_telem >= TICKS_EXTENDED_TELEM_INTERVAL || vision_update) {
             self.telemetry_publisher
                 .publish_immediate(control_debug_telem);
+            self.ticks_since_extended_telem = 0;
         }
     }
 
@@ -320,29 +296,45 @@ impl<
 
         Timer::after_millis(10).await;
 
-        let robot_model = self.get_robot_model();
-        let mut robot_controller =
-            BodyVelocityController::new_from_global_params(1.0 / 100.0, robot_model);
-
         let mut ctrl_seq_number = 0;
-        let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));
+        let loop_period = Duration::from_millis(1);  // 1 kHz
+        let mut loop_rate_ticker = Ticker::every(loop_period);
 
-        let mut cmd_vel = Vector3::new(0.0, 0.0, 0.0);
+        let mut robot_controller = BodyController::new(loop_period.as_micros() as f32 * 1e-6);
+
+        let mut cmd = Vector3f::default();
+        let mut last_vision_pose_meas = Vector3f::default();
+        let mut vision_update = false;
         let mut ticks_since_control_packet = 0;
 
+        // //////////////////////// Frequency Measurement Vars //////////////////////////
+        // let mut loop_ticks_since_freqeuncy_measurement = 0;
+        // let mut frequency_measurement_time_elapsed_sum_ms: f32 = 0.;
+        // let frequency_measurement_window_length = 60;
+        // let mut last_frequency_measurement_time = Instant::now();
+        // //////////////////////////////////////////////////////////////////////////////
+
+        let mut last_loop_start_time = Instant::now();
         let mut last_loop_term_time = Instant::now();
+        let mut ticks_since_trace_print = 0;
+        let mut t_us_at_loop_start = 0u64;
 
         loop {
-            let loop_start_time = Instant::now();
-            let loop_invocation_dead_time = loop_start_time - last_loop_term_time;
-            if loop_start_time - last_loop_term_time > Duration::from_millis(11) {
-                defmt::warn!("control loop scheuling lagged. Expected ~10ms between loop invocations, but got {:?}us", loop_invocation_dead_time.as_micros());
+            t_us_at_loop_start += (Instant::now() - last_loop_start_time).as_micros() as u64;
+            last_loop_start_time = Instant::now();
+            let mut start = last_loop_start_time;
+            let loop_invocation_dead_time = last_loop_start_time - last_loop_term_time;
+            if loop_invocation_dead_time > Duration::from_micros(1100) {
+                defmt::warn!("control loop scheuling lagged. Expected ~1ms between loop invocations, but got {:?}us", loop_invocation_dead_time.as_micros());
             }
 
             self.motor_fl.process_packets();
             self.motor_bl.process_packets();
             self.motor_br.process_packets();
             self.motor_fr.process_packets();
+
+            let motor_packet_process_time = Instant::now() - start;
+            start = Instant::now();
 
             let cur_state = self.shared_robot_state.get_state();
 
@@ -355,20 +347,36 @@ impl<
             while let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
                 match latest_packet {
                     ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
-                        let new_cmd_vel = Vector3::new(
-                            latest_control.vel_x_linear,
-                            latest_control.vel_y_linear,
-                            latest_control.vel_z_angular,
-                        );
-
-                        cmd_vel = new_cmd_vel;
-                        ticks_since_control_packet = 0;
+                        // //////////////////////// Loop Rate Measurement ///////////////////////////////
+                        // let frequency_measurement_loop_time_elapsed = ((Instant::now() - last_frequency_measurement_time).as_micros() as f32) / 1000.0;
+                        // frequency_measurement_time_elapsed_sum_ms += frequency_measurement_loop_time_elapsed;
+                        // if loop_ticks_since_freqeuncy_measurement == frequency_measurement_window_length {
+                        //     let frequency: f32 = loop_ticks_since_freqeuncy_measurement as f32 / (frequency_measurement_time_elapsed_sum_ms / 1000.0);
+                        //     defmt::debug!("Command RX Frequency - {} hz", frequency);
+                        //     frequency_measurement_time_elapsed_sum_ms = 0.;
+                        //     loop_ticks_since_freqeuncy_measurement = 0;
+                        // }
+                        // last_frequency_measurement_time = Instant::now();
+                        // loop_ticks_since_freqeuncy_measurement += 1;
+                        // //////////////////////////////////////////////////////////////////////////////
 
                         if latest_control.reboot_robot() != 0 {
                             loop {
                                 cortex_m::peripheral::SCB::sys_reset();
                             }
                         }
+
+                        cmd = Vector3f::new(
+                            latest_control.x_linear_cmd,
+                            latest_control.y_linear_cmd,
+                            latest_control.z_angular_cmd,
+                        );
+                        last_vision_pose_meas = Vector3f::new(
+                            latest_control.pose_x_linear_vision,
+                            latest_control.pose_y_linear_vision,
+                            latest_control.pose_z_angular_vision,
+                        );
+                        vision_update = latest_control.vision_update() != 0;
 
                         if latest_control.request_shutdown() != 0 {
                             self.shared_robot_state.flag_shutdown_requested();
@@ -378,10 +386,10 @@ impl<
                             self.last_command.wheel_vel_control_enabled() != 0,
                             self.last_command.wheel_torque_control_enabled() != 0,
                         ) {
-                            (true, true) => MotionCommandType::BOTH,
-                            (true, false) => MotionCommandType::VELOCITY,
-                            (false, true) => MotionCommandType::TORQUE,
-                            (false, false) => MotionCommandType::OPEN_LOOP,
+                            (true, true) => CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT,
+                            (true, false) => CcmMotionControlType::CCM_MCT_VELOCITY,
+                            (false, true) => CcmMotionControlType::CCM_MCT_CURRENT,
+                            (false, false) => CcmMotionControlType::CCM_MCT_MOTOR_OFF,
                         };
 
                         self.motor_fl.set_motion_type(wheel_motion_type);
@@ -389,7 +397,14 @@ impl<
                         self.motor_br.set_motion_type(wheel_motion_type);
                         self.motor_fr.set_motion_type(wheel_motion_type);
 
+                        let motion_enabled = wheel_motion_type != CcmMotionControlType::CCM_MCT_MOTOR_OFF;
+                        self.motor_fl.set_motion_enabled(motion_enabled);
+                        self.motor_bl.set_motion_enabled(motion_enabled);
+                        self.motor_br.set_motion_enabled(motion_enabled);
+                        self.motor_fr.set_motion_enabled(motion_enabled);
+
                         self.last_command = latest_control;
+                        ticks_since_control_packet = 0;
                     }
                     ateam_common_packets::radio::DataPacket::ParameterCommand(latest_param_cmd) => {
                         let param_cmd_resp = robot_controller.apply_command(&latest_param_cmd);
@@ -407,12 +422,15 @@ impl<
                 }
             }
 
-            if ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
-                cmd_vel = Vector3::new(0., 0., 0.);
-                //defmt::warn!("ticks since packet lockout");
-            }
+            let command_packet_process_time = Instant::now() - start;
+            start = Instant::now();
 
-            // now we have setpoint r(t) in self.cmd_vel
+            let wheel_vel_meas = Vector4f::new(
+                self.motor_fl.read_rads(),
+                self.motor_bl.read_rads(),
+                self.motor_br.read_rads(),
+                self.motor_fr.read_rads(),
+            );
 
             while let Some(gyro_rads) = self.gyro_subscriber.try_next_message_pure() {
                 self.last_gyro_rads = gyro_rads[2];
@@ -435,51 +453,91 @@ impl<
                 self.last_power_telemetry = power_telemetry;
             }
 
-            if self.stop_wheels() {
-                cmd_vel = Vector3::new(0.0, 0.0, 0.0);
-            } else if self.last_command.game_state_in_stop() != 0 {
+            if self.last_command.game_state_in_stop() != 0 {
                 // TODO impl 1.5m/s clamping or something
             }
 
-            let wheel_vels = if self.stop_wheels() {
+            robot_controller.control_update(
+                cmd,
+                self.last_command.body_pose_control_enabled() != 0,
+                self.last_command.body_twist_control_enabled() != 0,
+                self.last_command.body_accel_control_enabled() != 0,
+                last_vision_pose_meas,
+                vision_update,
+                wheel_vel_meas,
+                self.last_gyro_rads,
+                ticks_since_trace_print >= TICKS_TRACE_PRINT,
+            );
+            vision_update = false;  // reset vision update flag after use
+
+            let (wheel_current_cmd, wheel_vel_cmd) = if self.stop_wheels() || 
+                ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
                 defmt::warn!("control task - motor commands locked out");
-                Vector4::new(0.0, 0.0, 0.0, 0.0)
+                (Vector4f::default(), Vector4f::default())
             } else {
-                let controls_enabled = self.last_command.body_vel_controls_enabled() != 0;
-                self.do_control_update(
-                    &mut robot_controller,
-                    cmd_vel,
-                    self.last_gyro_rads,
-                    controls_enabled,
-                )
+                (robot_controller.get_wheel_currents(), robot_controller.get_wheel_velocities())
             };
 
-            self.motor_fl.set_setpoint(wheel_vels[0]);
-            self.motor_bl.set_setpoint(wheel_vels[1]);
-            self.motor_br.set_setpoint(wheel_vels[2]);
-            self.motor_fr.set_setpoint(wheel_vels[3]);
+            ////////////////// TODO: Move this/delete this //////////////////////
 
-            defmt::info!(
-                "wheel vels: {} {} {} {}",
-                self.motor_fl.read_encoder_delta(),
-                self.motor_bl.read_encoder_delta(),
-                self.motor_br.read_encoder_delta(),
-                self.motor_fr.read_encoder_delta()
-            );
-            defmt::info!(
-                "wheel curr: {} {} {} {}",
-                self.motor_fl.read_current(),
-                self.motor_bl.read_current(),
-                self.motor_br.read_current(),
-                self.motor_fr.read_current()
-            );
+            let mut wheel_ma = wheel_current_cmd * 1000.0;
+            // TODO: remove this safety clamp after testing
+            if wheel_ma.x.abs() > MAX_CURRENT_MA || wheel_ma.y.abs() > MAX_CURRENT_MA || wheel_ma.z.abs() > MAX_CURRENT_MA || wheel_ma.w.abs() > MAX_CURRENT_MA {
+                defmt::warn!(
+                    "high wheel current command detected: {} {} {} {}",
+                    wheel_ma.x as i16,
+                    wheel_ma.y as i16,
+                    wheel_ma.z as i16,
+                    wheel_ma.w as i16
+                );
+                wheel_ma = Vector4f::default();
+            }
+
+            if ticks_since_trace_print >= TICKS_TRACE_PRINT {
+                let state = robot_controller.robot_model.x;
+                let wheel_torques = robot_controller.get_wheel_torques();
+                defmt::info!("state position: {}, {}, {}", state[(0, 0)], state[(1, 0)], state[(2, 0)]);
+                defmt::info!("state velocity: {}, {}, {}", state[(3, 0)], state[(4, 0)], state[(5, 0)]);
+                defmt::info!("wheel torque cmd: {} {} {} {}", wheel_torques.x, wheel_torques.y, wheel_torques.z, wheel_torques.w);
+                defmt::info!(
+                    "wheel vel cmd: {} {} {} {}",
+                    wheel_vel_cmd.x,
+                    wheel_vel_cmd.y,
+                    wheel_vel_cmd.z,
+                    wheel_vel_cmd.w,
+                );
+                defmt::info!(
+                    "wheel_ma cmd: {} {} {} {}",
+                    wheel_ma.x as i16,
+                    wheel_ma.y as i16,
+                    wheel_ma.z as i16,
+                    wheel_ma.w as i16,
+                );
+            }
+
+            /////////////////////////////////////////////////////////???????????
+
+            self.motor_fl.set_setpoint(wheel_vel_cmd.x);
+            self.motor_bl.set_setpoint(wheel_vel_cmd.y);
+            self.motor_br.set_setpoint(wheel_vel_cmd.z);
+            self.motor_fr.set_setpoint(wheel_vel_cmd.w);
+
+            self.motor_fl.set_current_setpoint(wheel_ma.x as i16);
+            self.motor_bl.set_current_setpoint(wheel_ma.y as i16);
+            self.motor_br.set_current_setpoint(wheel_ma.z as i16);
+            self.motor_fr.set_current_setpoint(wheel_ma.w as i16);
+
+            let control_update_time = Instant::now() - start;
+            start = Instant::now();
 
             ///////////////////////////////////
             //  send commands and telemetry  //
             ///////////////////////////////////
 
+            let timestamp_us = t_us_at_loop_start + (Instant::now() - last_loop_start_time).as_micros() as u64;
             self.send_motor_commands_and_telemetry(
                 ctrl_seq_number,
+                timestamp_us,
                 &mut robot_controller,
                 cur_state,
             );
@@ -487,14 +545,31 @@ impl<
             // increment seq number
             ctrl_seq_number = (ctrl_seq_number + 1) & 0x00FF;
 
-            let loop_end_time = Instant::now();
-            let loop_execution_time = loop_end_time - loop_start_time;
-            if loop_execution_time > Duration::from_millis(2) {
-                defmt::warn!("control loop is taking >2ms to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {:?}", loop_execution_time);
+            let channel_update_time = Instant::now() - start;
+            start = Instant::now();
+
+            let loop_execution_time_us = Instant::now().duration_since(last_loop_start_time).as_micros();
+            if ticks_since_trace_print > TICKS_TRACE_PRINT || loop_execution_time_us > 300 {
+                defmt::trace!(
+                    "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
+                    motor_packet_process_time.as_micros(),
+                    command_packet_process_time.as_micros(),
+                    control_update_time.as_micros(),
+                    channel_update_time.as_micros(),
+                );
+                defmt::trace!("TOTAL CONTROL LOOP EXECUTION TIME: {} us", loop_execution_time_us);
             }
 
-            last_loop_term_time = Instant::now();
+            if loop_execution_time_us > 300 {
+                defmt::warn!("control loop is taking >300us: {} us (it may be interrupted by higher priority tasks). This is >30% of an execution frame.", loop_execution_time_us);
+            }
 
+            if ticks_since_trace_print > TICKS_TRACE_PRINT {
+                ticks_since_trace_print = 0;
+            }
+            ticks_since_trace_print += 1;
+
+            last_loop_term_time = Instant::now();
             loop_rate_ticker.next().await;
         }
     }
@@ -584,32 +659,32 @@ impl<
         }
     }
 
-    fn get_robot_model(&mut self) -> motion::robot_model::RobotModel {
-        let robot_model_constants: RobotConstants = RobotConstants {
-            wheel_angles_rad: Vector4::new(
-                WHEEL_ANGLES_DEG[0].to_radians(),
-                WHEEL_ANGLES_DEG[1].to_radians(),
-                WHEEL_ANGLES_DEG[2].to_radians(),
-                WHEEL_ANGLES_DEG[3].to_radians(),
-            ),
-            wheel_radius_m: Vector4::new(
-                WHEEL_RADIUS_M,
-                WHEEL_RADIUS_M,
-                WHEEL_RADIUS_M,
-                WHEEL_RADIUS_M,
-            ),
-            wheel_dist_to_cent_m: Vector4::new(
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
-                WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
-            ),
-        };
+    // fn get_robot_model(&mut self) -> motion::robot_model::RobotModel {
+    //     let robot_model_constants: RobotConstants = RobotConstants {
+    //         wheel_angles_rad: Vector4::new(
+    //             WHEEL_ANGLES_DEG[0].to_radians(),
+    //             WHEEL_ANGLES_DEG[1].to_radians(),
+    //             WHEEL_ANGLES_DEG[2].to_radians(),
+    //             WHEEL_ANGLES_DEG[3].to_radians(),
+    //         ),
+    //         wheel_radius_m: Vector4::new(
+    //             WHEEL_RADIUS_M,
+    //             WHEEL_RADIUS_M,
+    //             WHEEL_RADIUS_M,
+    //             WHEEL_RADIUS_M,
+    //         ),
+    //         wheel_dist_to_cent_m: Vector4::new(
+    //             WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+    //             WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+    //             WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+    //             WHEEL_DISTANCE_TO_ROBOT_CENTER_M,
+    //         ),
+    //     };
 
-        let robot_model: RobotModel = RobotModel::new(robot_model_constants);
+    //     let robot_model: RobotModel = RobotModel::new(robot_model_constants);
 
-        return robot_model;
-    }
+    //     return robot_model;
+    // }
 
     fn stop_wheels(&self) -> bool {
         // defmt::debug!("hco: {}, sd req: {}, estop: {}", self.last_power_telemetry.high_current_operations_allowed() == 0, self.shared_robot_state.shutdown_requested(), self.last_command.emergency_stop() != 0);
@@ -738,7 +813,7 @@ pub async fn start_control_task(
     //  create motor controllers  //
     ////////////////////////////////
 
-    let motor_fl = WheelMotor::new_from_pins(
+    let motor_fl = ControlWheelMotor::new_from_pins(
         &FRONT_LEFT_IDLE_BUFFERED_UART,
         FRONT_LEFT_IDLE_BUFFERED_UART.get_uart_read_queue(),
         FRONT_LEFT_IDLE_BUFFERED_UART.get_uart_write_queue(),
@@ -746,7 +821,7 @@ pub async fn start_control_task(
         motor_fl_nrst_pin.into(),
         WHEEL_FW_IMG,
     );
-    let motor_bl = WheelMotor::new_from_pins(
+    let motor_bl = ControlWheelMotor::new_from_pins(
         &BACK_LEFT_IDLE_BUFFERED_UART,
         BACK_LEFT_IDLE_BUFFERED_UART.get_uart_read_queue(),
         BACK_LEFT_IDLE_BUFFERED_UART.get_uart_write_queue(),
@@ -754,7 +829,7 @@ pub async fn start_control_task(
         motor_bl_nrst_pin.into(),
         WHEEL_FW_IMG,
     );
-    let motor_br = WheelMotor::new_from_pins(
+    let motor_br = ControlWheelMotor::new_from_pins(
         &BACK_RIGHT_IDLE_BUFFERED_UART,
         BACK_RIGHT_IDLE_BUFFERED_UART.get_uart_read_queue(),
         BACK_RIGHT_IDLE_BUFFERED_UART.get_uart_write_queue(),
@@ -762,7 +837,7 @@ pub async fn start_control_task(
         motor_br_nrst_pin.into(),
         WHEEL_FW_IMG,
     );
-    let motor_fr = WheelMotor::new_from_pins(
+    let motor_fr = ControlWheelMotor::new_from_pins(
         &FRONT_RIGHT_IDLE_BUFFERED_UART,
         FRONT_RIGHT_IDLE_BUFFERED_UART.get_uart_read_queue(),
         FRONT_RIGHT_IDLE_BUFFERED_UART.get_uart_write_queue(),

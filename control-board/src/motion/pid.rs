@@ -54,4 +54,9 @@ impl<'a, const NUM_STATES: usize> PidController<NUM_STATES> {
     pub fn set_gain(&mut self, new_gain: SMatrix<f32, NUM_STATES, 5>) {
         self.gain.copy_from(&new_gain)
     }
+
+    pub fn reset(&mut self) {
+        self.prev_error = SVector::<f32, NUM_STATES>::zeros();
+        self.integrated_error = SVector::<f32, NUM_STATES>::zeros();
+    }
 }
