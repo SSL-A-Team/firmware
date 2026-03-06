@@ -59,8 +59,7 @@ int main() {
     bool telemetry_enabled = false;
 
     // initialize current sensing setup
-    ADC_Result_t res;
-    currsen_setup(ADC_MODE, &res, ADC_NUM_CHANNELS, ADC_CH_MASK, ADC_SR_MASK);
+    CS_Status_t cs_status = currsen_setup(ADC_CH_MASK);
 
     // initialize motor driver
     pwm6step_setup();
@@ -212,7 +211,7 @@ int main() {
         bool run_telemetry = time_sync_ready_rst(&telemetry_timer);
 
         if (run_torque_loop) {
-            float cur_measurement = ((float) res.I_motor / (float) UINT16_MAX) * AVDD_V;
+            float cur_measurement = currsen_get_motor_current();
             // TODO: recover current from voltage
             // TODO: estimate torque from current
             // TODO: filter?
@@ -229,7 +228,7 @@ int main() {
             response_packet.data.motion.torque_setpoint = r;
             response_packet.data.motion.torque_estimate = cur_measurement;
             response_packet.data.motion.torque_computed_error = torque_pid.prev_err;
-            response_packet.data.motion.torque_computed_setpoint = torque_setpoint;
+            response_packet.data.motion.torque_computed_nm = torque_setpoint;
         }
 
         if (run_torque_loop) {

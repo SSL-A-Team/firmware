@@ -33,10 +33,9 @@ pub struct WheelMotor<
     stm32_uart_interface:
         Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES>,
     firmware_image: &'a [u8],
-
+    current_timestamp_ms: u32,
     current_state: MotorTelemetry,
     current_params_state: ParameterMotorResponse,
-
     version_major: u8,
     version_minor: u8,
     version_patch: u16,
@@ -50,6 +49,8 @@ pub struct WheelMotor<
     motion_type: MotionCommandType::Type,
     reset_flagged: bool,
     telemetry_enabled: bool,
+    motion_enabled: bool,
+    calibrate_current: bool,
 }
 
 impl<
@@ -81,6 +82,7 @@ impl<
             version_major: 0,
             version_minor: 0,
             version_patch: 0,
+            current_timestamp_ms: 0,
             current_state: start_state,
             current_params_state: start_params_state,
             vel_pid_constants: Vector3::new(0.0, 0.0, 0.0),
@@ -93,6 +95,8 @@ impl<
             motion_type: OPEN_LOOP,
             reset_flagged: false,
             telemetry_enabled: false,
+            motion_enabled: false,
+            calibrate_current: false,
         }
     }
 
@@ -125,6 +129,7 @@ impl<
             version_major: 0,
             version_minor: 0,
             version_patch: 0,
+            current_timestamp_ms: 0,
             current_state: start_state,
             current_params_state: start_params_state,
             vel_pid_constants: Vector3::new(0.0, 0.0, 0.0),
@@ -137,6 +142,8 @@ impl<
             motion_type: OPEN_LOOP,
             reset_flagged: false,
             telemetry_enabled: false,
+            motion_enabled: false,
+            calibrate_current: false,
         }
     }
 
@@ -216,6 +223,7 @@ impl<
                 res = Err(());
             }
         }
+
         // Make sure that the uart queue is empty of any possible parameter
         // response packets, which may cause side effects for the flashing
         // process
@@ -273,6 +281,13 @@ impl<
         }
         return self.init_firmware_image(flash, self.firmware_image).await;
     }
+    
+    pub async fn save_motor_current_constants(&mut self, current_constant: f32) -> Result<(), ()> {
+        defmt::debug!("Drive Motor - Saving motor current constant: {:?}", current_constant);
+        self.stm32_uart_interface.write_current_calibration_constants(current_constant).await
+
+    }
+
 
     pub fn process_packets(&mut self) {
         while let Ok(res) = self.stm32_uart_interface.try_read_data() {
@@ -424,6 +439,18 @@ impl<
         self.telemetry_enabled = telemetry_enabled;
     }
 
+    pub fn set_motion_enabled(&mut self, enabled: bool) {
+        self.motion_enabled = enabled;
+    }
+
+    pub fn set_calibrate_current(&mut self, calibrate_current: bool) {
+        self.calibrate_current = calibrate_current;
+    }
+
+    pub fn read_current_timestamp_ms(&self) -> u32 {
+        return self.current_timestamp_ms;
+    }
+
     pub fn read_is_error(&self) -> bool {
         return self.current_state.master_error() != 0;
     }
@@ -432,10 +459,6 @@ impl<
         return self.current_state.hall_power_error() != 0
             || self.current_state.hall_disconnected_error() != 0
             || self.current_state.hall_enc_vel_disagreement_error() != 0;
-    }
-
-    pub fn read_current(&self) -> f32 {
-        return self.current_state.current_estimate;
     }
 
     pub fn read_encoder_delta(&self) -> i32 {
@@ -454,7 +477,35 @@ impl<
         return self.current_state.vel_setpoint;
     }
 
-    pub fn read_vel_computed_setpoint(&self) -> f32 {
-        return self.current_state.vel_computed_setpoint;
+    pub fn read_vel_computed_duty(&self) -> f32 {
+        return self.current_state.vel_computed_duty;
+    }
+
+    pub fn read_current(&self) -> f32 {
+        return self.current_state.current_estimate;
+    }
+
+    pub fn read_torque_setpoint(&self) -> f32 {
+        return self.current_state.torque_setpoint;
+    }
+
+    pub fn read_torque_estimate(&self) -> f32 {
+        return self.current_state.torque_estimate;
+    }
+
+    pub fn read_torque_computed_error(&self) -> f32 {
+        return self.current_state.torque_computed_error;
+    }
+
+    pub fn read_torque_computed_nm(&self) -> f32 {
+        return self.current_state.torque_computed_nm;
+    }
+
+    pub fn read_torque_computed_duty(&self) -> f32 {
+        return self.current_state.torque_computed_duty;
+    }
+
+    pub fn read_vbus_voltage(&self) -> f32 {
+        return self.current_state.vbus_voltage;
     }
 }
