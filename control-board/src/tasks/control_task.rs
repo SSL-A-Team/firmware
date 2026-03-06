@@ -1,5 +1,5 @@
 use ateam_common_packets::{
-    bindings::{BasicControl, BasicTelemetry, KickerTelemetry, MotionCommandType, PowerTelemetry},
+    bindings::{BasicControl, BasicTelemetry, CcmMotionControlType, KickerTelemetry, MotionCommandType, PowerTelemetry},
     radio::TelemetryPacket,
 };
 use ateam_lib_stm32::{
@@ -23,11 +23,11 @@ use crate::{
     parameter_interface::ParameterInterface,
     pins::*,
     robot_state::{RobotState, SharedRobotState},
-    stspin_motor::WheelMotor,
+    motor::CurrentControlledMotor,
     SystemIrqs, DEBUG_MOTOR_UART_QUEUES, ROBOT_VERSION_MAJOR, ROBOT_VERSION_MINOR,
 };
 
-include_external_cpp_bin! {WHEEL_FW_IMG, "wheel.bin"}
+include_external_cpp_bin! {WHEEL_FW_IMG, "wheel-torque.bin"}
 
 const MAX_TX_PACKET_SIZE: usize = 80;
 const TX_BUF_DEPTH: usize = 3;
@@ -35,7 +35,7 @@ const MAX_RX_PACKET_SIZE: usize = 80;
 const RX_BUF_DEPTH: usize = 20;
 
 type ControlWheelMotor =
-    WheelMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH>;
+    CurrentControlledMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES>;
 static_idle_buffered_uart!(FRONT_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(BACK_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
@@ -184,10 +184,10 @@ impl<
         // torque values are computed on the spin but put in the current variable
         // TODO update this when packet/var names are updated to match software
         let wheel_torques = Vector4::new(
-            self.motor_fl.read_current(),
-            self.motor_bl.read_current(),
-            self.motor_br.read_current(),
-            self.motor_fr.read_current(),
+            self.motor_fl.read_current_estimate_ma() as f32,
+            self.motor_bl.read_current_estimate_ma() as f32,
+            self.motor_br.read_current_estimate_ma() as f32,
+            self.motor_fr.read_current_estimate_ma() as f32,
         );
 
         // TODO read from channel or something
@@ -205,6 +205,7 @@ impl<
     fn send_motor_commands_and_telemetry(
         &mut self,
         seq_number: u16,
+        timestamp_us: u64,
         robot_controller: &mut BodyVelocityController,
         cur_state: RobotState,
     ) {
@@ -261,7 +262,9 @@ impl<
                 self.last_kicker_telemetry.error_detected() as u32,
                 false as u32, // chipper available
                 (!cur_state.kicker_inop && self.last_kicker_telemetry.error_detected() == 0) as u32,
-                self.last_command.body_vel_controls_enabled(),
+                self.last_command.body_pose_control_enabled(),
+                self.last_command.body_twist_control_enabled(),
+                self.last_command.body_accel_control_enabled(),
                 self.last_command.wheel_vel_control_enabled(),
                 self.last_command.wheel_torque_control_enabled(),
                 Default::default(),
@@ -276,6 +279,9 @@ impl<
 
         let mut control_debug_telem = robot_controller.get_control_debug_telem();
 
+        control_debug_telem.timestamp_us_lo = (timestamp_us & 0xFFFFFFFF) as u32;
+        control_debug_telem.timestamp_us_hi = ((timestamp_us >> 32) & 0xFFFFFFFF) as u32;
+
         control_debug_telem.front_left_motor = self.motor_fl.get_latest_state();
         control_debug_telem.back_left_motor = self.motor_bl.get_latest_state();
         control_debug_telem.back_right_motor = self.motor_br.get_latest_state();
@@ -284,8 +290,8 @@ impl<
         control_debug_telem.imu_accel[0] = self.last_accel_x_ms;
         control_debug_telem.imu_accel[1] = self.last_accel_y_ms;
 
-        control_debug_telem.kicker_status = self.last_kicker_telemetry;
-        control_debug_telem.power_status = self.last_power_telemetry;
+        // control_debug_telem.kicker_status = self.last_kicker_telemetry;
+        // control_debug_telem.power_status = self.last_power_telemetry;
 
         let control_debug_telem = TelemetryPacket::Extended(control_debug_telem);
         if cur_state.radio_bridge_ok {
@@ -330,6 +336,7 @@ impl<
         let mut cmd_vel = Vector3::new(0.0, 0.0, 0.0);
         let mut ticks_since_control_packet = 0;
 
+        let start = Instant::now();
         let mut last_loop_term_time = Instant::now();
 
         loop {
@@ -356,9 +363,9 @@ impl<
                 match latest_packet {
                     ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
                         let new_cmd_vel = Vector3::new(
-                            latest_control.vel_x_linear,
-                            latest_control.vel_y_linear,
-                            latest_control.vel_z_angular,
+                            latest_control.x_linear_cmd,
+                            latest_control.y_linear_cmd,
+                            latest_control.z_angular_cmd,
                         );
 
                         cmd_vel = new_cmd_vel;
@@ -445,7 +452,7 @@ impl<
                 defmt::warn!("control task - motor commands locked out");
                 Vector4::new(0.0, 0.0, 0.0, 0.0)
             } else {
-                let controls_enabled = self.last_command.body_vel_controls_enabled() != 0;
+                let controls_enabled = self.last_command.body_twist_control_enabled() != 0;
                 self.do_control_update(
                     &mut robot_controller,
                     cmd_vel,
@@ -461,25 +468,27 @@ impl<
 
             defmt::info!(
                 "wheel vels: {} {} {} {}",
-                self.motor_fl.read_encoder_delta(),
-                self.motor_bl.read_encoder_delta(),
-                self.motor_br.read_encoder_delta(),
-                self.motor_fr.read_encoder_delta()
+                self.motor_fl.read_rads(),
+                self.motor_bl.read_rads(),
+                self.motor_br.read_rads(),
+                self.motor_fr.read_rads()
             );
             defmt::info!(
                 "wheel curr: {} {} {} {}",
-                self.motor_fl.read_current(),
-                self.motor_bl.read_current(),
-                self.motor_br.read_current(),
-                self.motor_fr.read_current()
+                self.motor_fl.read_current_estimate_ma(),
+                self.motor_bl.read_current_estimate_ma(),
+                self.motor_br.read_current_estimate_ma(),
+                self.motor_fr.read_current_estimate_ma()
             );
 
             ///////////////////////////////////
             //  send commands and telemetry  //
             ///////////////////////////////////
 
+            let timestamp_us = (Instant::now() - start).as_micros() as u64;
             self.send_motor_commands_and_telemetry(
                 ctrl_seq_number,
+                timestamp_us,
                 &mut robot_controller,
                 cur_state,
             );
@@ -738,7 +747,7 @@ pub async fn start_control_task(
     //  create motor controllers  //
     ////////////////////////////////
 
-    let motor_fl = WheelMotor::new_from_pins(
+    let motor_fl = ControlWheelMotor::new_from_pins(
         &FRONT_LEFT_IDLE_BUFFERED_UART,
         FRONT_LEFT_IDLE_BUFFERED_UART.get_uart_read_queue(),
         FRONT_LEFT_IDLE_BUFFERED_UART.get_uart_write_queue(),
@@ -746,7 +755,7 @@ pub async fn start_control_task(
         motor_fl_nrst_pin.into(),
         WHEEL_FW_IMG,
     );
-    let motor_bl = WheelMotor::new_from_pins(
+    let motor_bl = ControlWheelMotor::new_from_pins(
         &BACK_LEFT_IDLE_BUFFERED_UART,
         BACK_LEFT_IDLE_BUFFERED_UART.get_uart_read_queue(),
         BACK_LEFT_IDLE_BUFFERED_UART.get_uart_write_queue(),
@@ -754,7 +763,7 @@ pub async fn start_control_task(
         motor_bl_nrst_pin.into(),
         WHEEL_FW_IMG,
     );
-    let motor_br = WheelMotor::new_from_pins(
+    let motor_br = ControlWheelMotor::new_from_pins(
         &BACK_RIGHT_IDLE_BUFFERED_UART,
         BACK_RIGHT_IDLE_BUFFERED_UART.get_uart_read_queue(),
         BACK_RIGHT_IDLE_BUFFERED_UART.get_uart_write_queue(),
@@ -762,7 +771,7 @@ pub async fn start_control_task(
         motor_br_nrst_pin.into(),
         WHEEL_FW_IMG,
     );
-    let motor_fr = WheelMotor::new_from_pins(
+    let motor_fr = ControlWheelMotor::new_from_pins(
         &FRONT_RIGHT_IDLE_BUFFERED_UART,
         FRONT_RIGHT_IDLE_BUFFERED_UART.get_uart_read_queue(),
         FRONT_RIGHT_IDLE_BUFFERED_UART.get_uart_write_queue(),
