@@ -72,9 +72,12 @@ fn main() -> std::io::Result<()> {
             control: BasicControl {
                 _bitfield_1: Default::default(),
                 _bitfield_align_1: Default::default(),
-                vel_x_linear: 0.,
-                vel_y_linear: 0.,
-                vel_z_angular: 0.,
+                pose_x_linear_vision: 0.0,
+                pose_y_linear_vision: 0.0,
+                pose_z_angular_vision: 0.0,
+                x_linear_cmd: 0.0,
+                y_linear_cmd: 0.0,
+                z_angular_cmd: 0.0,
                 kick_vel: 0.,
                 dribbler_speed: 0.,
                 kick_request: KickRequest::KR_ARM,
@@ -119,8 +122,8 @@ fn main() -> std::io::Result<()> {
     let max = 1.0;
     let mut up = true;
     loop {
-        // packet.data.control.vel_x_linear = vel;
-        packet.data.control.vel_z_angular = 0.0;
+        // packet.data.control.x_linear_cmd = vel;
+        packet.data.control.z_angular_cmd = 0.0;
         socket.send_to(packet_bytes, src)?;
         std::thread::sleep(Duration::from_millis(10));
 
