@@ -385,10 +385,10 @@ impl<
                             self.last_command.wheel_vel_control_enabled() != 0,
                             self.last_command.wheel_torque_control_enabled() != 0,
                         ) {
-                            (true, true) => MotionCommandType::BOTH,
-                            (true, false) => MotionCommandType::VELOCITY,
-                            (false, true) => MotionCommandType::TORQUE,
-                            (false, false) => MotionCommandType::OPEN_LOOP,
+                            (true, true) => CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT,
+                            (true, false) => CcmMotionControlType::CCM_MCT_VELOCITY,
+                            (false, true) => CcmMotionControlType::CCM_MCT_CURRENT,
+                            (false, false) => CcmMotionControlType::CCM_MCT_MOTOR_OFF,
                         };
 
                         self.motor_fl.set_motion_type(wheel_motion_type);
