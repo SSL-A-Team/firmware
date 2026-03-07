@@ -45,11 +45,17 @@ static_idle_buffered_uart!(BACK_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_P
 static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(FRONT_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
-const TICKS_WITHOUT_PACKET_STOP: usize = 200;
-const TICKS_BASIC_TELEM_INTERVAL: usize = 20; // send basic telem every 10 ticks (100 Hz if loop is 1 kHz)
-const TICKS_EXTENDED_TELEM_INTERVAL: usize = 20; // send extended telem every 20 ticks (50 Hz if loop is 1 kHz)
-                                                 // const TICKS_TRACE_PRINT: usize = 1000;  // print trace every 1000 ticks (1 second if loop is 1 kHz)
-const TICKS_TRACE_PRINT: usize = 100; // print trace every 100 ticks (0.1 second if loop is 1 kHz)
+const CONTROL_FREQ: f32 = 100.0; // Hz
+const BASIC_TELEM_FREQ: f32 = 100.0; // Hz, send basic telemetry at this frequency
+const EXTENDED_TELEM_FREQ: f32 = 100.0; // Hz, send extended telemetry at this frequency, or immediately when a vision update is received
+const TRACE_PRINT_FREQ: f32 = 10.0; // Hz, print trace info at this frequency
+const TIME_WITHOUT_PACKET_STOP: f32 = 0.2; // seconds, time without receiving a control packet before locking out motor commands
+
+const CONTROL_DT: f32 = 1.0 / CONTROL_FREQ; // seconds
+const BASIC_TELEM_INTERVAL_TICKS: usize = (1.0 / BASIC_TELEM_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between basic telemetry sends
+const EXTENDED_TELEM_INTERVAL_TICKS: usize = (1.0 / EXTENDED_TELEM_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between extended telemetry sends
+const TRACE_PRINT_INTERVAL_TICKS: usize = (1.0 / TRACE_PRINT_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between trace prints
+const TICKS_WITHOUT_PACKET_STOP: usize = (TIME_WITHOUT_PACKET_STOP * CONTROL_FREQ) as usize; // number of control loop ticks without receiving a control packet before locking out motor commands
 
 #[macro_export]
 macro_rules! create_control_task {
@@ -247,7 +253,7 @@ impl<
         });
 
         self.ticks_since_basic_telem += 1;
-        if cur_state.radio_bridge_ok && self.ticks_since_basic_telem >= TICKS_BASIC_TELEM_INTERVAL {
+        if cur_state.radio_bridge_ok && self.ticks_since_basic_telem >= BASIC_TELEM_INTERVAL_TICKS {
             self.telemetry_publisher.publish_immediate(basic_telem);
             self.ticks_since_basic_telem = 0;
         }
@@ -273,7 +279,7 @@ impl<
         let control_debug_telem = TelemetryPacket::Extended(control_debug_telem);
         self.ticks_since_extended_telem += 1;
         if cur_state.radio_bridge_ok
-            && (self.ticks_since_extended_telem >= TICKS_EXTENDED_TELEM_INTERVAL || vision_update)
+            && (self.ticks_since_extended_telem >= EXTENDED_TELEM_INTERVAL_TICKS || vision_update)
         {
             self.telemetry_publisher
                 .publish_immediate(control_debug_telem);
@@ -308,8 +314,7 @@ impl<
         Timer::after_millis(10).await;
 
         let mut ctrl_seq_number = 0;
-        // let loop_period = Duration::from_millis(1);  // 1 kHz
-        let loop_period = Duration::from_millis(10); // 100 Hz
+        let loop_period = Duration::from_micros((CONTROL_DT * 1e6) as u64);
         let mut loop_rate_ticker = Ticker::every(loop_period);
 
         let mut robot_controller = BodyController::new(loop_period.as_micros() as f32 * 1e-6);
@@ -479,7 +484,7 @@ impl<
                 vision_update,
                 wheel_vel_meas,
                 self.last_gyro_rads,
-                ticks_since_trace_print >= TICKS_TRACE_PRINT,
+                ticks_since_trace_print >= TRACE_PRINT_INTERVAL_TICKS,
             );
             vision_update = false; // reset vision update flag after use
 
@@ -513,7 +518,7 @@ impl<
                 wheel_ma = Vector4f::default();
             }
 
-            if ticks_since_trace_print >= TICKS_TRACE_PRINT {
+            if ticks_since_trace_print >= TRACE_PRINT_INTERVAL_TICKS {
                 let state = robot_controller.robot_model.x;
                 let wheel_torques = robot_controller.get_wheel_torques();
                 defmt::info!(
@@ -588,7 +593,8 @@ impl<
             let loop_execution_time_us = Instant::now()
                 .duration_since(last_loop_start_time)
                 .as_micros();
-            if ticks_since_trace_print > TICKS_TRACE_PRINT || loop_execution_time_us > 300 {
+            if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS || loop_execution_time_us > 300
+            {
                 defmt::trace!(
                     "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
                     motor_packet_process_time.as_micros(),
@@ -606,7 +612,7 @@ impl<
                 defmt::warn!("control loop is taking >300us: {} us (it may be interrupted by higher priority tasks). This is >30% of an execution frame.", loop_execution_time_us);
             }
 
-            if ticks_since_trace_print > TICKS_TRACE_PRINT {
+            if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS {
                 ticks_since_trace_print = 0;
             }
             ticks_since_trace_print += 1;
