@@ -1,11 +1,14 @@
-use core::f32::consts::PI;
-
 use crate::parameter_interface::ParameterInterface;
 use crate::motion::pid::PidController;
 use ateam_common_packets::bindings::{
     ParameterCommandCode::*, ParameterDataFormat, ParameterName
 };
-use ateam_controls::{Vector3f, Vector4f, Vector6f, Vector8f};
+use crate::motion::constant_gain_kalman_filter::CgKalmanFilter;
+use crate::motion::params::body_vel_filter_params::{
+    CONTROL_INPUT, INIT_ESTIMATE_COV, KALMAN_GAIN, KF_NUM_CONTROL_INPUTS, KF_NUM_OBSERVATIONS,
+    KF_NUM_STATES, OBSERVATION_MODEL, PROCESS_COV, STATE_TRANSITION,
+};
+use ateam_controls::{Vector3f, Vector4f, Vector5f, Vector6f, Vector8f};
 use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
 use ateam_controls::robot_model::RobotModel;
 use embassy_time::Instant;
@@ -60,8 +63,9 @@ impl Default for PoseControlHysteresis {
 }
 
 
-pub struct BodyController {
+pub struct BodyController<'a> {
     pub robot_model: RobotModel,
+    pub twist_cgkf: CgKalmanFilter<'a, 3, 4, 5>,
     pub pose_pid_controller: PidController<3>,
     pub twist_pid_controller: PidController<3>,
     pub trajectory_params: TrajectoryParams,
@@ -76,10 +80,23 @@ pub struct BodyController {
     pub dt: f32,
 }
 
-impl BodyController {
-    pub fn new(dt: f32) -> BodyController {
+impl<'a> BodyController<'a> {
+    pub fn new(dt: f32) -> BodyController<'a> {
+        let twist_cgkf: CgKalmanFilter<
+            KF_NUM_STATES,
+            KF_NUM_CONTROL_INPUTS,
+            KF_NUM_OBSERVATIONS,
+        > = CgKalmanFilter::new(
+            &STATE_TRANSITION,
+            &CONTROL_INPUT,
+            &OBSERVATION_MODEL,
+            &PROCESS_COV,
+            &KALMAN_GAIN,
+            &INIT_ESTIMATE_COV,
+        );
         BodyController {
             robot_model: RobotModel::new_from_default_params(dt).expect("Failed to create RobotModel, check that default parameters are valid"),
+            twist_cgkf: twist_cgkf,
             pose_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
             twist_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
             trajectory_params: TrajectoryParams::default(),
@@ -109,26 +126,11 @@ impl BodyController {
     ) {
         let mut start = Instant::now();
 
-        let state_prediction = self.robot_model.x;
+        let state_prediction = self.get_state();
 
-        let measurement: Vector8f = vector![
-            vision_pose_meas.x,
-            vision_pose_meas.y,
-            vision_pose_meas.z,
-            wheel_vel_meas.x,
-            wheel_vel_meas.y,
-            wheel_vel_meas.z,
-            wheel_vel_meas.w,
-            gyro_theta_meas,
-        ];
+        self.state_update(vision_pose_meas, vision_update, wheel_vel_meas, gyro_theta_meas);
 
-        // TODO: consider what to do here for singular matrix cases - maybe skip the update and just use the prediction as the estimate for this cycle, or add some regularization to the covariance to prevent singularities?
-        let res = self.robot_model.kf_update(measurement, !vision_update, false, false);
-        if res.is_err() {
-            defmt::error!("Kalman filter update failed, skipping update: {}", res.err().unwrap() as i32);
-        }
-
-        let mut state_estimate = self.robot_model.x.clone();
+        let mut state_estimate = self.get_state();
 
         // Deadzone the velocity estimate
         if fabsf(state_estimate[3]) < 0.05 {
@@ -141,11 +143,6 @@ impl BodyController {
             state_estimate[5] = 0.0;
         }
 
-        let kf_update_time = Instant::now() - start;
-        start = Instant::now();
-
-        let state_estimate = self.robot_model.x;
-
         if trace {
             defmt::trace!("State Estimate: [{}, {}, {}, {}, {}, {}]",
                 state_estimate.x,
@@ -156,6 +153,9 @@ impl BodyController {
                 state_estimate.b,
             );
         }
+
+        let kf_update_time = Instant::now() - start;
+        start = Instant::now();
 
         if body_pose_control_enabled {
             self.compute_effort_pose_control(state_estimate, body_cmd);
@@ -173,20 +173,7 @@ impl BodyController {
         let effort_time = Instant::now() - start;
         start = Instant::now();
 
-        // defmt::info!("Wheel Velocity Cmds: {}, {}, {}, {}", self.wheel_vel_cmd.x, self.wheel_vel_cmd.y, self.wheel_vel_cmd.z, self.wheel_vel_cmd.w);
-
-        // Safety checks on commands
-        let max_wheel_vel = 30.0; // rad/s
-        if self.wheel_vel_cmd.x.abs() > max_wheel_vel || self.wheel_vel_cmd.y.abs() > max_wheel_vel || self.wheel_vel_cmd.z.abs() > max_wheel_vel || self.wheel_vel_cmd.w.abs() > max_wheel_vel {
-            // defmt::warn!("Wheel vel cmd too high: {}, {}, {}, {}", self.wheel_vel_cmd.x, self.wheel_vel_cmd.y, self.wheel_vel_cmd.z, self.wheel_vel_cmd.w);
-            // self.wheel_vel_cmd = Vector4f::default();
-            // self.wheel_torque_cmd = Vector4f::default();
-        }
-        if self.wheel_torque_cmd.x > 1.0 || self.wheel_torque_cmd.y > 1.0 || self.wheel_torque_cmd.z > 1.0 || self.wheel_torque_cmd.w > 1.0 {
-            defmt::warn!("Wheel torque cmd too high: {}, {}, {}, {}", self.wheel_torque_cmd.x, self.wheel_torque_cmd.y, self.wheel_torque_cmd.z, self.wheel_torque_cmd.w);
-            self.wheel_vel_cmd = Vector4f::default();
-            self.wheel_torque_cmd = Vector4f::default();
-        }
+        defmt::info!("Wheel Velocity Cmds: {}, {}, {}, {}", self.wheel_vel_cmd.x, self.wheel_vel_cmd.y, self.wheel_vel_cmd.z, self.wheel_vel_cmd.w);
 
         // Copy values to telemetry
         self.debug_telemetry.set_body_pose_control_enabled(body_pose_control_enabled as u32);
@@ -206,11 +193,7 @@ impl BodyController {
         let control_outputs_time = Instant::now() - start;
         start = Instant::now();
 
-        // TODO: kalman filter predict next state
-        // // Use control law adjusted value to predict the next cycle's state.
-        // self.body_vel_filter.predict(&wheel_vel_output);
-
-        self.robot_model.kf_predict(self.body_accel_cmd);
+        self.state_predict();
 
         let kf_predict_time = Instant::now() - start;
         if trace {
@@ -221,29 +204,6 @@ impl BodyController {
                 kf_predict_time.as_micros(),
             );
         }
-    }
-
-    pub fn compute_effort_pose_control(&mut self, state_estimate: Vector6f, target_pose: Vector3f) {
-        (self.body_twist_cmd, self.body_accel_cmd) = self.pose_pid_control(state_estimate, target_pose);
-        // (self.body_twist_cmd, self.body_accel_cmd) = self.pose_bangbang_control(state_estimate, target_pose);
-        // (self.body_twist_cmd, self.body_accel_cmd) = self.pose_dualmode_control(state_estimate, target_pose);
-        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_cmd;
-        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * self.body_accel_cmd;
-    }
-
-    pub fn compute_effort_twist_control(&mut self, state_estimate: Vector6f, target_twist: Vector3f) {
-        // (self.body_twist_cmd, self.body_accel_cmd) = self.twist_bangbang_control(state_estimate, target_twist);
-        (self.body_twist_cmd, self.body_accel_cmd) = self.twist_pid_control(state_estimate, target_twist);
-        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_cmd;
-        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * self.body_accel_cmd;
-    }
-
-    pub fn compute_effort_accel_control(&mut self, state_estimate: Vector6f, target_accel: Vector3f) {
-        let next_state = self.robot_model.a * state_estimate + self.robot_model.b * target_accel;
-        self.body_twist_cmd = next_state.fixed_rows::<3>(3).into();
-        self.body_accel_cmd = target_accel;
-        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_cmd;
-        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * self.body_accel_cmd;
     }
 
     pub fn get_wheel_velocities(&self) -> Vector4f {
@@ -262,6 +222,99 @@ impl BodyController {
 
     pub fn get_control_debug_telem(&self) -> ExtendedTelemetry {
         self.debug_telemetry
+    }
+
+    fn get_state(&self) -> Vector6f {
+        // // Use EKF
+        // self.robot_model.x
+
+        // Use CGKF
+        let twist = self.twist_cgkf.get_state();
+        // Use local frame for twist_cgkf
+        vector![
+            0.0,
+            0.0,
+            0.0,
+            twist[0],
+            twist[1],
+            twist[2],
+        ]
+    }
+
+    fn state_update(&mut self, vision_pose_meas: Vector3f, vision_update: bool, wheel_vel_meas: Vector4f, gyro_theta_meas: f32) {
+        // // Use EKF
+        // let measurement: Vector8f = vector![
+        //     vision_pose_meas.x,
+        //     vision_pose_meas.y,
+        //     vision_pose_meas.z,
+        //     wheel_vel_meas.x,
+        //     wheel_vel_meas.y,
+        //     wheel_vel_meas.z,
+        //     wheel_vel_meas.w,
+        //     gyro_theta_meas,
+        // ];
+        // self.state_update_ekf(measurement, vision_update);
+
+        // Use CGKF
+        let measurement: Vector5f = vector![
+            wheel_vel_meas.x,
+            wheel_vel_meas.y,
+            wheel_vel_meas.z,
+            wheel_vel_meas.w,
+            gyro_theta_meas,
+        ];
+        self.state_update_cgkf(measurement);
+    }
+
+    fn state_predict(&mut self) {
+        // // Use EKF
+        // self.state_predict_ekf();
+
+        // Use CGKF
+        self.state_predict_cgkf();
+    }
+
+    fn compute_effort_pose_control(&mut self, state_estimate: Vector6f, target_pose: Vector3f) {
+        (self.body_twist_cmd, self.body_accel_cmd) = self.pose_pid_control(state_estimate, target_pose);
+        // (self.body_twist_cmd, self.body_accel_cmd) = self.pose_bangbang_control(state_estimate, target_pose);
+        // (self.body_twist_cmd, self.body_accel_cmd) = self.pose_dualmode_control(state_estimate, target_pose);
+        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_cmd;
+        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * self.body_accel_cmd;
+    }
+
+    fn compute_effort_twist_control(&mut self, state_estimate: Vector6f, target_twist: Vector3f) {
+        // (self.body_twist_cmd, self.body_accel_cmd) = self.twist_bangbang_control(state_estimate, target_twist);
+        (self.body_twist_cmd, self.body_accel_cmd) = self.twist_pid_control(state_estimate, target_twist);
+        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_cmd;
+        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * self.body_accel_cmd;
+    }
+
+    fn compute_effort_accel_control(&mut self, state_estimate: Vector6f, target_accel: Vector3f) {
+        let next_state = self.robot_model.a * state_estimate + self.robot_model.b * target_accel;
+        self.body_twist_cmd = next_state.fixed_rows::<3>(3).into();
+        self.body_accel_cmd = target_accel;
+        self.wheel_vel_cmd = self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_cmd;
+        self.wheel_torque_cmd = self.robot_model.transform_accel2wheel(state_estimate.z) * self.body_accel_cmd;
+    }
+
+    fn state_update_cgkf(&mut self, measurement: Vector5f) {
+        self.twist_cgkf.update(&measurement);
+    }
+
+    fn state_update_ekf(&mut self, measurement: Vector8f, vision_update: bool) {
+        // TODO: consider what to do here for singular matrix cases - maybe skip the update and just use the prediction as the estimate for this cycle, or add some regularization to the covariance to prevent singularities?
+        let res = self.robot_model.kf_update(measurement, !vision_update, false, false);
+        if res.is_err() {
+            defmt::error!("Kalman filter update failed, skipping update: {}", res.err().unwrap() as i32);
+        }
+    }
+
+    fn state_predict_cgkf(&mut self) {
+        self.twist_cgkf.predict(&self.get_wheel_velocities());
+    }
+
+    fn state_predict_ekf(&mut self) {
+        self.robot_model.kf_predict(self.body_accel_cmd);
     }
 
     fn pose_pid_control(&mut self, state_estimate: Vector6f, target_pose: Vector3f) -> (Vector3f, Vector3f) {
@@ -350,11 +403,11 @@ impl BodyController {
     fn twist_pid_control(&mut self, state_estimate: Vector6f, target_twist: Vector3f) -> (Vector3f, Vector3f) {
         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
         let body_twist_pid = self.twist_pid_controller.calculate(&target_twist, &twist_estimate, self.dt);
-        let mut global_twist_cmd = target_twist + body_twist_pid;
+        let mut twist_cmd = target_twist + body_twist_pid;
 
         // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
         // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
-        let mut global_accel_cmd = (global_twist_cmd - self.prev_body_twist_cmd) / self.dt;
+        let mut accel_cmd = (twist_cmd - self.prev_body_twist_cmd) / self.dt;
 
         let max_accel_linear = self.trajectory_params.max_accel_linear;
         let max_accel_angular = self.trajectory_params.max_accel_angular;
@@ -362,36 +415,36 @@ impl BodyController {
         let max_vel_angular = self.trajectory_params.max_vel_angular;
 
         // Clamp acceleration: linear magnitude and angular independently
-        let accel_linear_mag = sqrtf(global_accel_cmd.x * global_accel_cmd.x + global_accel_cmd.y * global_accel_cmd.y);
+        let accel_linear_mag = sqrtf(accel_cmd.x * accel_cmd.x + accel_cmd.y * accel_cmd.y);
         if accel_linear_mag > max_accel_linear {
             let scale = max_accel_linear / accel_linear_mag;
-            global_accel_cmd.x *= scale;
-            global_accel_cmd.y *= scale;
+            accel_cmd.x *= scale;
+            accel_cmd.y *= scale;
         }
-        global_accel_cmd.z = global_accel_cmd.z.clamp(-max_accel_angular, max_accel_angular);
+        accel_cmd.z = accel_cmd.z.clamp(-max_accel_angular, max_accel_angular);
 
         // Recompute twist from clamped acceleration
-        global_twist_cmd = self.prev_body_twist_cmd + (global_accel_cmd * self.dt);
+        twist_cmd = self.prev_body_twist_cmd + (accel_cmd * self.dt);
 
         // Clamp twist: linear magnitude and angular independently
-        let twist_linear_mag = sqrtf(global_twist_cmd.x * global_twist_cmd.x + global_twist_cmd.y * global_twist_cmd.y);
+        let twist_linear_mag = sqrtf(twist_cmd.x * twist_cmd.x + twist_cmd.y * twist_cmd.y);
         if twist_linear_mag > max_vel_linear {
             let scale = max_vel_linear / twist_linear_mag;
-            global_twist_cmd.x *= scale;
-            global_twist_cmd.y *= scale;
+            twist_cmd.x *= scale;
+            twist_cmd.y *= scale;
         }
-        global_twist_cmd.z = global_twist_cmd.z.clamp(-max_vel_angular, max_vel_angular);
+        twist_cmd.z = twist_cmd.z.clamp(-max_vel_angular, max_vel_angular);
 
         // Recompute accel to stay consistent with the clamped twist
-        global_accel_cmd = (global_twist_cmd - self.prev_body_twist_cmd) / self.dt;
+        accel_cmd = (twist_cmd - self.prev_body_twist_cmd) / self.dt;
 
-        self.prev_body_twist_cmd.copy_from_slice(global_twist_cmd.as_slice());
+        self.prev_body_twist_cmd.copy_from_slice(twist_cmd.as_slice());
 
-        (global_twist_cmd, global_accel_cmd)
+        (twist_cmd, accel_cmd)
     }
 }
 
-impl ParameterInterface for BodyController {
+impl<'a> ParameterInterface for BodyController<'a> {
     fn processes_cmd(&self, param_cmd: &ParameterCommand) -> bool {
         return self.has_name(param_cmd.parameter_name);
     }
