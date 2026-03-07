@@ -297,7 +297,8 @@ impl<
         Timer::after_millis(10).await;
 
         let mut ctrl_seq_number = 0;
-        let loop_period = Duration::from_millis(1);  // 1 kHz
+        // let loop_period = Duration::from_millis(1);  // 1 kHz
+        let loop_period = Duration::from_millis(10);  // 100 Hz
         let mut loop_rate_ticker = Ticker::every(loop_period);
 
         let mut robot_controller = BodyController::new(loop_period.as_micros() as f32 * 1e-6);
