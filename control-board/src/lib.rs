@@ -17,8 +17,8 @@ use embassy_stm32::{
     bind_interrupts, peripherals,
     rcc::{
         mux::{Adcsel, Saisel, Sdmmcsel, Spi6sel, Usart16910sel, Usart234578sel, Usbsel},
-        AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllDiv, PllMul, PllPreDiv, PllSource,
-        Sysclk, VoltageScale, Hsi48Config 
+        AHBPrescaler, APBPrescaler, Hse, HseMode, Hsi48Config, Pll, PllDiv, PllMul, PllPreDiv,
+        PllSource, Sysclk, VoltageScale,
     },
     time::Hertz,
     usart, Config,
@@ -132,7 +132,9 @@ pub fn get_system_config() -> Config {
     config.rcc.csi = true;
 
     // turn on the hsi48 as a primordial ADC source
-    config.rcc.hsi48 = Some(Hsi48Config { sync_from_usb: true });
+    config.rcc.hsi48 = Some(Hsi48Config {
+        sync_from_usb: true,
+    });
 
     // configure the PLLs
     // validated in ST Cube MX
@@ -205,14 +207,14 @@ pub const fn is_float_safe(f: f32) -> bool {
 pub fn is_command_packet_safe(cmd_pck: DataPacket) -> bool {
     match cmd_pck {
         DataPacket::BasicControl(basic_control) => {
-            is_float_safe(basic_control.pose_x_linear_vision) &&
-            is_float_safe(basic_control.pose_y_linear_vision) &&
-            is_float_safe(basic_control.pose_z_angular_vision) &&
-            is_float_safe(basic_control.x_linear_cmd) &&
-            is_float_safe(basic_control.y_linear_cmd) &&
-            is_float_safe(basic_control.z_angular_cmd) &&
-            is_float_safe(basic_control.kick_vel) &&
-            is_float_safe(basic_control.dribbler_speed)
+            is_float_safe(basic_control.pose_x_linear_vision)
+                && is_float_safe(basic_control.pose_y_linear_vision)
+                && is_float_safe(basic_control.pose_z_angular_vision)
+                && is_float_safe(basic_control.x_linear_cmd)
+                && is_float_safe(basic_control.y_linear_cmd)
+                && is_float_safe(basic_control.z_angular_cmd)
+                && is_float_safe(basic_control.kick_vel)
+                && is_float_safe(basic_control.dribbler_speed)
         }
         DataPacket::ParameterCommand(parameter_command) => match parameter_command.data_format {
             ParameterDataFormat::F32 => {

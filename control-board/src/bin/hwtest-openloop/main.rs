@@ -1,8 +1,10 @@
 #![no_std]
 #![no_main]
 
-
-use ateam_common_packets::{bindings::{BasicControl, KickRequest}, radio::DataPacket};
+use ateam_common_packets::{
+    bindings::{BasicControl, KickRequest},
+    radio::DataPacket,
+};
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{interrupt, pac::Interrupt};
 use embassy_sync::pubsub::PubSubChannel;
@@ -25,8 +27,8 @@ use credentials::private_credentials::wifi::wifi_credentials;
 #[cfg(feature = "no-private-credentials")]
 use credentials::public_credentials::wifi::wifi_credentials;
 
-use embassy_time::{Instant, Ticker, Timer};
 use core::f32::consts::PI;
+use embassy_time::{Instant, Ticker, Timer};
 use libm::{cosf, sinf};
 // provide embedded panic probe
 use panic_probe as _;
@@ -194,14 +196,14 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p
     );
 
-    let loop_period = embassy_time::Duration::from_millis(10);  // 100 Hz loop
+    let loop_period = embassy_time::Duration::from_millis(10); // 100 Hz loop
     let mut loop_rate_ticker = Ticker::every(loop_period);
 
     let w = 2.0 * PI / 3.0; // 3 second period
-    // // let a_angular = 5.0;  // rad/s amplitude
-    // let a_angular = 5.0;  // rad/s^2 amplitude
-    // let a_linear = 0.05;  // m/s amplitude
-    let a_linear = 0.025;  // m/s^2 amplitude
+                            // // let a_angular = 5.0;  // rad/s amplitude
+                            // let a_angular = 5.0;  // rad/s^2 amplitude
+                            // let a_linear = 0.05;  // m/s amplitude
+    let a_linear = 0.025; // m/s^2 amplitude
 
     let request_shutdown = 0;
     let reboot_robot = 0;
@@ -220,7 +222,21 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let play_song = 0;
 
     let mut control = BasicControl {
-        _bitfield_1: BasicControl::new_bitfield_1(request_shutdown, reboot_robot, game_state_in_stop, emergency_stop, body_pose_control_enabled, body_twist_control_enabled, body_accel_control_enabled, wheel_vel_control_enabled, wheel_torque_control_enabled, vision_update, dribbler_multiplier, reserved, play_song),
+        _bitfield_1: BasicControl::new_bitfield_1(
+            request_shutdown,
+            reboot_robot,
+            game_state_in_stop,
+            emergency_stop,
+            body_pose_control_enabled,
+            body_twist_control_enabled,
+            body_accel_control_enabled,
+            wheel_vel_control_enabled,
+            wheel_torque_control_enabled,
+            vision_update,
+            dribbler_multiplier,
+            reserved,
+            play_song,
+        ),
         _bitfield_align_1: Default::default(),
         pose_x_linear_vision: 0.0,
         pose_y_linear_vision: 0.0,
@@ -238,9 +254,12 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut last_loop_start = Instant::now();
     let mut t = 0.0;
     loop {
-        t += Instant::now().checked_duration_since(last_loop_start).unwrap().as_micros() as f32 * 1e-6;
+        t += Instant::now()
+            .checked_duration_since(last_loop_start)
+            .unwrap()
+            .as_micros() as f32
+            * 1e-6;
         last_loop_start = Instant::now();
-
 
         if t < 5. {
             control.x_linear_cmd = 0.02;
@@ -263,7 +282,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                         control.pose_z_angular_vision = latest_control.pose_z_angular_vision;
                     }
                 }
-                ateam_common_packets::radio::DataPacket::ParameterCommand(_) => {},
+                ateam_common_packets::radio::DataPacket::ParameterCommand(_) => {}
             }
         }
         radio_command_publisher.publish_immediate(DataPacket::BasicControl(control));

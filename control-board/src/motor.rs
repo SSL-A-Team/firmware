@@ -14,7 +14,14 @@ use embassy_time::{with_timeout, Duration, Timer};
 
 use crate::image_hash;
 use ateam_common_packets::bindings::{
-    CcmCommand, CcmCommandType::CCM_CMD_MOTION, CcmMotionControlType, CcmResponse, CcmResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM}, CcmTelemetry, MotionCommandType::OPEN_LOOP, MotorCommandPacket, MotorCommandType::MCP_PARAMS
+    CcmCommand,
+    CcmCommandType::CCM_CMD_MOTION,
+    CcmMotionControlType, CcmResponse,
+    CcmResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM},
+    CcmTelemetry,
+    MotionCommandType::OPEN_LOOP,
+    MotorCommandPacket,
+    MotorCommandType::MCP_PARAMS,
 };
 
 pub struct CurrentControlledMotor<
@@ -60,7 +67,8 @@ impl<
             DEBUG_MOTOR_UART_QUEUES,
         >,
         firmware_image: &'a [u8],
-    ) -> CurrentControlledMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES> {
+    ) -> CurrentControlledMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES>
+    {
         let start_state: CcmTelemetry = Default::default();
 
         CurrentControlledMotor {
@@ -88,7 +96,8 @@ impl<
         boot0_pin: Peri<'static, AnyPin>,
         reset_pin: Peri<'static, AnyPin>,
         firmware_image: &'a [u8],
-    ) -> CurrentControlledMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES> {
+    ) -> CurrentControlledMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES>
+    {
         // Need a Pull None to allow for STSPIN watchdog usage.
         let stm32_interface = Stm32Interface::new_from_pins(
             uart,
@@ -141,7 +150,6 @@ impl<
     pub async fn get_current_device_img_hash(&mut self) -> [u8; 4] {
         // TODO: fix with new structure
 
-        
         // loop {
         //     // defmt::trace!("Wheel Interface - Sending parameter command packet");
         //     self.send_params_command();
@@ -151,7 +159,6 @@ impl<
         //     // defmt::debug!("Wheel Interface - Checking for parameter response");
         //     // Parse incoming packets
         //     self.process_packets();
-
 
         //     // Check if curret_params_state has updated, assuming that the
         //     // params state firmware_img_hash field is initialized as 0's
@@ -337,7 +344,7 @@ impl<
                 } else if mrp.type_ == CCM_RESP_PARAMS {
                     trace!("Received parameter response packet");
                     debug!("Parameter response data: {:?}", buf);
-                    
+
                     warn!("Current Controlled Motor params response not implmeneted");
                 }
             }
@@ -473,7 +480,12 @@ impl<
             acc += sample as u32;
         }
 
-        return (acc / self.current_state.current_telemetry.current_samples_ma.len() as u32) as u16
+        return (acc
+            / self
+                .current_state
+                .current_telemetry
+                .current_samples_ma
+                .len() as u32) as u16;
     }
 
     pub fn read_current_setpoint_ma(&self) -> i16 {

@@ -1,11 +1,14 @@
 use ateam_common_packets::{
-    bindings::{BasicControl, BasicTelemetry, CcmMotionControlType, KickerTelemetry, MotionCommandType, PowerTelemetry},
+    bindings::{
+        BasicControl, BasicTelemetry, CcmMotionControlType, KickerTelemetry, MotionCommandType,
+        PowerTelemetry,
+    },
     radio::TelemetryPacket,
 };
+use ateam_controls::{Vector3f, Vector4f};
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
 };
-use ateam_controls::{Vector3f, Vector4f};
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::{usart::Uart, Peri};
 use embassy_time::{Duration, Instant, Ticker, Timer};
@@ -13,10 +16,10 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 use crate::{
     include_external_cpp_bin,
     motion::robot_controller::BodyController,
+    motor::CurrentControlledMotor,
     parameter_interface::ParameterInterface,
     pins::*,
     robot_state::{RobotState, SharedRobotState},
-    motor::CurrentControlledMotor,
     SystemIrqs, DEBUG_MOTOR_UART_QUEUES, ROBOT_VERSION_MAJOR, ROBOT_VERSION_MINOR,
 };
 
@@ -29,18 +32,24 @@ const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 80;
 const RX_BUF_DEPTH: usize = 20;
 
-type ControlWheelMotor =
-    CurrentControlledMotor<'static, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE, RX_BUF_DEPTH, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES>;
+type ControlWheelMotor = CurrentControlledMotor<
+    'static,
+    MAX_RX_PACKET_SIZE,
+    MAX_TX_PACKET_SIZE,
+    RX_BUF_DEPTH,
+    TX_BUF_DEPTH,
+    DEBUG_MOTOR_UART_QUEUES,
+>;
 static_idle_buffered_uart!(FRONT_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(BACK_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(FRONT_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
 const TICKS_WITHOUT_PACKET_STOP: usize = 200;
-const TICKS_BASIC_TELEM_INTERVAL: usize = 20;  // send basic telem every 10 ticks (100 Hz if loop is 1 kHz)
-const TICKS_EXTENDED_TELEM_INTERVAL: usize = 20;  // send extended telem every 20 ticks (50 Hz if loop is 1 kHz)
-// const TICKS_TRACE_PRINT: usize = 1000;  // print trace every 1000 ticks (1 second if loop is 1 kHz)
-const TICKS_TRACE_PRINT: usize = 100;  // print trace every 100 ticks (0.1 second if loop is 1 kHz)
+const TICKS_BASIC_TELEM_INTERVAL: usize = 20; // send basic telem every 10 ticks (100 Hz if loop is 1 kHz)
+const TICKS_EXTENDED_TELEM_INTERVAL: usize = 20; // send extended telem every 20 ticks (50 Hz if loop is 1 kHz)
+                                                 // const TICKS_TRACE_PRINT: usize = 1000;  // print trace every 1000 ticks (1 second if loop is 1 kHz)
+const TICKS_TRACE_PRINT: usize = 100; // print trace every 100 ticks (0.1 second if loop is 1 kHz)
 
 #[macro_export]
 macro_rules! create_control_task {
@@ -263,7 +272,9 @@ impl<
         let vision_update = control_debug_telem.vision_update() != 0;
         let control_debug_telem = TelemetryPacket::Extended(control_debug_telem);
         self.ticks_since_extended_telem += 1;
-        if cur_state.radio_bridge_ok && (self.ticks_since_extended_telem >= TICKS_EXTENDED_TELEM_INTERVAL || vision_update) {
+        if cur_state.radio_bridge_ok
+            && (self.ticks_since_extended_telem >= TICKS_EXTENDED_TELEM_INTERVAL || vision_update)
+        {
             self.telemetry_publisher
                 .publish_immediate(control_debug_telem);
             self.ticks_since_extended_telem = 0;
@@ -298,7 +309,7 @@ impl<
 
         let mut ctrl_seq_number = 0;
         // let loop_period = Duration::from_millis(1);  // 1 kHz
-        let loop_period = Duration::from_millis(10);  // 100 Hz
+        let loop_period = Duration::from_millis(10); // 100 Hz
         let mut loop_rate_ticker = Ticker::every(loop_period);
 
         let mut robot_controller = BodyController::new(loop_period.as_micros() as f32 * 1e-6);
@@ -398,7 +409,8 @@ impl<
                         self.motor_br.set_motion_type(wheel_motion_type);
                         self.motor_fr.set_motion_type(wheel_motion_type);
 
-                        let motion_enabled = wheel_motion_type != CcmMotionControlType::CCM_MCT_MOTOR_OFF;
+                        let motion_enabled =
+                            wheel_motion_type != CcmMotionControlType::CCM_MCT_MOTOR_OFF;
                         self.motor_fl.set_motion_enabled(motion_enabled);
                         self.motor_bl.set_motion_enabled(motion_enabled);
                         self.motor_br.set_motion_enabled(motion_enabled);
@@ -469,21 +481,28 @@ impl<
                 self.last_gyro_rads,
                 ticks_since_trace_print >= TICKS_TRACE_PRINT,
             );
-            vision_update = false;  // reset vision update flag after use
+            vision_update = false; // reset vision update flag after use
 
-            let (wheel_current_cmd, wheel_vel_cmd) = if self.stop_wheels() || 
-                ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
-                defmt::warn!("control task - motor commands locked out");
-                (Vector4f::default(), Vector4f::default())
-            } else {
-                (robot_controller.get_wheel_currents(), robot_controller.get_wheel_velocities())
-            };
+            let (wheel_current_cmd, wheel_vel_cmd) =
+                if self.stop_wheels() || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
+                    defmt::warn!("control task - motor commands locked out");
+                    (Vector4f::default(), Vector4f::default())
+                } else {
+                    (
+                        robot_controller.get_wheel_currents(),
+                        robot_controller.get_wheel_velocities(),
+                    )
+                };
 
             ////////////////// TODO: Move this/delete this //////////////////////
 
             let mut wheel_ma = wheel_current_cmd * 1000.0;
             // TODO: remove this safety clamp after testing
-            if wheel_ma.x.abs() > MAX_CURRENT_MA || wheel_ma.y.abs() > MAX_CURRENT_MA || wheel_ma.z.abs() > MAX_CURRENT_MA || wheel_ma.w.abs() > MAX_CURRENT_MA {
+            if wheel_ma.x.abs() > MAX_CURRENT_MA
+                || wheel_ma.y.abs() > MAX_CURRENT_MA
+                || wheel_ma.z.abs() > MAX_CURRENT_MA
+                || wheel_ma.w.abs() > MAX_CURRENT_MA
+            {
                 defmt::warn!(
                     "high wheel current command detected: {} {} {} {}",
                     wheel_ma.x as i16,
@@ -497,9 +516,25 @@ impl<
             if ticks_since_trace_print >= TICKS_TRACE_PRINT {
                 let state = robot_controller.robot_model.x;
                 let wheel_torques = robot_controller.get_wheel_torques();
-                defmt::info!("state position: {}, {}, {}", state[(0, 0)], state[(1, 0)], state[(2, 0)]);
-                defmt::info!("state velocity: {}, {}, {}", state[(3, 0)], state[(4, 0)], state[(5, 0)]);
-                defmt::info!("wheel torque cmd: {} {} {} {}", wheel_torques.x, wheel_torques.y, wheel_torques.z, wheel_torques.w);
+                defmt::info!(
+                    "state position: {}, {}, {}",
+                    state[(0, 0)],
+                    state[(1, 0)],
+                    state[(2, 0)]
+                );
+                defmt::info!(
+                    "state velocity: {}, {}, {}",
+                    state[(3, 0)],
+                    state[(4, 0)],
+                    state[(5, 0)]
+                );
+                defmt::info!(
+                    "wheel torque cmd: {} {} {} {}",
+                    wheel_torques.x,
+                    wheel_torques.y,
+                    wheel_torques.z,
+                    wheel_torques.w
+                );
                 defmt::info!(
                     "wheel vel cmd: {} {} {} {}",
                     wheel_vel_cmd.x,
@@ -535,7 +570,8 @@ impl<
             //  send commands and telemetry  //
             ///////////////////////////////////
 
-            let timestamp_us = t_us_at_loop_start + (Instant::now() - last_loop_start_time).as_micros() as u64;
+            let timestamp_us =
+                t_us_at_loop_start + (Instant::now() - last_loop_start_time).as_micros() as u64;
             self.send_motor_commands_and_telemetry(
                 ctrl_seq_number,
                 timestamp_us,
@@ -549,7 +585,9 @@ impl<
             let channel_update_time = Instant::now() - start;
             start = Instant::now();
 
-            let loop_execution_time_us = Instant::now().duration_since(last_loop_start_time).as_micros();
+            let loop_execution_time_us = Instant::now()
+                .duration_since(last_loop_start_time)
+                .as_micros();
             if ticks_since_trace_print > TICKS_TRACE_PRINT || loop_execution_time_us > 300 {
                 defmt::trace!(
                     "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
@@ -558,7 +596,10 @@ impl<
                     control_update_time.as_micros(),
                     channel_update_time.as_micros(),
                 );
-                defmt::trace!("TOTAL CONTROL LOOP EXECUTION TIME: {} us", loop_execution_time_us);
+                defmt::trace!(
+                    "TOTAL CONTROL LOOP EXECUTION TIME: {} us",
+                    loop_execution_time_us
+                );
             }
 
             if loop_execution_time_us > 300 {
