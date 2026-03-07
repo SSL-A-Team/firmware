@@ -79,7 +79,7 @@ pub struct BodyController {
 impl BodyController {
     pub fn new(dt: f32) -> BodyController {
         BodyController {
-            robot_model: RobotModel::new_from_default_params(dt),
+            robot_model: RobotModel::new_from_default_params(dt).expect("Failed to create RobotModel, check that default parameters are valid"),
             pose_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
             twist_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
             trajectory_params: TrajectoryParams::default(),
@@ -122,7 +122,12 @@ impl BodyController {
             gyro_theta_meas,
         ];
 
-        self.robot_model.kf_update(measurement, !vision_update, false, false);
+        // TODO: consider what to do here for singular matrix cases - maybe skip the update and just use the prediction as the estimate for this cycle, or add some regularization to the covariance to prevent singularities?
+        let res = self.robot_model.kf_update(measurement, !vision_update, false, false);
+        if res.is_err() {
+            defmt::error!("Kalman filter update failed, skipping update: {}", res.err().unwrap() as i32);
+        }
+
         let mut state_estimate = self.robot_model.x.clone();
 
         // Deadzone the velocity estimate
@@ -273,11 +278,11 @@ impl BodyController {
         // Calculate the optimal trajectory to the setpoint
         let traj = BangBangTraj3D::from_target_pose(
             state_estimate, target_pose, self.trajectory_params,
-        );
+        ).expect("Failed to generate bang-bang trajectory, check that trajectory parameters are valid");
         // Calculate the acceleration needed to achieve the trajectory right now
-        let global_accel_cmd = traj.accel_at(0.0);
+        let global_accel_cmd = traj.accel_at(0.0).expect("Bang-bang trajectory should always have a valid accel at t=0.0");
         // Calculate the twist that should be achieved at the next time step after applying this acceleration
-        let next_body_state = traj.state_at(state_estimate, 0.0, self.dt);
+        let next_body_state = traj.state_at(state_estimate, 0.0, self.dt).expect("Bang-bang trajectory should always have a valid state at t=0.0 + dt");
         let global_twist_cmd = Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
         (global_twist_cmd, global_accel_cmd)
     }
@@ -335,10 +340,10 @@ impl BodyController {
             state_estimate.fixed_rows::<3>(3).into(),
             target_twist,
             self.trajectory_params,
-        );
-        let next_state = traj.state_at(state_estimate, 0.0, self.dt);
+        ).expect("Failed to generate bang-bang trajectory, check that trajectory parameters are valid");
+        let next_state = traj.state_at(state_estimate, 0.0, self.dt).expect("Bang-bang trajectory should always have a valid state at t=0.0 + dt");
         let global_twist_cmd: Vector3f = next_state.fixed_rows::<3>(3).into();
-        let global_accel_cmd = traj.accel_at(0.0);
+        let global_accel_cmd = traj.accel_at(0.0).expect("Bang-bang trajectory should always have a valid accel at t=0.0");
         (global_twist_cmd, global_accel_cmd)
     }
 
