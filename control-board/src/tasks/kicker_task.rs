@@ -143,9 +143,7 @@ impl<
             } else if self.kicker_task_state >= KickerTaskState::ConnectUart {
                 // Check if connection timeout occurred
                 let time_elapsed =
-                    Instant::checked_duration_since(&Instant::now(), connection_timeout_start)
-                        .unwrap()
-                        .as_millis();
+                    Instant::duration_since(&Instant::now(), connection_timeout_start).as_millis();
                 if time_elapsed > TELEMETRY_TIMEOUT_MS {
                     defmt::error!("Kicker Interface - Kicker telemetry timed out, current state is '{}', rolling state back to 'Reset'", self.kicker_task_state);
                     self.kicker_task_state = KickerTaskState::Reset;
@@ -185,6 +183,8 @@ impl<
                     );
                     self.kicker_driver.reset().await;
                     self.kicker_task_state = KickerTaskState::InitFirmware;
+
+                    main_loop_ticker.reset();
                 }
                 KickerTaskState::InitFirmware => {
                     // Ensure firmware image is up to date
@@ -222,6 +222,8 @@ impl<
                     connection_timeout_start = Instant::now();
                     // Move on to ConnectUart state
                     self.kicker_task_state = KickerTaskState::Connected;
+
+                    main_loop_ticker.reset();
                 }
                 KickerTaskState::ConnectUart => {
                     if telemetry_received {

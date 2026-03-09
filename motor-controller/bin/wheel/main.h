@@ -21,9 +21,8 @@
 // expect cmd packets at 100H Hz (10ms), ticks are currently 1ms per
 // timeout ticks equates to 10 consecutive missed packets.
 #define COMMAND_PACKET_TIMEOUT_TICKS 100
-#define IOQ_BUF_LEN 64
 
-#define AVDD_V 3.3f
+#define AVDD_V 3.0f
 
 ///////////////////////////////////////////
 //  current sense amplification network  //
