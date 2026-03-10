@@ -222,6 +222,12 @@ impl<'a> BodyController<'a> {
             .body_cmd
             .copy_from_slice(body_cmd.as_slice());
         self.debug_telemetry
+            .body_traj_pose
+            .copy_from_slice(self.trajectory_state.fixed_rows::<3>(0).as_slice());
+        self.debug_telemetry
+            .body_traj_twist
+            .copy_from_slice(self.trajectory_state.fixed_rows::<3>(3).as_slice());
+        self.debug_telemetry
             .kf_body_pose_prediction
             .copy_from_slice(&state_prediction.as_slice()[0..3]);
         self.debug_telemetry
@@ -567,7 +573,8 @@ impl<'a> BodyController<'a> {
                     .x;
             },
             PoseControlMode::Pid => {
-                let target_x: Vector1f = target_pose.fixed_rows::<1>(0).into();
+                // let target_x: Vector1f = target_pose.fixed_rows::<1>(0).into();
+                let target_x: Vector1f = self.trajectory_state.fixed_rows::<1>(0).into();
                 let current_x: Vector1f = pose_estimate.fixed_rows::<1>(0).into();
                 global_accel_cmd.x = self.pose_pid_controller_x.calculate(
                     &target_x, 
@@ -586,7 +593,8 @@ impl<'a> BodyController<'a> {
                     .y;
             },
             PoseControlMode::Pid => {
-                let target_y: Vector1f = target_pose.fixed_rows::<1>(1).into();
+                // let target_y: Vector1f = target_pose.fixed_rows::<1>(1).into();
+                let target_y: Vector1f = self.trajectory_state.fixed_rows::<1>(1).into();
                 let current_y: Vector1f = pose_estimate.fixed_rows::<1>(1).into();
                 global_accel_cmd.y = self.pose_pid_controller_y.calculate(
                     &target_y, 
@@ -605,7 +613,8 @@ impl<'a> BodyController<'a> {
                     .z;
             },
             PoseControlMode::Pid => {
-                let target_theta: Vector1f = target_pose.fixed_rows::<1>(2).into();
+                // let target_theta: Vector1f = target_pose.fixed_rows::<1>(2).into();
+                let target_theta: Vector1f = self.trajectory_state.fixed_rows::<1>(2).into();
                 let current_theta: Vector1f = pose_estimate.fixed_rows::<1>(2).into();
                 global_accel_cmd.z = self.pose_pid_controller_theta.calculate(
                     &target_theta, 
