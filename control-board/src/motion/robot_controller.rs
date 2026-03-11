@@ -82,7 +82,7 @@ pub struct BodyController<'a> {
     pub traj_recompute_error_vel_angular: f32,
     pub body_twist_cmd: Vector3f,
     pub body_accel_cmd: Vector3f,
-    pub prev_body_twist_cmd: Vector3f, // Used for twist PID control
+    pub prev_body_cmd: Option<Vector3f>,
     pub wheel_vel_cmd: Vector4f,
     pub wheel_torque_cmd: Vector4f,
     pub debug_telemetry: ExtendedTelemetry,
@@ -123,7 +123,7 @@ impl<'a> BodyController<'a> {
             traj_recompute_error_vel_angular: 50.0,
             body_twist_cmd: Vector3f::default(),
             body_accel_cmd: Vector3f::default(),
-            prev_body_twist_cmd: Vector3f::default(),
+            prev_body_cmd: None,
             wheel_vel_cmd: Vector4f::default(),
             wheel_torque_cmd: Vector4f::default(),
             debug_telemetry: Default::default(),
@@ -489,8 +489,11 @@ impl<'a> BodyController<'a> {
         let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
 
-        // Check if body configuration has strayed too far from the trajectory, recompute traj if necessary
-        if self.trajectory.is_none() ||
+        // Compute trajectory to target pose if
+        //   1) we don't have a trajectory yet
+        //   2) the target pose has changed
+        //   3) the current body configuration has strayed too far from the currently tracked trajectory
+        if self.trajectory.is_none() || self.prev_body_cmd.is_none() || self.prev_body_cmd.unwrap() != target_pose ||
             (self.trajectory_state.x - pose_estimate.x).abs() > self.traj_recompute_error_pos_linear ||
             (self.trajectory_state.y - pose_estimate.y).abs() > self.traj_recompute_error_pos_linear ||
             (self.trajectory_state.z - pose_estimate.z).abs() > self.traj_recompute_error_pos_angular ||
@@ -633,6 +636,8 @@ impl<'a> BodyController<'a> {
             .state_at(self.trajectory_state, self.trajectory_time, self.trajectory_time + self.dt)
             .expect("Trajectory should always have valid state at current time + dt");
         self.trajectory_time += self.dt;
+        
+        self.prev_body_cmd = Some(target_pose);
 
         (global_twist_cmd, global_accel_cmd)
     }
@@ -673,7 +678,8 @@ impl<'a> BodyController<'a> {
 
         // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
         // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
-        let mut accel_cmd = (twist_cmd - self.prev_body_twist_cmd) / self.dt;
+        let prev_twist_cmd = self.prev_body_cmd.unwrap_or(Vector3f::default());
+        let mut accel_cmd = (twist_cmd - prev_twist_cmd) / self.dt;
 
         let max_accel_linear = self.trajectory_params.max_accel_linear;
         let max_accel_angular = self.trajectory_params.max_accel_angular;
@@ -690,7 +696,7 @@ impl<'a> BodyController<'a> {
         accel_cmd.z = accel_cmd.z.clamp(-max_accel_angular, max_accel_angular);
 
         // Recompute twist from clamped acceleration
-        twist_cmd = self.prev_body_twist_cmd + (accel_cmd * self.dt);
+        twist_cmd = prev_twist_cmd + (accel_cmd * self.dt);
 
         // Clamp twist: linear magnitude and angular independently
         let twist_linear_mag = sqrtf(twist_cmd.x * twist_cmd.x + twist_cmd.y * twist_cmd.y);
@@ -702,10 +708,9 @@ impl<'a> BodyController<'a> {
         twist_cmd.z = twist_cmd.z.clamp(-max_vel_angular, max_vel_angular);
 
         // Recompute accel to stay consistent with the clamped twist
-        accel_cmd = (twist_cmd - self.prev_body_twist_cmd) / self.dt;
+        accel_cmd = (twist_cmd - prev_twist_cmd) / self.dt;
 
-        self.prev_body_twist_cmd
-            .copy_from_slice(twist_cmd.as_slice());
+        self.prev_body_cmd = Some(twist_cmd);
 
         (twist_cmd, accel_cmd)
     }
