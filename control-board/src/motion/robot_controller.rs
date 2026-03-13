@@ -280,7 +280,7 @@ impl<'a> BodyController<'a> {
         self.debug_telemetry
     }
 
-    fn get_state(&self) -> Vector6f {
+    pub fn get_state(&self) -> Vector6f {
         // Use EKF
         self.robot_model.x
 
@@ -336,6 +336,8 @@ impl<'a> BodyController<'a> {
         // (self.body_twist_cmd, self.body_accel_cmd) = self.pose_dualmode_control(state_estimate, target_pose);
         (self.body_twist_cmd, self.body_accel_cmd) =
             self.pose_dimensional_dualmode_control(state_estimate, target_pose);
+        // Compensate for modeled friction forces
+        self.body_accel_cmd -= self.robot_model.i_inv * self.robot_model.compute_friction_force(self.body_twist_cmd);
         self.wheel_vel_cmd =
             self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_cmd;
         self.wheel_torque_cmd =
