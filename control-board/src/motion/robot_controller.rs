@@ -745,6 +745,10 @@ impl<'a> ParameterInterface for BodyController<'a> {
             ParameterName::PHYS_BODY_MOMENT_Z => true,
             ParameterName::PHYS_MOTOR_TORQUE_CONSTANT => true,
             ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => true,
+            ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_LINEAR => true,
+            ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_ANGULAR => true,
+            ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_LINEAR => true,
+            ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_ANGULAR => true,
             ParameterName::PIDII_X => true,
             ParameterName::PIDII_Y => true,
             ParameterName::PIDII_THETA => true,
@@ -820,6 +824,10 @@ impl<'a> ParameterInterface for BodyController<'a> {
                 | ParameterName::PHYS_BODY_MOMENT_Z
                 | ParameterName::PHYS_MOTOR_TORQUE_CONSTANT
                 | ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR
+                | ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_LINEAR
+                | ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_ANGULAR
+                | ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_LINEAR
+                | ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_ANGULAR
                 | ParameterName::TRAJ_ALLOWABLE_ERROR_POS_LINEAR
                 | ParameterName::TRAJ_ALLOWABLE_ERROR_POS_ANGULAR
                 | ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_LINEAR
@@ -901,6 +909,18 @@ impl<'a> ParameterInterface for BodyController<'a> {
                         }
                         ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => {
                             self.robot_model.physical_params.motor_efficiency_factor
+                        }
+                        ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_LINEAR => {
+                            self.robot_model.physical_params.coulomb_friction_coefficient_linear
+                        }
+                        ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_ANGULAR => {
+                            self.robot_model.physical_params.coulomb_friction_coefficient_angular
+                        }
+                        ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_LINEAR => {
+                            self.robot_model.physical_params.viscous_friction_coefficient_linear
+                        }
+                        ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_ANGULAR => {
+                            self.robot_model.physical_params.viscous_friction_coefficient_angular
                         }
                         ParameterName::TRAJ_ALLOWABLE_ERROR_POS_LINEAR => {
                             self.trajectory_params.allowable_error_pos_linear
@@ -1070,7 +1090,11 @@ impl<'a> ParameterInterface for BodyController<'a> {
                 | ParameterName::PHYS_BODY_MASS
                 | ParameterName::PHYS_BODY_MOMENT_Z
                 | ParameterName::PHYS_MOTOR_TORQUE_CONSTANT
-                | ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => {
+                | ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR 
+                | ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_LINEAR
+                | ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_ANGULAR
+                | ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_LINEAR
+                | ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_ANGULAR => {
                     if param_cmd.data_format != ParameterDataFormat::F32 {
                         reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
                         return Err(reply_cmd);
@@ -1091,6 +1115,18 @@ impl<'a> ParameterInterface for BodyController<'a> {
                         }
                         ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => {
                             physical_params.motor_efficiency_factor = write_value
+                        }
+                        ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_LINEAR => {
+                            physical_params.coulomb_friction_coefficient_linear = write_value
+                        }
+                        ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_ANGULAR => {
+                            physical_params.coulomb_friction_coefficient_angular = write_value
+                        }
+                        ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_LINEAR => {
+                            physical_params.viscous_friction_coefficient_linear = write_value
+                        }
+                        ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_ANGULAR => {
+                            physical_params.viscous_friction_coefficient_angular = write_value
                         }
                         _ => unreachable!(),
                     }
