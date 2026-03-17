@@ -521,33 +521,33 @@ impl<
             if ticks_since_trace_print >= TRACE_PRINT_INTERVAL_TICKS {
                 let state = robot_controller.robot_model.x;
                 let wheel_torques = robot_controller.get_wheel_torques();
-                defmt::info!(
+                defmt::trace!(
                     "state position: {}, {}, {}",
                     state[(0, 0)],
                     state[(1, 0)],
                     state[(2, 0)]
                 );
-                defmt::info!(
+                defmt::trace!(
                     "state velocity: {}, {}, {}",
                     state[(3, 0)],
                     state[(4, 0)],
                     state[(5, 0)]
                 );
-                defmt::info!(
+                defmt::trace!(
                     "wheel torque cmd: {} {} {} {}",
                     wheel_torques.x,
                     wheel_torques.y,
                     wheel_torques.z,
                     wheel_torques.w
                 );
-                defmt::info!(
+                defmt::trace!(
                     "wheel vel cmd: {} {} {} {}",
                     wheel_vel_cmd.x,
                     wheel_vel_cmd.y,
                     wheel_vel_cmd.z,
                     wheel_vel_cmd.w,
                 );
-                defmt::info!(
+                defmt::trace!(
                     "wheel_ma cmd: {} {} {} {}",
                     wheel_ma.x as i16,
                     wheel_ma.y as i16,
