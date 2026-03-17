@@ -280,14 +280,14 @@ impl<'a> BodyController<'a> {
         self.debug_telemetry
     }
 
-    fn get_state(&self) -> Vector6f {
-        // // Use EKF
-        // self.robot_model.x
+    pub fn get_state(&self) -> Vector6f {
+        // Use EKF
+        self.robot_model.x
 
-        // Use CGKF
-        let twist = self.twist_cgkf.get_state();
-        // Use local frame for twist_cgkf
-        vector![0.0, 0.0, 0.0, twist[0], twist[1], twist[2],]
+        // // Use CGKF
+        // let twist = self.twist_cgkf.get_state();
+        // // Use local frame for twist_cgkf
+        // vector![0.0, 0.0, 0.0, twist[0], twist[1], twist[2],]
     }
 
     fn state_update(
@@ -297,36 +297,36 @@ impl<'a> BodyController<'a> {
         wheel_vel_meas: Vector4f,
         gyro_theta_meas: f32,
     ) {
-        // // Use EKF
-        // let measurement: Vector8f = vector![
-        //     vision_pose_meas.x,
-        //     vision_pose_meas.y,
-        //     vision_pose_meas.z,
-        //     wheel_vel_meas.x,
-        //     wheel_vel_meas.y,
-        //     wheel_vel_meas.z,
-        //     wheel_vel_meas.w,
-        //     gyro_theta_meas,
-        // ];
-        // self.state_update_ekf(measurement, vision_update);
-
-        // Use CGKF
-        let measurement: Vector5f = vector![
+        // Use EKF
+        let measurement: Vector8f = vector![
+            vision_pose_meas.x,
+            vision_pose_meas.y,
+            vision_pose_meas.z,
             wheel_vel_meas.x,
             wheel_vel_meas.y,
             wheel_vel_meas.z,
             wheel_vel_meas.w,
             gyro_theta_meas,
         ];
-        self.state_update_cgkf(measurement);
+        self.state_update_ekf(measurement, vision_update);
+
+        // // Use CGKF
+        // let measurement: Vector5f = vector![
+        //     wheel_vel_meas.x,
+        //     wheel_vel_meas.y,
+        //     wheel_vel_meas.z,
+        //     wheel_vel_meas.w,
+        //     gyro_theta_meas,
+        // ];
+        // self.state_update_cgkf(measurement);
     }
 
     fn state_predict(&mut self) {
-        // // Use EKF
-        // self.state_predict_ekf();
+        // Use EKF
+        self.state_predict_ekf();
 
-        // Use CGKF
-        self.state_predict_cgkf();
+        // // Use CGKF
+        // self.state_predict_cgkf();
     }
 
     fn compute_effort_pose_control(&mut self, state_estimate: Vector6f, target_pose: Vector3f) {
