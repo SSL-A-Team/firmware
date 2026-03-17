@@ -52,6 +52,7 @@ const TRACE_PRINT_FREQ: f32 = 10.0; // Hz, print trace info at this frequency
 const TIME_WITHOUT_PACKET_STOP: f32 = 0.2; // seconds, time without receiving a control packet before locking out motor commands
 
 const CONTROL_DT: f32 = 1.0 / CONTROL_FREQ; // seconds
+const CONTROL_DT_US: u64 = (CONTROL_DT * 1e6) as u64;  // us
 const BASIC_TELEM_INTERVAL_TICKS: usize = (1.0 / BASIC_TELEM_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between basic telemetry sends
 const EXTENDED_TELEM_INTERVAL_TICKS: usize = (1.0 / EXTENDED_TELEM_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between extended telemetry sends
 const TRACE_PRINT_INTERVAL_TICKS: usize = (1.0 / TRACE_PRINT_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between trace prints
@@ -314,7 +315,7 @@ impl<
         Timer::after_millis(10).await;
 
         let mut ctrl_seq_number = 0;
-        let loop_period = Duration::from_micros((CONTROL_DT * 1e6) as u64);
+        let loop_period = Duration::from_micros(CONTROL_DT_US);
         let mut loop_rate_ticker = Ticker::every(loop_period);
 
         let mut robot_controller = BodyController::new(loop_period.as_micros() as f32 * 1e-6);
@@ -341,8 +342,8 @@ impl<
             last_loop_start_time = Instant::now();
             let mut start = last_loop_start_time;
             let loop_invocation_dead_time = last_loop_start_time - last_loop_term_time;
-            if loop_invocation_dead_time > Duration::from_micros(1100) {
-                defmt::warn!("control loop scheuling lagged. Expected ~1ms between loop invocations, but got {:?}us", loop_invocation_dead_time.as_micros());
+            if loop_invocation_dead_time > Duration::from_micros(CONTROL_DT_US) {
+                defmt::warn!("control loop scheuling lagged. Expected <{:?}us between loop invocations, but got {:?}us", CONTROL_DT_US, loop_invocation_dead_time.as_micros());
             }
 
             self.motor_fl.process_packets();
