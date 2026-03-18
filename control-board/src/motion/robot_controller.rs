@@ -64,6 +64,8 @@ pub struct BodyController<'a> {
     pub robot_model: RobotModel,
     pub twist_cgkf: CgKalmanFilter<'a, 3, 4, 5>,
     pub pose_pid_controller: PidController<3>,
+    pub feedforward_gain: f32,
+    pub feedback_gain: f32,
     pub twist_pid_controller: PidController<3>,
     pub pose_pid_controller_x: PidController<1>,
     pub pose_pid_controller_y: PidController<1>,
@@ -105,6 +107,8 @@ impl<'a> BodyController<'a> {
                 .expect("Failed to create RobotModel, check that default parameters are valid"),
             twist_cgkf: twist_cgkf,
             pose_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
+            feedforward_gain: 0.0,
+            feedback_gain: 0.0,
             twist_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
             pose_pid_controller_x: PidController::<1>::from_gains_matrix(&Matrix1x5::zeros()),
             pose_pid_controller_y: PidController::<1>::from_gains_matrix(&Matrix1x5::zeros()),
@@ -334,8 +338,10 @@ impl<'a> BodyController<'a> {
         //     self.pose_pid_control(state_estimate, target_pose);
         // (self.body_twist_cmd, self.body_accel_cmd) = self.pose_bangbang_control(state_estimate, target_pose);
         // (self.body_twist_cmd, self.body_accel_cmd) = self.pose_dualmode_control(state_estimate, target_pose);
+        // (self.body_twist_cmd, self.body_accel_cmd) =
+        //     self.pose_dimensional_dualmode_control(state_estimate, target_pose);
         (self.body_twist_cmd, self.body_accel_cmd) =
-            self.pose_dimensional_dualmode_control(state_estimate, target_pose);
+            self.pose_dimensional_feed_forward_backward_control(state_estimate, target_pose);
         // Compensate for modeled friction forces
         let compensated_accel = self.body_accel_cmd - self.robot_model.i_inv * self.robot_model.compute_friction_force(self.body_twist_cmd);
         self.wheel_vel_cmd =
@@ -430,6 +436,89 @@ impl<'a> BodyController<'a> {
         let global_twist_cmd =
             Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
         (global_twist_cmd, global_accel_cmd)
+    }
+
+    fn pose_dimensional_feed_forward_backward_control(
+        &mut self,
+        state_estimate: Vector6f,
+        target_pose: Vector3f,
+    ) -> (Vector3f, Vector3f) {
+        let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
+        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+
+        // Compute trajectory to target pose if
+        //   1) we don't have a trajectory yet
+        //   2) the target pose has changed
+        //   3) the current body configuration has strayed too far from the currently tracked trajectory
+        if self.trajectory.is_none() || self.prev_body_cmd.is_none() || self.prev_body_cmd.unwrap() != target_pose ||
+            (self.trajectory_state.x - pose_estimate.x).abs() > self.traj_recompute_error_pos_linear ||
+            (self.trajectory_state.y - pose_estimate.y).abs() > self.traj_recompute_error_pos_linear ||
+            (self.trajectory_state.z - pose_estimate.z).abs() > self.traj_recompute_error_pos_angular ||
+            (self.trajectory_state[(3, 0)] - twist_estimate.x).abs() > self.traj_recompute_error_vel_linear ||
+            (self.trajectory_state[(4, 0)] - twist_estimate.y).abs() > self.traj_recompute_error_vel_linear ||
+            (self.trajectory_state[(5, 0)] - twist_estimate.z).abs() > self.traj_recompute_error_vel_angular
+        {
+            self.trajectory = Some(BangBangTraj3D::from_target_pose(
+                state_estimate,
+                target_pose,
+                self.trajectory_params,
+            ).expect("Failed to generate trajectory, check that trajectory params are valid"));
+            self.trajectory_state = state_estimate;
+            self.trajectory_time = 0.0;
+        }
+
+
+        // Compute feedforward as the tracked trajectory
+        let feedforward = self.trajectory
+            .as_ref()
+            .expect("Trajectory should always be Some at this point since we set it if it was None above")
+            .accel_at(self.trajectory_time)
+            .expect("Trajectory should always have valid accel at current time");
+
+        let mut feedback = Vector3f::default();
+
+        // Use each dimension's PID controller to calculate feedback on positional error with tracked trajectory
+        let target_x: Vector1f = self.trajectory_state.fixed_rows::<1>(0).into();
+        let current_x: Vector1f = pose_estimate.fixed_rows::<1>(0).into();
+        feedback.x = self.pose_pid_controller_x.calculate(
+            &target_x, 
+            &current_x,
+            self.dt
+        )[(0, 0)];
+
+        let target_y: Vector1f = self.trajectory_state.fixed_rows::<1>(1).into();
+        let current_y: Vector1f = pose_estimate.fixed_rows::<1>(1).into();
+        feedback.y = self.pose_pid_controller_y.calculate(
+            &target_y, 
+            &current_y,
+            self.dt
+        )[(0, 0)];
+
+        let target_theta: Vector1f = self.trajectory_state.fixed_rows::<1>(1).into();
+        let current_theta: Vector1f = pose_estimate.fixed_rows::<1>(1).into();
+        feedback.z = self.pose_pid_controller_theta.calculate(
+            &target_theta, 
+            &current_theta,
+            self.dt
+        )[(0, 0)];
+
+        // Weighted sum of feedback and feedforward terms to calculate the accel command
+        let global_accel_cmd = self.feedforward_gain * feedforward + self.feedback_gain * feedback;
+
+        let global_twist_cmd: Vector3f = (state_estimate.fixed_rows::<3>(3) + global_accel_cmd * self.dt).into();
+
+        // Step trajectory forward
+        self.trajectory_state = self.trajectory
+            .as_ref()
+            .expect("Trajectory should always be Some at this point since we set it if it was None above")
+            .state_at(self.trajectory_state, self.trajectory_time, self.trajectory_time + self.dt)
+            .expect("Trajectory should always have valid state at current time + dt");
+        self.trajectory_time += self.dt;
+        
+        self.prev_body_cmd = Some(target_pose);
+
+        (global_twist_cmd, global_accel_cmd)
+
     }
 
     fn pose_dualmode_control(
@@ -777,6 +866,8 @@ impl<'a> ParameterInterface for BodyController<'a> {
             ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_LINEAR => true,
             ParameterName::TRAJ_RECOMPUTE_ERROR_POS_ANGULAR => true,
             ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_ANGULAR => true,
+            ParameterName::FEEDFORWARD_GAIN => true,
+            ParameterName::FEEDBACK_GAIN => true,
             _ => false,
         };
     }
@@ -849,7 +940,9 @@ impl<'a> ParameterInterface for BodyController<'a> {
                 | ParameterName::TRAJ_RECOMPUTE_ERROR_POS_LINEAR
                 | ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_LINEAR
                 | ParameterName::TRAJ_RECOMPUTE_ERROR_POS_ANGULAR
-                | ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_ANGULAR => {
+                | ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_ANGULAR
+                | ParameterName::FEEDFORWARD_GAIN
+                | ParameterName::FEEDBACK_GAIN => {
                     reply_cmd.data_format = ParameterDataFormat::F32;
                     reply_cmd.data.f32_ = match param_cmd.parameter_name {
                         ParameterName::KF_PROCESS_STD_POS_LINEAR => {
@@ -981,6 +1074,12 @@ impl<'a> ParameterInterface for BodyController<'a> {
                         }
                         ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_ANGULAR => {
                             self.traj_recompute_error_vel_angular
+                        }
+                        ParameterName::FEEDFORWARD_GAIN => {
+                            self.feedforward_gain
+                        }
+                        ParameterName::FEEDBACK_GAIN => {
+                            self.feedback_gain
                         }
                         _ => unreachable!(),
                     };
@@ -1219,7 +1318,9 @@ impl<'a> ParameterInterface for BodyController<'a> {
                 ParameterName::TRAJ_RECOMPUTE_ERROR_POS_LINEAR
                 | ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_LINEAR
                 | ParameterName::TRAJ_RECOMPUTE_ERROR_POS_ANGULAR
-                | ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_ANGULAR => {
+                | ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_ANGULAR
+                | ParameterName::FEEDFORWARD_GAIN
+                | ParameterName::FEEDBACK_GAIN => {
                     if param_cmd.data_format != ParameterDataFormat::F32 {
                         reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
                         return Err(reply_cmd);
@@ -1237,6 +1338,12 @@ impl<'a> ParameterInterface for BodyController<'a> {
                         }
                         ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_ANGULAR => {
                             self.traj_recompute_error_vel_angular = write_value
+                        }
+                        ParameterName::FEEDFORWARD_GAIN => {
+                            self.feedforward_gain = write_value
+                        }
+                        ParameterName::FEEDBACK_GAIN => {
+                            self.feedback_gain = write_value
                         }
                         _ => unreachable!(),
                     }
