@@ -55,8 +55,8 @@ pub const RADIO_LOOP_RATE_MS: u64 = 10;
 
 pub const RADIO_MAX_TX_PACKET_SIZE: usize = 448;
 pub const RADIO_TX_BUF_DEPTH: usize = 4;
-pub const RADIO_MAX_RX_PACKET_SIZE: usize = 256;
-pub const RADIO_RX_BUF_DEPTH: usize = 4;
+pub const RADIO_MAX_RX_PACKET_SIZE: usize = 128;
+pub const RADIO_RX_BUF_DEPTH: usize = 16;
 
 static_idle_buffered_uart!(RADIO, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, DEBUG_RADIO_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
@@ -538,12 +538,16 @@ impl<
     }
 
     async fn process_packets(&mut self, tx_ctr: i32) -> Result<(), ()> {
+        defmt::info!("processing packets");
+        
         // read any packets
         loop {
             if let Ok(pkt) = self.radio.read_packet_nonblocking() {
                 if let Some(c2_pkt) = pkt {
                     // update the last packet timestamp
                     self.last_software_packet = Instant::now();
+                    defmt::info!("got a packet");
+
                     if is_command_packet_safe(c2_pkt) {
                         self.command_publisher.publish_immediate(c2_pkt);
                     } else {
@@ -610,6 +614,7 @@ impl<
 
         // always send the latest telemetry
         if tx_ctr == 0 {
+            defmt::info!("sending basic telem");
             self.last_basic_telemetry.transmission_sequence_number = self.seq_number as u8;
             self.seq_number = (self.seq_number + 1) & 0x00FF;
 
