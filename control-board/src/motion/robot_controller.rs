@@ -135,6 +135,29 @@ impl<'a> BodyController<'a> {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.robot_model.reset();
+        self.twist_cgkf.reset();
+        self.twist_pid_controller.reset();
+        self.pose_pid_controller_x.reset();
+        self.pose_pid_controller_y.reset();
+        self.pose_pid_controller_theta.reset();
+        self.pose_pid_controller.reset();
+        self.trajectory = None;
+        self.trajectory_state = Vector6f::default();
+        self.trajectory_time = 0.0;
+        self.pose_control_mode_x = PoseControlMode::BangBang;
+        self.pose_control_mode_y = PoseControlMode::BangBang;
+        self.pose_control_mode_theta = PoseControlMode::BangBang;
+        self.pose_control_hysteresis = PoseControlHysteresis::default();
+        self.body_twist_cmd = Vector3f::default();
+        self.body_accel_cmd = Vector3f::default();
+        self.prev_body_cmd = None;
+        self.wheel_vel_cmd = Vector4f::default();
+        self.wheel_torque_cmd = Vector4f::default();
+        self.debug_telemetry = Default::default();
+    }
+
     pub fn control_update(
         &mut self,
         body_cmd: Vector3f,
@@ -494,8 +517,8 @@ impl<'a> BodyController<'a> {
             self.dt
         )[(0, 0)];
 
-        let target_theta: Vector1f = self.trajectory_state.fixed_rows::<1>(1).into();
-        let current_theta: Vector1f = pose_estimate.fixed_rows::<1>(1).into();
+        let target_theta: Vector1f = self.trajectory_state.fixed_rows::<1>(2).into();
+        let current_theta: Vector1f = pose_estimate.fixed_rows::<1>(2).into();
         feedback.z = self.pose_pid_controller_theta.calculate(
             &target_theta, 
             &current_theta,
@@ -508,11 +531,12 @@ impl<'a> BodyController<'a> {
         let global_twist_cmd: Vector3f = (state_estimate.fixed_rows::<3>(3) + global_accel_cmd * self.dt).into();
 
         // Step trajectory forward
-        self.trajectory_state = self.trajectory
-            .as_ref()
-            .expect("Trajectory should always be Some at this point since we set it if it was None above")
+        let next_state = self.trajectory
+            .expect("Trajectory should never be None at this point.")
             .state_at(self.trajectory_state, self.trajectory_time, self.trajectory_time + self.dt)
             .expect("Trajectory should always have valid state at current time + dt");
+
+        self.trajectory_state = next_state;
         self.trajectory_time += self.dt;
         
         self.prev_body_cmd = Some(target_pose);
@@ -1365,7 +1389,6 @@ impl<'a> ParameterInterface for BodyController<'a> {
                         gain[(row, col)] = write_values[col];
                     }
                     self.pose_pid_controller.set_gain(gain);
-                    self.pose_pid_controller.reset();
 
                     let dimensional_controller = match param_cmd.parameter_name {
                         ParameterName::PIDII_X => &mut self.pose_pid_controller_x,
@@ -1395,7 +1418,6 @@ impl<'a> ParameterInterface for BodyController<'a> {
                         gain[(row, col)] = write_values[col];
                     }
                     self.twist_pid_controller.set_gain(gain);
-                    self.twist_pid_controller.reset();
                     reply_cmd.data.pidii_f32 = write_values;
                 }
                 _ => {
@@ -1405,6 +1427,7 @@ impl<'a> ParameterInterface for BodyController<'a> {
                 }
             }
             reply_cmd.command_code = PCC_ACK;
+            self.reset();
         }
 
         return Ok(reply_cmd);
