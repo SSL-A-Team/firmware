@@ -502,6 +502,17 @@ impl<
                     )
                 };
 
+            // // RAW CURRENT COMMAND TESTING
+            // let mut wheel_current_cmd = Vector4f::default();
+            // let mut wheel_vel_cmd = Vector4f::default();
+            // if cmd.x.abs() > 0.01 || cmd.y.abs() > 0.01 || cmd.z.abs() > 0.01 {
+            //     defmt::trace!("cmd: {} {} {}", cmd.x, cmd.y, cmd.z);
+            //     wheel_current_cmd.x = -0.1745;
+            //     wheel_current_cmd.y = -0.2137;
+            //     wheel_current_cmd.z = 0.2137;
+            //     wheel_current_cmd.w = 0.1745;
+            // }
+
             ////////////////// TODO: Move this/delete this //////////////////////
 
             let mut wheel_ma = wheel_current_cmd * 1000.0;
