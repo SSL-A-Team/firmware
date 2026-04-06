@@ -55,6 +55,9 @@ pub struct EnqueueRef<'a, const LENGTH: usize, const DEPTH: usize> {
     queue: &'a Queue<LENGTH, DEPTH>,
     data: &'a mut [u8],
     len: &'a mut usize,
+    /// True when try_enqueue_override performed an eviction (decremented write_index and size)
+    /// to make room. cancel() must restore those decrements so the queue state is coherent.
+    evicted: bool,
 }
 
 impl<const LENGTH: usize, const DEPTH: usize> EnqueueRef<'_, LENGTH, DEPTH> {
@@ -67,7 +70,11 @@ impl<const LENGTH: usize, const DEPTH: usize> EnqueueRef<'_, LENGTH, DEPTH> {
     }
 
     pub fn cancel(self) {
-        self.queue.cancel_enqueue();
+        if self.evicted {
+            self.queue.cancel_enqueue_restore_eviction();
+        } else {
+            self.queue.cancel_enqueue();
+        }
     }
 }
 
@@ -235,6 +242,7 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                     queue: self,
                     data,
                     len: &mut buf.len,
+                    evicted: false,
                 })
             } else {
                 Err(Error::QueueFull)
@@ -260,7 +268,8 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
             // if the queue is currently full, we need to evict the tail entry
             let mut write_index = self.write_index.load(Ordering::SeqCst);
             let cur_size = self.size.load(Ordering::SeqCst);
-            if cur_size >= DEPTH {
+            let evicted = cur_size >= DEPTH;
+            if evicted {
                 // queue is full, free the back entry
                 if write_index == 0 {
                     write_index = DEPTH - 1;
@@ -300,6 +309,7 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                 queue: self,
                 data,
                 len: &mut buf.len,
+                evicted,
             })
         })
     }
@@ -331,6 +341,22 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
 
     fn cancel_enqueue(&self) {
         self.write_in_progress.store(false, Ordering::SeqCst);
+    }
+
+    fn cancel_enqueue_restore_eviction(&self) {
+        // The eviction in try_enqueue_override decremented write_index and size to free the
+        // newest slot. If the DMA produced no data we must undo those decrements so the queue
+        // remains at its pre-eviction depth rather than permanently losing one slot.
+        critical_section::with(|_| {
+            let write_index = self.write_index.load(Ordering::SeqCst);
+            self.write_index
+                .store((write_index + 1) % DEPTH, Ordering::SeqCst);
+
+            let cur_size = self.size.load(Ordering::SeqCst);
+            self.size.store(cur_size + 1, Ordering::SeqCst);
+
+            self.write_in_progress.store(false, Ordering::SeqCst);
+        });
     }
 
     fn finish_enqueue(&self) {
