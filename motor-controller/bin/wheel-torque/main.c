@@ -481,32 +481,13 @@ static uint8_t params_seq_ctr = 0;
 static uint8_t seq_ctr = 0;
 static void send_packets() {
     CcmResponse response_pkt;
-    response_pkt.type = CCM_RESP_TELEM;
-    response_pkt.timestamp = time_local_epoch_s();
-    response_pkt.seq_num = seq_ctr;  // intentionally overflow
-    seq_ctr++;
-
-    response_pkt.data.motion = response_packet;
 
     // If previous UART transmit is still occurring,
     // wait for it to finish.
     uart_wait_for_transmission();
-    // takes ~270uS, mostly hardware DMA, but should be cleared out by now.
-    uart_transmit((uint8_t *) &response_pkt, sizeof(CcmResponse));
-    // Capture the status for the response packet / LED.
-    if (uart_tx_get_logging_status() != UART_LOGGING_OK) {
-        uart_logging_status_send = uart_tx_get_logging_status();
-    } else {
-        // If we are in COMP_MODE, don't latch the status if
-        // we are able to send a packet successfully later.
-        #ifdef COMP_MODE
-        uart_logging_status_send = UART_LOGGING_OK;
-        #endif
-    }
 
-    // Clear the logging for the next UART transmit / receive.
-    uart_tx_clear_logging_status();
-    
+    // Send only one packet per frame to avoid back-to-back transmissions
+    // that merge into a single UART idle-line frame on the receiver.
     if (params_return_packet_requested) {
         params_return_packet_requested = false;
 
@@ -522,25 +503,30 @@ static void send_packets() {
 
         // load the hash
         memcpy(response_pkt.data.params.value.val_u8x4, wheel_img_hash_struct.img_hash, sizeof(response_pkt.data.params.value));
+    } else {
+        response_pkt.type = CCM_RESP_TELEM;
+        response_pkt.timestamp = time_local_epoch_s();
+        response_pkt.seq_num = seq_ctr;  // intentionally overflow
+        seq_ctr++;
 
-        // send the packet
-        uart_transmit((uint8_t *) &response_pkt, sizeof(CcmResponse));
-
-        // TODO check if this works, uart_transmit doesn't block so status may be stale
-        // Capture the status for the response packet / LED.
-        if (uart_tx_get_logging_status() != UART_LOGGING_OK) {
-            uart_logging_status_send = uart_tx_get_logging_status();
-        } else {
-            // If we are in COMP_MODE, don't latch the status if
-            // we are able to send a packet successfully later.
-            #ifdef COMP_MODE
-            uart_logging_status_send = UART_LOGGING_OK;
-            #endif
-        }
-
-        // Clear the logging for the next UART transmit / receive.
-        uart_tx_clear_logging_status();
+        response_pkt.data.motion = response_packet;
     }
+
+    // takes ~270uS, mostly hardware DMA, but should be cleared out by now.
+    uart_transmit((uint8_t *) &response_pkt, sizeof(CcmResponse));
+    // Capture the status for the response packet / LED.
+    if (uart_tx_get_logging_status() != UART_LOGGING_OK) {
+        uart_logging_status_send = uart_tx_get_logging_status();
+    } else {
+        // If we are in COMP_MODE, don't latch the status if
+        // we are able to send a packet successfully later.
+        #ifdef COMP_MODE
+        uart_logging_status_send = UART_LOGGING_OK;
+        #endif
+    }
+
+    // Clear the logging for the next UART transmit / receive.
+    uart_tx_clear_logging_status();
 }
 
 static void set_leds() {
