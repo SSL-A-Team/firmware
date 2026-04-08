@@ -7,7 +7,7 @@
 //! Each test gets its own static buffers — Queue has no reset method and
 //! static state persists across the lifetime of the test binary.
 //!
-//! DEPTH=4, LENGTH=8 for all tests.
+//! DEPTH=4, LENGTH=8 for most tests; DEPTH=2 for the minimum-depth test.
 #![feature(sync_unsafe_cell)]
 
 use core::cell::SyncUnsafeCell;
@@ -36,6 +36,27 @@ static T5_Q: Queue<8, 4> = Queue::new(&T5_BUFS);
 static T6_BUFS: [SyncUnsafeCell<Buffer<8>>; 4] =
     [const { SyncUnsafeCell::new(Buffer::<8>::new()) }; 4];
 static T6_Q: Queue<8, 4> = Queue::new(&T6_BUFS);
+
+static T7_BUFS: [SyncUnsafeCell<Buffer<8>>; 4] =
+    [const { SyncUnsafeCell::new(Buffer::<8>::new()) }; 4];
+static T7_Q: Queue<8, 4> = Queue::new(&T7_BUFS);
+
+static T8_BUFS: [SyncUnsafeCell<Buffer<8>>; 4] =
+    [const { SyncUnsafeCell::new(Buffer::<8>::new()) }; 4];
+static T8_Q: Queue<8, 4> = Queue::new(&T8_BUFS);
+
+static T9_BUFS: [SyncUnsafeCell<Buffer<8>>; 4] =
+    [const { SyncUnsafeCell::new(Buffer::<8>::new()) }; 4];
+static T9_Q: Queue<8, 4> = Queue::new(&T9_BUFS);
+
+static T10_BUFS: [SyncUnsafeCell<Buffer<8>>; 4] =
+    [const { SyncUnsafeCell::new(Buffer::<8>::new()) }; 4];
+static T10_Q: Queue<8, 4> = Queue::new(&T10_BUFS);
+
+// DEPTH=2 for minimum-depth test
+static T11_BUFS: [SyncUnsafeCell<Buffer<8>>; 2] =
+    [const { SyncUnsafeCell::new(Buffer::<8>::new()) }; 2];
+static T11_Q: Queue<8, 2> = Queue::new(&T11_BUFS);
 
 // -----------------------------------------------------------------------
 // Test 1: basic enqueue / dequeue round-trip
@@ -200,4 +221,239 @@ fn eviction_cancel_then_eviction_commit() {
         assert_eq!(buf.data()[0], exp);
     }
     assert!(!T6_Q.can_dequeue());
+}
+
+// -----------------------------------------------------------------------
+// Test 7: index wrap-around
+//
+// The most common ring buffer bug: write_index and read_index must wrap
+// correctly from DEPTH-1 back to 0. Exercises this by doing a full
+// fill → full drain → fill again cycle so both indices cross the boundary.
+// -----------------------------------------------------------------------
+#[test]
+fn index_wrap_around() {
+    // First fill + drain — advances both indices to DEPTH (wraps to 0)
+    for i in 0u8..4 {
+        let mut buf = T7_Q.try_enqueue().unwrap();
+        buf.data()[0] = i;
+        *buf.len() = 1;
+    }
+    for expected in 0u8..4 {
+        let buf = T7_Q.try_dequeue().unwrap();
+        assert_eq!(buf.data()[0], expected, "first pass dequeue order mismatch");
+    }
+    assert!(!T7_Q.can_dequeue(), "queue must be empty after first drain");
+
+    // Second fill + drain — both indices have now wrapped; verify correctness
+    for i in 10u8..14 {
+        let mut buf = T7_Q.try_enqueue().unwrap();
+        buf.data()[0] = i;
+        *buf.len() = 1;
+    }
+    assert!(T7_Q.is_full(), "queue must be full after second fill");
+    for expected in 10u8..14 {
+        let buf = T7_Q.try_dequeue().unwrap();
+        assert_eq!(buf.data()[0], expected, "second pass dequeue order mismatch (wrap bug)");
+    }
+    assert!(!T7_Q.can_dequeue(), "queue must be empty after second drain");
+}
+
+// -----------------------------------------------------------------------
+// Test 8: eviction when write_index == 0
+//
+// try_enqueue_override has a special branch for write_index == 0:
+//   if write_index == 0 { write_index = DEPTH - 1 }
+// This is only reachable when the write pointer sits at 0 at eviction
+// time. Arrange that by: fill → drain one → fill one (write_index now
+// at 0 mod DEPTH after wrapping) → fill to full → trigger override.
+// -----------------------------------------------------------------------
+#[test]
+fn eviction_at_write_index_zero() {
+    // Fill completely — write_index is now at 0 (wrapped)
+    for i in 0u8..4 {
+        let mut buf = T8_Q.try_enqueue().unwrap();
+        buf.data()[0] = i;
+        *buf.len() = 1;
+    }
+    // Drain all — read_index wraps to 0, write_index already at 0
+    for _ in 0u8..4 {
+        let _ = T8_Q.try_dequeue().unwrap();
+    }
+    // Fill again — write_index advances 0→1→2→3→0 (wraps), ending at 0
+    for i in 10u8..14 {
+        let mut buf = T8_Q.try_enqueue().unwrap();
+        buf.data()[0] = i;
+        *buf.len() = 1;
+    }
+    assert!(T8_Q.is_full(), "queue must be full before eviction-at-zero test");
+
+    // write_index is 0 here — this hits the special branch
+    {
+        let mut buf = T8_Q.try_enqueue_override().unwrap();
+        buf.data()[0] = 99;
+        *buf.len() = 1;
+    }
+    assert!(T8_Q.is_full(), "queue must remain full after eviction at write_index==0");
+
+    // Entry 13 (the newest, at index DEPTH-1) was evicted and replaced with 99
+    let expected = [10u8, 11, 12, 99];
+    for &exp in &expected {
+        let buf = T8_Q.try_dequeue().unwrap();
+        assert_eq!(buf.data()[0], exp, "wrong entry after eviction at write_index==0");
+    }
+    assert!(!T8_Q.can_dequeue());
+}
+
+// -----------------------------------------------------------------------
+// Test 9: dequeue cancel
+//
+// cancel() on a DequeueRef must leave read_index and size unchanged so
+// the same entry can be dequeued again. Verifies the same data is
+// returned on the retry and that the queue depth is unaffected.
+// -----------------------------------------------------------------------
+#[test]
+fn dequeue_cancel_retains_entry() {
+    {
+        let mut buf = T9_Q.try_enqueue().unwrap();
+        buf.data()[0] = 42;
+        *buf.len() = 1;
+    }
+
+    // Dequeue but cancel — entry must not be consumed
+    {
+        let buf = T9_Q.try_dequeue().unwrap();
+        assert_eq!(buf.data()[0], 42);
+        buf.cancel();
+    }
+
+    assert!(T9_Q.can_dequeue(), "queue must still have an entry after dequeue cancel");
+
+    // Dequeue again — must see the same entry
+    let buf = T9_Q.try_dequeue().unwrap();
+    assert_eq!(buf.data()[0], 42, "entry missing after dequeue cancel");
+    assert!(!T9_Q.can_dequeue(), "queue must be empty after consuming the entry");
+}
+
+// -----------------------------------------------------------------------
+// Test 10: in-progress guards
+//
+// try_enqueue while a write is in progress must return InProgress.
+// try_dequeue while a read is in progress must return InProgress.
+// -----------------------------------------------------------------------
+#[test]
+fn in_progress_guards() {
+    use ateam_lib_crossarch::queue::Error;
+
+    // Enqueue guard: hold the EnqueueRef and try a second enqueue
+    {
+        let _held = T10_Q.try_enqueue().unwrap();
+        assert_eq!(
+            T10_Q.try_enqueue().err().unwrap(),
+            Error::InProgress,
+            "second try_enqueue must return InProgress while first is held"
+        );
+        assert_eq!(
+            T10_Q.try_enqueue_override().err().unwrap(),
+            Error::InProgress,
+            "try_enqueue_override must return InProgress while enqueue is held"
+        );
+    } // _held dropped here — write_in_progress cleared
+
+    // Dequeue guard: enqueue one entry then hold the DequeueRef
+    {
+        let mut buf = T10_Q.try_enqueue().unwrap();
+        buf.data()[0] = 7;
+        *buf.len() = 1;
+    }
+    {
+        let _held = T10_Q.try_dequeue().unwrap();
+        assert_eq!(
+            T10_Q.try_dequeue().err().unwrap(),
+            Error::InProgress,
+            "second try_dequeue must return InProgress while first is held"
+        );
+    } // _held dropped — read_in_progress cleared, entry consumed
+}
+
+// -----------------------------------------------------------------------
+// Test 11: try_dequeue on empty queue
+//
+// Dequeuing an empty queue must return QueueEmpty, not panic or corrupt
+// state. Afterwards a normal enqueue+dequeue must still work.
+// -----------------------------------------------------------------------
+#[test]
+fn dequeue_empty_returns_error() {
+    use ateam_lib_crossarch::queue::Error;
+
+    assert_eq!(
+        T10_Q.try_dequeue().err().unwrap(),
+        Error::QueueEmpty,
+        "dequeue on empty queue must return QueueEmpty"
+    );
+
+    // Queue must still be usable
+    {
+        let mut buf = T10_Q.try_enqueue().unwrap();
+        buf.data()[0] = 55;
+        *buf.len() = 1;
+    }
+    let buf = T10_Q.try_dequeue().unwrap();
+    assert_eq!(buf.data()[0], 55);
+}
+
+// -----------------------------------------------------------------------
+// Test 12: minimum depth (DEPTH=2)
+//
+// At DEPTH=2 every enqueue fills the queue and every dequeue empties it.
+// The eviction decrement always hits the wrap boundary (write_index
+// flips between 0 and 1). Verifies both the normal and override paths
+// at minimum depth.
+// -----------------------------------------------------------------------
+#[test]
+fn minimum_depth_operations() {
+    // Normal fill + drain
+    {
+        let mut buf = T11_Q.try_enqueue().unwrap();
+        buf.data()[0] = 1;
+        *buf.len() = 1;
+    }
+    {
+        let mut buf = T11_Q.try_enqueue().unwrap();
+        buf.data()[0] = 2;
+        *buf.len() = 1;
+    }
+    assert!(T11_Q.is_full());
+
+    let b = T11_Q.try_dequeue().unwrap();
+    assert_eq!(b.data()[0], 1);
+    drop(b);
+    let b = T11_Q.try_dequeue().unwrap();
+    assert_eq!(b.data()[0], 2);
+    drop(b);
+    assert!(!T11_Q.can_dequeue());
+
+    // Override at DEPTH=2: fill, then evict+commit
+    {
+        let mut buf = T11_Q.try_enqueue().unwrap();
+        buf.data()[0] = 10;
+        *buf.len() = 1;
+    }
+    {
+        let mut buf = T11_Q.try_enqueue().unwrap();
+        buf.data()[0] = 11;
+        *buf.len() = 1;
+    }
+    {
+        let mut buf = T11_Q.try_enqueue_override().unwrap();
+        buf.data()[0] = 99;
+        *buf.len() = 1;
+    }
+    assert!(T11_Q.is_full());
+    let b = T11_Q.try_dequeue().unwrap();
+    assert_eq!(b.data()[0], 10);
+    drop(b);
+    let b = T11_Q.try_dequeue().unwrap();
+    assert_eq!(b.data()[0], 99, "evicted newest slot must be replaced at DEPTH=2");
+    drop(b);
+    assert!(!T11_Q.can_dequeue());
 }

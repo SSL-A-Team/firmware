@@ -5,7 +5,7 @@ use embassy_stm32::usart;
 use embassy_time::Timer;
 use heapless::String;
 
-use crate::queue;
+use ateam_lib_crossarch::queue;
 use crate::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
 
 use super::at_protocol::{ATEvent, ATResponse, WifiLinkDisconnectedReason};

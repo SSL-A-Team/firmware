@@ -8,7 +8,7 @@ use embassy_stm32::Peri;
 use embassy_time::with_timeout;
 use embassy_time::{Duration, Timer};
 
-use crate::queue::{DequeueRef, Error};
+use ateam_lib_crossarch::queue::{DequeueRef, Error};
 use crate::uart::queue::{IdleBufferedUart, Reader, UartReadQueue, UartWriteQueue, Writer};
 
 pub const STM32_BOOTLOADER_MAX_BAUD_RATE: u32 = 115_200;

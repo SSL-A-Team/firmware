@@ -8,7 +8,7 @@ use panic_probe as _;
 #[defmt_test::tests]
 mod tests {
     use core::cell::SyncUnsafeCell;
-    use ateam_lib_stm32::queue::{Buffer, Queue};
+    use ateam_lib_crossarch::queue::{Buffer, Queue};
 
     // Each test gets its own static buffers — Queue has no reset method and
     // static state persists across the lifetime of the test binary.

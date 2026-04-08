@@ -27,7 +27,7 @@ pub mod time;
 pub mod uart;
 pub mod units;
 
-pub mod queue;
-
-// required for exported queue macros
+// required for exported uart queue macros
 pub extern crate paste;
+#[doc(hidden)]
+pub use ateam_lib_crossarch;
