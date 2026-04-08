@@ -79,6 +79,8 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "defmt 1.0.1",
+ "num-traits",
+ "smart-leds",
 ]
 
 [[package]]
