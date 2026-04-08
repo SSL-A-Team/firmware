@@ -15,13 +15,12 @@ use embassy_time::{with_timeout, Duration, Timer};
 use crate::image_hash;
 use ateam_common_packets::bindings::{
     CcmCommand,
-    CcmCommandType::CCM_CMD_MOTION,
-    CcmMotionControlType, CcmResponse,
+    CcmCommandType::{CCM_CMD_MOTION, CCM_CMD_PARAMS},
+    CcmMotionControlType, CcmParameter, CcmParameterDirection, CcmParameterOperation,
+    CcmParameterPacket, CcmResponse,
     CcmResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM},
     CcmTelemetry,
     MotionCommandType::OPEN_LOOP,
-    MotorCommandPacket,
-    MotorCommandType::MCP_PARAMS,
 };
 
 pub struct CurrentControlledMotor<
@@ -37,6 +36,7 @@ pub struct CurrentControlledMotor<
     firmware_image: &'a [u8],
     current_timestamp_ms: u32,
     current_state: CcmTelemetry,
+    current_params_state: CcmParameterPacket,
     current_state_seq_num: u8,
     torque_limit: f32,
 
@@ -77,6 +77,7 @@ impl<
 
             current_timestamp_ms: 0,
             current_state: start_state,
+            current_params_state: Default::default(),
             current_state_seq_num: 0,
             torque_limit: 0.0,
 
@@ -110,7 +111,6 @@ impl<
         );
 
         let start_state: CcmTelemetry = Default::default();
-        let start_params_state: CcmResponse = Default::default();
 
         CurrentControlledMotor {
             stm32_uart_interface: stm32_interface,
@@ -118,6 +118,7 @@ impl<
 
             current_timestamp_ms: 0,
             current_state: start_state,
+            current_params_state: Default::default(),
             current_state_seq_num: 0,
             torque_limit: 0.0,
 
@@ -148,34 +149,30 @@ impl<
 
     /// Get the first 4 bytes of the currently loaded image hash on the device, Run with timeout!
     pub async fn get_current_device_img_hash(&mut self) -> [u8; 4] {
-        // TODO: fix with new structure
+        loop {
+            self.send_params_command();
 
-        // loop {
-        //     // defmt::trace!("Wheel Interface - Sending parameter command packet");
-        //     self.send_params_command();
+            Timer::after(Duration::from_millis(5)).await;
 
-        //     Timer::after(Duration::from_millis(5)).await;
+            // Parse incoming packets
+            self.process_packets();
 
-        //     // defmt::debug!("Wheel Interface - Checking for parameter response");
-        //     // Parse incoming packets
-        //     self.process_packets();
+            // Check if current_params_state has updated with a firmware image hash reply
+            if self.current_params_state.parameter == CcmParameter::CCM_PARAM_FIRMWARE_IMAGE_HASH
+                && self.current_params_state.parameter_direction
+                    == CcmParameterDirection::CCM_PARAMDIR_REPLY
+            {
+                let current_img_hash = unsafe { self.current_params_state.value.val_u8x4 };
+                defmt::debug!("Wheel Interface - Received parameter response");
+                defmt::trace!(
+                    "Wheel Interface - Current device image hash {:x}",
+                    current_img_hash
+                );
+                return current_img_hash;
+            }
 
-        //     // Check if curret_params_state has updated, assuming that the
-        //     // params state firmware_img_hash field is initialized as 0's
-        //     // if self.current_params_state.firmware_img_hash != [0; 4] {
-        //     //     let current_img_hash = self.current_params_state.firmware_img_hash;
-        //     //     defmt::debug!("Wheel Interface - Received parameter response");
-        //     //     defmt::trace!(
-        //     //         "Wheel Interface - Current device image hash {:x}",
-        //     //         current_img_hash
-        //     //     );
-        //     //     return current_img_hash;
-        //     // };
-
-        //     // Timer::after(Duration::from_millis(5)).await;
-        // }
-
-        [0; 4]
+            Timer::after(Duration::from_millis(5)).await;
+        }
     }
 
     pub async fn check_device_has_latest_default_image(&mut self) -> Result<bool, ()> {
@@ -344,8 +341,7 @@ impl<
                 } else if mrp.type_ == CCM_RESP_PARAMS {
                     trace!("Received parameter response packet");
                     debug!("Parameter response data: {:?}", buf);
-
-                    warn!("Current Controlled Motor params response not implmeneted");
+                    self.current_params_state = mrp.data.params;
                 }
             }
         }
@@ -371,19 +367,17 @@ impl<
 
     pub fn send_params_command(&mut self) {
         unsafe {
-            let mut cmd: MotorCommandPacket = { MaybeUninit::zeroed().assume_init() };
+            let mut cmd: CcmCommand = { MaybeUninit::zeroed().assume_init() };
 
-            cmd.type_ = MCP_PARAMS;
+            cmd.type_ = CCM_CMD_PARAMS;
             cmd.crc32 = 0;
-
-            // TODO figure out what to set here
-            // Update a param like this
-            // cmd.data.params.set_update_timestamp(1);
-            // cmd.data.params.timestamp = 0x0;
+            cmd.data.param.parameter = CcmParameter::CCM_PARAM_FIRMWARE_IMAGE_HASH;
+            cmd.data.param.parameter_operation = CcmParameterOperation::CCM_PARAMOP_READ;
+            cmd.data.param.parameter_direction = CcmParameterDirection::CCM_PARAMDIR_COMMAND;
 
             let struct_bytes = core::slice::from_raw_parts(
-                (&cmd as *const MotorCommandPacket) as *const u8,
-                core::mem::size_of::<MotorCommandPacket>(),
+                (&cmd as *const CcmCommand) as *const u8,
+                core::mem::size_of::<CcmCommand>(),
             );
 
             self.stm32_uart_interface.send_or_discard_data(struct_bytes);

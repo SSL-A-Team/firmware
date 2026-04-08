@@ -491,7 +491,9 @@ impl<
 
             let (wheel_current_cmd, wheel_vel_cmd) =
                 if self.stop_wheels() || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
-                    defmt::warn!("control task - motor commands locked out");
+                    if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS {
+                        defmt::warn!("control task - motor commands locked out");
+                    }
                     (Vector4f::default(), Vector4f::default())
                 } else {
                     (
@@ -499,6 +501,17 @@ impl<
                         robot_controller.get_wheel_velocities(),
                     )
                 };
+
+            // // RAW CURRENT COMMAND TESTING
+            // let mut wheel_current_cmd = Vector4f::default();
+            // let mut wheel_vel_cmd = Vector4f::default();
+            // if cmd.x.abs() > 0.01 || cmd.y.abs() > 0.01 || cmd.z.abs() > 0.01 {
+            //     defmt::trace!("cmd: {} {} {}", cmd.x, cmd.y, cmd.z);
+            //     wheel_current_cmd.x = -0.1745;
+            //     wheel_current_cmd.y = -0.2137;
+            //     wheel_current_cmd.z = 0.2137;
+            //     wheel_current_cmd.w = 0.1745;
+            // }
 
             ////////////////// TODO: Move this/delete this //////////////////////
 

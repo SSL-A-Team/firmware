@@ -21,7 +21,7 @@ from argparse import ArgumentParser
 
 firmware_dir_path = (Path(__file__) / ".." / "..").resolve()
 kicker_bin_path = firmware_dir_path / "kicker-board" / "target" / "thumbv7em-none-eabihf" / "release" / "kicker.bin"
-wheel_bin_path = firmware_dir_path / "motor-controller" / "build" / "bin" / "wheel.bin"
+wheel_bin_path = firmware_dir_path / "motor-controller" / "build" / "bin" / "wheel-torque.bin"
 dribbler_bin_path = firmware_dir_path / "motor-controller" / "build" / "bin" / "dribbler.bin"
 wheel_img_hash_magic_ctrl = b'WheelImgHashCtrl'
 wheel_img_hash_magic_weel = b'WheelImgHashWeel'
