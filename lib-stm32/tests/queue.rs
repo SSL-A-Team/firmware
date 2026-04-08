@@ -119,11 +119,15 @@ mod tests {
         // Queue must still report full — eviction was a no-op
         defmt::assert!(T3_Q.is_full(), "queue must still be full after eviction+cancel");
 
-        // All 4 original entries must still be intact
-        for expected in 0u8..4 {
+        // Entries 0-2 are intact; the evicted slot (entry 3) is discarded — its buffer
+        // was handed to the DMA engine so the old data cannot be trusted. It comes back
+        // as a 0-length entry.
+        for expected in 0u8..3 {
             let buf = T3_Q.try_dequeue().unwrap();
             defmt::assert_eq!(buf.data()[0], expected, "entry corrupted after eviction+cancel");
         }
+        let discarded = T3_Q.try_dequeue().unwrap();
+        defmt::assert_eq!(discarded.data().len(), 0, "evicted+cancelled slot must be empty");
         defmt::assert!(!T3_Q.can_dequeue());
     }
 
@@ -184,11 +188,14 @@ mod tests {
 
         defmt::assert!(T5_Q.is_full(), "queue must be full after all cancels");
 
-        // All 4 original entries must survive unchanged
-        for expected in 0u8..4 {
+        // Entries 0-2 are intact; the newest slot is repeatedly evicted+cancelled so it
+        // always comes back empty (DMA may have touched it).
+        for expected in 0u8..3 {
             let buf = T5_Q.try_dequeue().unwrap();
             defmt::assert_eq!(buf.data()[0], expected, "entry corrupted by repeated eviction+cancel");
         }
+        let discarded = T5_Q.try_dequeue().unwrap();
+        defmt::assert_eq!(discarded.data().len(), 0, "repeatedly evicted+cancelled slot must be empty");
     }
 
     // -----------------------------------------------------------------------
