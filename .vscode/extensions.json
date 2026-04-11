@@ -1,6 +1,5 @@
 {
     "recommendations": [
-        "bbenoist.nix",
         "ms-vscode.makefile-tools",
         "ms-vscode.cmake-tools",
         "github.vscode-github-actions",
@@ -8,6 +7,7 @@
         "ms-vscode.cpptools-extension-pack",
         "tamasfe.even-better-toml",
         "fill-labs.dependi",
-        "ms-vscode-remote.vscode-remote-extensionpack"
+        "ms-vscode-remote.vscode-remote-extensionpack",
+        "jnoortheen.nix-ide"
     ]
 }
