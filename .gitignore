@@ -1,6 +1,9 @@
 # Rust files
 *rustc-ice*
 
+# Python files
+**/__pycache__
+
 # nix artifacts
 result
 result/
