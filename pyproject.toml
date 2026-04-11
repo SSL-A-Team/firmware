@@ -1,0 +1,19 @@
+[project]
+name = "ateam-firmware-scripts"
+version = "0.1.0"
+description = "Python scripts for the SSL A-Team firmware repository"
+requires-python = ">=3.12"
+dependencies = [
+    "pyserial>=3.5",
+    "matplotlib>=3.5.0",
+    "numpy>=1.21.0",
+    "jsonlines>=3.1.0",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+# This project contains scripts only — there is no Python package to build or install.
+package = false
