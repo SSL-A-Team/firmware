@@ -632,7 +632,7 @@ impl<
         self.read_data(|data| self.parse_data_packet(data)).await?
     }
 
-    pub fn read_packet_nonblocking(&self) -> Result<Option<DataPacket>, ()> {
+    pub fn read_packet_nonblocking(&self) -> Result<Option<DataPacket>, RobotRadioError> {
         let res = self.read_data_nonblocking(|data| self.parse_data_packet(data));
 
         match res {
@@ -640,24 +640,21 @@ impl<
                 match res {
                     Some(pkt) => {
                         match pkt {
-                            Ok(pkt) => {
-                                return Ok(Some(pkt));
-                            }
-                            Err(_) => {
+                            Ok(pkt) => Ok(Some(pkt)),
+                            Err(e) => {
                                 // we got data that was a valid EDM DataPacket, but couldn't parse it
                                 // into any known A-Team packet format
-                                defmt::debug!("got EDM packet but wasn't A-Team");
-                                return Err(());
+                                defmt::debug!("got EDM packet but wasn't A-Team: {}", e);
+                                Err(e)
                             }
                         }
                     }
-                    None => return Ok(None),
+                    None => Ok(None),
                 }
             }
-            Err(err_res) => {
-                defmt::debug!("radio in invalid state {:?}", err_res);
-                // read_data_nonblocking failed because the radio was in an invalid state
-                return Err(());
+            Err(e) => {
+                defmt::debug!("radio in invalid state: {}", e);
+                Err(e)
             }
         }
     }

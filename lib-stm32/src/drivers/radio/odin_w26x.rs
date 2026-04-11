@@ -514,12 +514,12 @@ impl<
                         if let EdmPacket::DataEvent { channel: _, data } = pkt {
                             Ok(fn_read(data))
                         } else {
-                            // defmt::trace!("got non data event");
+                            defmt::warn!("OdinW26x - expected DataEvent, got {}", pkt);
                             Err(OdinRadioError::ReadDataInvalid)
                         }
                     }
-                    Err(_) => {
-                        // defmt::trace!("got data that wasn't an edm packet: {}", buf.data());
+                    Err(e) => {
+                        defmt::warn!("OdinW26x - EDM framing error: {}", e);
                         Err(OdinRadioError::ReadDataInvalid)
                     }
                 }

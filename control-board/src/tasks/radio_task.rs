@@ -540,8 +540,8 @@ impl<
     async fn process_packets(&mut self, tx_ctr: i32) -> Result<(), ()> {
         // read any packets
         loop {
-            if let Ok(pkt) = self.radio.read_packet_nonblocking() {
-                if let Some(c2_pkt) = pkt {
+            match self.radio.read_packet_nonblocking() {
+                Ok(Some(c2_pkt)) => {
                     // update the last packet timestamp
                     self.last_software_packet = Instant::now();
                     if is_command_packet_safe(c2_pkt) {
@@ -551,6 +551,7 @@ impl<
                         let error_telemetry = create_error_telemetry_from_string(
                             "Received unsafe command packet - check for NaNs",
                         );
+                        defmt::warn!("RadioTask - sending error telemetry packet");
                         if self
                             .radio
                             .send_error_telemetry(error_telemetry)
@@ -560,11 +561,12 @@ impl<
                             defmt::warn!("RadioTask - failed to send error telemetry packet");
                         }
                     }
-                } else {
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    defmt::warn!("RadioTask - error reading data packet: {}", e);
                     break;
                 }
-            } else {
-                defmt::warn!("RadioTask - error reading data packet");
             }
         }
 
@@ -598,6 +600,7 @@ impl<
                         }
                     }
                     TelemetryPacket::ErrorTelemetry(error_packet) => {
+                        defmt::warn!("RadioTask - sending error telemetry packet");
                         if self.radio.send_error_telemetry(error_packet).await.is_err() {
                             defmt::warn!("RadioTask - failed to send error packet");
                         }
