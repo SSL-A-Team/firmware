@@ -1,20 +1,14 @@
-use crate::motion::constant_gain_kalman_filter::CgKalmanFilter;
-use crate::motion::params::body_vel_filter_params::{
-    CONTROL_INPUT, INIT_ESTIMATE_COV, KALMAN_GAIN, KF_NUM_CONTROL_INPUTS, KF_NUM_OBSERVATIONS,
-    KF_NUM_STATES, OBSERVATION_MODEL, PROCESS_COV, STATE_TRANSITION,
-};
 use crate::motion::pid::PidController;
 use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::{BodyControlMode, BodyControlTelemetry, ParameterCommandCode::*, ParameterDataFormat, ParameterName};
 use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
 use ateam_controls::robot_model::RobotModel;
-use ateam_controls::{Vector1f, Vector3f, Vector4f, Vector5f, Vector6f, Vector8f};
-use ateam_lib_stm32::drivers::imu;
+use ateam_controls::{Vector2f, Vector3f, Vector4f, Vector5f, Vector6f, Vector8f};
 use embassy_time::Instant;
-use libm::{fabsf, sqrtf};
-use nalgebra::{matrix, vector, Matrix1x5, Matrix3x5};
+use libm::fabsf;
+use nalgebra::{vector, Matrix3x5};
 
-use ateam_common_packets::bindings::{ExtendedTelemetry, ParameterCommand};
+use ateam_common_packets::bindings::ParameterCommand;
 
 
 pub struct BodyController {
@@ -38,14 +32,15 @@ pub struct BodyController {
     pub dt: f32,
 }
 
-impl<'a> BodyController {
+impl BodyController {
     pub fn new(dt: f32) -> BodyController {
         let linear_pid_gains = Vector5f::new(115.0, 0.0, 2.75, 0.0, 0.0).transpose();
         let angular_pid_gains = Vector5f::new(250.0, 0.0, 10.0, 0.0, 0.0).transpose();
+        let pose_pid_gains = Matrix3x5::from_rows(&[linear_pid_gains, linear_pid_gains, angular_pid_gains]);
         BodyController {
             robot_model: RobotModel::new_from_default_params(dt)
                 .expect("Failed to create RobotModel, check that default parameters are valid"),
-            pose_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
+            pose_pid_controller: PidController::<3>::from_gains_matrix(&pose_pid_gains),
             pose_control_gain: Vector2f::new(1.0, 1.0),
             traj_recompute_error: Vector4f::new(0.5, 1.0, 1.0, 2.0),
             trajectory: None,
@@ -129,18 +124,32 @@ impl<'a> BodyController {
         let kf_update_time = Instant::now() - start;
         start = Instant::now();
 
-        if body_control_mode == BodyControlMode::BCM_GLOBAL_POSE {
-            self.compute_effort_pose_control(state_estimate, body_cmd);
-        } else if body_control_mode == BodyControlMode::BCM_GLOBAL_TWIST {
-            self.compute_effort_twist_control(state_estimate, body_cmd);
-        } else if body_control_mode == BodyControlMode::BCM_GLOBAL_ACCEL {
-            self.compute_effort_accel_control(state_estimate, body_cmd);
-        } else {
-            self.body_twist_out = Vector3f::default();
-            self.body_accel_out = Vector3f::default();
-            self.body_accel_out_fric_comp = Vector3f::default();
-            self.wheel_vel_out = Vector4f::default();
-            self.wheel_torque_out = Vector4f::default();
+        match body_control_mode {
+            BodyControlMode::BCM_GLOBAL_POSE => {
+                self.compute_effort_pose_control(state_estimate, body_cmd);
+            }
+            BodyControlMode::BCM_GLOBAL_TWIST => {
+                defmt::error!("Global twist control mode is not currently supported");
+            }
+            BodyControlMode::BCM_LOCAL_TWIST => {
+                defmt::error!("Local twist control mode is not currently supported");
+            }
+            BodyControlMode::BCM_GLOBAL_ACCEL => {
+                self.compute_effort_accel_control(state_estimate, body_cmd);
+            }
+            BodyControlMode::BCM_LOCAL_ACCEL => {
+                defmt::error!("Local accel control mode is not currently supported");
+            }
+            _ => {
+                if body_control_mode != BodyControlMode::BCM_OFF {
+                    defmt::error!("Received command with unrecognized control mode: {}", body_control_mode as i32);
+                }
+                self.body_twist_out = Vector3f::default();
+                self.body_accel_out = Vector3f::default();
+                self.body_accel_out_fric_comp = Vector3f::default();
+                self.wheel_vel_out = Vector4f::default();
+                self.wheel_torque_out = Vector4f::default();
+            }
         }
 
         let effort_time = Instant::now() - start;
@@ -255,25 +264,25 @@ impl<'a> BodyController {
             self.robot_model.transform_accel2wheel(state_estimate.z) * self.body_accel_out_fric_comp;
     }
 
-    fn compute_effort_twist_control(&mut self, state_estimate: Vector6f, target_twist: Vector3f) {
-        // (self.body_twist_cmd, self.body_accel_cmd) = self.twist_bangbang_control(state_estimate, target_twist);
-        (self.body_twist_cmd, self.body_accel_cmd) =
-            self.twist_pid_control(state_estimate, target_twist);
-        let compensated_accel = self.body_accel_cmd - self.robot_model.i_inv * self.robot_model.compute_friction_force(self.body_twist_cmd);
-        self.wheel_vel_cmd =
-            self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_cmd;
-        self.wheel_torque_cmd =
-            self.robot_model.transform_accel2wheel(state_estimate.z) * compensated_accel;
-    }
+    // fn compute_effort_twist_control(&mut self, state_estimate: Vector6f, target_twist: Vector3f) {
+    //     // (self.body_twist_out, self.body_accel_out) = self.twist_bangbang_control(state_estimate, target_twist);
+    //     (self.body_twist_out, self.body_accel_out) =
+    //         self.twist_pid_control(state_estimate, target_twist);
+    //     let compensated_accel = self.body_accel_out - self.robot_model.i_inv * self.robot_model.compute_friction_force(self.body_twist_out);
+    //     self.wheel_vel_out =
+    //         self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_out;
+    //     self.wheel_torque_out =
+    //         self.robot_model.transform_accel2wheel(state_estimate.z) * compensated_accel;
+    // }
 
     fn compute_effort_accel_control(&mut self, state_estimate: Vector6f, target_accel: Vector3f) {
         let next_state = self.robot_model.a * state_estimate + self.robot_model.b * target_accel;
-        self.body_twist_cmd = next_state.fixed_rows::<3>(3).into();
-        self.body_accel_cmd = target_accel;
-        let compensated_accel = self.body_accel_cmd - self.robot_model.i_inv * self.robot_model.compute_friction_force(self.body_twist_cmd);
-        self.wheel_vel_cmd =
-            self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_cmd;
-        self.wheel_torque_cmd =
+        self.body_twist_out = next_state.fixed_rows::<3>(3).into();
+        self.body_accel_out = target_accel;
+        let compensated_accel = self.body_accel_out - self.robot_model.i_inv * self.robot_model.compute_friction_force(self.body_twist_out);
+        self.wheel_vel_out =
+            self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_out;
+        self.wheel_torque_out =
             self.robot_model.transform_accel2wheel(state_estimate.z) * compensated_accel;
     }
 
@@ -321,9 +330,9 @@ impl<'a> BodyController {
         );
 
         // Weighted sum of feedback and feedforward terms to calculate the accel command
-        let global_accel_cmd = self.feedforward_gain * ff + self.feedback_gain * fb;
+        let global_accel_out = self.pose_control_gain[0] * ff + self.pose_control_gain[1] * fb;
 
-        let global_twist_cmd: Vector3f = (state_estimate.fixed_rows::<3>(3) + global_accel_cmd * self.dt).into();
+        let global_twist_out: Vector3f = (state_estimate.fixed_rows::<3>(3) + global_accel_out * self.dt).into();
 
         // Step trajectory forward
         let next_state = self.trajectory
@@ -336,620 +345,329 @@ impl<'a> BodyController {
         
         self.prev_body_cmd = Some(target_pose);
 
-        (global_twist_cmd, global_accel_cmd)
+        (global_twist_out, global_accel_out)
     }
 
-    fn twist_bangbang_control(
-        &mut self,
-        state_estimate: Vector6f,
-        target_twist: Vector3f,
-    ) -> (Vector3f, Vector3f) {
-        let traj = BangBangTraj3D::from_target_twist(
-            state_estimate.fixed_rows::<3>(3).into(),
-            target_twist,
-            self.trajectory_params,
-        )
-        .expect(
-            "Failed to generate bang-bang trajectory, check that trajectory parameters are valid",
-        );
-        let next_state = traj
-            .state_at(state_estimate, 0.0, self.dt)
-            .expect("Bang-bang trajectory should always have a valid state at t=0.0 + dt");
-        let global_twist_cmd: Vector3f = next_state.fixed_rows::<3>(3).into();
-        let global_accel_cmd = traj
-            .accel_at(0.0)
-            .expect("Bang-bang trajectory should always have a valid accel at t=0.0");
-        (global_twist_cmd, global_accel_cmd)
+    // fn twist_bangbang_control(
+    //     &mut self,
+    //     state_estimate: Vector6f,
+    //     target_twist: Vector3f,
+    // ) -> (Vector3f, Vector3f) {
+    //     let traj = BangBangTraj3D::from_target_twist(
+    //         state_estimate.fixed_rows::<3>(3).into(),
+    //         target_twist,
+    //         self.trajectory_params,
+    //     )
+    //     .expect(
+    //         "Failed to generate bang-bang trajectory, check that trajectory parameters are valid",
+    //     );
+    //     let next_state = traj
+    //         .state_at(state_estimate, 0.0, self.dt)
+    //         .expect("Bang-bang trajectory should always have a valid state at t=0.0 + dt");
+    //     let global_twist_out: Vector3f = next_state.fixed_rows::<3>(3).into();
+    //     let global_accel_out = traj
+    //         .accel_at(0.0)
+    //         .expect("Bang-bang trajectory should always have a valid accel at t=0.0");
+    //     (global_twist_out, global_accel_out)
+    // }
+
+//     fn twist_pid_control(
+//         &mut self,
+//         state_estimate: Vector6f,
+//         target_twist: Vector3f,
+//     ) -> (Vector3f, Vector3f) {
+//         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+//         let body_twist_pid =
+//             self.twist_pid_controller
+//                 .calculate(&target_twist, &twist_estimate, self.dt);
+//         let mut twist_out = target_twist + body_twist_pid;
+
+//         // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
+//         // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
+//         let prev_twist_out = self.prev_body_cmd.unwrap_or(Vector3f::default());
+//         let mut accel_out = (twist_out - prev_twist_out) / self.dt;
+
+//         let max_accel_linear = self.trajectory_params.max_accel_linear;
+//         let max_accel_angular = self.trajectory_params.max_accel_angular;
+//         let max_vel_linear = self.trajectory_params.max_vel_linear;
+//         let max_vel_angular = self.trajectory_params.max_vel_angular;
+
+//         // Clamp acceleration: linear magnitude and angular independently
+//         let accel_linear_mag = sqrtf(accel_out.x * accel_out.x + accel_out.y * accel_out.y);
+//         if accel_linear_mag > max_accel_linear {
+//             let scale = max_accel_linear / accel_linear_mag;
+//             accel_out.x *= scale;
+//             accel_out.y *= scale;
+//         }
+//         accel_out.z = accel_out.z.clamp(-max_accel_angular, max_accel_angular);
+
+//         // Recompute twist from clamped acceleration
+//         twist_out = prev_twist_out + (accel_out * self.dt);
+
+//         // Clamp twist: linear magnitude and angular independently
+//         let twist_linear_mag = sqrtf(twist_out.x * twist_out.x + twist_out.y * twist_out.y);
+//         if twist_linear_mag > max_vel_linear {
+//             let scale = max_vel_linear / twist_linear_mag;
+//             twist_out.x *= scale;
+//             twist_out.y *= scale;
+//         }
+//         twist_out.z = twist_out.z.clamp(-max_vel_angular, max_vel_angular);
+
+//         // Recompute accel to stay consistent with the clamped twist
+//         accel_out = (twist_out - prev_twist_out) / self.dt;
+
+//         self.prev_body_cmd = Some(twist_out);
+
+//         (twist_out, accel_out)
+//     }
+
+    /// Returns the expected data format for a parameter name handled by BodyController,
+    /// or None if the name is not recognized.
+    fn expected_format(name: ParameterName::Type) -> Option<ParameterDataFormat::Type> {
+        match name {
+            ParameterName::KF_PROCESS_STD => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::KF_MEASUREMENT_STD => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::KF_MAX_STATE => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::PHYS_WHEEL => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::PHYS_INERTIA => Some(ParameterDataFormat::VEC2_F32),
+            ParameterName::PHYS_MOTOR_MODEL => Some(ParameterDataFormat::VEC2_F32),
+            ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::POSE_CONTROL_GAIN => Some(ParameterDataFormat::VEC2_F32),
+            ParameterName::TRAJ_RECOMPUTE_ERROR => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::TRAJ_MAX => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::POSE_FB_PIDII_X => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::POSE_FB_PIDII_Y => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::POSE_FB_PIDII_THETA => Some(ParameterDataFormat::VEC5_F32),
+            _ => None,
+        }
     }
 
-    fn twist_pid_control(
-        &mut self,
-        state_estimate: Vector6f,
-        target_twist: Vector3f,
-    ) -> (Vector3f, Vector3f) {
-        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-        let body_twist_pid =
-            self.twist_pid_controller
-                .calculate(&target_twist, &twist_estimate, self.dt);
-        let mut twist_cmd = target_twist + body_twist_pid;
-
-        // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
-        // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
-        let prev_twist_cmd = self.prev_body_cmd.unwrap_or(Vector3f::default());
-        let mut accel_cmd = (twist_cmd - prev_twist_cmd) / self.dt;
-
-        let max_accel_linear = self.trajectory_params.max_accel_linear;
-        let max_accel_angular = self.trajectory_params.max_accel_angular;
-        let max_vel_linear = self.trajectory_params.max_vel_linear;
-        let max_vel_angular = self.trajectory_params.max_vel_angular;
-
-        // Clamp acceleration: linear magnitude and angular independently
-        let accel_linear_mag = sqrtf(accel_cmd.x * accel_cmd.x + accel_cmd.y * accel_cmd.y);
-        if accel_linear_mag > max_accel_linear {
-            let scale = max_accel_linear / accel_linear_mag;
-            accel_cmd.x *= scale;
-            accel_cmd.y *= scale;
+    fn read_param(&self, name: ParameterName::Type, reply: &mut ParameterCommand) {
+        let kf = &self.robot_model.kf_params;
+        let phys = &self.robot_model.physical_params;
+        match name {
+            ParameterName::KF_PROCESS_STD => {
+                reply.data.vec4_f32 = [
+                    kf.process_noise_std_pos_linear,
+                    kf.process_noise_std_pos_angular,
+                    kf.process_noise_std_vel_linear,
+                    kf.process_noise_std_vel_angular,
+                ];
+            }
+            ParameterName::KF_MEASUREMENT_STD => {
+                reply.data.vec4_f32 = [
+                    kf.measurement_noise_std_vision_pos_linear,
+                    kf.measurement_noise_std_vision_pos_angular,
+                    kf.measurement_noise_std_encoder_vel_angular,
+                    kf.measurement_noise_std_gyro_vel_angular,
+                ];
+            }
+            ParameterName::KF_MAX_STATE => {
+                reply.data.vec4_f32 = [
+                    kf.max_pos_linear,
+                    kf.max_pos_angular,
+                    kf.max_vel_linear,
+                    kf.max_vel_angular,
+                ];
+            }
+            ParameterName::PHYS_WHEEL => {
+                reply.data.vec4_f32 = [phys.alpha, phys.beta, phys.l, phys.r];
+            }
+            ParameterName::PHYS_INERTIA => {
+                reply.data.vec2_f32 = [phys.mass, phys.iz];
+            }
+            ParameterName::PHYS_MOTOR_MODEL => {
+                reply.data.vec2_f32 = [phys.motor_torque_constant, phys.motor_efficiency_factor];
+            }
+            ParameterName::PHYS_FRICTION_MODEL => {
+                reply.data.vec4_f32 = [
+                    phys.coulomb_friction_coefficient_linear,
+                    phys.coulomb_friction_coefficient_angular,
+                    phys.viscous_friction_coefficient_linear,
+                    phys.viscous_friction_coefficient_angular,
+                ];
+            }
+            ParameterName::POSE_CONTROL_GAIN => {
+                reply.data.vec2_f32 = [self.pose_control_gain[0], self.pose_control_gain[1]];
+            }
+            ParameterName::TRAJ_RECOMPUTE_ERROR => {
+                reply.data.vec4_f32 = [
+                    self.traj_recompute_error[0],
+                    self.traj_recompute_error[1],
+                    self.traj_recompute_error[2],
+                    self.traj_recompute_error[3],
+                ];
+            }
+            ParameterName::TRAJ_MAX => {
+                reply.data.vec4_f32 = [
+                    self.trajectory_params.max_vel_linear,
+                    self.trajectory_params.max_vel_angular,
+                    self.trajectory_params.max_accel_linear,
+                    self.trajectory_params.max_accel_angular,
+                ];
+            }
+            ParameterName::POSE_FB_PIDII_X
+            | ParameterName::POSE_FB_PIDII_Y
+            | ParameterName::POSE_FB_PIDII_THETA => {
+                let gain = self.pose_pid_controller.get_gain();
+                let row = match name {
+                    ParameterName::POSE_FB_PIDII_X => 0,
+                    ParameterName::POSE_FB_PIDII_Y => 1,
+                    _ => 2,
+                };
+                reply.data.vec5_f32 = [
+                    gain[(row, 0)],
+                    gain[(row, 1)],
+                    gain[(row, 2)],
+                    gain[(row, 3)],
+                    gain[(row, 4)],
+                ];
+            }
+            _ => unreachable!(),
         }
-        accel_cmd.z = accel_cmd.z.clamp(-max_accel_angular, max_accel_angular);
+    }
 
-        // Recompute twist from clamped acceleration
-        twist_cmd = prev_twist_cmd + (accel_cmd * self.dt);
-
-        // Clamp twist: linear magnitude and angular independently
-        let twist_linear_mag = sqrtf(twist_cmd.x * twist_cmd.x + twist_cmd.y * twist_cmd.y);
-        if twist_linear_mag > max_vel_linear {
-            let scale = max_vel_linear / twist_linear_mag;
-            twist_cmd.x *= scale;
-            twist_cmd.y *= scale;
-        }
-        twist_cmd.z = twist_cmd.z.clamp(-max_vel_angular, max_vel_angular);
-
-        // Recompute accel to stay consistent with the clamped twist
-        accel_cmd = (twist_cmd - prev_twist_cmd) / self.dt;
-
-        self.prev_body_cmd = Some(twist_cmd);
-
-        (twist_cmd, accel_cmd)
+    fn write_param(&mut self, cmd: &ParameterCommand) {
+        match cmd.parameter_name {
+            ParameterName::KF_PROCESS_STD => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                let mut kf = self.robot_model.kf_params;
+                kf.process_noise_std_pos_linear = v[0];
+                kf.process_noise_std_pos_angular = v[1];
+                kf.process_noise_std_vel_linear = v[2];
+                kf.process_noise_std_vel_angular = v[3];
+                self.robot_model.update_kf_params(kf);
+            }
+            ParameterName::KF_MEASUREMENT_STD => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                let mut kf = self.robot_model.kf_params;
+                kf.measurement_noise_std_vision_pos_linear = v[0];
+                kf.measurement_noise_std_vision_pos_angular = v[1];
+                kf.measurement_noise_std_encoder_vel_angular = v[2];
+                kf.measurement_noise_std_gyro_vel_angular = v[3];
+                self.robot_model.update_kf_params(kf);
+            }
+            ParameterName::KF_MAX_STATE => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                let mut kf = self.robot_model.kf_params;
+                kf.max_pos_linear = v[0];
+                kf.max_pos_angular = v[1];
+                kf.max_vel_linear = v[2];
+                kf.max_vel_angular = v[3];
+                self.robot_model.update_kf_params(kf);
+            }
+            ParameterName::PHYS_WHEEL => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                let mut p = self.robot_model.physical_params;
+                p.alpha = v[0];
+                p.beta = v[1];
+                p.l = v[2];
+                p.r = v[3];
+                let _ = self.robot_model.update_physical_params(p);
+            }
+            ParameterName::PHYS_INERTIA => {
+                let v = unsafe { cmd.data.vec2_f32 };
+                let mut p = self.robot_model.physical_params;
+                p.mass = v[0];
+                p.iz = v[1];
+                let _ = self.robot_model.update_physical_params(p);
+            }
+            ParameterName::PHYS_MOTOR_MODEL => {
+                let v = unsafe { cmd.data.vec2_f32 };
+                let mut p = self.robot_model.physical_params;
+                p.motor_torque_constant = v[0];
+                p.motor_efficiency_factor = v[1];
+                let _ = self.robot_model.update_physical_params(p);
+            }
+            ParameterName::PHYS_FRICTION_MODEL => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                let mut p = self.robot_model.physical_params;
+                p.coulomb_friction_coefficient_linear = v[0];
+                p.coulomb_friction_coefficient_angular = v[1];
+                p.viscous_friction_coefficient_linear = v[2];
+                p.viscous_friction_coefficient_angular = v[3];
+                let _ = self.robot_model.update_physical_params(p);
+            }
+            ParameterName::POSE_CONTROL_GAIN => {
+                let v = unsafe { cmd.data.vec2_f32 };
+                self.pose_control_gain = Vector2f::new(v[0], v[1]);
+            }
+            ParameterName::TRAJ_RECOMPUTE_ERROR => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                self.traj_recompute_error = Vector4f::new(v[0], v[1], v[2], v[3]);
+            }
+            ParameterName::TRAJ_MAX => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                self.trajectory_params.max_vel_linear = v[0];
+                self.trajectory_params.max_vel_angular = v[1];
+                self.trajectory_params.max_accel_linear = v[2];
+                self.trajectory_params.max_accel_angular = v[3];
+            }
+            ParameterName::POSE_FB_PIDII_X
+            | ParameterName::POSE_FB_PIDII_Y
+            | ParameterName::POSE_FB_PIDII_THETA => {
+                let v = unsafe { cmd.data.vec5_f32 };
+                let row = match cmd.parameter_name {
+                    ParameterName::POSE_FB_PIDII_X => 0,
+                    ParameterName::POSE_FB_PIDII_Y => 1,
+                    _ => 2,
+                };
+                let mut gain = self.pose_pid_controller.get_gain();
+                for col in 0..5 {
+                    gain[(row, col)] = v[col];
+                }
+                self.pose_pid_controller.set_gain(gain);
+            }
+            _ => unreachable!(),
+        };
+        self.reset();
     }
 }
 
-impl<'a> ParameterInterface for BodyController {
+impl ParameterInterface for BodyController {
     fn processes_cmd(&self, param_cmd: &ParameterCommand) -> bool {
-        return self.has_name(param_cmd.parameter_name);
+        self.has_name(param_cmd.parameter_name)
     }
 
     fn has_name(&self, param_name: ParameterName::Type) -> bool {
-        return match param_name {
-            ParameterName::KF_PROCESS_STD_POS_LINEAR => true,
-            ParameterName::KF_PROCESS_STD_POS_ANGULAR => true,
-            ParameterName::KF_PROCESS_STD_VEL_LINEAR => true,
-            ParameterName::KF_PROCESS_STD_VEL_ANGULAR => true,
-            ParameterName::KF_VISION_STD_LINEAR => true,
-            ParameterName::KF_VISION_STD_ANGULAR => true,
-            ParameterName::KF_ENCODER_STD_ANGULAR => true,
-            ParameterName::KF_GYRO_STD_ANGULAR => true,
-            ParameterName::KF_MAX_POS_LINEAR => true,
-            ParameterName::KF_MAX_POS_ANGULAR => true,
-            ParameterName::KF_MAX_VEL_LINEAR => true,
-            ParameterName::KF_MAX_VEL_ANGULAR => true,
-            ParameterName::PHYS_WHEEL_ANGLE_ALPHA => true,
-            ParameterName::PHYS_WHEEL_ANGLE_BETA => true,
-            ParameterName::PHYS_WHEEL_DISTANCE => true,
-            ParameterName::PHYS_WHEEL_RADIUS => true,
-            ParameterName::PHYS_BODY_MASS => true,
-            ParameterName::PHYS_BODY_MOMENT_Z => true,
-            ParameterName::PHYS_MOTOR_TORQUE_CONSTANT => true,
-            ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => true,
-            ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_LINEAR => true,
-            ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_ANGULAR => true,
-            ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_LINEAR => true,
-            ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_ANGULAR => true,
-            ParameterName::PIDII_X => true,
-            ParameterName::PIDII_Y => true,
-            ParameterName::PIDII_THETA => true,
-            ParameterName::TRAJ_ALLOWABLE_ERROR_POS_LINEAR => true,
-            ParameterName::TRAJ_ALLOWABLE_ERROR_POS_ANGULAR => true,
-            ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_LINEAR => true,
-            ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_ANGULAR => true,
-            ParameterName::TRAJ_MAX_VEL_LINEAR => true,
-            ParameterName::TRAJ_MAX_VEL_ANGULAR => true,
-            ParameterName::TRAJ_MAX_ACCEL_LINEAR => true,
-            ParameterName::TRAJ_MAX_ACCEL_ANGULAR => true,
-            ParameterName::TRAJ_RECOMPUTE_ERROR => true,
-            ParameterName::FEEDFORWARD_GAIN => true,
-            ParameterName::FEEDBACK_GAIN => true,
-            _ => false,
-        };
+        Self::expected_format(param_name).is_some()
     }
 
     fn apply_command(
         &mut self,
         param_cmd: &ParameterCommand,
     ) -> Result<ParameterCommand, ParameterCommand> {
-        let mut reply_cmd = param_cmd.clone();
+        let mut reply = *param_cmd;
 
-        // if we haven't been given an actionable command code, ignore the call
-        if !(param_cmd.command_code == PCC_READ || param_cmd.command_code == PCC_WRITE) {
-            defmt::warn!("asked to apply a command with out and actional command code");
-            return Err(reply_cmd);
+        if param_cmd.command_code != PCC_READ && param_cmd.command_code != PCC_WRITE {
+            defmt::warn!("asked to apply a command without an actionable command code");
+            return Err(reply);
         }
 
-        // if we've been asked to apply a command we don't have a key for it
-        // error out
-        if !self.has_name(param_cmd.parameter_name) {
-            defmt::warn!(
-                "asked to apply a command with a parameter name not managed by this module"
-            );
-            reply_cmd.command_code = PCC_NACK_INVALID_NAME;
-            return Err(*param_cmd);
-        }
+        let fmt = match Self::expected_format(param_cmd.parameter_name) {
+            Some(f) => f,
+            None => {
+                defmt::warn!("unexpected parameter name {}, cannot apply command", param_cmd.parameter_name);
+                reply.command_code = PCC_NACK_INVALID_NAME;
+                return Err(reply);
+            }
+        };
 
         if param_cmd.command_code == PCC_READ {
             defmt::info!("Reading parameter {}", param_cmd.parameter_name);
-            match param_cmd.parameter_name {
-                | ParameterName::KF_PROCESS_STD
-                | ParameterName::KF_VISION_STD_LINEAR
-                | ParameterName::KF_VISION_STD_ANGULAR
-                | ParameterName::KF_ENCODER_STD_ANGULAR
-                | ParameterName::KF_GYRO_STD_ANGULAR
-                | ParameterName::KF_MAX_POS_LINEAR
-                | ParameterName::KF_MAX_POS_ANGULAR
-                | ParameterName::KF_MAX_VEL_LINEAR
-                | ParameterName::KF_MAX_VEL_ANGULAR
-                | ParameterName::PHYS_WHEEL_ANGLE_ALPHA
-                | ParameterName::PHYS_WHEEL_ANGLE_BETA
-                | ParameterName::PHYS_WHEEL_DISTANCE
-                | ParameterName::PHYS_WHEEL_RADIUS
-                | ParameterName::PHYS_BODY_MASS
-                | ParameterName::PHYS_BODY_MOMENT_Z
-                | ParameterName::PHYS_MOTOR_TORQUE_CONSTANT
-                | ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR
-                | ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_LINEAR
-                | ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_ANGULAR
-                | ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_LINEAR
-                | ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_ANGULAR
-                | ParameterName::TRAJ_ALLOWABLE_ERROR_POS_LINEAR
-                | ParameterName::TRAJ_ALLOWABLE_ERROR_POS_ANGULAR
-                | ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_LINEAR
-                | ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_ANGULAR
-                | ParameterName::TRAJ_MAX_VEL_LINEAR
-                | ParameterName::TRAJ_MAX_VEL_ANGULAR
-                | ParameterName::TRAJ_MAX_ACCEL_LINEAR
-                | ParameterName::TRAJ_MAX_ACCEL_ANGULAR
-                | ParameterName::TRAJ_RECOMPUTE_ERROR => {
-                | ParameterName::FEEDFORWARD_GAIN
-                | ParameterName::FEEDBACK_GAIN => {
-                    reply_cmd.data_format = ParameterDataFormat::F32;
-                    reply_cmd.data.f32_ = match param_cmd.parameter_name {
-                        ParameterName::KF_PROCESS_STD_POS_LINEAR => {
-                            self.robot_model.kf_params.process_noise_std_pos_linear
-                        }
-                        ParameterName::KF_PROCESS_STD_POS_ANGULAR => {
-                            self.robot_model.kf_params.process_noise_std_pos_angular
-                        }
-                        ParameterName::KF_PROCESS_STD_VEL_LINEAR => {
-                            self.robot_model.kf_params.process_noise_std_vel_linear
-                        }
-                        ParameterName::KF_PROCESS_STD_VEL_ANGULAR => {
-                            self.robot_model.kf_params.process_noise_std_vel_angular
-                        }
-                        ParameterName::KF_VISION_STD_LINEAR => {
-                            self.robot_model
-                                .kf_params
-                                .measurement_noise_std_vision_pos_linear
-                        }
-                        ParameterName::KF_VISION_STD_ANGULAR => {
-                            self.robot_model
-                                .kf_params
-                                .measurement_noise_std_vision_pos_angular
-                        }
-                        ParameterName::KF_ENCODER_STD_ANGULAR => {
-                            self.robot_model
-                                .kf_params
-                                .measurement_noise_std_encoder_vel_angular
-                        }
-                        ParameterName::KF_GYRO_STD_ANGULAR => {
-                            self.robot_model
-                                .kf_params
-                                .measurement_noise_std_gyro_vel_angular
-                        }
-                        ParameterName::KF_MAX_POS_LINEAR => {
-                            self.robot_model.kf_params.max_pos_linear
-                        }
-                        ParameterName::KF_MAX_POS_ANGULAR => {
-                            self.robot_model.kf_params.max_pos_angular
-                        }
-                        ParameterName::KF_MAX_VEL_LINEAR => {
-                            self.robot_model.kf_params.max_vel_linear
-                        }
-                        ParameterName::KF_MAX_VEL_ANGULAR => {
-                            self.robot_model.kf_params.max_vel_angular
-                        }
-                        ParameterName::PHYS_WHEEL_ANGLE_ALPHA => {
-                            self.robot_model.physical_params.alpha
-                        }
-                        ParameterName::PHYS_WHEEL_ANGLE_BETA => {
-                            self.robot_model.physical_params.beta
-                        }
-                        ParameterName::PHYS_WHEEL_DISTANCE => self.robot_model.physical_params.l,
-                        ParameterName::PHYS_WHEEL_RADIUS => self.robot_model.physical_params.r,
-                        ParameterName::PHYS_BODY_MASS => self.robot_model.physical_params.mass,
-                        ParameterName::PHYS_BODY_MOMENT_Z => self.robot_model.physical_params.iz,
-                        ParameterName::PHYS_MOTOR_TORQUE_CONSTANT => {
-                            self.robot_model.physical_params.motor_torque_constant
-                        }
-                        ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => {
-                            self.robot_model.physical_params.motor_efficiency_factor
-                        }
-                        ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_LINEAR => {
-                            self.robot_model.physical_params.coulomb_friction_coefficient_linear
-                        }
-                        ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_ANGULAR => {
-                            self.robot_model.physical_params.coulomb_friction_coefficient_angular
-                        }
-                        ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_LINEAR => {
-                            self.robot_model.physical_params.viscous_friction_coefficient_linear
-                        }
-                        ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_ANGULAR => {
-                            self.robot_model.physical_params.viscous_friction_coefficient_angular
-                        }
-                        ParameterName::TRAJ_ALLOWABLE_ERROR_POS_LINEAR => {
-                            self.trajectory_params.allowable_error_pos_linear
-                        }
-                        ParameterName::TRAJ_ALLOWABLE_ERROR_POS_ANGULAR => {
-                            self.trajectory_params.allowable_error_pos_angular
-                        }
-                        ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_LINEAR => {
-                            self.trajectory_params.allowable_error_vel_linear
-                        }
-                        ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_ANGULAR => {
-                            self.trajectory_params.allowable_error_vel_angular
-                        }
-                        ParameterName::TRAJ_MAX_VEL_LINEAR => self.trajectory_params.max_vel_linear,
-                        ParameterName::TRAJ_MAX_VEL_ANGULAR => {
-                            self.trajectory_params.max_vel_angular
-                        }
-                        ParameterName::TRAJ_MAX_ACCEL_LINEAR => {
-                            self.trajectory_params.max_accel_linear
-                        }
-                        ParameterName::TRAJ_MAX_ACCEL_ANGULAR => {
-                            self.trajectory_params.max_accel_angular
-                        }
-                        ParameterName::TRAJ_RECOMPUTE_ERROR => {
-                            self.traj_recompute_error_vel_angular
-                        }
-                        ParameterName::FEEDFORWARD_GAIN => {
-                            self.feedforward_gain
-                        }
-                        ParameterName::FEEDBACK_GAIN => {
-                            self.feedback_gain
-                        }
-                        _ => unreachable!(),
-                    };
-                }
-                ParameterName::PIDII_X | ParameterName::PIDII_Y | ParameterName::PIDII_THETA => {
-                    reply_cmd.data_format = ParameterDataFormat::PID_LIMITED_INTEGRAL_F32;
-                    let gain = self.pose_pid_controller.get_gain();
-                    let row = match param_cmd.parameter_name {
-                        ParameterName::PIDII_X => 0,
-                        ParameterName::PIDII_Y => 1,
-                        ParameterName::PIDII_THETA => 2,
-                        _ => unreachable!(),
-                    };
-                    reply_cmd.data.pidii_f32 = [
-                        gain[(row, 0)],
-                        gain[(row, 1)],
-                        gain[(row, 2)],
-                        gain[(row, 3)],
-                        gain[(row, 4)],
-                    ];
-                }
-                ParameterName::PIDII_XD | ParameterName::PIDII_YD | ParameterName::PIDII_THETAD => {
-                    reply_cmd.data_format = ParameterDataFormat::PID_LIMITED_INTEGRAL_F32;
-                    let gain = self.twist_pid_controller.get_gain();
-                    let row = match param_cmd.parameter_name {
-                        ParameterName::PIDII_XD => 0,
-                        ParameterName::PIDII_YD => 1,
-                        ParameterName::PIDII_THETAD => 2,
-                        _ => unreachable!(),
-                    };
-                    reply_cmd.data.pidii_f32 = [
-                        gain[(row, 0)],
-                        gain[(row, 1)],
-                        gain[(row, 2)],
-                        gain[(row, 3)],
-                        gain[(row, 4)],
-                    ];
-                }
-                _ => {
-                    defmt::debug!("unimplemented key read in RobotController");
-                    reply_cmd.command_code = PCC_NACK_INVALID_NAME;
-                    return Err(reply_cmd);
-                }
-            };
-            reply_cmd.command_code = PCC_ACK;
-            return Ok(reply_cmd);
-        } else if param_cmd.command_code == PCC_WRITE {
+            reply.data_format = fmt;
+            self.read_param(param_cmd.parameter_name, &mut reply);
+        } else {
             defmt::info!("Writing parameter {}", param_cmd.parameter_name);
-            match param_cmd.parameter_name {
-                ParameterName::KF_PROCESS_STD_POS_LINEAR
-                | ParameterName::KF_PROCESS_STD_POS_ANGULAR
-                | ParameterName::KF_PROCESS_STD_VEL_LINEAR
-                | ParameterName::KF_PROCESS_STD_VEL_ANGULAR
-                | ParameterName::KF_VISION_STD_LINEAR
-                | ParameterName::KF_VISION_STD_ANGULAR
-                | ParameterName::KF_ENCODER_STD_ANGULAR
-                | ParameterName::KF_GYRO_STD_ANGULAR
-                | ParameterName::KF_MAX_POS_LINEAR
-                | ParameterName::KF_MAX_POS_ANGULAR
-                | ParameterName::KF_MAX_VEL_LINEAR
-                | ParameterName::KF_MAX_VEL_ANGULAR => {
-                    if param_cmd.data_format != ParameterDataFormat::F32 {
-                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
-                        return Err(reply_cmd);
-                    }
-                    let write_value = unsafe { param_cmd.data.f32_ };
-                    let mut kf_params = self.robot_model.kf_params;
-                    match param_cmd.parameter_name {
-                        ParameterName::KF_PROCESS_STD_POS_LINEAR => {
-                            kf_params.process_noise_std_pos_linear = write_value
-                        }
-                        ParameterName::KF_PROCESS_STD_POS_ANGULAR => {
-                            kf_params.process_noise_std_pos_angular = write_value
-                        }
-                        ParameterName::KF_PROCESS_STD_VEL_LINEAR => {
-                            kf_params.process_noise_std_vel_linear = write_value
-                        }
-                        ParameterName::KF_PROCESS_STD_VEL_ANGULAR => {
-                            kf_params.process_noise_std_vel_angular = write_value
-                        }
-                        ParameterName::KF_VISION_STD_LINEAR => {
-                            kf_params.measurement_noise_std_vision_pos_linear = write_value
-                        }
-                        ParameterName::KF_VISION_STD_ANGULAR => {
-                            kf_params.measurement_noise_std_vision_pos_angular = write_value
-                        }
-                        ParameterName::KF_ENCODER_STD_ANGULAR => {
-                            kf_params.measurement_noise_std_encoder_vel_angular = write_value
-                        }
-                        ParameterName::KF_GYRO_STD_ANGULAR => {
-                            kf_params.measurement_noise_std_gyro_vel_angular = write_value
-                        }
-                        ParameterName::KF_MAX_POS_LINEAR => kf_params.max_pos_linear = write_value,
-                        ParameterName::KF_MAX_POS_ANGULAR => {
-                            kf_params.max_pos_angular = write_value
-                        }
-                        ParameterName::KF_MAX_VEL_LINEAR => kf_params.max_vel_linear = write_value,
-                        ParameterName::KF_MAX_VEL_ANGULAR => {
-                            kf_params.max_vel_angular = write_value
-                        }
-                        _ => unreachable!(),
-                    }
-                    self.robot_model.update_kf_params(kf_params);
-                }
-                ParameterName::PHYS_WHEEL_ANGLE_ALPHA
-                | ParameterName::PHYS_WHEEL_ANGLE_BETA
-                | ParameterName::PHYS_WHEEL_DISTANCE
-                | ParameterName::PHYS_WHEEL_RADIUS
-                | ParameterName::PHYS_BODY_MASS
-                | ParameterName::PHYS_BODY_MOMENT_Z
-                | ParameterName::PHYS_MOTOR_TORQUE_CONSTANT
-                | ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR 
-                | ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_LINEAR
-                | ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_ANGULAR
-                | ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_LINEAR
-                | ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_ANGULAR => {
-                    if param_cmd.data_format != ParameterDataFormat::F32 {
-                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
-                        return Err(reply_cmd);
-                    }
-                    let write_value = unsafe { param_cmd.data.f32_ };
-                    let mut physical_params = self.robot_model.physical_params;
-                    match param_cmd.parameter_name {
-                        ParameterName::PHYS_WHEEL_ANGLE_ALPHA => {
-                            physical_params.alpha = write_value
-                        }
-                        ParameterName::PHYS_WHEEL_ANGLE_BETA => physical_params.beta = write_value,
-                        ParameterName::PHYS_WHEEL_DISTANCE => physical_params.l = write_value,
-                        ParameterName::PHYS_WHEEL_RADIUS => physical_params.r = write_value,
-                        ParameterName::PHYS_BODY_MASS => physical_params.mass = write_value,
-                        ParameterName::PHYS_BODY_MOMENT_Z => physical_params.iz = write_value,
-                        ParameterName::PHYS_MOTOR_TORQUE_CONSTANT => {
-                            physical_params.motor_torque_constant = write_value
-                        }
-                        ParameterName::PHYS_MOTOR_EFFICIENCY_FACTOR => {
-                            physical_params.motor_efficiency_factor = write_value
-                        }
-                        ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_LINEAR => {
-                            physical_params.coulomb_friction_coefficient_linear = write_value
-                        }
-                        ParameterName::PHYS_COULOMB_FRICTION_COEFFICIENT_ANGULAR => {
-                            physical_params.coulomb_friction_coefficient_angular = write_value
-                        }
-                        ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_LINEAR => {
-                            physical_params.viscous_friction_coefficient_linear = write_value
-                        }
-                        ParameterName::PHYS_VISCOUS_FRICTION_COEFFICIENT_ANGULAR => {
-                            physical_params.viscous_friction_coefficient_angular = write_value
-                        }
-                        _ => unreachable!(),
-                    }
-                    self.robot_model.update_physical_params(physical_params);
-                }
-                ParameterName::TRAJ_ALLOWABLE_ERROR_POS_LINEAR
-                | ParameterName::TRAJ_ALLOWABLE_ERROR_POS_ANGULAR
-                | ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_LINEAR
-                | ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_ANGULAR
-                | ParameterName::TRAJ_MAX_VEL_LINEAR
-                | ParameterName::TRAJ_MAX_VEL_ANGULAR
-                | ParameterName::TRAJ_MAX_ACCEL_LINEAR
-                | ParameterName::TRAJ_MAX_ACCEL_ANGULAR => {
-                    if param_cmd.data_format != ParameterDataFormat::F32 {
-                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
-                        return Err(reply_cmd);
-                    }
-                    let write_value = unsafe { param_cmd.data.f32_ };
-                    match param_cmd.parameter_name {
-                        ParameterName::TRAJ_ALLOWABLE_ERROR_POS_LINEAR => {
-                            self.trajectory_params.allowable_error_pos_linear = write_value
-                        }
-                        ParameterName::TRAJ_ALLOWABLE_ERROR_POS_ANGULAR => {
-                            self.trajectory_params.allowable_error_pos_angular = write_value
-                        }
-                        ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_LINEAR => {
-                            self.trajectory_params.allowable_error_vel_linear = write_value
-                        }
-                        ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_ANGULAR => {
-                            self.trajectory_params.allowable_error_vel_angular = write_value
-                        }
-                        ParameterName::TRAJ_MAX_VEL_LINEAR => {
-                            self.trajectory_params.max_vel_linear = write_value
-                        }
-                        ParameterName::TRAJ_MAX_VEL_ANGULAR => {
-                            self.trajectory_params.max_vel_angular = write_value
-                        }
-                        ParameterName::TRAJ_MAX_ACCEL_LINEAR => {
-                            self.trajectory_params.max_accel_linear = write_value
-                        }
-                        ParameterName::TRAJ_MAX_ACCEL_ANGULAR => {
-                            self.trajectory_params.max_accel_angular = write_value
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-                ParameterName::HYST_PID_ENTER_ERROR_POS_LINEAR
-                | ParameterName::HYST_PID_ENTER_ERROR_POS_ANGULAR
-                | ParameterName::HYST_PID_EXIT_ERROR_POS_LINEAR
-                | ParameterName::HYST_PID_EXIT_ERROR_POS_ANGULAR
-                | ParameterName::HYST_PID_ENTER_ERROR_VEL_LINEAR
-                | ParameterName::HYST_PID_ENTER_ERROR_VEL_ANGULAR
-                | ParameterName::HYST_PID_EXIT_ERROR_VEL_LINEAR
-                | ParameterName::HYST_PID_EXIT_ERROR_VEL_ANGULAR => {
-                    if param_cmd.data_format != ParameterDataFormat::F32 {
-                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
-                        return Err(reply_cmd);
-                    }
-                    let write_value = unsafe { param_cmd.data.f32_ };
-                    match param_cmd.parameter_name {
-                        ParameterName::HYST_PID_ENTER_ERROR_POS_LINEAR => {
-                            self.pose_control_hysteresis.pid_enter_error_pos_linear = write_value
-                        }
-                        ParameterName::HYST_PID_ENTER_ERROR_POS_ANGULAR => {
-                            self.pose_control_hysteresis.pid_enter_error_pos_angular = write_value
-                        }
-                        ParameterName::HYST_PID_EXIT_ERROR_POS_LINEAR => {
-                            self.pose_control_hysteresis.pid_exit_error_pos_linear = write_value
-                        }
-                        ParameterName::HYST_PID_EXIT_ERROR_POS_ANGULAR => {
-                            self.pose_control_hysteresis.pid_exit_error_pos_angular = write_value
-                        }
-                        ParameterName::HYST_PID_ENTER_ERROR_VEL_LINEAR => {
-                            self.pose_control_hysteresis.pid_enter_error_vel_linear = write_value
-                        }
-                        ParameterName::HYST_PID_ENTER_ERROR_VEL_ANGULAR => {
-                            self.pose_control_hysteresis.pid_enter_error_vel_angular = write_value
-                        }
-                        ParameterName::HYST_PID_EXIT_ERROR_VEL_LINEAR => {
-                            self.pose_control_hysteresis.pid_exit_error_vel_linear = write_value
-                        }
-                        ParameterName::HYST_PID_EXIT_ERROR_VEL_ANGULAR => {
-                            self.pose_control_hysteresis.pid_exit_error_vel_angular = write_value
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-                ParameterName::TRAJ_RECOMPUTE_ERROR_POS_LINEAR
-                | ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_LINEAR
-                | ParameterName::TRAJ_RECOMPUTE_ERROR_POS_ANGULAR
-                | ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_ANGULAR
-                | ParameterName::FEEDFORWARD_GAIN
-                | ParameterName::FEEDBACK_GAIN => {
-                    if param_cmd.data_format != ParameterDataFormat::F32 {
-                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
-                        return Err(reply_cmd);
-                    }
-                    let write_value = unsafe { param_cmd.data.f32_ };
-                    match param_cmd.parameter_name {
-                        ParameterName::TRAJ_RECOMPUTE_ERROR_POS_LINEAR => {
-                            self.traj_recompute_error_pos_linear = write_value
-                        }
-                        ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_LINEAR => {
-                            self.traj_recompute_error_vel_linear = write_value
-                        }
-                        ParameterName::TRAJ_RECOMPUTE_ERROR_POS_ANGULAR => {
-                            self.traj_recompute_error_pos_angular = write_value
-                        }
-                        ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_ANGULAR => {
-                            self.traj_recompute_error_vel_angular = write_value
-                        }
-                        ParameterName::FEEDFORWARD_GAIN => {
-                            self.feedforward_gain = write_value
-                        }
-                        ParameterName::FEEDBACK_GAIN => {
-                            self.feedback_gain = write_value
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-                ParameterName::PIDII_X | ParameterName::PIDII_Y | ParameterName::PIDII_THETA => {
-                    if param_cmd.data_format != ParameterDataFormat::PID_LIMITED_INTEGRAL_F32 {
-                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
-                        return Err(reply_cmd);
-                    }
-                    let write_values = unsafe { param_cmd.data.pidii_f32 };
-                    let row = match param_cmd.parameter_name {
-                        ParameterName::PIDII_X => 0,
-                        ParameterName::PIDII_Y => 1,
-                        ParameterName::PIDII_THETA => 2,
-                        _ => unreachable!(),
-                    };
-                    let mut gain = self.pose_pid_controller.get_gain();
-                    for col in 0..5 {
-                        gain[(row, col)] = write_values[col];
-                    }
-                    self.pose_pid_controller.set_gain(gain);
-
-                    let dimensional_controller = match param_cmd.parameter_name {
-                        ParameterName::PIDII_X => &mut self.pose_pid_controller_x,
-                        ParameterName::PIDII_Y => &mut self.pose_pid_controller_y,
-                        ParameterName::PIDII_THETA => &mut self.pose_pid_controller_theta,
-                        _ => unreachable!(),
-                    };
-                    let gain = matrix![write_values[0], write_values[1], write_values[2], write_values[3], write_values[4]];
-                    dimensional_controller.set_gain(gain);
-
-                    reply_cmd.data.pidii_f32 = write_values;
-                }
-                ParameterName::PIDII_XD | ParameterName::PIDII_YD | ParameterName::PIDII_THETAD => {
-                    if param_cmd.data_format != ParameterDataFormat::PID_LIMITED_INTEGRAL_F32 {
-                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
-                        return Err(reply_cmd);
-                    }
-                    let write_values = unsafe { param_cmd.data.pidii_f32 };
-                    let row = match param_cmd.parameter_name {
-                        ParameterName::PIDII_XD => 0,
-                        ParameterName::PIDII_YD => 1,
-                        ParameterName::PIDII_THETAD => 2,
-                        _ => unreachable!(),
-                    };
-                    let mut gain = self.twist_pid_controller.get_gain();
-                    for col in 0..5 {
-                        gain[(row, col)] = write_values[col];
-                    }
-                    self.twist_pid_controller.set_gain(gain);
-                    reply_cmd.data.pidii_f32 = write_values;
-                }
-                _ => {
-                    defmt::debug!("unimplemented key write in RobotController");
-                    reply_cmd.command_code = PCC_NACK_INVALID_NAME;
-                    return Err(reply_cmd);
-                }
+            if param_cmd.data_format != fmt {
+                reply.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                return Err(reply);
             }
-            reply_cmd.command_code = PCC_ACK;
-            self.reset();
+            self.write_param(param_cmd);
         }
 
-        return Ok(reply_cmd);
+        reply.command_code = PCC_ACK;
+        Ok(reply)
     }
 }
 
@@ -1003,13 +721,13 @@ impl<'a> ParameterInterface for BodyController {
 //     state_estimate: Vector6f,
 //     target_pose: Vector3f,
 // ) -> (Vector3f, Vector3f) {
-//     let global_accel_cmd = self.pose_pid_controller.calculate(
+//     let global_accel_out = self.pose_pid_controller.calculate(
 //         &target_pose,
 //         &state_estimate.fixed_rows::<3>(0).into(),
 //         self.dt,
 //     );
-//     let global_twist_cmd = state_estimate.fixed_rows::<3>(3) + self.body_accel_out * self.dt;
-//     (global_twist_cmd, global_accel_cmd)
+//     let global_twist_out = state_estimate.fixed_rows::<3>(3) + self.body_accel_out * self.dt;
+//     (global_twist_out, global_accel_out)
 // }
 
 // fn pose_bangbang_control(
@@ -1027,16 +745,16 @@ impl<'a> ParameterInterface for BodyController {
 //         "Failed to generate bang-bang trajectory, check that trajectory parameters are valid",
 //     );
 //     // Calculate the acceleration needed to achieve the trajectory right now
-//     let global_accel_cmd = traj
+//     let global_accel_out = traj
 //         .accel_at(0.0)
 //         .expect("Bang-bang trajectory should always have a valid accel at t=0.0");
 //     // Calculate the twist that should be achieved at the next time step after applying this acceleration
 //     let next_body_state = traj
 //         .state_at(state_estimate, 0.0, self.dt)
 //         .expect("Bang-bang trajectory should always have a valid state at t=0.0 + dt");
-//     let global_twist_cmd =
+//     let global_twist_out =
 //         Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
-//     (global_twist_cmd, global_accel_cmd)
+//     (global_twist_out, global_accel_out)
 // }
 
 // fn pose_dualmode_control(
@@ -1174,12 +892,12 @@ impl<'a> ParameterInterface for BodyController {
 //         }
 //     }
 
-//     let mut global_accel_cmd = Vector3f::default();
+//     let mut global_accel_out = Vector3f::default();
 
 //     // For each dimension, compute control output based on the active control mode
 //     match self.pose_control_mode_x {
 //         PoseControlMode::BangBang => {
-//             global_accel_cmd.x = self.trajectory
+//             global_accel_out.x = self.trajectory
 //                 .as_ref()
 //                 .expect("Trajectory should always be Some at this point since we set it if it was None above")
 //                 .accel_at(self.trajectory_time)
@@ -1190,7 +908,7 @@ impl<'a> ParameterInterface for BodyController {
 //             // let target_x: Vector1f = target_pose.fixed_rows::<1>(0).into();
 //             let target_x: Vector1f = self.trajectory_state.fixed_rows::<1>(0).into();
 //             let current_x: Vector1f = pose_estimate.fixed_rows::<1>(0).into();
-//             global_accel_cmd.x = self.pose_pid_controller_x.calculate(
+//             global_accel_out.x = self.pose_pid_controller_x.calculate(
 //                 &target_x, 
 //                 &current_x,
 //                 self.dt
@@ -1199,7 +917,7 @@ impl<'a> ParameterInterface for BodyController {
 //     }
 //     match self.pose_control_mode_y {
 //         PoseControlMode::BangBang => {
-//             global_accel_cmd.y = self.trajectory
+//             global_accel_out.y = self.trajectory
 //                 .as_ref()
 //                 .expect("Trajectory should always be Some at this point since we set it if it was None above")
 //                 .accel_at(self.trajectory_time)
@@ -1210,7 +928,7 @@ impl<'a> ParameterInterface for BodyController {
 //             // let target_y: Vector1f = target_pose.fixed_rows::<1>(1).into();
 //             let target_y: Vector1f = self.trajectory_state.fixed_rows::<1>(1).into();
 //             let current_y: Vector1f = pose_estimate.fixed_rows::<1>(1).into();
-//             global_accel_cmd.y = self.pose_pid_controller_y.calculate(
+//             global_accel_out.y = self.pose_pid_controller_y.calculate(
 //                 &target_y, 
 //                 &current_y,
 //                 self.dt
@@ -1219,7 +937,7 @@ impl<'a> ParameterInterface for BodyController {
 //     }
 //     match self.pose_control_mode_theta {
 //         PoseControlMode::BangBang => {
-//             global_accel_cmd.z = self.trajectory
+//             global_accel_out.z = self.trajectory
 //                 .as_ref()
 //                 .expect("Trajectory should always be Some at this point since we set it if it was None above")
 //                 .accel_at(self.trajectory_time)
@@ -1230,7 +948,7 @@ impl<'a> ParameterInterface for BodyController {
 //             // let target_theta: Vector1f = target_pose.fixed_rows::<1>(2).into();
 //             let target_theta: Vector1f = self.trajectory_state.fixed_rows::<1>(2).into();
 //             let current_theta: Vector1f = pose_estimate.fixed_rows::<1>(2).into();
-//             global_accel_cmd.z = self.pose_pid_controller_theta.calculate(
+//             global_accel_out.z = self.pose_pid_controller_theta.calculate(
 //                 &target_theta, 
 //                 &current_theta,
 //                 self.dt
@@ -1238,7 +956,7 @@ impl<'a> ParameterInterface for BodyController {
 //         },
 //     }
 
-//     let global_twist_cmd = state_estimate.fixed_rows::<3>(3) + global_accel_cmd * self.dt;
+//     let global_twist_out = state_estimate.fixed_rows::<3>(3) + global_accel_out * self.dt;
 
 //     // Step trajectory forward
 //     self.trajectory_state = self.trajectory
@@ -1250,5 +968,5 @@ impl<'a> ParameterInterface for BodyController {
     
 //     self.prev_body_cmd = Some(target_pose);
 
-//     (global_twist_cmd, global_accel_cmd)
+//     (global_twist_out, global_accel_out)
 // }

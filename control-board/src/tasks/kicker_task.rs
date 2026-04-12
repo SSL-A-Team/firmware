@@ -321,7 +321,7 @@ impl<
                             self.kicker_driver.request_kick(bc_pkt.kick_request);
                             self.kicker_driver.set_drib_vel(bc_pkt.dribbler_speed);
                             self.kicker_driver
-                                .set_drib_multiplier(bc_pkt.dribbler_multiplier());
+                                .set_drib_multiplier(bc_pkt.dribbler_multiplier as u32);
                         }
                         DataPacket::ParameterCommand(_) => {
                             // we currently don't have any kicker parameters
