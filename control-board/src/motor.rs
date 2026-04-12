@@ -280,7 +280,7 @@ impl<
             .await
     }
 
-    pub fn process_packets(&mut self) {
+    pub fn process_packets(&mut self) -> bool {
         while let Ok(res) = self.stm32_uart_interface.try_read_data() {
             let buf = res.data();
 
@@ -341,6 +341,8 @@ impl<
                     // info!("reset_watchdog_window {:?}", mrp.data.motion.reset_watchdog_window());
                     // info!("reset_low_power {:?}", mrp.data.motion.reset_low_power());
                     // info!("reset_software {:?}", mrp.data.motion.reset_software());
+
+                    return true;
                 } else if mrp.type_ == CCM_RESP_PARAMS {
                     trace!("Received parameter response packet");
                     debug!("Parameter response data: {:?}", buf);
@@ -349,6 +351,8 @@ impl<
                 }
             }
         }
+
+        return false;
     }
 
     pub fn log_reset(&self, motor_id: &str) {
