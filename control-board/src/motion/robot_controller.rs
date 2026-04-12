@@ -15,123 +15,50 @@ use nalgebra::{matrix, vector, Matrix1x5, Matrix3x5};
 
 use ateam_common_packets::bindings::{ExtendedTelemetry, ParameterCommand};
 
-/// Active control mode for pose control, used for bang-bang / PID hysteresis.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum PoseControlMode {
-    /// Bang-bang trajectory controller (used for large errors)
-    BangBang,
-    /// PID controller (used once error is small)
-    Pid,
-}
 
-/// Hysteresis thresholds for switching between bang-bang and PID control.
-#[derive(Clone, Copy, Debug)]
-pub struct PoseControlHysteresis {
-    /// Linear position error below which we switch from bang-bang to PID
-    pub pid_enter_error_pos_linear: f32,
-    /// Angular position error below which we switch from bang-bang to PID
-    pub pid_enter_error_pos_angular: f32,
-    /// Linear position error above which we switch from PID back to bang-bang
-    pub pid_exit_error_pos_linear: f32,
-    /// Angular position error above which we switch from PID back to bang-bang
-    pub pid_exit_error_pos_angular: f32,
-    /// Linear velocity error below which we switch from bang-bang to PID
-    pub pid_enter_error_vel_linear: f32,
-    /// Angular velocity error below which we switch from bang-bang to PID
-    pub pid_enter_error_vel_angular: f32,
-    /// Linear velocity error above which we switch from PID back to bang-bang
-    pub pid_exit_error_vel_linear: f32,
-    /// Angular velocity error above which we switch from PID back to bang-bang
-    pub pid_exit_error_vel_angular: f32,
-}
-
-impl Default for PoseControlHysteresis {
-    fn default() -> Self {
-        PoseControlHysteresis {
-            pid_enter_error_pos_linear: 0.05, // meters
-            pid_enter_error_pos_angular: 0.2, // radians
-            pid_exit_error_pos_linear: 0.1,   // meters (larger than enter for hysteresis)
-            pid_exit_error_pos_angular: 0.4,  // radians (larger than enter for hysteresis)
-            pid_enter_error_vel_linear: 0.2,  // m/s
-            pid_enter_error_vel_angular: 0.5, // rad/s
-            pid_exit_error_vel_linear: 0.4,   // m/s (larger than enter for hysteresis)
-            pid_exit_error_vel_angular: 0.8,  // rad/s (larger than enter for hysteresis)
-        }
-    }
-}
-
-pub struct BodyController<'a> {
+pub struct BodyController {
     pub robot_model: RobotModel,
-    pub twist_cgkf: CgKalmanFilter<'a, 3, 4, 5>,
-    pub pose_pid_controller: PidController<3>,
+    pub body_pid_controller: PidController<3>,
     pub feedforward_gain: f32,
     pub feedback_gain: f32,
-    pub twist_pid_controller: PidController<3>,
-    pub pose_pid_controller_x: PidController<1>,
-    pub pose_pid_controller_y: PidController<1>,
-    pub pose_pid_controller_theta: PidController<1>,
     pub trajectory: Option<BangBangTraj3D>,
     pub trajectory_time: f32,
     pub trajectory_state: Vector6f,
     pub trajectory_params: TrajectoryParams,
-    pub pose_control_mode_x: PoseControlMode,
-    pub pose_control_mode_y: PoseControlMode,
-    pub pose_control_mode_theta: PoseControlMode,
-    pub pose_control_hysteresis: PoseControlHysteresis,
-    pub traj_recompute_error_pos_linear: f32,
-    pub traj_recompute_error_vel_linear: f32,
-    pub traj_recompute_error_pos_angular: f32,
-    pub traj_recompute_error_vel_angular: f32,
-    pub body_twist_cmd: Vector3f,
-    pub body_accel_cmd: Vector3f,
+    /// linear_position_error, angular_position_error, linear_velocity_error, angular_velocity_error
+    pub traj_recompute_error: Vector4f,
     pub prev_body_cmd: Option<Vector3f>,
-    pub wheel_vel_cmd: Vector4f,
-    pub wheel_torque_cmd: Vector4f,
+    pub body_twist_out: Vector3f,
+    pub body_accel_out: Vector3f,
+    pub body_accel_out_fric_comp: Vector3f,
+    pub wheel_vel_out: Vector4f,
+    pub wheel_torque_out: Vector4f,
     pub debug_telemetry: ExtendedTelemetry,
     pub dt: f32,
 }
 
-impl<'a> BodyController<'a> {
-    pub fn new(dt: f32) -> BodyController<'a> {
-        let twist_cgkf: CgKalmanFilter<KF_NUM_STATES, KF_NUM_CONTROL_INPUTS, KF_NUM_OBSERVATIONS> =
-            CgKalmanFilter::new(
-                &STATE_TRANSITION,
-                &CONTROL_INPUT,
-                &OBSERVATION_MODEL,
-                &PROCESS_COV,
-                &KALMAN_GAIN,
-                &INIT_ESTIMATE_COV,
-            );
+impl<'a> BodyController {
+    pub fn new(dt: f32) -> BodyController {
         let linear_pid_gains = Vector5f::new(115.0, 0.0, 2.75, 0.0, 0.0).transpose();
         let angular_pid_gains = Vector5f::new(250.0, 0.0, 10.0, 0.0, 0.0).transpose();
         BodyController {
             robot_model: RobotModel::new_from_default_params(dt)
                 .expect("Failed to create RobotModel, check that default parameters are valid"),
-            twist_cgkf: twist_cgkf,
-            pose_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
+            body_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
             feedforward_gain: 1.0,
             feedback_gain: 1.0,
-            twist_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
-            pose_pid_controller_x: PidController::<1>::from_gains_matrix(&linear_pid_gains),
-            pose_pid_controller_y: PidController::<1>::from_gains_matrix(&linear_pid_gains),
-            pose_pid_controller_theta: PidController::<1>::from_gains_matrix(&angular_pid_gains),
             trajectory: None,
             trajectory_state: Vector6f::zeros(),
             trajectory_params: TrajectoryParams::default(),
             trajectory_time: 0.0,
-            pose_control_mode_x: PoseControlMode::BangBang,
-            pose_control_mode_y: PoseControlMode::BangBang,
-            pose_control_mode_theta: PoseControlMode::BangBang,
-            pose_control_hysteresis: PoseControlHysteresis::default(),
-            traj_recompute_error_pos_linear: 0.5,
-            traj_recompute_error_vel_linear: 1.0,
-            traj_recompute_error_pos_angular: 1.0,
-            traj_recompute_error_vel_angular: 2.0,
-            body_twist_cmd: Vector3f::default(),
-            body_accel_cmd: Vector3f::default(),
+            // linear_position_error, angular_position_error, linear_velocity_error, angular_velocity_error
+            traj_recompute_error: Vector4f::new(0.5, 1.0, 1.0, 2.0),
             prev_body_cmd: None,
-            wheel_vel_cmd: Vector4f::default(),
-            wheel_torque_cmd: Vector4f::default(),
+            body_twist_out: Vector3f::default(),
+            body_accel_out: Vector3f::default(),
+            body_accel_out_fric_comp: Vector3f::default(),
+            wheel_vel_out: Vector4f::default(),
+            wheel_torque_out: Vector4f::default(),
             debug_telemetry: Default::default(),
             dt,
         }
@@ -139,24 +66,16 @@ impl<'a> BodyController<'a> {
 
     pub fn reset(&mut self) {
         self.robot_model.reset();
-        self.twist_cgkf.reset();
-        self.twist_pid_controller.reset();
-        self.pose_pid_controller_x.reset();
-        self.pose_pid_controller_y.reset();
-        self.pose_pid_controller_theta.reset();
-        self.pose_pid_controller.reset();
+        self.body_pid_controller.reset();
         self.trajectory = None;
         self.trajectory_state = Vector6f::default();
         self.trajectory_time = 0.0;
-        self.pose_control_mode_x = PoseControlMode::BangBang;
-        self.pose_control_mode_y = PoseControlMode::BangBang;
-        self.pose_control_mode_theta = PoseControlMode::BangBang;
-        self.pose_control_hysteresis = PoseControlHysteresis::default();
-        self.body_twist_cmd = Vector3f::default();
-        self.body_accel_cmd = Vector3f::default();
         self.prev_body_cmd = None;
-        self.wheel_vel_cmd = Vector4f::default();
-        self.wheel_torque_cmd = Vector4f::default();
+        self.body_twist_out = Vector3f::default();
+        self.body_accel_out = Vector3f::default();
+        self.body_accel_out_fric_comp = Vector3f::default();
+        self.wheel_vel_out = Vector4f::default();
+        self.wheel_torque_out = Vector4f::default();
         self.debug_telemetry = Default::default();
     }
 
@@ -174,7 +93,7 @@ impl<'a> BodyController<'a> {
     ) {
         let mut start = Instant::now();
 
-        let state_prediction = self.get_state();
+        let state_prediction = self.robot_model.get_state();
 
         self.state_update(
             vision_pose_meas,
@@ -183,7 +102,7 @@ impl<'a> BodyController<'a> {
             gyro_theta_meas,
         );
 
-        let mut state_estimate = self.get_state();
+        let mut state_estimate = self.robot_model.get_state();
 
         // Deadzone the velocity estimate
         if fabsf(state_estimate[3]) < 0.05 {
@@ -218,10 +137,11 @@ impl<'a> BodyController<'a> {
         } else if body_accel_control_enabled {
             self.compute_effort_accel_control(state_estimate, body_cmd);
         } else {
-            self.body_twist_cmd = Vector3f::default();
-            self.body_accel_cmd = Vector3f::default();
-            self.wheel_vel_cmd = Vector4f::default();
-            self.wheel_torque_cmd = Vector4f::default();
+            self.body_twist_out = Vector3f::default();
+            self.body_accel_out = Vector3f::default();
+            self.body_accel_out_fric_comp = Vector3f::default();
+            self.wheel_vel_out = Vector4f::default();
+            self.wheel_torque_out = Vector4f::default();
         }
 
         let effort_time = Instant::now() - start;
@@ -270,15 +190,18 @@ impl<'a> BodyController<'a> {
             .copy_from_slice(&state_estimate.as_slice()[3..6]);
         self.debug_telemetry
             .body_twist_u
-            .copy_from_slice(self.body_twist_cmd.as_slice());
+            .copy_from_slice(self.body_twist_out.as_slice());
         self.debug_telemetry
             .body_accel_u
-            .copy_from_slice(self.body_accel_cmd.as_slice());
+            .copy_from_slice(self.body_accel_out.as_slice());
+        self.debug_telemetry
+            .body_accel_u_fric_comp
+            .copy_from_slice(self.body_accel_out_fric_comp.as_slice());
 
         let control_outputs_time = Instant::now() - start;
         start = Instant::now();
 
-        self.state_predict();
+        self.robot_model.kf_predict(self.body_accel_out);
 
         let kf_predict_time = Instant::now() - start;
         if trace {
@@ -292,31 +215,21 @@ impl<'a> BodyController<'a> {
     }
 
     pub fn get_wheel_velocities(&self) -> Vector4f {
-        self.wheel_vel_cmd
+        self.wheel_vel_out
     }
 
     /// Get the 4 wheel torque commands in Nm
     pub fn get_wheel_torques(&self) -> Vector4f {
-        self.wheel_torque_cmd
+        self.wheel_torque_out
     }
 
     /// Get the 4 wheel currents in amps
     pub fn get_wheel_currents(&self) -> Vector4f {
-        self.robot_model.torques_to_currents(self.wheel_torque_cmd)
+        self.robot_model.torques_to_currents(self.wheel_torque_out)
     }
 
     pub fn get_control_debug_telem(&self) -> ExtendedTelemetry {
         self.debug_telemetry
-    }
-
-    pub fn get_state(&self) -> Vector6f {
-        // Use EKF
-        self.robot_model.x
-
-        // // Use CGKF
-        // let twist = self.twist_cgkf.get_state();
-        // // Use local frame for twist_cgkf
-        // vector![0.0, 0.0, 0.0, twist[0], twist[1], twist[2],]
     }
 
     fn state_update(
@@ -337,42 +250,29 @@ impl<'a> BodyController<'a> {
             wheel_vel_meas.w,
             gyro_theta_meas,
         ];
-        self.state_update_ekf(measurement, vision_update);
-
-        // // Use CGKF
-        // let measurement: Vector5f = vector![
-        //     wheel_vel_meas.x,
-        //     wheel_vel_meas.y,
-        //     wheel_vel_meas.z,
-        //     wheel_vel_meas.w,
-        //     gyro_theta_meas,
-        // ];
-        // self.state_update_cgkf(measurement);
-    }
-
-    fn state_predict(&mut self) {
-        // Use EKF
-        self.state_predict_ekf();
-
-        // // Use CGKF
-        // self.state_predict_cgkf();
+        // TODO: consider what to do here for singular matrix cases - maybe skip the update and just use the prediction as the estimate for this cycle, or add some regularization to the covariance to prevent singularities?
+        let res = self
+            .robot_model
+            .kf_update(measurement, !vision_update, false, false);
+        if res.is_err() {
+            defmt::error!(
+                "Kalman filter update failed, skipping update: {}",
+                res.err().unwrap() as i32
+            );
+        }
     }
 
     fn compute_effort_pose_control(&mut self, state_estimate: Vector6f, target_pose: Vector3f) {
-        // (self.body_twist_cmd, self.body_accel_cmd) =
-        //     self.pose_pid_control(state_estimate, target_pose);
-        // (self.body_twist_cmd, self.body_accel_cmd) = self.pose_bangbang_control(state_estimate, target_pose);
-        // (self.body_twist_cmd, self.body_accel_cmd) = self.pose_dualmode_control(state_estimate, target_pose);
-        // (self.body_twist_cmd, self.body_accel_cmd) =
-        //     self.pose_dimensional_dualmode_control(state_estimate, target_pose);
-        (self.body_twist_cmd, self.body_accel_cmd) =
-            self.pose_dimensional_feed_forward_backward_control(state_estimate, target_pose);
+        // Compute control output with control policy
+        (self.body_twist_out, self.body_accel_out) =
+            self.pose_bangbang_pid_control_policy(state_estimate, target_pose);
         // Compensate for modeled friction forces
-        let compensated_accel = self.body_accel_cmd - self.robot_model.i_inv * self.robot_model.compute_friction_force(self.body_twist_cmd);
-        self.wheel_vel_cmd =
-            self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_cmd;
-        self.wheel_torque_cmd =
-            self.robot_model.transform_accel2wheel(state_estimate.z) * compensated_accel;
+        self.body_accel_out_fric_comp = self.body_accel_out - self.robot_model.i_inv * self.robot_model.compute_friction_force(self.body_twist_out);
+        // Calculate wheel commands from body commands
+        self.wheel_vel_out =
+            self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_out;
+        self.wheel_torque_out =
+            self.robot_model.transform_accel2wheel(state_estimate.z) * self.body_accel_out_fric_comp;
     }
 
     fn compute_effort_twist_control(&mut self, state_estimate: Vector6f, target_twist: Vector3f) {
@@ -397,73 +297,7 @@ impl<'a> BodyController<'a> {
             self.robot_model.transform_accel2wheel(state_estimate.z) * compensated_accel;
     }
 
-    fn state_update_cgkf(&mut self, measurement: Vector5f) {
-        self.twist_cgkf.update(&measurement);
-    }
-
-    fn state_update_ekf(&mut self, measurement: Vector8f, vision_update: bool) {
-        // TODO: consider what to do here for singular matrix cases - maybe skip the update and just use the prediction as the estimate for this cycle, or add some regularization to the covariance to prevent singularities?
-        let res = self
-            .robot_model
-            .kf_update(measurement, !vision_update, false, false);
-        if res.is_err() {
-            defmt::error!(
-                "Kalman filter update failed, skipping update: {}",
-                res.err().unwrap() as i32
-            );
-        }
-    }
-
-    fn state_predict_cgkf(&mut self) {
-        self.twist_cgkf.predict(&self.get_wheel_velocities());
-    }
-
-    fn state_predict_ekf(&mut self) {
-        self.robot_model.kf_predict(self.body_accel_cmd);
-    }
-
-    fn pose_pid_control(
-        &mut self,
-        state_estimate: Vector6f,
-        target_pose: Vector3f,
-    ) -> (Vector3f, Vector3f) {
-        let global_accel_cmd = self.pose_pid_controller.calculate(
-            &target_pose,
-            &state_estimate.fixed_rows::<3>(0).into(),
-            self.dt,
-        );
-        let global_twist_cmd = state_estimate.fixed_rows::<3>(3) + self.body_accel_cmd * self.dt;
-        (global_twist_cmd, global_accel_cmd)
-    }
-
-    fn pose_bangbang_control(
-        &mut self,
-        state_estimate: Vector6f,
-        target_pose: Vector3f,
-    ) -> (Vector3f, Vector3f) {
-        // Calculate the optimal trajectory to the setpoint
-        let traj = BangBangTraj3D::from_target_pose(
-            state_estimate,
-            target_pose,
-            self.trajectory_params,
-        )
-        .expect(
-            "Failed to generate bang-bang trajectory, check that trajectory parameters are valid",
-        );
-        // Calculate the acceleration needed to achieve the trajectory right now
-        let global_accel_cmd = traj
-            .accel_at(0.0)
-            .expect("Bang-bang trajectory should always have a valid accel at t=0.0");
-        // Calculate the twist that should be achieved at the next time step after applying this acceleration
-        let next_body_state = traj
-            .state_at(state_estimate, 0.0, self.dt)
-            .expect("Bang-bang trajectory should always have a valid state at t=0.0 + dt");
-        let global_twist_cmd =
-            Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
-        (global_twist_cmd, global_accel_cmd)
-    }
-
-    fn pose_dimensional_feed_forward_backward_control(
+    fn pose_bangbang_pid_control_policy(
         &mut self,
         state_estimate: Vector6f,
         target_pose: Vector3f,
@@ -476,12 +310,12 @@ impl<'a> BodyController<'a> {
         //   2) the target pose has changed
         //   3) the current body configuration has strayed too far from the currently tracked trajectory
         if self.trajectory.is_none() || self.prev_body_cmd.is_none() || self.prev_body_cmd.unwrap() != target_pose ||
-            (self.trajectory_state.x - pose_estimate.x).abs() > self.traj_recompute_error_pos_linear ||
-            (self.trajectory_state.y - pose_estimate.y).abs() > self.traj_recompute_error_pos_linear ||
-            (self.trajectory_state.z - pose_estimate.z).abs() > self.traj_recompute_error_pos_angular ||
-            (self.trajectory_state[(3, 0)] - twist_estimate.x).abs() > self.traj_recompute_error_vel_linear ||
-            (self.trajectory_state[(4, 0)] - twist_estimate.y).abs() > self.traj_recompute_error_vel_linear ||
-            (self.trajectory_state[(5, 0)] - twist_estimate.z).abs() > self.traj_recompute_error_vel_angular
+            (self.trajectory_state.x - pose_estimate.x).abs() > self.traj_recompute_error[(0, 0)] ||
+            (self.trajectory_state.y - pose_estimate.y).abs() > self.traj_recompute_error[(0, 0)] ||
+            (self.trajectory_state.z - pose_estimate.z).abs() > self.traj_recompute_error[(1, 0)] ||
+            (self.trajectory_state[(3, 0)] - twist_estimate.x).abs() > self.traj_recompute_error[(2, 0)] ||
+            (self.trajectory_state[(4, 0)] - twist_estimate.y).abs() > self.traj_recompute_error[(2, 0)] ||
+            (self.trajectory_state[(5, 0)] - twist_estimate.z).abs() > self.traj_recompute_error[(3, 0)]
         {
             self.trajectory = Some(BangBangTraj3D::from_target_pose(
                 state_estimate,
@@ -492,43 +326,22 @@ impl<'a> BodyController<'a> {
             self.trajectory_time = 0.0;
         }
 
-
         // Compute feedforward as the tracked trajectory
-        let feedforward = self.trajectory
+        let ff = self.trajectory
             .as_ref()
             .expect("Trajectory should always be Some at this point since we set it if it was None above")
             .accel_at(self.trajectory_time)
             .expect("Trajectory should always have valid accel at current time");
 
-        let mut feedback = Vector3f::default();
-
-        // Use each dimension's PID controller to calculate feedback on positional error with tracked trajectory
-        let target_x: Vector1f = self.trajectory_state.fixed_rows::<1>(0).into();
-        let current_x: Vector1f = pose_estimate.fixed_rows::<1>(0).into();
-        feedback.x = self.pose_pid_controller_x.calculate(
-            &target_x, 
-            &current_x,
-            self.dt
-        )[(0, 0)];
-
-        let target_y: Vector1f = self.trajectory_state.fixed_rows::<1>(1).into();
-        let current_y: Vector1f = pose_estimate.fixed_rows::<1>(1).into();
-        feedback.y = self.pose_pid_controller_y.calculate(
-            &target_y, 
-            &current_y,
-            self.dt
-        )[(0, 0)];
-
-        let target_theta: Vector1f = self.trajectory_state.fixed_rows::<1>(2).into();
-        let current_theta: Vector1f = pose_estimate.fixed_rows::<1>(2).into();
-        feedback.z = self.pose_pid_controller_theta.calculate(
-            &target_theta, 
-            &current_theta,
-            self.dt
-        )[(0, 0)];
+        let target: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
+        let fb = self.body_pid_controller.calculate(
+            &target,
+            &pose_estimate,
+            self.dt,
+        );
 
         // Weighted sum of feedback and feedforward terms to calculate the accel command
-        let global_accel_cmd = self.feedforward_gain * feedforward + self.feedback_gain * feedback;
+        let global_accel_cmd = self.feedforward_gain * ff + self.feedback_gain * fb;
 
         let global_twist_cmd: Vector3f = (state_estimate.fixed_rows::<3>(3) + global_accel_cmd * self.dt).into();
 
@@ -539,221 +352,6 @@ impl<'a> BodyController<'a> {
             .expect("Trajectory should always have valid state at current time + dt");
 
         self.trajectory_state = next_state;
-        self.trajectory_time += self.dt;
-        
-        self.prev_body_cmd = Some(target_pose);
-
-        (global_twist_cmd, global_accel_cmd)
-
-    }
-
-    fn pose_dualmode_control(
-        &mut self,
-        state_estimate: Vector6f,
-        target_pose: Vector3f,
-    ) -> (Vector3f, Vector3f) {
-        let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
-        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-
-        let pose_error: Vector3f = target_pose - pose_estimate;
-        let linear_error = sqrtf(pose_error.x * pose_error.x + pose_error.y * pose_error.y);
-        let angular_error = pose_error.z.abs();
-        // Target pose implies zero velocity, so velocity error is the current velocity magnitude
-        let linear_vel_error =
-            sqrtf(twist_estimate.x * twist_estimate.x + twist_estimate.y * twist_estimate.y);
-        let angular_vel_error = twist_estimate.z.abs();
-
-        let hyst = &self.pose_control_hysteresis;
-
-        // Dual-mode switching with hysteresis:
-        //  - Switch to PID when both position and velocity errors drop below the enter thresholds
-        //  - Switch back to bang-bang when any position or velocity error rises above the exit thresholds
-        match self.pose_control_mode_x {
-            PoseControlMode::BangBang => {
-                if linear_error < hyst.pid_enter_error_pos_linear
-                    && angular_error < hyst.pid_enter_error_pos_angular
-                    && linear_vel_error < hyst.pid_enter_error_vel_linear
-                    && angular_vel_error < hyst.pid_enter_error_vel_angular
-                {
-                    self.pose_control_mode_x = PoseControlMode::Pid;
-                    self.pose_control_mode_y = PoseControlMode::Pid;
-                    self.pose_control_mode_theta = PoseControlMode::Pid;
-                    self.pose_pid_controller.reset();
-                }
-            }
-            PoseControlMode::Pid => {
-                if linear_error > hyst.pid_exit_error_pos_linear
-                    || angular_error > hyst.pid_exit_error_pos_angular
-                    || linear_vel_error > hyst.pid_exit_error_vel_linear
-                    || angular_vel_error > hyst.pid_exit_error_vel_angular
-                {
-                    self.pose_control_mode_x = PoseControlMode::BangBang;
-                    self.pose_control_mode_y = PoseControlMode::BangBang;
-                    self.pose_control_mode_theta = PoseControlMode::BangBang;
-                }
-            }
-        }
-
-        match self.pose_control_mode_x {
-            PoseControlMode::BangBang => self.pose_bangbang_control(state_estimate, target_pose),
-            PoseControlMode::Pid => self.pose_pid_control(state_estimate, target_pose),
-        }
-    }
-
-    fn pose_dimensional_dualmode_control(
-        &mut self,
-        state_estimate: Vector6f,
-        target_pose: Vector3f,
-    ) -> (Vector3f, Vector3f) {
-        let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
-        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-
-        // Compute trajectory to target pose if
-        //   1) we don't have a trajectory yet
-        //   2) the target pose has changed
-        //   3) the current body configuration has strayed too far from the currently tracked trajectory
-        if self.trajectory.is_none() || self.prev_body_cmd.is_none() || self.prev_body_cmd.unwrap() != target_pose ||
-            (self.trajectory_state.x - pose_estimate.x).abs() > self.traj_recompute_error_pos_linear ||
-            (self.trajectory_state.y - pose_estimate.y).abs() > self.traj_recompute_error_pos_linear ||
-            (self.trajectory_state.z - pose_estimate.z).abs() > self.traj_recompute_error_pos_angular ||
-            (self.trajectory_state[(3, 0)] - twist_estimate.x).abs() > self.traj_recompute_error_vel_linear ||
-            (self.trajectory_state[(4, 0)] - twist_estimate.y).abs() > self.traj_recompute_error_vel_linear ||
-            (self.trajectory_state[(5, 0)] - twist_estimate.z).abs() > self.traj_recompute_error_vel_angular
-        {
-            self.trajectory = Some(BangBangTraj3D::from_target_pose(
-                state_estimate,
-                target_pose,
-                self.trajectory_params,
-            ).expect("Failed to generate trajectory, check that trajectory params are valid"));
-            self.trajectory_state = state_estimate;
-            self.trajectory_time = 0.0;
-        }
-
-        // For each dimension, determine whether to use bang-bang or PID control
-        match self.pose_control_mode_x {
-            PoseControlMode::BangBang => {
-                if (pose_estimate.x - target_pose.x).abs() < self.pose_control_hysteresis.pid_enter_error_pos_linear &&
-                    twist_estimate.x.abs() < self.pose_control_hysteresis.pid_enter_error_vel_linear
-                {
-                    self.pose_control_mode_x = PoseControlMode::Pid;
-                    self.pose_pid_controller_x.reset();
-                }
-            }
-            PoseControlMode::Pid => {
-                if (pose_estimate.x - target_pose.x).abs() > self.pose_control_hysteresis.pid_exit_error_pos_linear ||
-                    twist_estimate.x.abs() > self.pose_control_hysteresis.pid_exit_error_vel_linear
-                {
-                    self.pose_control_mode_x = PoseControlMode::BangBang;
-                }
-            }
-        }
-        match self.pose_control_mode_y {
-            PoseControlMode::BangBang => {
-                if (pose_estimate.y - target_pose.y).abs() < self.pose_control_hysteresis.pid_enter_error_pos_linear &&
-                    twist_estimate.y.abs() < self.pose_control_hysteresis.pid_enter_error_vel_linear
-                {
-                    self.pose_control_mode_y = PoseControlMode::Pid;
-                    self.pose_pid_controller_y.reset();
-                }
-            }
-            PoseControlMode::Pid => {
-                if (pose_estimate.y - target_pose.y).abs() > self.pose_control_hysteresis.pid_exit_error_pos_linear ||
-                    twist_estimate.y.abs() > self.pose_control_hysteresis.pid_exit_error_vel_linear
-                {
-                    self.pose_control_mode_y = PoseControlMode::BangBang;
-                }
-            }
-        }
-        match self.pose_control_mode_theta {
-            PoseControlMode::BangBang => {
-                if (pose_estimate.z - target_pose.z).abs() < self.pose_control_hysteresis.pid_enter_error_pos_angular &&
-                    twist_estimate.z.abs() < self.pose_control_hysteresis.pid_enter_error_vel_angular
-                {
-                    self.pose_control_mode_theta = PoseControlMode::Pid;
-                    self.pose_pid_controller_theta.reset();
-                }
-            }
-            PoseControlMode::Pid => {
-                if (pose_estimate.z - target_pose.z).abs() > self.pose_control_hysteresis.pid_exit_error_pos_angular ||
-                    twist_estimate.z.abs() > self.pose_control_hysteresis.pid_exit_error_vel_angular
-                {
-                    self.pose_control_mode_theta = PoseControlMode::BangBang;
-                }
-            }
-        }
-
-        let mut global_accel_cmd = Vector3f::default();
-
-        // For each dimension, compute control output based on the active control mode
-        match self.pose_control_mode_x {
-            PoseControlMode::BangBang => {
-                global_accel_cmd.x = self.trajectory
-                    .as_ref()
-                    .expect("Trajectory should always be Some at this point since we set it if it was None above")
-                    .accel_at(self.trajectory_time)
-                    .expect("Trajectory should always have valid accel at current time")
-                    .x;
-            },
-            PoseControlMode::Pid => {
-                // let target_x: Vector1f = target_pose.fixed_rows::<1>(0).into();
-                let target_x: Vector1f = self.trajectory_state.fixed_rows::<1>(0).into();
-                let current_x: Vector1f = pose_estimate.fixed_rows::<1>(0).into();
-                global_accel_cmd.x = self.pose_pid_controller_x.calculate(
-                    &target_x, 
-                    &current_x,
-                    self.dt
-                )[(0, 0)];
-            },
-        }
-        match self.pose_control_mode_y {
-            PoseControlMode::BangBang => {
-                global_accel_cmd.y = self.trajectory
-                    .as_ref()
-                    .expect("Trajectory should always be Some at this point since we set it if it was None above")
-                    .accel_at(self.trajectory_time)
-                    .expect("Trajectory should always have valid accel at current time")
-                    .y;
-            },
-            PoseControlMode::Pid => {
-                // let target_y: Vector1f = target_pose.fixed_rows::<1>(1).into();
-                let target_y: Vector1f = self.trajectory_state.fixed_rows::<1>(1).into();
-                let current_y: Vector1f = pose_estimate.fixed_rows::<1>(1).into();
-                global_accel_cmd.y = self.pose_pid_controller_y.calculate(
-                    &target_y, 
-                    &current_y,
-                    self.dt
-                )[(0, 0)];
-            },
-        }
-        match self.pose_control_mode_theta {
-            PoseControlMode::BangBang => {
-                global_accel_cmd.z = self.trajectory
-                    .as_ref()
-                    .expect("Trajectory should always be Some at this point since we set it if it was None above")
-                    .accel_at(self.trajectory_time)
-                    .expect("Trajectory should always have valid accel at current time")
-                    .z;
-            },
-            PoseControlMode::Pid => {
-                // let target_theta: Vector1f = target_pose.fixed_rows::<1>(2).into();
-                let target_theta: Vector1f = self.trajectory_state.fixed_rows::<1>(2).into();
-                let current_theta: Vector1f = pose_estimate.fixed_rows::<1>(2).into();
-                global_accel_cmd.z = self.pose_pid_controller_theta.calculate(
-                    &target_theta, 
-                    &current_theta,
-                    self.dt
-                )[(0, 0)];
-            },
-        }
-
-        let global_twist_cmd = state_estimate.fixed_rows::<3>(3) + global_accel_cmd * self.dt;
-
-        // Step trajectory forward
-        self.trajectory_state = self.trajectory
-            .as_ref()
-            .expect("Trajectory should always be Some at this point since we set it if it was None above")
-            .state_at(self.trajectory_state, self.trajectory_time, self.trajectory_time + self.dt)
-            .expect("Trajectory should always have valid state at current time + dt");
         self.trajectory_time += self.dt;
         
         self.prev_body_cmd = Some(target_pose);
@@ -1435,3 +1033,303 @@ impl<'a> ParameterInterface for BodyController<'a> {
         return Ok(reply_cmd);
     }
 }
+
+// /// Active control mode for pose control, used for bang-bang / PID hysteresis.
+// #[derive(Clone, Copy, Debug, PartialEq)]
+// pub enum PoseControlMode {
+//     /// Bang-bang trajectory controller (used for large errors)
+//     BangBang,
+//     /// PID controller (used once error is small)
+//     Pid,
+// }
+
+// /// Hysteresis thresholds for switching between bang-bang and PID control.
+// #[derive(Clone, Copy, Debug)]
+// pub struct PoseControlHysteresis {
+//     /// Linear position error below which we switch from bang-bang to PID
+//     pub pid_enter_error_pos_linear: f32,
+//     /// Angular position error below which we switch from bang-bang to PID
+//     pub pid_enter_error_pos_angular: f32,
+//     /// Linear position error above which we switch from PID back to bang-bang
+//     pub pid_exit_error_pos_linear: f32,
+//     /// Angular position error above which we switch from PID back to bang-bang
+//     pub pid_exit_error_pos_angular: f32,
+//     /// Linear velocity error below which we switch from bang-bang to PID
+//     pub pid_enter_error_vel_linear: f32,
+//     /// Angular velocity error below which we switch from bang-bang to PID
+//     pub pid_enter_error_vel_angular: f32,
+//     /// Linear velocity error above which we switch from PID back to bang-bang
+//     pub pid_exit_error_vel_linear: f32,
+//     /// Angular velocity error above which we switch from PID back to bang-bang
+//     pub pid_exit_error_vel_angular: f32,
+// }
+
+// impl Default for PoseControlHysteresis {
+//     fn default() -> Self {
+//         PoseControlHysteresis {
+//             pid_enter_error_pos_linear: 0.05, // meters
+//             pid_enter_error_pos_angular: 0.2, // radians
+//             pid_exit_error_pos_linear: 0.1,   // meters (larger than enter for hysteresis)
+//             pid_exit_error_pos_angular: 0.4,  // radians (larger than enter for hysteresis)
+//             pid_enter_error_vel_linear: 0.2,  // m/s
+//             pid_enter_error_vel_angular: 0.5, // rad/s
+//             pid_exit_error_vel_linear: 0.4,   // m/s (larger than enter for hysteresis)
+//             pid_exit_error_vel_angular: 0.8,  // rad/s (larger than enter for hysteresis)
+//         }
+//     }
+// }
+
+// fn pose_pid_control(
+//     &mut self,
+//     state_estimate: Vector6f,
+//     target_pose: Vector3f,
+// ) -> (Vector3f, Vector3f) {
+//     let global_accel_cmd = self.body_pid_controller.calculate(
+//         &target_pose,
+//         &state_estimate.fixed_rows::<3>(0).into(),
+//         self.dt,
+//     );
+//     let global_twist_cmd = state_estimate.fixed_rows::<3>(3) + self.body_accel_out * self.dt;
+//     (global_twist_cmd, global_accel_cmd)
+// }
+
+// fn pose_bangbang_control(
+//     &mut self,
+//     state_estimate: Vector6f,
+//     target_pose: Vector3f,
+// ) -> (Vector3f, Vector3f) {
+//     // Calculate the optimal trajectory to the setpoint
+//     let traj = BangBangTraj3D::from_target_pose(
+//         state_estimate,
+//         target_pose,
+//         self.trajectory_params,
+//     )
+//     .expect(
+//         "Failed to generate bang-bang trajectory, check that trajectory parameters are valid",
+//     );
+//     // Calculate the acceleration needed to achieve the trajectory right now
+//     let global_accel_cmd = traj
+//         .accel_at(0.0)
+//         .expect("Bang-bang trajectory should always have a valid accel at t=0.0");
+//     // Calculate the twist that should be achieved at the next time step after applying this acceleration
+//     let next_body_state = traj
+//         .state_at(state_estimate, 0.0, self.dt)
+//         .expect("Bang-bang trajectory should always have a valid state at t=0.0 + dt");
+//     let global_twist_cmd =
+//         Vector3f::new(next_body_state[3], next_body_state[4], next_body_state[5]);
+//     (global_twist_cmd, global_accel_cmd)
+// }
+
+// fn pose_dualmode_control(
+//     &mut self,
+//     state_estimate: Vector6f,
+//     target_pose: Vector3f,
+// ) -> (Vector3f, Vector3f) {
+//     let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
+//     let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+
+//     let pose_error: Vector3f = target_pose - pose_estimate;
+//     let linear_error = sqrtf(pose_error.x * pose_error.x + pose_error.y * pose_error.y);
+//     let angular_error = pose_error.z.abs();
+//     // Target pose implies zero velocity, so velocity error is the current velocity magnitude
+//     let linear_vel_error =
+//         sqrtf(twist_estimate.x * twist_estimate.x + twist_estimate.y * twist_estimate.y);
+//     let angular_vel_error = twist_estimate.z.abs();
+
+//     let hyst = &self.pose_control_hysteresis;
+
+//     // Dual-mode switching with hysteresis:
+//     //  - Switch to PID when both position and velocity errors drop below the enter thresholds
+//     //  - Switch back to bang-bang when any position or velocity error rises above the exit thresholds
+//     match self.pose_control_mode_x {
+//         PoseControlMode::BangBang => {
+//             if linear_error < hyst.pid_enter_error_pos_linear
+//                 && angular_error < hyst.pid_enter_error_pos_angular
+//                 && linear_vel_error < hyst.pid_enter_error_vel_linear
+//                 && angular_vel_error < hyst.pid_enter_error_vel_angular
+//             {
+//                 self.pose_control_mode_x = PoseControlMode::Pid;
+//                 self.pose_control_mode_y = PoseControlMode::Pid;
+//                 self.pose_control_mode_theta = PoseControlMode::Pid;
+//                 self.pose_pid_controller.reset();
+//             }
+//         }
+//         PoseControlMode::Pid => {
+//             if linear_error > hyst.pid_exit_error_pos_linear
+//                 || angular_error > hyst.pid_exit_error_pos_angular
+//                 || linear_vel_error > hyst.pid_exit_error_vel_linear
+//                 || angular_vel_error > hyst.pid_exit_error_vel_angular
+//             {
+//                 self.pose_control_mode_x = PoseControlMode::BangBang;
+//                 self.pose_control_mode_y = PoseControlMode::BangBang;
+//                 self.pose_control_mode_theta = PoseControlMode::BangBang;
+//             }
+//         }
+//     }
+
+//     match self.pose_control_mode_x {
+//         PoseControlMode::BangBang => self.pose_bangbang_control(state_estimate, target_pose),
+//         PoseControlMode::Pid => self.pose_pid_control(state_estimate, target_pose),
+//     }
+// }
+
+// fn pose_dimensional_dualmode_control(
+//     &mut self,
+//     state_estimate: Vector6f,
+//     target_pose: Vector3f,
+// ) -> (Vector3f, Vector3f) {
+//     let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
+//     let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+
+//     // Compute trajectory to target pose if
+//     //   1) we don't have a trajectory yet
+//     //   2) the target pose has changed
+//     //   3) the current body configuration has strayed too far from the currently tracked trajectory
+//     if self.trajectory.is_none() || self.prev_body_cmd.is_none() || self.prev_body_cmd.unwrap() != target_pose ||
+//         (self.trajectory_state.x - pose_estimate.x).abs() > self.traj_recompute_error_pos_linear ||
+//         (self.trajectory_state.y - pose_estimate.y).abs() > self.traj_recompute_error_pos_linear ||
+//         (self.trajectory_state.z - pose_estimate.z).abs() > self.traj_recompute_error_pos_angular ||
+//         (self.trajectory_state[(3, 0)] - twist_estimate.x).abs() > self.traj_recompute_error_vel_linear ||
+//         (self.trajectory_state[(4, 0)] - twist_estimate.y).abs() > self.traj_recompute_error_vel_linear ||
+//         (self.trajectory_state[(5, 0)] - twist_estimate.z).abs() > self.traj_recompute_error_vel_angular
+//     {
+//         self.trajectory = Some(BangBangTraj3D::from_target_pose(
+//             state_estimate,
+//             target_pose,
+//             self.trajectory_params,
+//         ).expect("Failed to generate trajectory, check that trajectory params are valid"));
+//         self.trajectory_state = state_estimate;
+//         self.trajectory_time = 0.0;
+//     }
+
+//     // For each dimension, determine whether to use bang-bang or PID control
+//     match self.pose_control_mode_x {
+//         PoseControlMode::BangBang => {
+//             if (pose_estimate.x - target_pose.x).abs() < self.pose_control_hysteresis.pid_enter_error_pos_linear &&
+//                 twist_estimate.x.abs() < self.pose_control_hysteresis.pid_enter_error_vel_linear
+//             {
+//                 self.pose_control_mode_x = PoseControlMode::Pid;
+//                 self.pose_pid_controller_x.reset();
+//             }
+//         }
+//         PoseControlMode::Pid => {
+//             if (pose_estimate.x - target_pose.x).abs() > self.pose_control_hysteresis.pid_exit_error_pos_linear ||
+//                 twist_estimate.x.abs() > self.pose_control_hysteresis.pid_exit_error_vel_linear
+//             {
+//                 self.pose_control_mode_x = PoseControlMode::BangBang;
+//             }
+//         }
+//     }
+//     match self.pose_control_mode_y {
+//         PoseControlMode::BangBang => {
+//             if (pose_estimate.y - target_pose.y).abs() < self.pose_control_hysteresis.pid_enter_error_pos_linear &&
+//                 twist_estimate.y.abs() < self.pose_control_hysteresis.pid_enter_error_vel_linear
+//             {
+//                 self.pose_control_mode_y = PoseControlMode::Pid;
+//                 self.pose_pid_controller_y.reset();
+//             }
+//         }
+//         PoseControlMode::Pid => {
+//             if (pose_estimate.y - target_pose.y).abs() > self.pose_control_hysteresis.pid_exit_error_pos_linear ||
+//                 twist_estimate.y.abs() > self.pose_control_hysteresis.pid_exit_error_vel_linear
+//             {
+//                 self.pose_control_mode_y = PoseControlMode::BangBang;
+//             }
+//         }
+//     }
+//     match self.pose_control_mode_theta {
+//         PoseControlMode::BangBang => {
+//             if (pose_estimate.z - target_pose.z).abs() < self.pose_control_hysteresis.pid_enter_error_pos_angular &&
+//                 twist_estimate.z.abs() < self.pose_control_hysteresis.pid_enter_error_vel_angular
+//             {
+//                 self.pose_control_mode_theta = PoseControlMode::Pid;
+//                 self.pose_pid_controller_theta.reset();
+//             }
+//         }
+//         PoseControlMode::Pid => {
+//             if (pose_estimate.z - target_pose.z).abs() > self.pose_control_hysteresis.pid_exit_error_pos_angular ||
+//                 twist_estimate.z.abs() > self.pose_control_hysteresis.pid_exit_error_vel_angular
+//             {
+//                 self.pose_control_mode_theta = PoseControlMode::BangBang;
+//             }
+//         }
+//     }
+
+//     let mut global_accel_cmd = Vector3f::default();
+
+//     // For each dimension, compute control output based on the active control mode
+//     match self.pose_control_mode_x {
+//         PoseControlMode::BangBang => {
+//             global_accel_cmd.x = self.trajectory
+//                 .as_ref()
+//                 .expect("Trajectory should always be Some at this point since we set it if it was None above")
+//                 .accel_at(self.trajectory_time)
+//                 .expect("Trajectory should always have valid accel at current time")
+//                 .x;
+//         },
+//         PoseControlMode::Pid => {
+//             // let target_x: Vector1f = target_pose.fixed_rows::<1>(0).into();
+//             let target_x: Vector1f = self.trajectory_state.fixed_rows::<1>(0).into();
+//             let current_x: Vector1f = pose_estimate.fixed_rows::<1>(0).into();
+//             global_accel_cmd.x = self.pose_pid_controller_x.calculate(
+//                 &target_x, 
+//                 &current_x,
+//                 self.dt
+//             )[(0, 0)];
+//         },
+//     }
+//     match self.pose_control_mode_y {
+//         PoseControlMode::BangBang => {
+//             global_accel_cmd.y = self.trajectory
+//                 .as_ref()
+//                 .expect("Trajectory should always be Some at this point since we set it if it was None above")
+//                 .accel_at(self.trajectory_time)
+//                 .expect("Trajectory should always have valid accel at current time")
+//                 .y;
+//         },
+//         PoseControlMode::Pid => {
+//             // let target_y: Vector1f = target_pose.fixed_rows::<1>(1).into();
+//             let target_y: Vector1f = self.trajectory_state.fixed_rows::<1>(1).into();
+//             let current_y: Vector1f = pose_estimate.fixed_rows::<1>(1).into();
+//             global_accel_cmd.y = self.pose_pid_controller_y.calculate(
+//                 &target_y, 
+//                 &current_y,
+//                 self.dt
+//             )[(0, 0)];
+//         },
+//     }
+//     match self.pose_control_mode_theta {
+//         PoseControlMode::BangBang => {
+//             global_accel_cmd.z = self.trajectory
+//                 .as_ref()
+//                 .expect("Trajectory should always be Some at this point since we set it if it was None above")
+//                 .accel_at(self.trajectory_time)
+//                 .expect("Trajectory should always have valid accel at current time")
+//                 .z;
+//         },
+//         PoseControlMode::Pid => {
+//             // let target_theta: Vector1f = target_pose.fixed_rows::<1>(2).into();
+//             let target_theta: Vector1f = self.trajectory_state.fixed_rows::<1>(2).into();
+//             let current_theta: Vector1f = pose_estimate.fixed_rows::<1>(2).into();
+//             global_accel_cmd.z = self.pose_pid_controller_theta.calculate(
+//                 &target_theta, 
+//                 &current_theta,
+//                 self.dt
+//             )[(0, 0)];
+//         },
+//     }
+
+//     let global_twist_cmd = state_estimate.fixed_rows::<3>(3) + global_accel_cmd * self.dt;
+
+//     // Step trajectory forward
+//     self.trajectory_state = self.trajectory
+//         .as_ref()
+//         .expect("Trajectory should always be Some at this point since we set it if it was None above")
+//         .state_at(self.trajectory_state, self.trajectory_time, self.trajectory_time + self.dt)
+//         .expect("Trajectory should always have valid state at current time + dt");
+//     self.trajectory_time += self.dt;
+    
+//     self.prev_body_cmd = Some(target_pose);
+
+//     (global_twist_cmd, global_accel_cmd)
+// }
