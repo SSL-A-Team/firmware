@@ -1,7 +1,6 @@
 use ateam_common_packets::{
     bindings::{
-        BasicControl, BasicTelemetry, CcmMotionControlType, KickerTelemetry, MotionCommandType,
-        PowerTelemetry,
+        BasicControl, BasicTelemetry, CcmMotionControlType, ExtendedTelemetry, KickerTelemetry, MotionCommandType, PowerTelemetry
     },
     radio::TelemetryPacket,
 };
@@ -123,9 +122,9 @@ pub struct ControlTask<
     power_telemetry_subscriber: PowerTelemetrySubscriber,
     kicker_telemetry_subscriber: KickerTelemetrySubscriber,
 
-    last_gyro_rads: f32,
-    last_accel_x_ms: f32,
-    last_accel_y_ms: f32,
+    last_imu_gyro_theta: f32,
+    last_imu_accel_x: f32,
+    last_imu_accel_y: f32,
     last_command: BasicControl,
     last_power_telemetry: PowerTelemetry,
     last_kicker_telemetry: KickerTelemetry,
@@ -167,9 +166,9 @@ impl<
             accel_subscriber: accel_subscriber,
             power_telemetry_subscriber,
             kicker_telemetry_subscriber,
-            last_gyro_rads: 0.0,
-            last_accel_x_ms: 0.0,
-            last_accel_y_ms: 0.0,
+            last_imu_gyro_theta: 0.0,
+            last_imu_accel_x: 0.0,
+            last_imu_accel_y: 0.0,
             last_command: Default::default(),
             last_power_telemetry: Default::default(),
             last_kicker_telemetry: Default::default(),
@@ -242,11 +241,6 @@ impl<
                 self.last_kicker_telemetry.error_detected() as u32,
                 false as u32, // chipper available
                 (!cur_state.kicker_inop && self.last_kicker_telemetry.error_detected() == 0) as u32,
-                self.last_command.body_pose_control_enabled(),
-                self.last_command.body_twist_control_enabled(),
-                self.last_command.body_accel_control_enabled(),
-                self.last_command.wheel_vel_control_enabled(),
-                self.last_command.wheel_torque_control_enabled(),
                 Default::default(),
             ),
             battery_percent: self.last_power_telemetry.battery_info.battery_pct as u16,
@@ -259,31 +253,27 @@ impl<
             self.ticks_since_basic_telem = 0;
         }
 
-        let mut control_debug_telem = robot_controller.get_control_debug_telem();
-
-        control_debug_telem.timestamp_us_lo = (timestamp_us & 0xFFFFFFFF) as u32;
-        control_debug_telem.timestamp_us_hi = ((timestamp_us >> 32) & 0xFFFFFFFF) as u32;
-
-        control_debug_telem.front_left_motor = self.motor_fl.get_latest_state();
-        control_debug_telem.back_left_motor = self.motor_bl.get_latest_state();
-        control_debug_telem.back_right_motor = self.motor_br.get_latest_state();
-        control_debug_telem.front_right_motor = self.motor_fr.get_latest_state();
-
-        control_debug_telem.imu_accel[0] = self.last_accel_x_ms;
-        control_debug_telem.imu_accel[1] = self.last_accel_y_ms;
-
-        // control_debug_telem.kicker_status = self.last_kicker_telemetry;
-        // control_debug_telem.power_status = self.last_power_telemetry;
+        let debug_telem = ExtendedTelemetry {
+            timestamp_us_lo: (timestamp_us & 0xFFFFFFFF) as u32,
+            timestamp_us_hi: ((timestamp_us >> 32) & 0xFFFFFFFF) as u32,
+            // power_status: self.last_power_telemetry,
+            front_left_motor: self.motor_fl.get_latest_state(),
+            back_left_motor: self.motor_bl.get_latest_state(),
+            back_right_motor: self.motor_br.get_latest_state(),
+            front_right_motor: self.motor_fr.get_latest_state(),
+            // kicker_status: self.last_kicker_telemetry,
+            body_control_telemetry: robot_controller.get_control_debug_telem(),
+        };
 
         // Send extended telemetry if vision update was received, or if the extended telemetry interval has elapsed
-        let vision_update = control_debug_telem.vision_update() != 0;
-        let control_debug_telem = TelemetryPacket::Extended(control_debug_telem);
+        let vision_update = debug_telem.body_control_telemetry.vision_update() != 0;
+        let debug_telem_packet = TelemetryPacket::Extended(debug_telem);
         self.ticks_since_extended_telem += 1;
         if cur_state.radio_bridge_ok
             && (self.ticks_since_extended_telem >= EXTENDED_TELEM_INTERVAL_TICKS || vision_update)
         {
             self.telemetry_publisher
-                .publish_immediate(control_debug_telem);
+                .publish_immediate(debug_telem_packet);
             self.ticks_since_extended_telem = 0;
         }
     }
@@ -451,13 +441,13 @@ impl<
                 self.motor_fr.read_rads(),
             );
 
-            while let Some(gyro_rads) = self.gyro_subscriber.try_next_message_pure() {
-                self.last_gyro_rads = gyro_rads[2];
+            while let Some(gyro) = self.gyro_subscriber.try_next_message_pure() {
+                self.last_imu_gyro_theta = gyro[2];
             }
 
-            while let Some(accel_ms) = self.accel_subscriber.try_next_message_pure() {
-                self.last_accel_x_ms = accel_ms[0];
-                self.last_accel_y_ms = accel_ms[1];
+            while let Some(accel) = self.accel_subscriber.try_next_message_pure() {
+                self.last_imu_accel_x = accel[0];
+                self.last_imu_accel_y = accel[1];
             }
 
             while let Some(kicker_telemetry) =
@@ -478,13 +468,13 @@ impl<
 
             robot_controller.control_update(
                 cmd,
-                self.last_command.body_pose_control_enabled() != 0,
-                self.last_command.body_twist_control_enabled() != 0,
-                self.last_command.body_accel_control_enabled() != 0,
+                self.last_command.body_control_mode,
                 last_vision_pose_meas,
                 vision_update,
                 wheel_vel_meas,
-                self.last_gyro_rads,
+                self.last_imu_gyro_theta,
+                self.last_imu_accel_x,
+                self.last_imu_accel_y,
                 ticks_since_trace_print >= TRACE_PRINT_INTERVAL_TICKS,
             );
             vision_update = false; // reset vision update flag after use

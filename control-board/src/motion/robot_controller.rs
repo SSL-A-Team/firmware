@@ -5,10 +5,11 @@ use crate::motion::params::body_vel_filter_params::{
 };
 use crate::motion::pid::PidController;
 use crate::parameter_interface::ParameterInterface;
-use ateam_common_packets::bindings::{ParameterCommandCode::*, ParameterDataFormat, ParameterName};
+use ateam_common_packets::bindings::{BodyControlMode, BodyControlTelemetry, ParameterCommandCode::*, ParameterDataFormat, ParameterName};
 use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
 use ateam_controls::robot_model::RobotModel;
 use ateam_controls::{Vector1f, Vector3f, Vector4f, Vector5f, Vector6f, Vector8f};
+use ateam_lib_stm32::drivers::imu;
 use embassy_time::Instant;
 use libm::{fabsf, sqrtf};
 use nalgebra::{matrix, vector, Matrix1x5, Matrix3x5};
@@ -18,22 +19,22 @@ use ateam_common_packets::bindings::{ExtendedTelemetry, ParameterCommand};
 
 pub struct BodyController {
     pub robot_model: RobotModel,
-    pub body_pid_controller: PidController<3>,
-    pub feedforward_gain: f32,
-    pub feedback_gain: f32,
+    pub pose_pid_controller: PidController<3>,
+    /// [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
+    pub pose_control_gain: Vector2f,
+    /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR] thresholds for when to recompute the trajectory
+    pub traj_recompute_error: Vector4f,
     pub trajectory: Option<BangBangTraj3D>,
     pub trajectory_time: f32,
     pub trajectory_state: Vector6f,
     pub trajectory_params: TrajectoryParams,
-    /// linear_position_error, angular_position_error, linear_velocity_error, angular_velocity_error
-    pub traj_recompute_error: Vector4f,
     pub prev_body_cmd: Option<Vector3f>,
     pub body_twist_out: Vector3f,
     pub body_accel_out: Vector3f,
     pub body_accel_out_fric_comp: Vector3f,
     pub wheel_vel_out: Vector4f,
     pub wheel_torque_out: Vector4f,
-    pub debug_telemetry: ExtendedTelemetry,
+    pub telemetry: BodyControlTelemetry,
     pub dt: f32,
 }
 
@@ -44,29 +45,27 @@ impl<'a> BodyController {
         BodyController {
             robot_model: RobotModel::new_from_default_params(dt)
                 .expect("Failed to create RobotModel, check that default parameters are valid"),
-            body_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
-            feedforward_gain: 1.0,
-            feedback_gain: 1.0,
+            pose_pid_controller: PidController::<3>::from_gains_matrix(&Matrix3x5::zeros()),
+            pose_control_gain: Vector2f::new(1.0, 1.0),
+            traj_recompute_error: Vector4f::new(0.5, 1.0, 1.0, 2.0),
             trajectory: None,
             trajectory_state: Vector6f::zeros(),
             trajectory_params: TrajectoryParams::default(),
             trajectory_time: 0.0,
-            // linear_position_error, angular_position_error, linear_velocity_error, angular_velocity_error
-            traj_recompute_error: Vector4f::new(0.5, 1.0, 1.0, 2.0),
             prev_body_cmd: None,
             body_twist_out: Vector3f::default(),
             body_accel_out: Vector3f::default(),
             body_accel_out_fric_comp: Vector3f::default(),
             wheel_vel_out: Vector4f::default(),
             wheel_torque_out: Vector4f::default(),
-            debug_telemetry: Default::default(),
+            telemetry: Default::default(),
             dt,
         }
     }
 
     pub fn reset(&mut self) {
         self.robot_model.reset();
-        self.body_pid_controller.reset();
+        self.pose_pid_controller.reset();
         self.trajectory = None;
         self.trajectory_state = Vector6f::default();
         self.trajectory_time = 0.0;
@@ -76,19 +75,19 @@ impl<'a> BodyController {
         self.body_accel_out_fric_comp = Vector3f::default();
         self.wheel_vel_out = Vector4f::default();
         self.wheel_torque_out = Vector4f::default();
-        self.debug_telemetry = Default::default();
+        self.telemetry = Default::default();
     }
 
     pub fn control_update(
         &mut self,
         body_cmd: Vector3f,
-        body_pose_control_enabled: bool,
-        body_twist_control_enabled: bool,
-        body_accel_control_enabled: bool,
+        body_control_mode: BodyControlMode::Type,
         vision_pose_meas: Vector3f,
         vision_update: bool,
         wheel_vel_meas: Vector4f,
-        gyro_theta_meas: f32,
+        imu_gyro_theta_meas: f32,
+        imu_accel_x_meas: f32,
+        imu_accel_y_meas: f32,
         trace: bool,
     ) {
         let mut start = Instant::now();
@@ -99,7 +98,7 @@ impl<'a> BodyController {
             vision_pose_meas,
             vision_update,
             wheel_vel_meas,
-            gyro_theta_meas,
+            imu_gyro_theta_meas,
         );
 
         let mut state_estimate = self.robot_model.get_state();
@@ -130,11 +129,11 @@ impl<'a> BodyController {
         let kf_update_time = Instant::now() - start;
         start = Instant::now();
 
-        if body_pose_control_enabled {
+        if body_control_mode == BodyControlMode::BCM_GLOBAL_POSE {
             self.compute_effort_pose_control(state_estimate, body_cmd);
-        } else if body_twist_control_enabled {
+        } else if body_control_mode == BodyControlMode::BCM_GLOBAL_TWIST {
             self.compute_effort_twist_control(state_estimate, body_cmd);
-        } else if body_accel_control_enabled {
+        } else if body_control_mode == BodyControlMode::BCM_GLOBAL_ACCEL {
             self.compute_effort_accel_control(state_estimate, body_cmd);
         } else {
             self.body_twist_out = Vector3f::default();
@@ -156,47 +155,28 @@ impl<'a> BodyController {
         // );
 
         // Copy values to telemetry
-        self.debug_telemetry
-            .set_body_pose_control_enabled(body_pose_control_enabled as u32);
-        self.debug_telemetry
-            .set_body_twist_control_enabled(body_twist_control_enabled as u32);
-        self.debug_telemetry
-            .set_body_accel_control_enabled(body_accel_control_enabled as u32);
-        self.debug_telemetry.set_vision_update(vision_update as u32);
-        self.debug_telemetry.imu_gyro[2] = gyro_theta_meas;
-        self.debug_telemetry
-            .vision_pose
-            .copy_from_slice(&vision_pose_meas.as_slice());
-        self.debug_telemetry
-            .body_cmd
-            .copy_from_slice(body_cmd.as_slice());
-        self.debug_telemetry
-            .body_traj_pose
-            .copy_from_slice(self.trajectory_state.fixed_rows::<3>(0).as_slice());
-        self.debug_telemetry
-            .body_traj_twist
-            .copy_from_slice(self.trajectory_state.fixed_rows::<3>(3).as_slice());
-        self.debug_telemetry
-            .kf_body_pose_prediction
-            .copy_from_slice(&state_prediction.as_slice()[0..3]);
-        self.debug_telemetry
-            .kf_body_twist_prediction
-            .copy_from_slice(&state_prediction.as_slice()[3..6]);
-        self.debug_telemetry
-            .kf_body_pose_estimate
-            .copy_from_slice(&state_estimate.as_slice()[0..3]);
-        self.debug_telemetry
-            .kf_body_twist_estimate
-            .copy_from_slice(&state_estimate.as_slice()[3..6]);
-        self.debug_telemetry
-            .body_twist_u
-            .copy_from_slice(self.body_twist_out.as_slice());
-        self.debug_telemetry
-            .body_accel_u
-            .copy_from_slice(self.body_accel_out.as_slice());
-        self.debug_telemetry
-            .body_accel_u_fric_comp
-            .copy_from_slice(self.body_accel_out_fric_comp.as_slice());
+        self.telemetry = BodyControlTelemetry {
+            body_control_mode,
+            _bitfield_align_1: Default::default(),
+            _bitfield_1: BodyControlTelemetry::new_bitfield_1(
+                vision_update as u8,
+                Default::default(),
+            ),
+            _reserved2: Default::default(),
+            imu_gyro: [0.0, 0.0, imu_gyro_theta_meas],
+            imu_accel: [imu_accel_x_meas, imu_accel_y_meas, 0.0],
+            vision_pose: vision_pose_meas.into(),
+            body_cmd: body_cmd.into(),
+            body_traj_pose: self.trajectory_state.fixed_rows::<3>(0).into(),
+            body_traj_twist: self.trajectory_state.fixed_rows::<3>(3).into(),
+            kf_body_pose_prediction: state_prediction.fixed_rows::<3>(0).into(),
+            kf_body_twist_prediction: state_prediction.fixed_rows::<3>(3).into(),
+            kf_body_pose_estimate: state_estimate.fixed_rows::<3>(0).into(),
+            kf_body_twist_estimate: state_estimate.fixed_rows::<3>(3).into(),
+            body_twist_u: self.body_twist_out.into(),
+            body_accel_u: self.body_accel_out.into(),
+            body_accel_u_fric_comp: self.body_accel_out_fric_comp.into(),
+        };
 
         let control_outputs_time = Instant::now() - start;
         start = Instant::now();
@@ -228,8 +208,8 @@ impl<'a> BodyController {
         self.robot_model.torques_to_currents(self.wheel_torque_out)
     }
 
-    pub fn get_control_debug_telem(&self) -> ExtendedTelemetry {
-        self.debug_telemetry
+    pub fn get_control_debug_telem(&self) -> BodyControlTelemetry {
+        self.telemetry
     }
 
     fn state_update(
@@ -237,7 +217,7 @@ impl<'a> BodyController {
         vision_pose_meas: Vector3f,
         vision_update: bool,
         wheel_vel_meas: Vector4f,
-        gyro_theta_meas: f32,
+        imu_gyro_theta_meas: f32,
     ) {
         // Use EKF
         let measurement: Vector8f = vector![
@@ -248,7 +228,7 @@ impl<'a> BodyController {
             wheel_vel_meas.y,
             wheel_vel_meas.z,
             wheel_vel_meas.w,
-            gyro_theta_meas,
+            imu_gyro_theta_meas,
         ];
         // TODO: consider what to do here for singular matrix cases - maybe skip the update and just use the prediction as the estimate for this cycle, or add some regularization to the covariance to prevent singularities?
         let res = self
@@ -334,7 +314,7 @@ impl<'a> BodyController {
             .expect("Trajectory should always have valid accel at current time");
 
         let target: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
-        let fb = self.body_pid_controller.calculate(
+        let fb = self.pose_pid_controller.calculate(
             &target,
             &pose_estimate,
             self.dt,
@@ -433,7 +413,7 @@ impl<'a> BodyController {
     }
 }
 
-impl<'a> ParameterInterface for BodyController<'a> {
+impl<'a> ParameterInterface for BodyController {
     fn processes_cmd(&self, param_cmd: &ParameterCommand) -> bool {
         return self.has_name(param_cmd.parameter_name);
     }
@@ -467,9 +447,6 @@ impl<'a> ParameterInterface for BodyController<'a> {
             ParameterName::PIDII_X => true,
             ParameterName::PIDII_Y => true,
             ParameterName::PIDII_THETA => true,
-            ParameterName::PIDII_XD => true,
-            ParameterName::PIDII_YD => true,
-            ParameterName::PIDII_THETAD => true,
             ParameterName::TRAJ_ALLOWABLE_ERROR_POS_LINEAR => true,
             ParameterName::TRAJ_ALLOWABLE_ERROR_POS_ANGULAR => true,
             ParameterName::TRAJ_ALLOWABLE_ERROR_VEL_LINEAR => true,
@@ -478,18 +455,7 @@ impl<'a> ParameterInterface for BodyController<'a> {
             ParameterName::TRAJ_MAX_VEL_ANGULAR => true,
             ParameterName::TRAJ_MAX_ACCEL_LINEAR => true,
             ParameterName::TRAJ_MAX_ACCEL_ANGULAR => true,
-            ParameterName::HYST_PID_ENTER_ERROR_POS_LINEAR => true,
-            ParameterName::HYST_PID_ENTER_ERROR_POS_ANGULAR => true,
-            ParameterName::HYST_PID_EXIT_ERROR_POS_LINEAR => true,
-            ParameterName::HYST_PID_EXIT_ERROR_POS_ANGULAR => true,
-            ParameterName::HYST_PID_ENTER_ERROR_VEL_LINEAR => true,
-            ParameterName::HYST_PID_ENTER_ERROR_VEL_ANGULAR => true,
-            ParameterName::HYST_PID_EXIT_ERROR_VEL_LINEAR => true,
-            ParameterName::HYST_PID_EXIT_ERROR_VEL_ANGULAR => true,
-            ParameterName::TRAJ_RECOMPUTE_ERROR_POS_LINEAR => true,
-            ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_LINEAR => true,
-            ParameterName::TRAJ_RECOMPUTE_ERROR_POS_ANGULAR => true,
-            ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_ANGULAR => true,
+            ParameterName::TRAJ_RECOMPUTE_ERROR => true,
             ParameterName::FEEDFORWARD_GAIN => true,
             ParameterName::FEEDBACK_GAIN => true,
             _ => false,
@@ -521,10 +487,7 @@ impl<'a> ParameterInterface for BodyController<'a> {
         if param_cmd.command_code == PCC_READ {
             defmt::info!("Reading parameter {}", param_cmd.parameter_name);
             match param_cmd.parameter_name {
-                ParameterName::KF_PROCESS_STD_POS_LINEAR
-                | ParameterName::KF_PROCESS_STD_POS_ANGULAR
-                | ParameterName::KF_PROCESS_STD_VEL_LINEAR
-                | ParameterName::KF_PROCESS_STD_VEL_ANGULAR
+                | ParameterName::KF_PROCESS_STD
                 | ParameterName::KF_VISION_STD_LINEAR
                 | ParameterName::KF_VISION_STD_ANGULAR
                 | ParameterName::KF_ENCODER_STD_ANGULAR
@@ -553,18 +516,7 @@ impl<'a> ParameterInterface for BodyController<'a> {
                 | ParameterName::TRAJ_MAX_VEL_ANGULAR
                 | ParameterName::TRAJ_MAX_ACCEL_LINEAR
                 | ParameterName::TRAJ_MAX_ACCEL_ANGULAR
-                | ParameterName::HYST_PID_ENTER_ERROR_POS_LINEAR
-                | ParameterName::HYST_PID_ENTER_ERROR_POS_ANGULAR
-                | ParameterName::HYST_PID_EXIT_ERROR_POS_LINEAR
-                | ParameterName::HYST_PID_EXIT_ERROR_POS_ANGULAR
-                | ParameterName::HYST_PID_ENTER_ERROR_VEL_LINEAR
-                | ParameterName::HYST_PID_ENTER_ERROR_VEL_ANGULAR
-                | ParameterName::HYST_PID_EXIT_ERROR_VEL_LINEAR
-                | ParameterName::HYST_PID_EXIT_ERROR_VEL_ANGULAR
-                | ParameterName::TRAJ_RECOMPUTE_ERROR_POS_LINEAR
-                | ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_LINEAR
-                | ParameterName::TRAJ_RECOMPUTE_ERROR_POS_ANGULAR
-                | ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_ANGULAR
+                | ParameterName::TRAJ_RECOMPUTE_ERROR => {
                 | ParameterName::FEEDFORWARD_GAIN
                 | ParameterName::FEEDBACK_GAIN => {
                     reply_cmd.data_format = ParameterDataFormat::F32;
@@ -663,40 +615,7 @@ impl<'a> ParameterInterface for BodyController<'a> {
                         ParameterName::TRAJ_MAX_ACCEL_ANGULAR => {
                             self.trajectory_params.max_accel_angular
                         }
-                        ParameterName::HYST_PID_ENTER_ERROR_POS_LINEAR => {
-                            self.pose_control_hysteresis.pid_enter_error_pos_linear
-                        }
-                        ParameterName::HYST_PID_ENTER_ERROR_POS_ANGULAR => {
-                            self.pose_control_hysteresis.pid_enter_error_pos_angular
-                        }
-                        ParameterName::HYST_PID_EXIT_ERROR_POS_LINEAR => {
-                            self.pose_control_hysteresis.pid_exit_error_pos_linear
-                        }
-                        ParameterName::HYST_PID_EXIT_ERROR_POS_ANGULAR => {
-                            self.pose_control_hysteresis.pid_exit_error_pos_angular
-                        }
-                        ParameterName::HYST_PID_ENTER_ERROR_VEL_LINEAR => {
-                            self.pose_control_hysteresis.pid_enter_error_vel_linear
-                        }
-                        ParameterName::HYST_PID_ENTER_ERROR_VEL_ANGULAR => {
-                            self.pose_control_hysteresis.pid_enter_error_vel_angular
-                        }
-                        ParameterName::HYST_PID_EXIT_ERROR_VEL_LINEAR => {
-                            self.pose_control_hysteresis.pid_exit_error_vel_linear
-                        }
-                        ParameterName::HYST_PID_EXIT_ERROR_VEL_ANGULAR => {
-                            self.pose_control_hysteresis.pid_exit_error_vel_angular
-                        }
-                        ParameterName::TRAJ_RECOMPUTE_ERROR_POS_LINEAR => {
-                            self.traj_recompute_error_pos_linear
-                        }
-                        ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_LINEAR => {
-                            self.traj_recompute_error_vel_linear
-                        }
-                        ParameterName::TRAJ_RECOMPUTE_ERROR_POS_ANGULAR => {
-                            self.traj_recompute_error_pos_angular
-                        }
-                        ParameterName::TRAJ_RECOMPUTE_ERROR_VEL_ANGULAR => {
+                        ParameterName::TRAJ_RECOMPUTE_ERROR => {
                             self.traj_recompute_error_vel_angular
                         }
                         ParameterName::FEEDFORWARD_GAIN => {
@@ -1084,7 +1003,7 @@ impl<'a> ParameterInterface for BodyController<'a> {
 //     state_estimate: Vector6f,
 //     target_pose: Vector3f,
 // ) -> (Vector3f, Vector3f) {
-//     let global_accel_cmd = self.body_pid_controller.calculate(
+//     let global_accel_cmd = self.pose_pid_controller.calculate(
 //         &target_pose,
 //         &state_estimate.fixed_rows::<3>(0).into(),
 //         self.dt,
