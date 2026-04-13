@@ -94,7 +94,7 @@ def _compute_crc32(data: bytes) -> int:
 
 def build_packet(command_code: int, data: bytes) -> bytes:
     """
-    Build a full RadioPacket (padded to 408 bytes).
+    Build a RadioPacket at exact length (no padding).
 
     Layout (little-endian):
       u32  crc32         (computed over packet with this field = 0)
@@ -103,8 +103,7 @@ def build_packet(command_code: int, data: bytes) -> bytes:
       u8   command_code
       u16  data_length
       u8   _reserved
-      u8[] data          (up to 396 bytes)
-      u8[] padding       (zero-fill to 408 bytes)
+      u8[] data
     """
     assert len(data) <= RADIO_DATA_MAX_SIZE, f"data too large: {len(data)} > {RADIO_DATA_MAX_SIZE}"
 
@@ -116,20 +115,22 @@ def build_packet(command_code: int, data: bytes) -> bytes:
         len(data),
     )
     payload = header_no_crc + data
-    # Pad to full packet size
-    payload = payload.ljust(RADIO_PACKET_TOTAL_SIZE, b'\x00')
 
     crc = _compute_crc32(payload)
-    # Write the crc32 at offset 0
-    packet = struct.pack("<I", crc) + payload[4:]
-    assert len(packet) == RADIO_PACKET_TOTAL_SIZE
-    return packet
+    return struct.pack("<I", crc) + payload[4:]
 
 
 def build_hello_request(robot_id: int, color: TeamColor) -> bytes:
     """CC_HELLO_REQ payload: robot_id (u8) + color (u8)."""
     data = struct.pack("<BB", robot_id, int(color))
     return build_packet(CommandCode.CC_HELLO_REQ, data)
+
+
+def build_hello_response(local_ip: str, local_port: int) -> bytes:
+    """CC_HELLO_RESP payload: ipv4[4] + port(u16)."""
+    ip_bytes = bytes(int(b) for b in local_ip.split("."))
+    data = ip_bytes + struct.pack("<H", local_port)
+    return build_packet(CommandCode.CC_HELLO_RESP, data)
 
 
 def build_control_packet(
@@ -249,6 +250,17 @@ def make_invalid_packet(base_packet: Optional[bytes] = None) -> bytes:
 # Discovery
 # ---------------------------------------------------------------------------
 
+
+def _get_local_ip(target_ip: str) -> str:
+    """Return the local IP on the interface that would route to target_ip."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        try:
+            s.connect((target_ip, MULTICAST_PORT))
+            return s.getsockname()[0]
+        except OSError:
+            return "127.0.0.1"
+
+
 def discover_robot(
     robot_id: int,
     color: TeamColor,
@@ -256,21 +268,20 @@ def discover_robot(
     max_retries: Optional[int] = None,
 ) -> Optional[Tuple[str, int]]:
     """
-    Send CC_HELLO_REQ via multicast and wait for CC_HELLO_RESP.
+    Listen for CC_HELLO_REQ via multicast and respond with CC_HELLO_RESP.
 
-    Loops indefinitely by default (max_retries=None) until a response is
-    received or the user presses Ctrl+C.  Pass max_retries>0 to bound the
-    number of attempts; returns None if all attempts are exhausted.
+    Joins the multicast group and waits for a robot to broadcast CC_HELLO_REQ,
+    then replies unicast with CC_HELLO_RESP containing the local IP and port.
+    Returns the robot's (ip, port) address, or None if all attempts exhausted.
     """
-    hello_pkt = build_hello_request(robot_id, color)
-
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
     sock.settimeout(timeout)
+    sock.bind(("", MULTICAST_PORT))
 
-    # Bind so we can receive the unicast response
-    sock.bind(("", LOCAL_PORT))
+    # Join the multicast group to receive robot broadcasts
+    mreq = struct.pack("4sL", socket.inet_aton(MULTICAST_IP), socket.INADDR_ANY)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
     infinite = max_retries is None or max_retries <= 0
     limit_str = "inf" if infinite else str(max_retries)
@@ -279,44 +290,56 @@ def discover_robot(
         attempt = 0
         while True:
             attempt += 1
-            print(f"[discovery] Sending CC_HELLO_REQ to {MULTICAST_IP}:{MULTICAST_PORT} "
+            print(f"[discovery] Listening for CC_HELLO_REQ on {MULTICAST_IP}:{MULTICAST_PORT} "
                   f"(attempt {attempt}/{limit_str})")
-            sock.sendto(hello_pkt, (MULTICAST_IP, MULTICAST_PORT))
 
             try:
                 raw, addr = sock.recvfrom(RADIO_PACKET_TOTAL_SIZE)
             except socket.timeout:
-                print(f"[discovery] Timeout waiting for CC_HELLO_RESP")
+                print(f"[discovery] Timeout waiting for CC_HELLO_REQ")
                 if not infinite and attempt >= max_retries:
                     return None
                 continue
 
             if len(raw) < RADIO_HEADER_SIZE:
-                print(f"[discovery] Response too short ({len(raw)} bytes), ignoring")
+                print(f"[discovery] Packet too short ({len(raw)} bytes), ignoring")
                 if not infinite and attempt >= max_retries:
                     return None
                 continue
 
             cmd = raw[8]
-            if cmd != CommandCode.CC_HELLO_RESP:
+            if cmd != CommandCode.CC_HELLO_REQ:
                 print(f"[discovery] Unexpected command code 0x{cmd:02X}, ignoring")
                 if not infinite and attempt >= max_retries:
                     return None
                 continue
 
             data_len = struct.unpack_from("<H", raw, 9)[0]
-            if data_len < 6:
-                print(f"[discovery] CC_HELLO_RESP data too short ({data_len} bytes)")
+            if data_len < 2:
+                print(f"[discovery] CC_HELLO_REQ data too short ({data_len} bytes)")
                 if not infinite and attempt >= max_retries:
                     return None
                 continue
 
-            # HelloResponse: ipv4[4] + port(u16)
-            ip_bytes = raw[RADIO_HEADER_SIZE:RADIO_HEADER_SIZE + 4]
-            port = struct.unpack_from("<H", raw, RADIO_HEADER_SIZE + 4)[0]
-            ip_str = ".".join(str(b) for b in ip_bytes)
-            print(f"[discovery] Got CC_HELLO_RESP from {addr[0]}: robot at {ip_str}:{port}")
-            return ip_str, port
+            # HelloRequest: robot_id (u8) + color (u8)
+            req_robot_id = raw[RADIO_HEADER_SIZE]
+            if req_robot_id != robot_id:
+                print(f"[discovery] CC_HELLO_REQ for robot {req_robot_id}, expected {robot_id}, ignoring")
+                if not infinite and attempt >= max_retries:
+                    return None
+                continue
+
+            robot_ip, robot_port = addr[0], addr[1]
+            print(f"[discovery] Got CC_HELLO_REQ from robot {req_robot_id} at {robot_ip}:{robot_port}")
+
+            # Reply unicast to the sender with our local IP on the interface
+            # that routes to the robot (mirrors radio_bridge GetClosestIpAddress)
+            local_ip = _get_local_ip(robot_ip)
+            resp_pkt = build_hello_response(local_ip, LOCAL_PORT)
+            sock.sendto(resp_pkt, (robot_ip, robot_port))
+            print(f"[discovery] Sent CC_HELLO_RESP to {robot_ip}:{robot_port} (local {local_ip}:{LOCAL_PORT})")
+
+            return robot_ip, robot_port
 
     except KeyboardInterrupt:
         print("\n[discovery] Interrupted by user")
@@ -388,6 +411,8 @@ def run_sender(
         - An invalid packet replaces the valid packet entirely.
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("", LOCAL_PORT))
     stats = Stats()
     infinite = count is None
 

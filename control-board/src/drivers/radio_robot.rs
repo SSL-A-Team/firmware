@@ -62,6 +62,7 @@ pub enum RobotRadioError {
 
     SoftwareConnectAckHeaderInvalid,
     SoftwareHelloHeaderInvalid,
+    SoftwareHelloResponseTimeout,
 
     ControlPacketDecodeInvalid,
     ParameterPacketDecodeInvalid,
@@ -572,6 +573,7 @@ impl<
             const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
                 + size_of::<HelloResponse>();
             if data.len() != PACKET_SIZE {
+                defmt::trace!("invalid hello response - got packet size {}, expected {}", data.len(), PACKET_SIZE);
                 return Err(RobotRadioError::SoftwareHelloHeaderInvalid);
             }
 
@@ -581,6 +583,7 @@ impl<
             let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
 
             if packet.command_code != CommandCode::CC_HELLO_RESP {
+                defmt::trace!("invalid hello response - got command code {}, expected {}", packet.command_code, CommandCode::CC_HELLO_RESP);
                 return Err(RobotRadioError::SoftwareHelloHeaderInvalid);
             }
             // TODO: handle nack
@@ -590,7 +593,10 @@ impl<
 
         match select(read_fut, Timer::after(timeout)).await {
             Either::First(ret) => ret?,
-            Either::Second(_) => Err(RobotRadioError::SoftwareHelloHeaderInvalid),
+            Either::Second(_) => {
+                defmt::trace!("software hello response timeout");
+                Err(RobotRadioError::SoftwareHelloResponseTimeout) 
+            },
         }
     }
 

@@ -15,7 +15,7 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{
     create_error_telemetry_from_string,
-    drivers::radio_robot::{RobotRadio, TeamColor},
+    drivers::radio_robot::{RobotRadio, RobotRadioError, TeamColor},
     is_command_packet_safe,
     pins::*,
     robot_state::SharedRobotState,
@@ -506,7 +506,7 @@ impl<
         match hello {
             Ok(hello) => {
                 defmt::info!(
-                    "recieved hello resp to: {}.{}.{}.{}:{}",
+                    "received hello resp to: {}.{}.{}.{}:{}",
                     hello.ipv4[0],
                     hello.ipv4[1],
                     hello.ipv4[2],
@@ -531,7 +531,10 @@ impl<
 
                 return Ok(true);
             }
-            Err(_) => {
+            Err(e) => {
+                if e != RobotRadioError::SoftwareHelloResponseTimeout {
+                    defmt::warn!("invalid hello response received: {}", e);
+                }
                 return Ok(false);
             }
         }
