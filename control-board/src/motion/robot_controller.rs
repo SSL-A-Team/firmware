@@ -3,9 +3,9 @@ use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::{BodyControlMode, BodyControlTelemetry, ParameterCommandCode::*, ParameterDataFormat, ParameterName};
 use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
 use ateam_controls::robot_model::RobotModel;
-use ateam_controls::{Vector2f, Vector3f, Vector4f, Vector5f, Vector6f, Vector8f};
+use ateam_controls::{Vector2f, Vector3f, Vector4f, Vector5f, Vector6f, Vector8f, z_rotation_mat};
 use embassy_time::Instant;
-use libm::fabsf;
+use libm::{fabsf, sqrtf};
 use nalgebra::{vector, Matrix3x5};
 
 use ateam_common_packets::bindings::ParameterCommand;
@@ -14,6 +14,7 @@ use ateam_common_packets::bindings::ParameterCommand;
 pub struct BodyController {
     pub robot_model: RobotModel,
     pub pose_pid_controller: PidController<3>,
+    pub twist_pid_controller: PidController<3>,
     /// [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
     pub pose_control_gain: Vector2f,
     /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR] thresholds for when to recompute the trajectory
@@ -34,13 +35,20 @@ pub struct BodyController {
 
 impl BodyController {
     pub fn new(dt: f32) -> BodyController {
-        let linear_pid_gains = Vector5f::new(115.0, 0.0, 2.75, 0.0, 0.0).transpose();
-        let angular_pid_gains = Vector5f::new(250.0, 0.0, 10.0, 0.0, 0.0).transpose();
-        let pose_pid_gains = Matrix3x5::from_rows(&[linear_pid_gains, linear_pid_gains, angular_pid_gains]);
+
+        let linear_pose_pid_gains = Vector5f::new(115.0, 0.0, 2.75, 0.0, 0.0).transpose();
+        let angular_pose_pid_gains = Vector5f::new(250.0, 0.0, 10.0, 0.0, 0.0).transpose();
+        let pose_pid_gains = Matrix3x5::from_rows(&[linear_pose_pid_gains, linear_pose_pid_gains, angular_pose_pid_gains]);
+
+        let linear_twist_pid_gains = Vector5f::new(0.0, 0.0, 0.0, 0.0, 0.0).transpose();
+        let angular_twist_pid_gains = Vector5f::new(0.0, 0.0, 0.0, 0.0, 0.0).transpose();
+        let twist_pid_gains = Matrix3x5::from_rows(&[linear_twist_pid_gains, linear_twist_pid_gains, angular_twist_pid_gains]);
+
         BodyController {
             robot_model: RobotModel::new_from_default_params(dt)
                 .expect("Failed to create RobotModel, check that default parameters are valid"),
             pose_pid_controller: PidController::<3>::from_gains_matrix(&pose_pid_gains),
+            twist_pid_controller: PidController::<3>::from_gains_matrix(&twist_pid_gains),
             pose_control_gain: Vector2f::new(1.0, 1.0),
             traj_recompute_error: Vector4f::new(0.5, 1.0, 1.0, 2.0),
             trajectory: None,
@@ -61,6 +69,7 @@ impl BodyController {
     pub fn reset(&mut self) {
         self.robot_model.reset();
         self.pose_pid_controller.reset();
+        self.twist_pid_controller.reset();
         self.trajectory = None;
         self.trajectory_state = Vector6f::default();
         self.trajectory_time = 0.0;
@@ -86,6 +95,8 @@ impl BodyController {
         trace: bool,
     ) {
         let mut start = Instant::now();
+
+        // Working in global frame, unless variable is specified as local
 
         let state_prediction = self.robot_model.get_state();
 
@@ -124,33 +135,37 @@ impl BodyController {
         let kf_update_time = Instant::now() - start;
         start = Instant::now();
 
-        match body_control_mode {
+        (self.body_twist_out, self.body_accel_out) = match body_control_mode {
             BodyControlMode::BCM_GLOBAL_POSE => {
-                self.compute_effort_pose_control(state_estimate, body_cmd);
+                self.global_pose_bangbang_pid_control_policy(state_estimate, body_cmd)
             }
             BodyControlMode::BCM_GLOBAL_TWIST => {
-                defmt::error!("Global twist control mode is not currently supported");
+                todo!()
             }
             BodyControlMode::BCM_LOCAL_TWIST => {
-                defmt::error!("Local twist control mode is not currently supported");
+                self.local_twist_control_policy(state_estimate, body_cmd)
             }
             BodyControlMode::BCM_GLOBAL_ACCEL => {
-                self.compute_effort_accel_control(state_estimate, body_cmd);
+                self.global_accel_control_policy(state_estimate, body_cmd)
             }
             BodyControlMode::BCM_LOCAL_ACCEL => {
-                defmt::error!("Local accel control mode is not currently supported");
+                self.local_accel_control_policy(state_estimate, body_cmd)
             }
             _ => {
                 if body_control_mode != BodyControlMode::BCM_OFF {
                     defmt::error!("Received command with unrecognized control mode: {}", body_control_mode as i32);
                 }
-                self.body_twist_out = Vector3f::default();
-                self.body_accel_out = Vector3f::default();
-                self.body_accel_out_fric_comp = Vector3f::default();
-                self.wheel_vel_out = Vector4f::default();
-                self.wheel_torque_out = Vector4f::default();
+                (Vector3f::zeros(), Vector3f::zeros())
             }
-        }
+        };
+
+        // Compensate for modeled friction forces
+        self.body_accel_out_fric_comp = self.body_accel_out - self.robot_model.i_inv * self.robot_model.compute_friction_force(self.body_twist_out);
+        // Calculate wheel commands from body commands
+        self.wheel_vel_out =
+            self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_out;
+        self.wheel_torque_out =
+            self.robot_model.transform_accel2wheel(state_estimate.z) * self.body_accel_out_fric_comp;
 
         let effort_time = Instant::now() - start;
         start = Instant::now();
@@ -228,7 +243,6 @@ impl BodyController {
         wheel_vel_meas: Vector4f,
         imu_gyro_theta_meas: f32,
     ) {
-        // Use EKF
         let measurement: Vector8f = vector![
             vision_pose_meas.x,
             vision_pose_meas.y,
@@ -251,42 +265,70 @@ impl BodyController {
         }
     }
 
-    fn compute_effort_pose_control(&mut self, state_estimate: Vector6f, target_pose: Vector3f) {
-        // Compute control output with control policy
-        (self.body_twist_out, self.body_accel_out) =
-            self.pose_bangbang_pid_control_policy(state_estimate, target_pose);
-        // Compensate for modeled friction forces
-        self.body_accel_out_fric_comp = self.body_accel_out - self.robot_model.i_inv * self.robot_model.compute_friction_force(self.body_twist_out);
-        // Calculate wheel commands from body commands
-        self.wheel_vel_out =
-            self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_out;
-        self.wheel_torque_out =
-            self.robot_model.transform_accel2wheel(state_estimate.z) * self.body_accel_out_fric_comp;
-    }
-
-    // fn compute_effort_twist_control(&mut self, state_estimate: Vector6f, target_twist: Vector3f) {
-    //     // (self.body_twist_out, self.body_accel_out) = self.twist_bangbang_control(state_estimate, target_twist);
-    //     (self.body_twist_out, self.body_accel_out) =
-    //         self.twist_pid_control(state_estimate, target_twist);
-    //     let compensated_accel = self.body_accel_out - self.robot_model.i_inv * self.robot_model.compute_friction_force(self.body_twist_out);
-    //     self.wheel_vel_out =
-    //         self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_out;
-    //     self.wheel_torque_out =
-    //         self.robot_model.transform_accel2wheel(state_estimate.z) * compensated_accel;
-    // }
-
-    fn compute_effort_accel_control(&mut self, state_estimate: Vector6f, target_accel: Vector3f) {
+    fn global_accel_control_policy(&mut self, state_estimate: Vector6f, target_accel: Vector3f) -> (Vector3f, Vector3f) {
         let next_state = self.robot_model.a * state_estimate + self.robot_model.b * target_accel;
-        self.body_twist_out = next_state.fixed_rows::<3>(3).into();
-        self.body_accel_out = target_accel;
-        let compensated_accel = self.body_accel_out - self.robot_model.i_inv * self.robot_model.compute_friction_force(self.body_twist_out);
-        self.wheel_vel_out =
-            self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_out;
-        self.wheel_torque_out =
-            self.robot_model.transform_accel2wheel(state_estimate.z) * compensated_accel;
+        let twist_out = next_state.fixed_rows::<3>(3).into();
+        let accel_out = target_accel;
+        (twist_out, accel_out)
     }
 
-    fn pose_bangbang_pid_control_policy(
+    fn local_accel_control_policy(&mut self, state_estimate: Vector6f, local_target_accel: Vector3f) -> (Vector3f, Vector3f) {
+        let target_accel = z_rotation_mat(state_estimate.z) * local_target_accel;
+        self.global_accel_control_policy(state_estimate, target_accel)
+    }
+
+    fn local_twist_control_policy(&mut self, state_estimate: Vector6f, local_target_twist: Vector3f) -> (Vector3f, Vector3f) {
+        let target_twist = z_rotation_mat(state_estimate.z) * local_target_twist;
+        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+        let body_twist_pid =
+            self.twist_pid_controller
+                .calculate(&target_twist, &twist_estimate, self.dt);
+        let mut twist_out = target_twist + body_twist_pid;
+
+        // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
+        // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
+        let prev_twist_out = self.prev_body_cmd.unwrap_or(Vector3f::default());
+        let mut accel_out = (twist_out - prev_twist_out) / self.dt;
+
+        let max_accel_linear = self.trajectory_params.max_accel_linear;
+        let max_accel_angular = self.trajectory_params.max_accel_angular;
+        let max_vel_linear = self.trajectory_params.max_vel_linear;
+        let max_vel_angular = self.trajectory_params.max_vel_angular;
+
+        // Clamp acceleration: linear magnitude and angular independently
+        let accel_linear_mag = sqrtf(accel_out.x * accel_out.x + accel_out.y * accel_out.y);
+        if accel_linear_mag > max_accel_linear {
+            let scale = max_accel_linear / accel_linear_mag;
+            accel_out.x *= scale;
+            accel_out.y *= scale;
+        }
+        accel_out.z = accel_out.z.clamp(-max_accel_angular, max_accel_angular);
+
+        // Recompute twist from clamped acceleration
+        twist_out = prev_twist_out + (accel_out * self.dt);
+
+        // Clamp twist: linear magnitude and angular independently
+        let twist_linear_mag = sqrtf(twist_out.x * twist_out.x + twist_out.y * twist_out.y);
+        if twist_linear_mag > max_vel_linear {
+            let scale = max_vel_linear / twist_linear_mag;
+            twist_out.x *= scale;
+            twist_out.y *= scale;
+        }
+        twist_out.z = twist_out.z.clamp(-max_vel_angular, max_vel_angular);
+
+        // Recompute accel to stay consistent with the clamped twist
+        accel_out = (twist_out - prev_twist_out) / self.dt;
+
+        self.prev_body_cmd = Some(twist_out);
+
+        (twist_out, accel_out)
+    }
+
+    fn global_twist_control_policy(&mut self, state_estimate: Vector6f, target_accel: Vector3f) -> (Vector3f, Vector3f, f32) {
+        todo!()
+    }
+
+    fn global_pose_bangbang_pid_control_policy(
         &mut self,
         state_estimate: Vector6f,
         target_pose: Vector3f,
@@ -330,9 +372,9 @@ impl BodyController {
         );
 
         // Weighted sum of feedback and feedforward terms to calculate the accel command
-        let global_accel_out = self.pose_control_gain[0] * ff + self.pose_control_gain[1] * fb;
+        let accel_out = self.pose_control_gain[0] * ff + self.pose_control_gain[1] * fb;
 
-        let global_twist_out: Vector3f = (state_estimate.fixed_rows::<3>(3) + global_accel_out * self.dt).into();
+        let twist_out: Vector3f = (state_estimate.fixed_rows::<3>(3) + accel_out * self.dt).into();
 
         // Step trajectory forward
         let next_state = self.trajectory
@@ -345,7 +387,7 @@ impl BodyController {
         
         self.prev_body_cmd = Some(target_pose);
 
-        (global_twist_out, global_accel_out)
+        (twist_out, accel_out)
     }
 
     // fn twist_bangbang_control(
@@ -438,6 +480,9 @@ impl BodyController {
             ParameterName::POSE_FB_PIDII_X => Some(ParameterDataFormat::VEC5_F32),
             ParameterName::POSE_FB_PIDII_Y => Some(ParameterDataFormat::VEC5_F32),
             ParameterName::POSE_FB_PIDII_THETA => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::TWIST_FB_PIDII_X => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::TWIST_FB_PIDII_Y => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::TWIST_FB_PIDII_THETA => Some(ParameterDataFormat::VEC5_F32),
             _ => None,
         }
     }
@@ -513,6 +558,23 @@ impl BodyController {
                 let row = match name {
                     ParameterName::POSE_FB_PIDII_X => 0,
                     ParameterName::POSE_FB_PIDII_Y => 1,
+                    _ => 2,
+                };
+                reply.data.vec5_f32 = [
+                    gain[(row, 0)],
+                    gain[(row, 1)],
+                    gain[(row, 2)],
+                    gain[(row, 3)],
+                    gain[(row, 4)],
+                ];
+            }
+            ParameterName::TWIST_FB_PIDII_X
+            | ParameterName::TWIST_FB_PIDII_Y
+            | ParameterName::TWIST_FB_PIDII_THETA => {
+                let gain = self.twist_pid_controller.get_gain();
+                let row = match name {
+                    ParameterName::TWIST_FB_PIDII_X => 0,
+                    ParameterName::TWIST_FB_PIDII_Y => 1,
                     _ => 2,
                 };
                 reply.data.vec5_f32 = [
@@ -617,6 +679,21 @@ impl BodyController {
                     gain[(row, col)] = v[col];
                 }
                 self.pose_pid_controller.set_gain(gain);
+            }
+            ParameterName::TWIST_FB_PIDII_X
+            | ParameterName::TWIST_FB_PIDII_Y
+            | ParameterName::TWIST_FB_PIDII_THETA => {
+                let v = unsafe { cmd.data.vec5_f32 };
+                let row = match cmd.parameter_name {
+                    ParameterName::TWIST_FB_PIDII_X => 0,
+                    ParameterName::TWIST_FB_PIDII_Y => 1,
+                    _ => 2,
+                };
+                let mut gain = self.twist_pid_controller.get_gain();
+                for col in 0..5 {
+                    gain[(row, col)] = v[col];
+                }
+                self.twist_pid_controller.set_gain(gain);
             }
             _ => unreachable!(),
         };
