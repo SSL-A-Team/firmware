@@ -189,7 +189,19 @@ impl<
         // Datasheet says wait at least 40ms after UART config change
         Timer::after(Duration::from_millis(50)).await;
 
-        // NORA-W36x does not use EDM mode - it stays in AT command mode
+        // NORA-W36x does not use EDM mode - it stays in AT command mode.
+        // Enable direct binary mode for inline data delivery in +UESODB/+UESODBF events
+        // (replaces the 2-step buffered approach of +UESODA then AT+USORB).
+        if self
+            .nora_driver
+            .set_socket_receive_mode(2)
+            .await
+            .is_err()
+        {
+            defmt::debug!("error setting direct binary receive mode");
+            return Err(RobotRadioNoraError::ConnectUartBadRadioConfigUpdate);
+        }
+        defmt::trace!("configured direct binary receive mode");
 
         Ok(())
     }
@@ -358,17 +370,19 @@ impl<
     {
         if self.socket.is_some() {
             if self.nora_driver.can_read_data() {
-                // Check if there's a data-available URC queued
-                match self.nora_driver.try_read_data_ready() {
-                    Ok((_socket_id, _length)) => {
-                        // Data is available but we need an async read_data call to get it.
-                        // Return None since we can't do async from a sync context.
-                        // The caller should use read_data() or read_packet() instead.
+                // In direct binary mode, +UESODB/+UESODBF events contain inline data.
+                // We can read and return it synchronously — no async AT+USORB needed.
+                match self.nora_driver.try_read_data_binary(fn_read) {
+                    Ok(Some(ret)) => Ok(Some(ret)),
+                    Ok(None) => Ok(None),
+                    Err(NoraRadioError::ReadLowLevelBufferEmpty) => Ok(None),
+                    Err(NoraRadioError::ReadDataInvalid) => {
+                        // Non-data event in the queue (e.g. connection event) — skip it
+                        defmt::trace!("non-data event in queue, skipping");
                         Ok(None)
                     }
-                    Err(NoraRadioError::ReadLowLevelBufferEmpty) => Ok(None),
                     Err(e) => {
-                        defmt::trace!("try_read_data_ready failed after can_read_data reported data ready");
+                        defmt::trace!("try_read_data_binary failed: {:?}", e);
                         Err(RobotRadioNoraError::DriverError(e))
                     }
                 }
