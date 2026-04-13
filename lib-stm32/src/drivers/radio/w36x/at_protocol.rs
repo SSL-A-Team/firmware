@@ -33,6 +33,20 @@ pub enum ATEvent<'a> {
         socket_id: u8,
         length: u16,
     }, // +UESODA
+    /// Direct binary mode: incoming TCP socket data with inline binary payload.
+    /// Requires AT+USORM=2 to enable.
+    SocketDataBinary {
+        socket_id: u8,
+        data: &'a [u8],
+    }, // +UESODB
+    /// Direct binary mode: incoming UDP socket data with inline binary payload
+    /// and source address info. Requires AT+USORM=2 to enable.
+    SocketDataBinaryFrom {
+        socket_id: u8,
+        remote_ip: &'a str,
+        remote_port: u16,
+        data: &'a [u8],
+    }, // +UESODBF
 
     // WiFi events (Section 9.2)
     WifiLinkUp {
@@ -67,6 +81,12 @@ impl ATEvent<'_> {
     const SOCKET_CONNECTED: &'static str = "+UESOC";
     const SOCKET_CLOSED: &'static str = "+UESOCL";
     const SOCKET_DATA_AVAILABLE: &'static str = "+UESODA";
+
+    // Binary socket event prefixes (byte-level, for binary-aware parsing)
+    const UESODB_PREFIX: &'static [u8] = b"\r\n+UESODB:";
+    const UESODBF_PREFIX: &'static [u8] = b"\r\n+UESODBF:";
+    /// Binary data start marker byte (0x01)
+    const BINARY_START_MARKER: u8 = 0x01;
 
     // WiFi URCs (Section 9.2)
     const WIFI_LINK_UP: &'static str = "+UEWLU";
@@ -198,6 +218,100 @@ impl ATEvent<'_> {
                 Ok(ATEvent::AccessPointNetworkDown)
             }
             _ => Err(AtPacketError::EventUnknown),
+        }
+    }
+
+    /// Try to parse a binary data event from raw bytes.
+    /// Binary events (+UESODB, +UESODBF) contain raw binary data that cannot
+    /// be parsed as UTF-8. This must be called BEFORE text-based parsing.
+    ///
+    /// Binary data format: `<01><length_high><length_low><data>`
+    /// where length is a 2-byte big-endian value.
+    pub fn try_parse_binary(buf: &[u8]) -> Result<Option<ATEvent<'_>>, AtPacketError> {
+        if buf.starts_with(Self::UESODB_PREFIX) {
+            // +UESODB:<socket_id><01><len_hi><len_lo><data>
+            let after_prefix = &buf[Self::UESODB_PREFIX.len()..];
+
+            // Find the binary start marker (0x01)
+            let marker_pos = after_prefix
+                .iter()
+                .position(|&b| b == Self::BINARY_START_MARKER)
+                .ok_or(AtPacketError::FramingDecodeFailed)?;
+
+            // Parse socket_id from ASCII digits before the marker
+            let socket_id_bytes = &after_prefix[..marker_pos];
+            let socket_id_str =
+                core::str::from_utf8(socket_id_bytes).or(Err(AtPacketError::Utf8DecodeFailed))?;
+            let socket_id = socket_id_str
+                .parse::<u8>()
+                .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+
+            // Extract length and data after marker
+            let after_marker = &after_prefix[marker_pos + 1..];
+            if after_marker.len() < 2 {
+                return Err(AtPacketError::FramingDecodeFailed);
+            }
+            let data_len = ((after_marker[0] as u16) << 8) | (after_marker[1] as u16);
+            let data_start = marker_pos + 1 + 2;
+            let data_end = data_start + data_len as usize;
+
+            if data_end > after_prefix.len() {
+                return Err(AtPacketError::FramingDecodeFailed);
+            }
+
+            let data = &after_prefix[data_start..data_end];
+            Ok(Some(ATEvent::SocketDataBinary { socket_id, data }))
+        } else if buf.starts_with(Self::UESODBF_PREFIX) {
+            // +UESODBF:<socket_id>,<remote_ip>,<remote_port><01><len_hi><len_lo><data>
+            let after_prefix = &buf[Self::UESODBF_PREFIX.len()..];
+
+            // Find the binary start marker (0x01)
+            let marker_pos = after_prefix
+                .iter()
+                .position(|&b| b == Self::BINARY_START_MARKER)
+                .ok_or(AtPacketError::FramingDecodeFailed)?;
+
+            // Parse text metadata before the marker as UTF-8
+            let text_part = core::str::from_utf8(&after_prefix[..marker_pos])
+                .or(Err(AtPacketError::Utf8DecodeFailed))?;
+
+            let mut parts = text_part.splitn(3, ',');
+            let socket_id = parts
+                .next()
+                .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                .parse::<u8>()
+                .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+            let remote_ip = parts
+                .next()
+                .ok_or(AtPacketError::TypeDecodeParameterMissing)?;
+            let remote_port = parts
+                .next()
+                .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                .parse::<u16>()
+                .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
+
+            // Extract length and data after marker
+            let after_marker = &after_prefix[marker_pos + 1..];
+            if after_marker.len() < 2 {
+                return Err(AtPacketError::FramingDecodeFailed);
+            }
+            let data_len = ((after_marker[0] as u16) << 8) | (after_marker[1] as u16);
+            let data_start = marker_pos + 1 + 2;
+            let data_end = data_start + data_len as usize;
+
+            if data_end > after_prefix.len() {
+                return Err(AtPacketError::FramingDecodeFailed);
+            }
+
+            let data = &after_prefix[data_start..data_end];
+            Ok(Some(ATEvent::SocketDataBinaryFrom {
+                socket_id,
+                remote_ip,
+                remote_port,
+                data,
+            }))
+        } else {
+            Ok(None)
         }
     }
 }

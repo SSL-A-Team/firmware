@@ -134,6 +134,19 @@ impl<
         Ok(())
     }
 
+    /// Set socket receive mode for incoming data delivery.
+    /// Uses AT+USORM=<receive_mode>
+    ///   - 0: Buffered mode (default) — +UESODA event, then AT+USORB to read
+    ///   - 2: Direct binary mode — +UESODB/+UESODBF events with inline data
+    pub async fn set_socket_receive_mode(&self, mode: u8) -> Result<(), NoraRadioError> {
+        let mut str: String<12> = String::new();
+        write!(&mut str, "AT+USORM={mode}")
+            .or(Err(NoraRadioError::CommandConstructionFailed))?;
+        self.send_command(str.as_str()).await?;
+        self.read_ok().await?;
+        Ok(())
+    }
+
     /// Set the host name on the NORA-W36 module.
     /// Uses AT+UWHN="<host_name>"
     pub async fn set_host_name(&self, host_name: &str) -> Result<(), NoraRadioError> {
@@ -450,12 +463,38 @@ impl<
 
     /// Try to read a queued +UESODA URC indicating data is available.
     /// Returns the socket_id and length of available data, or an error if nothing queued.
+    /// Used in buffered mode (AT+USORM=0).
     pub fn try_read_data_ready(&'a self) -> Result<(u8, u16), NoraRadioError> {
         match self.reader.try_dequeue() {
             Ok(buf) => {
                 match self.parse_packet(buf.data()) {
                     Ok(NoraPacket::Event(ATEvent::SocketDataAvailable { socket_id, length })) => {
                         Ok((socket_id, length))
+                    }
+                    _ => Err(NoraRadioError::ReadDataInvalid),
+                }
+            }
+            Err(queue::Error::QueueFull) => Err(NoraRadioError::ReadLowLevelBufferEmpty),
+            Err(queue::Error::QueueEmpty) => Err(NoraRadioError::ReadLowLevelBufferEmpty),
+            Err(queue::Error::InProgress) => Err(NoraRadioError::ReadLowLevelBufferBusy),
+        }
+    }
+
+    /// Try to read inline binary data from a queued +UESODB or +UESODBF event.
+    /// Used in direct binary mode (AT+USORM=2).
+    /// Returns the data via the provided callback, or None if no data is queued.
+    pub fn try_read_data_binary<RET, FN>(&'a self, fn_read: FN) -> Result<Option<RET>, NoraRadioError>
+    where
+        FN: FnOnce(&[u8]) -> RET,
+    {
+        match self.reader.try_dequeue() {
+            Ok(buf) => {
+                match self.parse_packet(buf.data()) {
+                    Ok(NoraPacket::Event(ATEvent::SocketDataBinary { socket_id: _, data })) => {
+                        Ok(Some(fn_read(data)))
+                    }
+                    Ok(NoraPacket::Event(ATEvent::SocketDataBinaryFrom { socket_id: _, data, .. })) => {
+                        Ok(Some(fn_read(data)))
                     }
                     _ => Err(NoraRadioError::ReadDataInvalid),
                 }
@@ -507,6 +546,19 @@ impl<
                                 ATEvent::SocketConnected { socket_id: _ } => false,
                                 ATEvent::SocketClosed { socket_id: _ } => false,
                                 ATEvent::SocketDataAvailable { socket_id: _, length: _ } => false,
+                                // TODO: In direct binary mode, +UESODB/+UESODBF events
+                                // arriving during AT command processing will be dropped here.
+                                // This is acceptable during init (no connections yet) and
+                                // during send_data (brief window). For robustness, consider
+                                // a side-buffer to stash data events.
+                                ATEvent::SocketDataBinary { .. } => {
+                                    defmt::warn!("dropping +UESODB data event in read_ok()");
+                                    false
+                                },
+                                ATEvent::SocketDataBinaryFrom { .. } => {
+                                    defmt::warn!("dropping +UESODBF data event in read_ok()");
+                                    false
+                                },
                                 ATEvent::WifiLinkUp { wlan_handle: _, bssid: _, channel: _ } => false,
                                 ATEvent::WifiLinkDown { wlan_handle: _, reason: _ } => false,
                                 ATEvent::WifiAccessPointUp => false,
@@ -517,10 +569,6 @@ impl<
                                 ATEvent::StationNetworkDown => false,
                                 ATEvent::AccessPointNetworkUp => false,
                                 ATEvent::AccessPointNetworkDown => false,
-                                _ => {
-                                    defmt::debug!("ignoring ATEvent in read_ok(). event: {}", at_event);
-                                    false
-                                }
                             }
                         },
                     }
@@ -544,7 +592,15 @@ impl<
     /// Parse a raw UART buffer into either an AT response or an AT event (URC).
     /// URCs start with \r\n+ and don't end with OK/ERROR.
     /// Responses end with OK or ERROR.
+    /// Binary data events (+UESODB/+UESODBF) are checked first since they
+    /// contain raw bytes that would fail UTF-8 text parsing.
     fn parse_packet<'b>(&self, buf: &'b [u8]) -> Result<NoraPacket<'b>, AtPacketError> {
+        // Check for binary data events first (before UTF-8 conversion).
+        // These contain raw binary payloads that cannot be parsed as text.
+        if let Some(event) = ATEvent::try_parse_binary(buf)? {
+            return Ok(NoraPacket::Event(event));
+        }
+
         // Try parsing as ATResponse first
         if let Ok(resp) = ATResponse::new(buf) {
             match resp {
