@@ -37,8 +37,8 @@ pub struct BodyController {
 impl BodyController {
     pub fn new(dt: f32) -> BodyController {
 
-        let linear_pose_pid_gains = Vector5f::new(115.0, 0.0, 2.75, 0.0, 0.0).transpose();
-        let angular_pose_pid_gains = Vector5f::new(250.0, 0.0, 10.0, 0.0, 0.0).transpose();
+        let linear_pose_pid_gains = Vector5f::new(125.0, 0.5, 10.0, -1.0, 1.0).transpose();
+        let angular_pose_pid_gains = Vector5f::new(125.0, 0.5, 15.0, -1.0, 1.0).transpose();
         let pose_pid_gains = Matrix3x5::from_rows(&[linear_pose_pid_gains, linear_pose_pid_gains, angular_pose_pid_gains]);
 
         let linear_twist_pid_gains = Vector5f::new(0.0, 0.0, 0.0, 0.0, 0.0).transpose();
