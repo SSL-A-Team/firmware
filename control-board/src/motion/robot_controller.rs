@@ -5,7 +5,8 @@ use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
 use ateam_controls::robot_model::RobotModel;
 use ateam_controls::{Vector2f, Vector3f, Vector4f, Vector5f, Vector6f, Vector8f, z_rotation_mat};
 use embassy_time::Instant;
-use libm::{fabsf, sqrtf};
+use libm::{fabsf, remainderf, sqrtf};
+use core::f32::consts::PI;
 use nalgebra::{vector, Matrix3x5};
 
 use ateam_common_packets::bindings::ParameterCommand;
@@ -343,7 +344,7 @@ impl BodyController {
         if self.trajectory.is_none() || self.prev_body_cmd.is_none() || self.prev_body_cmd.unwrap() != target_pose ||
             (self.trajectory_state.x - pose_estimate.x).abs() > self.traj_recompute_error[(0, 0)] ||
             (self.trajectory_state.y - pose_estimate.y).abs() > self.traj_recompute_error[(0, 0)] ||
-            (self.trajectory_state.z - pose_estimate.z).abs() > self.traj_recompute_error[(1, 0)] ||
+            remainderf(self.trajectory_state.z - pose_estimate.z, 2.0 * PI).abs() > self.traj_recompute_error[(1, 0)] ||
             (self.trajectory_state[(3, 0)] - twist_estimate.x).abs() > self.traj_recompute_error[(2, 0)] ||
             (self.trajectory_state[(4, 0)] - twist_estimate.y).abs() > self.traj_recompute_error[(2, 0)] ||
             (self.trajectory_state[(5, 0)] - twist_estimate.z).abs() > self.traj_recompute_error[(3, 0)]
@@ -364,7 +365,9 @@ impl BodyController {
             .accel_at(self.trajectory_time)
             .expect("Trajectory should always have valid accel at current time");
 
-        let target: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
+        let mut target: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
+        // Wrap target theta so that (target.z - pose_estimate.z) lies in [-π, π],
+        target.z = pose_estimate.z + remainderf(target.z - pose_estimate.z, 2.0 * PI);
         let fb = self.pose_pid_controller.calculate(
             &target,
             &pose_estimate,
