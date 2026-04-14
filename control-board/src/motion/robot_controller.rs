@@ -368,9 +368,12 @@ impl BodyController {
         let mut target: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
         // Wrap target theta so that (target.z - pose_estimate.z) lies in [-π, π],
         target.z = pose_estimate.z + remainderf(target.z - pose_estimate.z, 2.0 * PI);
-        let fb = self.pose_pid_controller.calculate(
+        let target_twist: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
+        let twist_error = target_twist - twist_estimate;
+        let fb = self.pose_pid_controller.calculate_with_derivative(
             &target,
             &pose_estimate,
+            &twist_error,
             self.dt,
         );
 
