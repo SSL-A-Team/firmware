@@ -391,6 +391,7 @@ def run_sender(
     intra_burst_delay: float,
     invalid_rate: float,
     duplicate_rate: float,
+    control_padding: int,
     verbose: bool,
 ) -> Stats:
     """
@@ -441,6 +442,7 @@ def run_sender(
 
             for i in range(burst_actual):
                 valid_pkt = build_control_packet(body_twist_control_enabled=True)
+                valid_pkt += b'\x00' * control_padding
 
                 # Decide what to actually send
                 roll_invalid = random.random() < invalid_rate
@@ -534,6 +536,8 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Fraction [0,1] of slots that send an invalid packet (default: 0.0)")
     inject.add_argument("--duplicate-rate", type=float, default=0.0, metavar="FRAC",
                         help="Fraction [0,1] of valid slots that are also duplicated (default: 0.0)")
+    inject.add_argument("--control-padding", type=int, default=0, metavar="BYTES",
+                        help="Extra zero bytes appended to each control packet (default: 0)")
 
     p.add_argument("--verbose", "-v", action="store_true",
                    help="Print each packet send")
@@ -604,6 +608,8 @@ def main() -> None:
     burst_gap_min = args.burst_gap_min if args.burst_gap_min is not None else base_delay
     burst_gap_max = args.burst_gap_max if args.burst_gap_max is not None else base_delay
 
+    time.sleep(0.1)
+
     count_str = str(args.count) if args.count is not None else "inf"
     print(
         f"\n[config] Sending {count_str} packet(s) to {robot_addr[0]}:{robot_addr[1]}\n"
@@ -624,6 +630,7 @@ def main() -> None:
         intra_burst_delay=args.intra_burst_delay,
         invalid_rate=args.invalid_rate,
         duplicate_rate=args.duplicate_rate,
+        control_padding=args.control_padding,
         verbose=args.verbose,
     )
 

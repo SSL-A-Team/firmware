@@ -439,14 +439,18 @@ impl<
         while !ok || !peer_disconnect || !disconnect {
             self.reader
                 .dequeue(|buf| {
+                    defmt::info!("{}", buf);
                     match self.to_packet(buf)? {
                         EdmPacket::ATEvent(ATEvent::PeerDisconnected { peer_handle: _ }) => {
+                            defmt::info!("odin - close peer - ATEvent::PeerDisconnected");
                             peer_disconnect = true
                         }
                         EdmPacket::DisconnectEvent { channel: _ } => {
+                            defmt::info!("odin - close peer - DisconnectEvent");
                             disconnect = true;
                         }
                         EdmPacket::ATResponse(ATResponse::Ok("")) => {
+                            defmt::info!("odin - close peer - ATResponse::Ok");
                             ok = true;
                         }
                         EdmPacket::DataEvent {
@@ -527,14 +531,17 @@ impl<
             }
             Err(queue::Error::QueueFull) => {
                 // nothing to read
+                defmt::warn!("OdinW26x - ReadLowLevelBufferEmpty - QueueFull");
                 Err(OdinRadioError::ReadLowLevelBufferEmpty)
             }
             Err(queue::Error::QueueEmpty) => {
                 // nothing to read
+                defmt::warn!("OdinW26x - ReadLowLevelBufferEmpty - QueueEmpty");
                 Err(OdinRadioError::ReadLowLevelBufferEmpty)
             }
             Err(queue::Error::InProgress) => {
                 // you did something illegal
+                defmt::error!("OdinW26x - ReadLowLevelBufferBusy");
                 Err(OdinRadioError::ReadLowLevelBufferBusy)
             }
         }

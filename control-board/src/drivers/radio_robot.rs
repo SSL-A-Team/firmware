@@ -382,7 +382,7 @@ impl<
                 match self.odin_driver.try_read_data(fn_read) {
                     Ok(ret) => Ok(Some(ret)),
                     Err(e) => {
-                        defmt::trace!(
+                        defmt::error!(
                             "try read data failed after can read data reported data ready"
                         );
                         Err(RobotRadioError::DriverError(e))
@@ -392,7 +392,7 @@ impl<
                 Ok(None)
             }
         } else {
-            defmt::trace!("peer was none");
+            defmt::error!("peer was none");
             Err(RobotRadioError::PeerMissing)
         }
     }
@@ -650,7 +650,7 @@ impl<
                             Err(e) => {
                                 // we got data that was a valid EDM DataPacket, but couldn't parse it
                                 // into any known A-Team packet format
-                                defmt::debug!("got EDM packet but wasn't A-Team: {}", e);
+                                defmt::warn!("got EDM packet but wasn't A-Team: {}", e);
                                 Err(e)
                             }
                         }
@@ -659,7 +659,7 @@ impl<
                 }
             }
             Err(e) => {
-                defmt::debug!("radio in invalid state: {}", e);
+                defmt::error!("radio in invalid state: {}", e);
                 Err(e)
             }
         }

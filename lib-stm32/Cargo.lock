@@ -21,9 +21,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ateam-lib-crossarch"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "defmt",
+ "num-traits",
+ "smart-leds",
+]
+
+[[package]]
 name = "ateam-lib-stm32"
 version = "0.1.0"
 dependencies = [
+ "ateam-lib-crossarch",
  "critical-section",
  "defmt",
  "defmt-rtt",
