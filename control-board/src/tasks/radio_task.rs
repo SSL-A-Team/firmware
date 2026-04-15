@@ -464,6 +464,8 @@ impl<
         wifi_network: WifiCredential,
         robot_id: u8,
     ) -> Result<(), ()> {
+        defmt::info!("connecting to wifi network: {} ({})", wifi_network.get_ssid(), wifi_network.get_password());
+
         if self
             .radio
             .connect_to_network(wifi_network, robot_id)

@@ -492,7 +492,7 @@ impl<
             let (wheel_current_cmd, wheel_vel_cmd) =
                 if self.stop_wheels() || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
                     if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS {
-                        defmt::warn!("control task - motor commands locked out");
+                        // defmt::warn!("control task - motor commands locked out");
                     }
                     (Vector4f::default(), Vector4f::default())
                 } else {
