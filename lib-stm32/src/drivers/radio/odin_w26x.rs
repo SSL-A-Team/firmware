@@ -324,20 +324,20 @@ impl<
                 .dequeue(|buf| {
                     match self.to_packet(buf)? {
                         EdmPacket::ATEvent(ATEvent::NetworkUp { interface_id: 0 }) => {
-                            defmt::debug!("odin - network up");
+                            defmt::info!("odin - network up");
                             network_up += 1;
                         }
                         EdmPacket::ATEvent(ATEvent::WifiLinkConnected {
-                            conn_id: _,
-                            bssid: _,
-                            channel: _,
+                            conn_id,
+                            bssid,
+                            channel,
                         }) => {
-                            defmt::debug!("odin - wifi link connected");
+                            defmt::info!("odin - wifi link connected {} {} {}", conn_id, bssid, channel);
                             // TODO
                             // self.wifiConnected = true;
                         }
                         EdmPacket::ATEvent(ATEvent::WifiLinkDisconnected { conn_id, reason }) => {
-                            defmt::debug!("odin - got WifiLinkDisconnected during initial connect. id: {}, reason: {}", conn_id, reason);
+                            defmt::info!("odin - got WifiLinkDisconnected during initial connect. id: {}, reason: {}", conn_id, reason);
                         }
                         other => {
                             defmt::error!("odin - connect_wifi: unsupported EDM packet: {}", other);
