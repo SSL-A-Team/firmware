@@ -16,8 +16,8 @@ use crate::tasks::dotstar_task::ControlBoardLedCommand;
 //  Pub Sub Types  //
 /////////////////////
 
-const COMMANDS_PUBSUB_DEPTH: usize = 4;
-const TELEMETRY_PUBSUB_DEPTH: usize = 4;
+const COMMANDS_PUBSUB_DEPTH: usize = 6;
+const TELEMETRY_PUBSUB_DEPTH: usize = 6;
 const GYRO_DATA_PUBSUB_DEPTH: usize = 1;
 const ACCEL_DATA_PUBSUB_DEPTH: usize = 1;
 const POWER_TELEMETRY_PUBSUB_DEPTH: usize = 1;

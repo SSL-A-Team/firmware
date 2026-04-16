@@ -322,20 +322,27 @@ impl<
         while network_up < 2 {
             self.reader
                 .dequeue(|buf| {
-                    let packet = self.to_packet(buf)?;
-
-                    if let EdmPacket::ATEvent(ATEvent::NetworkUp { interface_id: 0 }) = packet {
-                        network_up += 1;
-                    } else if let EdmPacket::ATEvent(ATEvent::WifiLinkConnected {
-                        conn_id: _,
-                        bssid: _,
-                        channel: _,
-                    }) = packet
-                    {
-                        // TODO
-                        // self.wifiConnected = true;
-                    } else {
-                        return Err(OdinRadioError::AtEventUnsupported);
+                    match self.to_packet(buf)? {
+                        EdmPacket::ATEvent(ATEvent::NetworkUp { interface_id: 0 }) => {
+                            defmt::debug!("odin - network up");
+                            network_up += 1;
+                        }
+                        EdmPacket::ATEvent(ATEvent::WifiLinkConnected {
+                            conn_id: _,
+                            bssid: _,
+                            channel: _,
+                        }) => {
+                            defmt::debug!("odin - wifi link connected");
+                            // TODO
+                            // self.wifiConnected = true;
+                        }
+                        EdmPacket::ATEvent(ATEvent::WifiLinkDisconnected { conn_id, reason }) => {
+                            defmt::debug!("odin - got WifiLinkDisconnected during initial connect. id: {}, reason: {}", conn_id, reason);
+                        }
+                        other => {
+                            defmt::error!("odin - connect_wifi: unsupported EDM packet: {}", other);
+                            return Err(OdinRadioError::AtEventUnsupported);
+                        }
                     }
                     Ok(())
                 })
@@ -412,7 +419,8 @@ impl<
                                 return Err(OdinRadioError::PeerConnectionFailed);
                             }
                         }
-                        _ => {
+                        other => {
+                            defmt::warn!("connect_peer: unsupported EDM packet: {}", other);
                             return Err(OdinRadioError::AtEventUnsupported);
                         }
                     };
@@ -439,18 +447,18 @@ impl<
         while !ok || !peer_disconnect || !disconnect {
             self.reader
                 .dequeue(|buf| {
-                    defmt::info!("{}", buf);
+                    defmt::trace!("{}", buf);
                     match self.to_packet(buf)? {
                         EdmPacket::ATEvent(ATEvent::PeerDisconnected { peer_handle: _ }) => {
-                            defmt::info!("odin - close peer - ATEvent::PeerDisconnected");
+                            defmt::debug!("odin - close peer - ATEvent::PeerDisconnected");
                             peer_disconnect = true
                         }
                         EdmPacket::DisconnectEvent { channel: _ } => {
-                            defmt::info!("odin - close peer - DisconnectEvent");
+                            defmt::debug!("odin - close peer - DisconnectEvent");
                             disconnect = true;
                         }
                         EdmPacket::ATResponse(ATResponse::Ok("")) => {
-                            defmt::info!("odin - close peer - ATResponse::Ok");
+                            defmt::debug!("odin - close peer - ATResponse::Ok");
                             ok = true;
                         }
                         EdmPacket::DataEvent {
