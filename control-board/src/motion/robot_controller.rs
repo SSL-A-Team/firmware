@@ -141,7 +141,7 @@ impl BodyController {
                 self.global_pose_bangbang_pid_control_policy(state_estimate, body_cmd)
             }
             BodyControlMode::BCM_GLOBAL_TWIST => {
-                todo!()
+                self.global_twist_control_policy(state_estimate, body_cmd)
             }
             BodyControlMode::BCM_LOCAL_TWIST => {
                 self.local_twist_control_policy(state_estimate, body_cmd)
@@ -325,8 +325,62 @@ impl BodyController {
         (twist_out, accel_out)
     }
 
-    fn global_twist_control_policy(&mut self, state_estimate: Vector6f, target_accel: Vector3f) -> (Vector3f, Vector3f, f32) {
-        todo!()
+    fn global_twist_control_policy(&mut self, state_estimate: Vector6f, target_twist: Vector3f) -> (Vector3f, Vector3f) {
+        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+
+        // Compute trajectory to target twist if
+        //   1) we don't have a trajectory yet
+        //   2) the target twist has changed
+        //   3) the current twist has strayed too far from the currently tracked trajectory
+        if self.trajectory.is_none() || self.prev_body_cmd.is_none() || self.prev_body_cmd.unwrap() != target_twist ||
+            (self.trajectory_state[(3, 0)] - twist_estimate.x).abs() > self.traj_recompute_error[(2, 0)] ||
+            (self.trajectory_state[(4, 0)] - twist_estimate.y).abs() > self.traj_recompute_error[(2, 0)] ||
+            (self.trajectory_state[(5, 0)] - twist_estimate.z).abs() > self.traj_recompute_error[(3, 0)]
+        {
+            self.trajectory = Some(BangBangTraj3D::from_target_twist(
+                twist_estimate,
+                target_twist,
+                self.trajectory_params,
+            ).expect("Failed to generate bang-bang trajectory, check that trajectory parameters are valid"));
+            self.trajectory_state = state_estimate;
+            self.trajectory_time = 0.0;
+        }
+
+        // Feedforward: acceleration from the tracked trajectory
+        let ff = self.trajectory
+            .as_ref()
+            .expect("Trajectory should always be Some at this point since we set it if it was None above")
+            .accel_at(self.trajectory_time)
+            .expect("Trajectory should always have valid accel at current time");
+
+        // Feedback: PID on twist error between tracked trajectory twist and estimated twist
+        let target_traj_twist: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
+        let fb = self.twist_pid_controller.calculate(
+            &target_traj_twist,
+            &twist_estimate,
+            self.dt,
+        );
+
+        // Weighted sum of feedforward and feedback
+        // TODO: turn into params
+        let twist_control_gain_ff = 1.0;
+        let twist_control_gain_fb = 1.0;
+        let accel_out = twist_control_gain_ff * ff + twist_control_gain_fb * fb;
+
+        let twist_out: Vector3f = (state_estimate.fixed_rows::<3>(3) + accel_out * self.dt).into();
+
+        // Step trajectory forward
+        let next_state = self.trajectory
+            .expect("Trajectory should never be None at this point.")
+            .state_at(self.trajectory_state, self.trajectory_time, self.trajectory_time + self.dt)
+            .expect("Trajectory should always have valid state at current time + dt");
+
+        self.trajectory_state = next_state;
+        self.trajectory_time += self.dt;
+
+        self.prev_body_cmd = Some(target_twist);
+
+        (twist_out, accel_out)
     }
 
     fn global_pose_bangbang_pid_control_policy(
@@ -395,79 +449,6 @@ impl BodyController {
 
         (twist_out, accel_out)
     }
-
-    // fn twist_bangbang_control(
-    //     &mut self,
-    //     state_estimate: Vector6f,
-    //     target_twist: Vector3f,
-    // ) -> (Vector3f, Vector3f) {
-    //     let traj = BangBangTraj3D::from_target_twist(
-    //         state_estimate.fixed_rows::<3>(3).into(),
-    //         target_twist,
-    //         self.trajectory_params,
-    //     )
-    //     .expect(
-    //         "Failed to generate bang-bang trajectory, check that trajectory parameters are valid",
-    //     );
-    //     let next_state = traj
-    //         .state_at(state_estimate, 0.0, self.dt)
-    //         .expect("Bang-bang trajectory should always have a valid state at t=0.0 + dt");
-    //     let global_twist_out: Vector3f = next_state.fixed_rows::<3>(3).into();
-    //     let global_accel_out = traj
-    //         .accel_at(0.0)
-    //         .expect("Bang-bang trajectory should always have a valid accel at t=0.0");
-    //     (global_twist_out, global_accel_out)
-    // }
-
-//     fn twist_pid_control(
-//         &mut self,
-//         state_estimate: Vector6f,
-//         target_twist: Vector3f,
-//     ) -> (Vector3f, Vector3f) {
-//         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-//         let body_twist_pid =
-//             self.twist_pid_controller
-//                 .calculate(&target_twist, &twist_estimate, self.dt);
-//         let mut twist_out = target_twist + body_twist_pid;
-
-//         // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
-//         // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
-//         let prev_twist_out = self.prev_body_cmd.unwrap_or(Vector3f::default());
-//         let mut accel_out = (twist_out - prev_twist_out) / self.dt;
-
-//         let max_accel_linear = self.trajectory_params.max_accel_linear;
-//         let max_accel_angular = self.trajectory_params.max_accel_angular;
-//         let max_vel_linear = self.trajectory_params.max_vel_linear;
-//         let max_vel_angular = self.trajectory_params.max_vel_angular;
-
-//         // Clamp acceleration: linear magnitude and angular independently
-//         let accel_linear_mag = sqrtf(accel_out.x * accel_out.x + accel_out.y * accel_out.y);
-//         if accel_linear_mag > max_accel_linear {
-//             let scale = max_accel_linear / accel_linear_mag;
-//             accel_out.x *= scale;
-//             accel_out.y *= scale;
-//         }
-//         accel_out.z = accel_out.z.clamp(-max_accel_angular, max_accel_angular);
-
-//         // Recompute twist from clamped acceleration
-//         twist_out = prev_twist_out + (accel_out * self.dt);
-
-//         // Clamp twist: linear magnitude and angular independently
-//         let twist_linear_mag = sqrtf(twist_out.x * twist_out.x + twist_out.y * twist_out.y);
-//         if twist_linear_mag > max_vel_linear {
-//             let scale = max_vel_linear / twist_linear_mag;
-//             twist_out.x *= scale;
-//             twist_out.y *= scale;
-//         }
-//         twist_out.z = twist_out.z.clamp(-max_vel_angular, max_vel_angular);
-
-//         // Recompute accel to stay consistent with the clamped twist
-//         accel_out = (twist_out - prev_twist_out) / self.dt;
-
-//         self.prev_body_cmd = Some(twist_out);
-
-//         (twist_out, accel_out)
-//     }
 
     /// Returns the expected data format for a parameter name handled by BodyController,
     /// or None if the name is not recognized.
@@ -798,6 +779,79 @@ impl ParameterInterface for BodyController {
 //         }
 //     }
 // }
+
+    // fn twist_bangbang_control(
+    //     &mut self,
+    //     state_estimate: Vector6f,
+    //     target_twist: Vector3f,
+    // ) -> (Vector3f, Vector3f) {
+    //     let traj = BangBangTraj3D::from_target_twist(
+    //         state_estimate.fixed_rows::<3>(3).into(),
+    //         target_twist,
+    //         self.trajectory_params,
+    //     )
+    //     .expect(
+    //         "Failed to generate bang-bang trajectory, check that trajectory parameters are valid",
+    //     );
+    //     let next_state = traj
+    //         .state_at(state_estimate, 0.0, self.dt)
+    //         .expect("Bang-bang trajectory should always have a valid state at t=0.0 + dt");
+    //     let global_twist_out: Vector3f = next_state.fixed_rows::<3>(3).into();
+    //     let global_accel_out = traj
+    //         .accel_at(0.0)
+    //         .expect("Bang-bang trajectory should always have a valid accel at t=0.0");
+    //     (global_twist_out, global_accel_out)
+    // }
+
+//     fn twist_pid_control(
+//         &mut self,
+//         state_estimate: Vector6f,
+//         target_twist: Vector3f,
+//     ) -> (Vector3f, Vector3f) {
+//         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+//         let body_twist_pid =
+//             self.twist_pid_controller
+//                 .calculate(&target_twist, &twist_estimate, self.dt);
+//         let mut twist_out = target_twist + body_twist_pid;
+
+//         // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
+//         // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
+//         let prev_twist_out = self.prev_body_cmd.unwrap_or(Vector3f::default());
+//         let mut accel_out = (twist_out - prev_twist_out) / self.dt;
+
+//         let max_accel_linear = self.trajectory_params.max_accel_linear;
+//         let max_accel_angular = self.trajectory_params.max_accel_angular;
+//         let max_vel_linear = self.trajectory_params.max_vel_linear;
+//         let max_vel_angular = self.trajectory_params.max_vel_angular;
+
+//         // Clamp acceleration: linear magnitude and angular independently
+//         let accel_linear_mag = sqrtf(accel_out.x * accel_out.x + accel_out.y * accel_out.y);
+//         if accel_linear_mag > max_accel_linear {
+//             let scale = max_accel_linear / accel_linear_mag;
+//             accel_out.x *= scale;
+//             accel_out.y *= scale;
+//         }
+//         accel_out.z = accel_out.z.clamp(-max_accel_angular, max_accel_angular);
+
+//         // Recompute twist from clamped acceleration
+//         twist_out = prev_twist_out + (accel_out * self.dt);
+
+//         // Clamp twist: linear magnitude and angular independently
+//         let twist_linear_mag = sqrtf(twist_out.x * twist_out.x + twist_out.y * twist_out.y);
+//         if twist_linear_mag > max_vel_linear {
+//             let scale = max_vel_linear / twist_linear_mag;
+//             twist_out.x *= scale;
+//             twist_out.y *= scale;
+//         }
+//         twist_out.z = twist_out.z.clamp(-max_vel_angular, max_vel_angular);
+
+//         // Recompute accel to stay consistent with the clamped twist
+//         accel_out = (twist_out - prev_twist_out) / self.dt;
+
+//         self.prev_body_cmd = Some(twist_out);
+
+//         (twist_out, accel_out)
+//     }
 
 // fn pose_pid_control(
 //     &mut self,
