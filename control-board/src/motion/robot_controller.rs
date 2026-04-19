@@ -111,13 +111,13 @@ impl BodyController {
         let mut state_estimate = self.robot_model.get_state();
 
         // Deadzone the velocity estimate
-        if fabsf(state_estimate[3]) < 0.05 {
+        if fabsf(state_estimate[3]) < 0.1 {
             state_estimate[3] = 0.0;
         }
-        if fabsf(state_estimate[4]) < 0.05 {
+        if fabsf(state_estimate[4]) < 0.1 {
             state_estimate[4] = 0.0;
         }
-        if fabsf(state_estimate[5]) < 0.05 {
+        if fabsf(state_estimate[5]) < 0.2 {
             state_estimate[5] = 0.0;
         }
 
@@ -161,7 +161,13 @@ impl BodyController {
         };
 
         // Compensate for modeled friction forces
-        self.body_accel_out_fric_comp = self.body_accel_out - self.robot_model.i_inv * self.robot_model.compute_friction_force(self.body_twist_out);
+
+        // // Using the target twist will activate coulomb friction compensation even when the robot is stationary, which helps to overcome static friction. Using the estimated twist would cause the controller to not apply any torque when the robot is stationary due to zero estimated velocity, which would make it unable to overcome static friction to start moving. However, it's causing small oscillations at the setpoint.
+        // self.body_accel_out_fric_comp = self.body_accel_out - self.robot_model.i_inv * self.robot_model.compute_friction_force(self.body_twist_out);
+
+        // Using the deadzoned estimated twist will prevent oscillations at the setpoint, but will fail to use coulomb friction compensation to overcome static friction when at rest.
+        self.body_accel_out_fric_comp = self.body_accel_out - self.robot_model.i_inv * self.robot_model.compute_friction_force(state_estimate.fixed_rows::<3>(3).into());
+
         // Calculate wheel commands from body commands
         self.wheel_vel_out =
             self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_out;
