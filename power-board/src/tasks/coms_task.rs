@@ -8,7 +8,6 @@ use embassy_stm32::{
 use crate::{pins::*, power_state::SharedPowerState, SystemIrqs, DEBUG_UART_QUEUES};
 use ateam_common_packets::bindings::{BatteryInfo, PowerCommand, PowerTelemetry};
 use ateam_lib_stm32::{
-    audio::{songs::SongId, AudioCommand},
     idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl,
     uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue},
 };
@@ -63,7 +62,7 @@ async fn coms_task_entry(
     write_queue: &'static UartWriteQueue<MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_UART_QUEUES>,
     shared_power_state: &'static SharedPowerState,
     mut telemetry_subscriber: TelemetrySubscriber,
-    audio_publisher: AudioPublisher,
+    _audio_publisher: AudioPublisher,
 ) {
     let mut loop_rate_ticker = Ticker::every(Duration::from_millis(10));
     let mut last_battery_telem_packet: BatteryInfo = Default::default();
@@ -121,9 +120,6 @@ async fn coms_task_entry(
 
             if command_packet.request_shutdown() != 0 {
                 defmt::info!("COMS TASK - request shutdown received from control board");
-                audio_publisher
-                    .publish(AudioCommand::PlaySong(SongId::ShutdownRequested))
-                    .await;
                 shared_power_state.set_shutdown_requested(true).await;
             }
 
@@ -193,7 +189,7 @@ pub async fn start_coms_task(
     uart_queue_spawner: SendSpawner,
     shared_power_state: &'static SharedPowerState,
     telemetry_subscriber: TelemetrySubscriber,
-    audio_publisher: AudioPublisher,
+    _audio_publisher: AudioPublisher,
     uart: Peri<'static, ComsUart>,
     uart_rx_pin: Peri<'static, ComsUartRxPin>,
     uart_tx_pin: Peri<'static, ComsUartTxPin>,
@@ -220,7 +216,7 @@ pub async fn start_coms_task(
             &COMS_IDLE_BUFFERED_UART.get_uart_write_queue(),
             shared_power_state,
             telemetry_subscriber,
-            audio_publisher,
+            _audio_publisher,
         ))
         .expect("failed to spawn coms task");
 }
