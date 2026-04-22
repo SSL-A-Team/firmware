@@ -1,7 +1,6 @@
 use ateam_common_packets::{bindings::BasicTelemetry, radio::TelemetryPacket};
 use ateam_lib_stm32::{
-    idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart,
-    uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue},
+    drivers::radio::edm_protocol::EDM_PACKET_WIRE_OVERHEAD, idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}
 };
 use credentials::WifiCredential;
 use embassy_executor::{SendSpawner, Spawner};
@@ -54,9 +53,9 @@ macro_rules! create_radio_task {
 pub const RADIO_LOOP_RATE_MS: u64 = 10;
 pub const RADIO_BASIC_TELEM_INTERVAL_MS: u64 = 0; // 0 binds basic telem to task loop rate
 
-pub const RADIO_MAX_TX_PACKET_SIZE: usize = 448;
+pub const RADIO_MAX_TX_PACKET_SIZE: usize = ateam_common_packets::MAX_ROBOT_TX_PACKET_SIZE + EDM_PACKET_WIRE_OVERHEAD;
 pub const RADIO_TX_BUF_DEPTH: usize = 6;
-pub const RADIO_MAX_RX_PACKET_SIZE: usize = 256;
+pub const RADIO_MAX_RX_PACKET_SIZE: usize = ateam_common_packets::MAX_ROBOT_RX_PACKET_SIZE + EDM_PACKET_WIRE_OVERHEAD;
 pub const RADIO_RX_BUF_DEPTH: usize = 6;
 
 static_idle_buffered_uart!(RADIO, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, DEBUG_RADIO_UART_QUEUES, #[link_section = ".axisram.buffers"]);
