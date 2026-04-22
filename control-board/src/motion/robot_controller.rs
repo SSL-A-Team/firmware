@@ -137,13 +137,13 @@ impl BodyController {
         start = Instant::now();
 
         (self.body_twist_out, self.body_accel_out) = match body_control_mode {
-            BodyControlMode::BCM_GLOBAL_POSE => {
+            BodyControlMode::BCM_GLOBAL_POSITION => {
                 self.global_pose_bangbang_pid_control_policy(state_estimate, body_cmd)
             }
-            BodyControlMode::BCM_GLOBAL_TWIST => {
+            BodyControlMode::BCM_GLOBAL_VELOCITY => {
                 self.global_twist_control_policy(state_estimate, body_cmd)
             }
-            BodyControlMode::BCM_LOCAL_TWIST => {
+            BodyControlMode::BCM_LOCAL_VELOCITY => {
                 self.local_twist_control_policy(state_estimate, body_cmd)
             }
             BodyControlMode::BCM_GLOBAL_ACCEL => {
