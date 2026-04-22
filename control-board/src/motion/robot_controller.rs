@@ -1,6 +1,6 @@
 use crate::motion::pid::PidController;
 use crate::parameter_interface::ParameterInterface;
-use ateam_common_packets::bindings::{BodyControlMode, BodyControlTelemetry, ParameterCommandCode::*, ParameterDataFormat, ParameterName};
+use ateam_common_packets::bindings::{BodyControlCommand, BodyControlExtendedTelemetry, BodyControlMode, BodyControlSkillExtendedTelemetry, BodyControlTelemetry, ExtendedGlobalAccelerationTelemetry, ExtendedGlobalPositionTelemetry, ExtendedGlobalVelocityTelemetry, ExtendedLocalAccelerationTelemetry, ExtendedLocalVelocityTelemetry, GlobalPositionCommand, ParameterCommandCode::*, ParameterDataFormat, ParameterName};
 use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
 use ateam_controls::robot_model::RobotModel;
 use ateam_controls::{Vector2f, Vector3f, Vector4f, Vector5f, Vector6f, Vector8f, z_rotation_mat};
@@ -31,6 +31,7 @@ pub struct BodyController {
     pub wheel_vel_out: Vector4f,
     pub wheel_torque_out: Vector4f,
     pub telemetry: BodyControlTelemetry,
+    pub debug_telemetry: BodyControlExtendedTelemetry,
     pub dt: f32,
 }
 
@@ -63,6 +64,7 @@ impl BodyController {
             wheel_vel_out: Vector4f::default(),
             wheel_torque_out: Vector4f::default(),
             telemetry: Default::default(),
+            debug_telemetry: Default::default(),
             dt,
         }
     }
@@ -81,11 +83,12 @@ impl BodyController {
         self.wheel_vel_out = Vector4f::default();
         self.wheel_torque_out = Vector4f::default();
         self.telemetry = Default::default();
+        self.debug_telemetry = Default::default();
     }
 
     pub fn control_update(
         &mut self,
-        body_cmd: Vector3f,
+        body_cmd: BodyControlCommand,
         body_control_mode: BodyControlMode::Type,
         vision_pose_meas: Vector3f,
         vision_update: bool,
@@ -136,27 +139,91 @@ impl BodyController {
         let kf_update_time = Instant::now() - start;
         start = Instant::now();
 
-        (self.body_twist_out, self.body_accel_out) = match body_control_mode {
+        let body_twist_out;
+        let body_accel_out;
+        let skill_telem;
+        match body_control_mode {
             BodyControlMode::BCM_GLOBAL_POSITION => {
-                self.global_pose_bangbang_pid_control_policy(state_estimate, body_cmd)
+                let cmd = unsafe {
+                    Vector3f::new(
+                        body_cmd.global_pos.global_x, 
+                        body_cmd.global_pos.global_y, 
+                        body_cmd.global_pos.global_theta
+                    )
+                };
+                (body_twist_out, body_accel_out) = self.global_pose_bangbang_pid_control_policy(state_estimate, cmd);
+                skill_telem = BodyControlSkillExtendedTelemetry {
+                    global_pos: ExtendedGlobalPositionTelemetry {
+                        cmd_echo: unsafe { body_cmd.global_pos }
+                    }
+                };
             }
             BodyControlMode::BCM_GLOBAL_VELOCITY => {
-                self.global_twist_control_policy(state_estimate, body_cmd)
+                let cmd = unsafe {
+                    Vector3f::new(
+                        body_cmd.global_vel.global_xd, 
+                        body_cmd.global_vel.global_yd, 
+                        body_cmd.global_vel.global_omega
+                    )
+                };
+                (body_twist_out, body_accel_out) = self.global_twist_control_policy(state_estimate, cmd);
+                skill_telem = BodyControlSkillExtendedTelemetry {
+                    global_vel: ExtendedGlobalVelocityTelemetry {
+                        cmd_echo: unsafe { body_cmd.global_vel }
+                    }
+                };
             }
             BodyControlMode::BCM_LOCAL_VELOCITY => {
-                self.local_twist_control_policy(state_estimate, body_cmd)
+                let cmd = unsafe {
+                    Vector3f::new(
+                        body_cmd.local_vel.local_xd,
+                        body_cmd.local_vel.local_yd,
+                        body_cmd.local_vel.local_omega
+                    )
+                };
+                (body_twist_out, body_accel_out) = self.local_twist_control_policy(state_estimate, cmd);
+                skill_telem = BodyControlSkillExtendedTelemetry {
+                    local_vel: ExtendedLocalVelocityTelemetry {
+                        cmd_echo: unsafe { body_cmd.local_vel }
+                    }
+                };
             }
             BodyControlMode::BCM_GLOBAL_ACCEL => {
-                self.global_accel_control_policy(state_estimate, body_cmd)
+                let cmd = unsafe {
+                    Vector3f::new(
+                        body_cmd.global_acc.global_xdd,
+                        body_cmd.global_acc.global_ydd,
+                        body_cmd.global_acc.global_alpha,
+                    )
+                };
+                (body_twist_out, body_accel_out) = self.global_accel_control_policy(state_estimate, cmd);
+                skill_telem = BodyControlSkillExtendedTelemetry {
+                    global_acc: ExtendedGlobalAccelerationTelemetry {
+                        cmd_echo: unsafe { body_cmd.global_acc }
+                    }
+                };
             }
             BodyControlMode::BCM_LOCAL_ACCEL => {
-                self.local_accel_control_policy(state_estimate, body_cmd)
+                let cmd = unsafe {
+                    Vector3f::new(
+                        body_cmd.local_acc.local_xdd,
+                        body_cmd.local_acc.local_ydd,
+                        body_cmd.local_acc.local_alpha,
+                    )
+                };
+                (body_twist_out, body_accel_out) = self.local_accel_control_policy(state_estimate, cmd);
+                skill_telem = BodyControlSkillExtendedTelemetry {
+                    local_acc: ExtendedLocalAccelerationTelemetry {
+                        cmd_echo: unsafe { body_cmd.local_acc }
+                    }
+                };
             }
             _ => {
                 if body_control_mode != BodyControlMode::BCM_OFF {
                     defmt::error!("Received command with unrecognized control mode: {}", body_control_mode as i32);
                 }
-                (Vector3f::zeros(), Vector3f::zeros())
+                (body_twist_out, body_accel_out) = (Vector3f::zeros(), Vector3f::zeros());
+                skill_telem = BodyControlSkillExtendedTelemetry::default();
             }
         };
 
@@ -185,26 +252,26 @@ impl BodyController {
         //     self.wheel_vel_cmd.w
         // );
 
-        // Copy values to telemetry
-        self.telemetry = BodyControlTelemetry {
+        // Copy values to debug telemetry
+        self.debug_telemetry = BodyControlExtendedTelemetry {
             body_control_mode,
             _bitfield_align_1: Default::default(),
-            _bitfield_1: BodyControlTelemetry::new_bitfield_1(
+            _bitfield_1: BodyControlExtendedTelemetry::new_bitfield_1(
                 vision_update as u8,
                 Default::default(),
             ),
             _reserved2: Default::default(),
+            skill: skill_telem,
             imu_gyro: [0.0, 0.0, imu_gyro_theta_meas],
             imu_accel: [imu_accel_x_meas, imu_accel_y_meas, 0.0],
             vision_pose: vision_pose_meas.into(),
-            body_cmd: body_cmd.into(),
-            body_traj_pose: self.trajectory_state.fixed_rows::<3>(0).into(),
-            body_traj_twist: self.trajectory_state.fixed_rows::<3>(3).into(),
-            kf_body_pose_prediction: state_prediction.fixed_rows::<3>(0).into(),
-            kf_body_twist_prediction: state_prediction.fixed_rows::<3>(3).into(),
-            kf_body_pose_estimate: state_estimate.fixed_rows::<3>(0).into(),
-            kf_body_twist_estimate: state_estimate.fixed_rows::<3>(3).into(),
-            body_twist_u: self.body_twist_out.into(),
+            body_traj_pos: self.trajectory_state.fixed_rows::<3>(0).into(),
+            body_traj_vel: self.trajectory_state.fixed_rows::<3>(3).into(),
+            kf_body_pos_prediction: state_prediction.fixed_rows::<3>(0).into(),
+            kf_body_vel_prediction: state_prediction.fixed_rows::<3>(3).into(),
+            kf_body_pos_estimate: state_estimate.fixed_rows::<3>(0).into(),
+            kf_body_vel_estimate: state_estimate.fixed_rows::<3>(3).into(),
+            body_vel_u: self.body_twist_out.into(),
             body_accel_u: self.body_accel_out.into(),
             body_accel_u_fric_comp: self.body_accel_out_fric_comp.into(),
         };
@@ -239,8 +306,12 @@ impl BodyController {
         self.robot_model.torques_to_currents(self.wheel_torque_out)
     }
 
-    pub fn get_control_debug_telem(&self) -> BodyControlTelemetry {
+    pub fn get_control_telem(&self) -> BodyControlTelemetry {
         self.telemetry
+    }
+
+    pub fn get_control_debug_telem(&self) -> BodyControlExtendedTelemetry {
+        self.debug_telemetry
     }
 
     fn state_update(

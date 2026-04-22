@@ -9,10 +9,7 @@
 #![feature(sync_unsafe_cell)]
 #![feature(variant_count)]
 
-use ateam_common_packets::{
-    bindings::{ErrorTelemetry, ParameterDataFormat},
-    radio::DataPacket,
-};
+use ateam_common_packets::bindings::ErrorTelemetry;
 use embassy_stm32::{
     bind_interrupts, peripherals,
     rcc::{
@@ -189,60 +186,6 @@ pub fn get_system_config() -> Config {
     config.rcc.voltage_scale = VoltageScale::Scale0;
 
     config
-}
-
-pub fn is_float_array_safe(arr: &[f32]) -> bool {
-    for f in arr {
-        if !is_float_safe(*f) {
-            return false;
-        }
-    }
-    return true;
-}
-
-pub const fn is_float_safe(f: f32) -> bool {
-    !f.is_nan() && f.is_finite()
-}
-
-pub fn is_command_packet_safe(cmd_pck: DataPacket) -> bool {
-    match cmd_pck {
-        DataPacket::BasicControl(basic_control) => {
-            is_float_safe(basic_control.pose_x_linear_vision)
-                && is_float_safe(basic_control.pose_y_linear_vision)
-                && is_float_safe(basic_control.pose_z_angular_vision)
-                && is_float_safe(basic_control.x_linear_cmd)
-                && is_float_safe(basic_control.y_linear_cmd)
-                && is_float_safe(basic_control.z_angular_cmd)
-                && is_float_safe(basic_control.kick_vel)
-                && is_float_safe(basic_control.dribbler_speed)
-        },
-        DataPacket::ParameterCommand(parameter_command) => match parameter_command.data_format {
-            ParameterDataFormat::F32 => {
-                let float = unsafe { parameter_command.data.f32_ };
-                return is_float_safe(float);
-            },
-            ParameterDataFormat::VEC2_F32 => {
-                let arr = unsafe { parameter_command.data.vec2_f32 };
-                return is_float_array_safe(&arr);
-            },
-            ParameterDataFormat::VEC3_F32 => {
-                let arr = unsafe { parameter_command.data.vec3_f32 };
-                return is_float_array_safe(&arr);
-            },
-            ParameterDataFormat::VEC4_F32 => {
-                let arr = unsafe { parameter_command.data.vec4_f32 };
-                return is_float_array_safe(&arr);
-            },
-            ParameterDataFormat::VEC5_F32 => {
-                let arr = unsafe { parameter_command.data.vec5_f32 };
-                return is_float_array_safe(&arr);
-            },
-            _ => {
-                defmt::error!("Parameter Command data packet has an unexpected data type");
-                return false;
-            },
-        },
-    }
 }
 
 pub fn create_error_telemetry_from_string(error_message: &str) -> ErrorTelemetry {

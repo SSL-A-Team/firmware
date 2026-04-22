@@ -1,6 +1,6 @@
 use ateam_common_packets::{
     bindings::{
-        BasicControl, BasicTelemetry, CcmMotionControlType, ExtendedTelemetry, KickerTelemetry, MotionCommandType, PowerTelemetry
+        BasicControl, BasicTelemetry, BodyControlCommand, BodyControlMode, CcmMotionControlType, ExtendedTelemetry, KickerTelemetry, MotionCommandType, PowerTelemetry
     },
     radio::TelemetryPacket,
 };
@@ -19,7 +19,7 @@ use crate::{
     parameter_interface::ParameterInterface,
     pins::*,
     robot_state::{RobotState, SharedRobotState},
-    SystemIrqs, DEBUG_MOTOR_UART_QUEUES, ROBOT_VERSION_MAJOR, ROBOT_VERSION_MINOR,
+    SystemIrqs, DEBUG_MOTOR_UART_QUEUES,
 };
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel-torque.bin"}
@@ -209,10 +209,10 @@ impl<
             .hall_disconnected_error() as u32;
 
         let basic_telem = TelemetryPacket::Basic(BasicTelemetry {
-            control_data_sequence_number: seq_number as u8,
             transmission_sequence_number: 0,
-            robot_revision_major: ROBOT_VERSION_MAJOR,
-            robot_revision_minor: ROBOT_VERSION_MINOR,
+            control_data_sequence_number: seq_number as u8,
+            body_control_mode: self.last_command.body_control_mode,
+            reserved1: Default::default(),
             _bitfield_align_1: Default::default(),
             _bitfield_1: BasicTelemetry::new_bitfield_1(
                 !self.last_power_telemetry.power_ok() as u32, // power error
@@ -245,6 +245,7 @@ impl<
             ),
             battery_percent: self.last_power_telemetry.battery_info.battery_pct as u16,
             kicker_charge_percent: self.last_kicker_telemetry.charge_pct,
+            control_telem: robot_controller.get_control_telem(),
         });
 
         self.ticks_since_basic_telem += 1;
@@ -256,13 +257,13 @@ impl<
         let debug_telem = ExtendedTelemetry {
             timestamp_us_lo: (timestamp_us & 0xFFFFFFFF) as u32,
             timestamp_us_hi: ((timestamp_us >> 32) & 0xFFFFFFFF) as u32,
-            // power_status: self.last_power_telemetry,
+            power_status: self.last_power_telemetry,
             front_left_motor: self.motor_fl.get_latest_state(),
             back_left_motor: self.motor_bl.get_latest_state(),
             back_right_motor: self.motor_br.get_latest_state(),
             front_right_motor: self.motor_fr.get_latest_state(),
-            // kicker_status: self.last_kicker_telemetry,
             body_control_telemetry: robot_controller.get_control_debug_telem(),
+            kicker_status: self.last_kicker_telemetry,
         };
 
         // Send extended telemetry if vision update was received, or if the extended telemetry interval has elapsed
@@ -310,7 +311,8 @@ impl<
 
         let mut robot_controller = BodyController::new(loop_period.as_micros() as f32 * 1e-6);
 
-        let mut cmd = Vector3f::default();
+        let mut cmd_mode = BodyControlMode::BCM_OFF;
+        let mut cmd = BodyControlCommand::default();
         let mut last_vision_pose_meas = Vector3f::default();
         let mut vision_update = false;
         let mut ticks_since_control_packet = 0;
@@ -374,25 +376,18 @@ impl<
                             }
                         }
 
-                        cmd = Vector3f::new(
-                            latest_control.x_linear_cmd,
-                            latest_control.y_linear_cmd,
-                            latest_control.z_angular_cmd,
-                        );
-                        last_vision_pose_meas = Vector3f::new(
-                            latest_control.pose_x_linear_vision,
-                            latest_control.pose_y_linear_vision,
-                            latest_control.pose_z_angular_vision,
-                        );
-                        vision_update = latest_control.vision_update() != 0;
-
                         if latest_control.request_shutdown() != 0 {
                             self.shared_robot_state.flag_shutdown_requested();
                         }
 
+                        cmd_mode = latest_control.body_control_mode;
+                        cmd = latest_control.cmd;
+                        last_vision_pose_meas = latest_control.vision_position_update.into();
+                        vision_update = latest_control.vision_update() != 0;
+
                         let wheel_motion_type = match (
-                            self.last_command.wheel_vel_control_enabled() != 0,
-                            self.last_command.wheel_torque_control_enabled() != 0,
+                            latest_control.wheel_vel_control_enabled() != 0,
+                            latest_control.wheel_torque_control_enabled() != 0,
                         ) {
                             (true, true) => CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT,
                             (true, false) => CcmMotionControlType::CCM_MCT_VELOCITY,
@@ -468,7 +463,7 @@ impl<
 
             robot_controller.control_update(
                 cmd,
-                self.last_command.body_control_mode,
+                cmd_mode,
                 last_vision_pose_meas,
                 vision_update,
                 wheel_vel_meas,

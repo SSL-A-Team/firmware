@@ -275,7 +275,7 @@ impl<
                 // Avoid spamming logs while the system starts up
                 defmt::error!("Kicker Interface - Kicker task has stopped receiving commands from the radio task and will de-arm the kicker board");
                 self.kicker_driver.set_kick_strength(0.0);
-                self.kicker_driver.request_kick(KickRequest::KR_DISABLE);
+                self.kicker_driver.request_kick(KickRequest::KR_DISABLE as u32);
                 self.kicker_driver.set_drib_vel(0.0);
             }
 
@@ -318,10 +318,8 @@ impl<
                             self.last_command_received_time = Some(Instant::now());
 
                             self.kicker_driver.set_kick_strength(bc_pkt.kick_vel);
-                            self.kicker_driver.request_kick(bc_pkt.kick_request);
+                            self.kicker_driver.request_kick(bc_pkt.kick_request as u32);
                             self.kicker_driver.set_drib_vel(bc_pkt.dribbler_speed);
-                            self.kicker_driver
-                                .set_drib_multiplier(bc_pkt.dribbler_multiplier as u32);
                         }
                         DataPacket::ParameterCommand(_) => {
                             // we currently don't have any kicker parameters
