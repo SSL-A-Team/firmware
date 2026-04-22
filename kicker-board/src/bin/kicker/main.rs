@@ -95,7 +95,6 @@ static_idle_buffered_uart_nl!(
 );
 
 static DRIB_VEL_PUBSUB: PubSubChannel<CriticalSectionRawMutex, f32, 1, 1, 1> = PubSubChannel::new();
-static DRIB_MULT: AtomicU32 = AtomicU32::new(100);
 static BALL_DETECT: AtomicBool = AtomicBool::new(false);
 static DRIB_TELEM_PUBSUB: PubSubChannel<CriticalSectionRawMutex, MotorTelemetry, 1, 1, 1> =
     PubSubChannel::new();
@@ -212,7 +211,6 @@ async fn high_pri_kick_task(
             }
 
             drib_vel_pub.publish_immediate(kicker_control_packet.drib_speed);
-            DRIB_MULT.store(kicker_control_packet.dribbler_mult(), Relaxed);
 
             last_packet_received_time = Instant::now();
         }
@@ -496,16 +494,7 @@ async fn low_pri_dribble_task(
         }
         drib_motor.process_packets();
 
-        let mut drib_mult = DRIB_MULT.load(Relaxed);
-        if drib_mult == 0 || drib_mult > 100 {
-            drib_mult = 100;
-        }
-        let drib_mult_float = (drib_mult as f32) / 100.0f32;
-
-        let mut drib_sp = -1.0 * lastest_drib_vel / 1000.0;
-        if !BALL_DETECT.load(Relaxed) {
-            drib_sp *= drib_mult_float;
-        }
+        let drib_sp = -1.0 * lastest_drib_vel / 1000.0;
         drib_motor.set_setpoint(drib_sp);
 
         drib_motor.send_motion_command();
