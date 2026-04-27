@@ -6,8 +6,7 @@ use std::{
 };
 
 use ateam_common_packets::bindings::{
-    self, BasicControl, CommandCode, HelloRequest, HelloResponse, KickRequest, RadioPacket,
-    RadioPacket_Data,
+    BasicControl, BodyControlCommand, BodyControlMode, CommandCode, HelloRequest, HelloResponse, KickRequest, LocalVelocityCommand, RadioData, RadioHeader, RadioPacket
 };
 use local_ip_address::local_ip;
 
@@ -29,10 +28,10 @@ fn main() -> std::io::Result<()> {
     let src = loop {
         let (len, src) = socket.recv_from(&mut buf)?;
         if len
-            == size_of::<RadioPacket>() - size_of::<RadioPacket_Data>() + size_of::<HelloRequest>()
+            == size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloRequest>()
         {
             let packet = unsafe { &*(buf.as_ptr() as *const RadioPacket) };
-            if packet.command_code == CommandCode::CC_HELLO_REQ {
+            if packet.header.command_code == CommandCode::CC_HELLO_REQ {
                 println!("Source: {src}");
                 println!("{:?}", unsafe { packet.data.hello_request });
                 break src;
@@ -41,12 +40,13 @@ fn main() -> std::io::Result<()> {
     };
 
     let packet = RadioPacket {
+        header: RadioHeader {
         crc32: 0,
-        major_version: bindings::kProtocolVersionMajor,
-        minor_version: bindings::kProtocolVersionMinor,
+        _reserved: 0,
         command_code: CommandCode::CC_HELLO_RESP,
         data_length: size_of::<HelloResponse>() as u16,
-        data: RadioPacket_Data {
+        },
+        data: RadioData {
             hello_response: HelloResponse {
                 ipv4: local_ip.octets(),
                 port: 42069,
@@ -56,38 +56,47 @@ fn main() -> std::io::Result<()> {
     let packet_bytes = unsafe {
         core::slice::from_raw_parts(
             &packet as *const _ as *const u8,
-            size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+            size_of::<RadioPacket>() - size_of::<RadioData>()
                 + core::mem::size_of::<HelloResponse>(),
         )
     };
     socket.send_to(packet_bytes, src)?;
 
     let mut packet = RadioPacket {
+        header: RadioHeader {
         crc32: 0,
-        major_version: bindings::kProtocolVersionMajor,
-        minor_version: bindings::kProtocolVersionMinor,
+        _reserved: 0,
         command_code: CommandCode::CC_CONTROL,
         data_length: size_of::<BasicControl>() as u16,
-        data: RadioPacket_Data {
+        },
+        data: RadioData {
             control: BasicControl {
                 _bitfield_1: Default::default(),
                 _bitfield_align_1: Default::default(),
-                pose_x_linear_vision: 0.0,
-                pose_y_linear_vision: 0.0,
-                pose_z_angular_vision: 0.0,
-                x_linear_cmd: 0.0,
-                y_linear_cmd: 0.0,
-                z_angular_cmd: 0.0,
+                vision_position_update: [0.0, 0.0, 0.0],
+
+                body_control_mode: BodyControlMode::BCM_LOCAL_VELOCITY,
+                kick_request: KickRequest::KR_ARM,
+                play_song: 0,
+                reserved2: [0; 1],
+
                 kick_vel: 0.,
                 dribbler_speed: 0.,
-                kick_request: KickRequest::KR_ARM,
+
+                cmd: BodyControlCommand { local_vel: LocalVelocityCommand {
+                    local_xd: 0.0,
+                    local_yd: 0.0,
+                    local_omega: 0.0,
+                    max_linear_acc: 0.0,
+                    max_angular_acc: 0.0,
+                }},
             },
         },
     };
     let packet_bytes = unsafe {
         core::slice::from_raw_parts(
             &packet as *const _ as *const u8,
-            core::mem::size_of::<RadioPacket>() - core::mem::size_of::<RadioPacket_Data>()
+            core::mem::size_of::<RadioPacket>() - core::mem::size_of::<RadioData>()
                 + core::mem::size_of::<BasicControl>(),
         )
     };
@@ -123,7 +132,7 @@ fn main() -> std::io::Result<()> {
     let mut up = true;
     loop {
         // packet.data.control.x_linear_cmd = vel;
-        packet.data.control.z_angular_cmd = 0.0;
+        packet.data.control.cmd.local_vel.local_omega = 0.0;
         socket.send_to(packet_bytes, src)?;
         std::thread::sleep(Duration::from_millis(10));
 

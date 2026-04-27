@@ -2,7 +2,7 @@
 #![no_main]
 
 use ateam_common_packets::{
-    bindings::{BasicControl, KickRequest},
+    bindings::{BasicControl, BodyControlCommand, BodyControlMode, KickRequest, LocalVelocityCommand},
     radio::DataPacket,
 };
 use embassy_executor::InterruptExecutor;
@@ -209,17 +209,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let reboot_robot = 0;
     let game_state_in_stop = 0;
     let emergency_stop = 0;
-    let body_pose_control_enabled = 0;
-    // let body_pose_control_enabled = 1;
-    let body_twist_control_enabled = 0;
-    let body_accel_control_enabled = 1;
-    // let body_accel_control_enabled = 0;
     let wheel_vel_control_enabled = 0;
     let wheel_torque_control_enabled = 1;
     let vision_update = 0;
-    let dribbler_multiplier = 0;
     let reserved = 0;
-    let play_song = 0;
 
     let mut control = BasicControl {
         _bitfield_1: BasicControl::new_bitfield_1(
@@ -227,26 +220,30 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             reboot_robot,
             game_state_in_stop,
             emergency_stop,
-            body_pose_control_enabled,
-            body_twist_control_enabled,
-            body_accel_control_enabled,
             wheel_vel_control_enabled,
             wheel_torque_control_enabled,
             vision_update,
-            dribbler_multiplier,
-            reserved,
-            play_song,
+            reserved
         ),
         _bitfield_align_1: Default::default(),
-        pose_x_linear_vision: 0.0,
-        pose_y_linear_vision: 0.0,
-        pose_z_angular_vision: 0.0,
-        x_linear_cmd: 0.0,
-        y_linear_cmd: 0.0,
-        z_angular_cmd: 0.0,
-        kick_vel: 0.0,
-        dribbler_speed: 0.0,
+
+        vision_position_update: [0.0, 0.0, 0.0],
+
+        body_control_mode: BodyControlMode::BCM_LOCAL_VELOCITY,
         kick_request: KickRequest::KR_DISABLE,
+        play_song: 0,
+        reserved2: [0; 1],
+        
+        kick_vel: 0.0,
+        dribbler_speed: 50.0,
+
+        cmd: BodyControlCommand { local_vel: LocalVelocityCommand {
+            local_xd: 0.0,
+            local_yd: 0.0,
+            local_omega: 0.0,
+            max_linear_acc: 0.0,
+            max_angular_acc: 0.0,
+        }},
     };
 
     Timer::after_secs(5).await;
@@ -262,9 +259,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         last_loop_start = Instant::now();
 
         if t < 5. {
-            control.x_linear_cmd = 0.02;
+            control.cmd.local_vel.local_xd = 0.02;
         } else {
-            control.x_linear_cmd = 0.0;
+            control.cmd.local_vel.local_xd = 0.0;
         }
 
         // control.z_angular_cmd = a_angular * sinf(w * t);
@@ -277,9 +274,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
                     if latest_control.vision_update() != 0 {
                         control.set_vision_update(1);
-                        control.pose_x_linear_vision = latest_control.pose_x_linear_vision;
-                        control.pose_y_linear_vision = latest_control.pose_y_linear_vision;
-                        control.pose_z_angular_vision = latest_control.pose_z_angular_vision;
+                        control.vision_position_update = latest_control.vision_position_update;
                     }
                 }
                 ateam_common_packets::radio::DataPacket::ParameterCommand(_) => {}

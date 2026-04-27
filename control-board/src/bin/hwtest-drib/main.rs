@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use ateam_common_packets::{bindings::BasicControl, bindings::KickRequest, radio::DataPacket};
+use ateam_common_packets::{bindings::{BasicControl, BodyControlCommand, BodyControlMode, GlobalVelocityCommand, KickRequest}, radio::DataPacket};
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{interrupt, pac::Interrupt};
 use embassy_sync::pubsub::PubSubChannel;
@@ -88,20 +88,27 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     loop {
         Timer::after_millis(100).await;
 
-        test_command_publisher
-            .publish(DataPacket::BasicControl(BasicControl {
-                _bitfield_1: Default::default(),
-                _bitfield_align_1: Default::default(),
-                pose_x_linear_vision: 0.0,
-                pose_y_linear_vision: 0.0,
-                pose_z_angular_vision: 0.0,
-                x_linear_cmd: 0.0,
-                y_linear_cmd: 0.0,
-                z_angular_cmd: 0.0,
-                kick_vel: 0.0,
-                dribbler_speed: 50.0,
-                kick_request: KickRequest::KR_DISABLE,
-            }))
-            .await;
+        test_command_publisher.publish_immediate(DataPacket::BasicControl(BasicControl {
+            _bitfield_1: Default::default(),
+            _bitfield_align_1: Default::default(),
+
+            vision_position_update: [0.0, 0.0, 0.0],
+
+            body_control_mode: BodyControlMode::BCM_GLOBAL_VELOCITY,
+            kick_request: KickRequest::KR_DISABLE,
+            play_song: 0,
+            reserved2: [0; 1],
+            
+            kick_vel: 0.0,
+            dribbler_speed: 50.0,
+
+            cmd: BodyControlCommand { global_vel: GlobalVelocityCommand {
+                global_xd: 0.0,
+                global_yd: 0.0,
+                global_omega: 0.0,
+                max_linear_acc: 0.0,
+                max_angular_acc: 0.0,
+            }},
+        }));
     }
 }
