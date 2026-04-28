@@ -227,6 +227,9 @@ impl BodyController {
             }
         };
 
+        self.body_twist_out = body_twist_out;
+        self.body_accel_out = body_accel_out;
+
         // Compensate for modeled friction forces
 
         // // Using the target twist will activate coulomb friction compensation even when the robot is stationary, which helps to overcome static friction. Using the estimated twist would cause the controller to not apply any torque when the robot is stationary due to zero estimated velocity, which would make it unable to overcome static friction to start moving. However, it's causing small oscillations at the setpoint.
