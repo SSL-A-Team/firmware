@@ -462,8 +462,7 @@ impl<
             }
 
             robot_controller.control_update(
-                cmd,
-                cmd_mode,
+                self.last_command,
                 last_vision_pose_meas,
                 vision_update,
                 wheel_vel_meas,
@@ -486,6 +485,8 @@ impl<
                         robot_controller.get_wheel_velocities(),
                     )
                 };
+
+            // defmt::info!("curr cmd: {}, vel cmd {}", wheel_current_cmd.as_slice(), wheel_vel_cmd.as_slice());
 
             // // RAW CURRENT COMMAND TESTING
             // let mut wheel_current_cmd = Vector4f::default();

@@ -1,6 +1,7 @@
 use crate::motion::pid::PidController;
 use crate::parameter_interface::ParameterInterface;
-use ateam_common_packets::bindings::{BodyControlCommand, BodyControlExtendedTelemetry, BodyControlMode, BodyControlSkillExtendedTelemetry, BodyControlTelemetry, ExtendedGlobalAccelerationTelemetry, ExtendedGlobalPositionTelemetry, ExtendedGlobalVelocityTelemetry, ExtendedLocalAccelerationTelemetry, ExtendedLocalVelocityTelemetry, GlobalPositionCommand, ParameterCommandCode::*, ParameterDataFormat, ParameterName};
+use ateam_common_packets::bindings::{BasicControl, BodyControlCommand, BodyControlExtendedTelemetry, BodyControlMode, BodyControlTelemetry, ExtendedGlobalAccelerationTelemetry, ExtendedGlobalPositionTelemetry, ExtendedGlobalVelocityTelemetry, ExtendedLocalAccelerationTelemetry, ExtendedLocalVelocityTelemetry, GlobalPositionCommand, ParameterCommandCode::*, ParameterDataFormat, ParameterName};
+use ateam_common_packets::radio::{SkillCommand, SkillExtendedTelemetry};
 use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
 use ateam_controls::robot_model::RobotModel;
 use ateam_controls::{Vector2f, Vector3f, Vector4f, Vector5f, Vector6f, Vector8f, z_rotation_mat};
@@ -88,8 +89,7 @@ impl BodyController {
 
     pub fn control_update(
         &mut self,
-        body_cmd: BodyControlCommand,
-        body_control_mode: BodyControlMode::Type,
+        last_command: BasicControl,
         vision_pose_meas: Vector3f,
         vision_update: bool,
         wheel_vel_meas: Vector4f,
@@ -142,88 +142,30 @@ impl BodyController {
         let body_twist_out;
         let body_accel_out;
         let skill_telem;
-        match body_control_mode {
-            BodyControlMode::BCM_GLOBAL_POSITION => {
-                let cmd = unsafe {
-                    Vector3f::new(
-                        body_cmd.global_pos.global_x, 
-                        body_cmd.global_pos.global_y, 
-                        body_cmd.global_pos.global_theta
-                    )
-                };
-                (body_twist_out, body_accel_out) = self.global_pose_bangbang_pid_control_policy(state_estimate, cmd);
-                skill_telem = BodyControlSkillExtendedTelemetry {
-                    global_pos: ExtendedGlobalPositionTelemetry {
-                        cmd_echo: unsafe { body_cmd.global_pos }
-                    }
-                };
+        match last_command.get_skill_command() {
+            SkillCommand::GlobalPosition(gpos_cmd) => {
+                (body_twist_out, body_accel_out) = self.global_pose_bangbang_pid_control_policy(state_estimate, gpos_cmd.as_vec3f());
+                skill_telem = SkillExtendedTelemetry::GlobalPosition(ExtendedGlobalPositionTelemetry { cmd_echo: gpos_cmd });
             }
-            BodyControlMode::BCM_GLOBAL_VELOCITY => {
-                let cmd = unsafe {
-                    Vector3f::new(
-                        body_cmd.global_vel.global_xd, 
-                        body_cmd.global_vel.global_yd, 
-                        body_cmd.global_vel.global_omega
-                    )
-                };
-                (body_twist_out, body_accel_out) = self.global_twist_control_policy(state_estimate, cmd);
-                skill_telem = BodyControlSkillExtendedTelemetry {
-                    global_vel: ExtendedGlobalVelocityTelemetry {
-                        cmd_echo: unsafe { body_cmd.global_vel }
-                    }
-                };
+            SkillCommand::GlobalVelocity(gvel_cmd) => {
+                (body_twist_out, body_accel_out) = self.global_twist_control_policy(state_estimate, gvel_cmd.as_vec3f());
+                skill_telem = SkillExtendedTelemetry::GlobalVelocity(ExtendedGlobalVelocityTelemetry { cmd_echo: gvel_cmd });
             }
-            BodyControlMode::BCM_LOCAL_VELOCITY => {
-                let cmd = unsafe {
-                    Vector3f::new(
-                        body_cmd.local_vel.local_xd,
-                        body_cmd.local_vel.local_yd,
-                        body_cmd.local_vel.local_omega
-                    )
-                };
-                (body_twist_out, body_accel_out) = self.local_twist_control_policy(state_estimate, cmd);
-                skill_telem = BodyControlSkillExtendedTelemetry {
-                    local_vel: ExtendedLocalVelocityTelemetry {
-                        cmd_echo: unsafe { body_cmd.local_vel }
-                    }
-                };
+            SkillCommand::LocalVelocity(lvel_cmd) => {
+                (body_twist_out, body_accel_out) = self.local_twist_control_policy(state_estimate, lvel_cmd.as_vec3f());
+                skill_telem = SkillExtendedTelemetry::LocalVelocity(ExtendedLocalVelocityTelemetry { cmd_echo: lvel_cmd });
             }
-            BodyControlMode::BCM_GLOBAL_ACCEL => {
-                let cmd = unsafe {
-                    Vector3f::new(
-                        body_cmd.global_acc.global_xdd,
-                        body_cmd.global_acc.global_ydd,
-                        body_cmd.global_acc.global_alpha,
-                    )
-                };
-                (body_twist_out, body_accel_out) = self.global_accel_control_policy(state_estimate, cmd);
-                skill_telem = BodyControlSkillExtendedTelemetry {
-                    global_acc: ExtendedGlobalAccelerationTelemetry {
-                        cmd_echo: unsafe { body_cmd.global_acc }
-                    }
-                };
+            SkillCommand::GlobalAcceleration(gacc_cmd) => {
+                (body_twist_out, body_accel_out) = self.global_accel_control_policy(state_estimate, gacc_cmd.as_vec3f());
+                skill_telem = SkillExtendedTelemetry::GlobalAcceleration(ExtendedGlobalAccelerationTelemetry { cmd_echo: gacc_cmd });
             }
-            BodyControlMode::BCM_LOCAL_ACCEL => {
-                let cmd = unsafe {
-                    Vector3f::new(
-                        body_cmd.local_acc.local_xdd,
-                        body_cmd.local_acc.local_ydd,
-                        body_cmd.local_acc.local_alpha,
-                    )
-                };
-                (body_twist_out, body_accel_out) = self.local_accel_control_policy(state_estimate, cmd);
-                skill_telem = BodyControlSkillExtendedTelemetry {
-                    local_acc: ExtendedLocalAccelerationTelemetry {
-                        cmd_echo: unsafe { body_cmd.local_acc }
-                    }
-                };
+            SkillCommand::LocalAcceleration(lacc_cmd) => {
+                (body_twist_out, body_accel_out) = self.local_accel_control_policy(state_estimate, lacc_cmd.as_vec3f());
+                skill_telem = SkillExtendedTelemetry::LocalAcceleration(ExtendedLocalAccelerationTelemetry { cmd_echo: lacc_cmd });
             }
             _ => {
-                if body_control_mode != BodyControlMode::BCM_OFF {
-                    defmt::error!("Received command with unrecognized control mode: {}", body_control_mode as i32);
-                }
                 (body_twist_out, body_accel_out) = (Vector3f::zeros(), Vector3f::zeros());
-                skill_telem = BodyControlSkillExtendedTelemetry::default();
+                skill_telem = SkillExtendedTelemetry::Off;
             }
         };
 
@@ -257,14 +199,12 @@ impl BodyController {
 
         // Copy values to debug telemetry
         self.debug_telemetry = BodyControlExtendedTelemetry {
-            body_control_mode,
             _bitfield_align_1: Default::default(),
             _bitfield_1: BodyControlExtendedTelemetry::new_bitfield_1(
                 vision_update as u8,
                 Default::default(),
             ),
             _reserved2: Default::default(),
-            skill: skill_telem,
             imu_gyro: [0.0, 0.0, imu_gyro_theta_meas],
             imu_accel: [imu_accel_x_meas, imu_accel_y_meas, 0.0],
             vision_pose: vision_pose_meas.into(),
@@ -277,7 +217,9 @@ impl BodyController {
             body_vel_u: self.body_twist_out.into(),
             body_accel_u: self.body_accel_out.into(),
             body_accel_u_fric_comp: self.body_accel_out_fric_comp.into(),
+            ..self.debug_telemetry
         };
+        self.debug_telemetry.set_skill_telemetry(skill_telem);
 
         let control_outputs_time = Instant::now() - start;
         start = Instant::now();
