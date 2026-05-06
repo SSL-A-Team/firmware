@@ -43,8 +43,8 @@ impl BodyController {
         let angular_pose_pid_gains = Vector5f::new(125.0, 0.5, 15.0, -1.0, 1.0).transpose();
         let pose_pid_gains = Matrix3x5::from_rows(&[linear_pose_pid_gains, linear_pose_pid_gains, angular_pose_pid_gains]);
 
-        let linear_twist_pid_gains = Vector5f::new(0.0, 0.0, 0.0, 0.0, 0.0).transpose();
-        let angular_twist_pid_gains = Vector5f::new(0.0, 0.0, 0.0, 0.0, 0.0).transpose();
+        let linear_twist_pid_gains = Vector5f::new(100.0, 0.0, 0.0, 0.0, 0.0).transpose();
+        let angular_twist_pid_gains = Vector5f::new(20.0, 0.0, 0.0, 0.0, 0.0).transpose();
         let twist_pid_gains = Matrix3x5::from_rows(&[linear_twist_pid_gains, linear_twist_pid_gains, angular_twist_pid_gains]);
 
         BodyController {
@@ -302,49 +302,7 @@ impl BodyController {
 
     fn local_twist_control_policy(&mut self, state_estimate: Vector6f, local_target_twist: Vector3f) -> (Vector3f, Vector3f) {
         let target_twist = z_rotation_mat(state_estimate.z) * local_target_twist;
-        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-        let body_twist_pid =
-            self.twist_pid_controller
-                .calculate(&target_twist, &twist_estimate, self.dt);
-        let mut twist_out = target_twist + body_twist_pid;
-
-        // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
-        // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
-        let prev_twist_out = self.prev_body_cmd.unwrap_or(Vector3f::default());
-        let mut accel_out = (twist_out - prev_twist_out) / self.dt;
-
-        let max_accel_linear = self.trajectory_params.max_accel_linear;
-        let max_accel_angular = self.trajectory_params.max_accel_angular;
-        let max_vel_linear = self.trajectory_params.max_vel_linear;
-        let max_vel_angular = self.trajectory_params.max_vel_angular;
-
-        // Clamp acceleration: linear magnitude and angular independently
-        let accel_linear_mag = sqrtf(accel_out.x * accel_out.x + accel_out.y * accel_out.y);
-        if accel_linear_mag > max_accel_linear {
-            let scale = max_accel_linear / accel_linear_mag;
-            accel_out.x *= scale;
-            accel_out.y *= scale;
-        }
-        accel_out.z = accel_out.z.clamp(-max_accel_angular, max_accel_angular);
-
-        // Recompute twist from clamped acceleration
-        twist_out = prev_twist_out + (accel_out * self.dt);
-
-        // Clamp twist: linear magnitude and angular independently
-        let twist_linear_mag = sqrtf(twist_out.x * twist_out.x + twist_out.y * twist_out.y);
-        if twist_linear_mag > max_vel_linear {
-            let scale = max_vel_linear / twist_linear_mag;
-            twist_out.x *= scale;
-            twist_out.y *= scale;
-        }
-        twist_out.z = twist_out.z.clamp(-max_vel_angular, max_vel_angular);
-
-        // Recompute accel to stay consistent with the clamped twist
-        accel_out = (twist_out - prev_twist_out) / self.dt;
-
-        self.prev_body_cmd = Some(twist_out);
-
-        (twist_out, accel_out)
+        self.global_twist_control_policy(state_estimate, target_twist)
     }
 
     fn global_twist_control_policy(&mut self, state_estimate: Vector6f, target_twist: Vector3f) -> (Vector3f, Vector3f) {
@@ -801,6 +759,54 @@ impl ParameterInterface for BodyController {
 //         }
 //     }
 // }
+
+
+    // fn local_twist_control_policy(&mut self, state_estimate: Vector6f, local_target_twist: Vector3f) -> (Vector3f, Vector3f) {
+    //     let target_twist = z_rotation_mat(state_estimate.z) * local_target_twist;
+    //     let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+    //     let body_twist_pid =
+    //         self.twist_pid_controller
+    //             .calculate(&target_twist, &twist_estimate, self.dt);
+    //     let mut twist_out = target_twist + body_twist_pid;
+
+    //     // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
+    //     // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
+    //     let prev_twist_out = self.prev_body_cmd.unwrap_or(Vector3f::default());
+    //     let mut accel_out = (twist_out - prev_twist_out) / self.dt;
+
+    //     let max_accel_linear = self.trajectory_params.max_accel_linear;
+    //     let max_accel_angular = self.trajectory_params.max_accel_angular;
+    //     let max_vel_linear = self.trajectory_params.max_vel_linear;
+    //     let max_vel_angular = self.trajectory_params.max_vel_angular;
+
+    //     // Clamp acceleration: linear magnitude and angular independently
+    //     let accel_linear_mag = sqrtf(accel_out.x * accel_out.x + accel_out.y * accel_out.y);
+    //     if accel_linear_mag > max_accel_linear {
+    //         let scale = max_accel_linear / accel_linear_mag;
+    //         accel_out.x *= scale;
+    //         accel_out.y *= scale;
+    //     }
+    //     accel_out.z = accel_out.z.clamp(-max_accel_angular, max_accel_angular);
+
+    //     // Recompute twist from clamped acceleration
+    //     twist_out = prev_twist_out + (accel_out * self.dt);
+
+    //     // Clamp twist: linear magnitude and angular independently
+    //     let twist_linear_mag = sqrtf(twist_out.x * twist_out.x + twist_out.y * twist_out.y);
+    //     if twist_linear_mag > max_vel_linear {
+    //         let scale = max_vel_linear / twist_linear_mag;
+    //         twist_out.x *= scale;
+    //         twist_out.y *= scale;
+    //     }
+    //     twist_out.z = twist_out.z.clamp(-max_vel_angular, max_vel_angular);
+
+    //     // Recompute accel to stay consistent with the clamped twist
+    //     accel_out = (twist_out - prev_twist_out) / self.dt;
+
+    //     self.prev_body_cmd = Some(twist_out);
+
+    //     (twist_out, accel_out)
+    // }
 
     // fn twist_bangbang_control(
     //     &mut self,
