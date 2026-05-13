@@ -129,7 +129,9 @@ impl<
         highspeed_radio_uart_config.baudrate = 921_600;
         highspeed_radio_uart_config.stop_bits = StopBits::STOP1;
         highspeed_radio_uart_config.data_bits = DataBits::DataBits8;
-        highspeed_radio_uart_config.parity = usart::Parity::ParityEven;
+        // NORA-W36 AT+USYUS only configures baudrate and flow control;
+        // data format is fixed at 8N1, so parity must stay None
+        highspeed_radio_uart_config.parity = usart::Parity::ParityNone;
 
         highspeed_radio_uart_config
     }
@@ -145,49 +147,69 @@ impl<
             defmt::debug!("failed to reset host uart to startup config.");
         }
 
+        defmt::trace!("Will reset the radio for baseline.");
         // reset the radio so we can listen for the startup event
-        self.reset_pin.set_high();
-        Timer::after(Duration::from_millis(1)).await;
+        // PD7 drives an inverting transistor to the radio's active-low nRESET:
+        //   PD7 Low  → nRESET High (radio running)
+        //   PD7 High → nRESET Low  (radio in reset)
+        // Ensure a clean reset pulse: release first, then assert, then release
         self.reset_pin.set_low();
+        Timer::after(Duration::from_millis(10)).await;
+        self.reset_pin.set_high();
+        // t_RESET is Minimum 1ms (4.2.3 in the datasheet), but we'll give it a bit more time to be safe
+        Timer::after(Duration::from_millis(10)).await;
+        self.reset_pin.set_low();
+        defmt::trace!("Reset released, waiting for radio boot.");
 
-        // wait until startup event is received
-        if self.nora_driver.wait_startup().await.is_err() {
-            defmt::debug!("error processing radio wait startup command");
-            return Err(RobotRadioNoraError::ConnectUartBadStartup);
-        }
-        defmt::trace!("increasing link speed");
-
-        let baudrate = 921_600;
-        if self.nora_driver.set_echo(false).await.is_err() {
-            defmt::debug!("error disabling echo on radio");
-            return Err(RobotRadioNoraError::ConnectUartBadEcho);
-        }
-
-        // NORA config_uart only takes baudrate and flow control (no data_bits/parity params)
-        if self
-            .nora_driver
-            .config_uart(baudrate, self.use_flow_control)
-            .await
-            .is_err()
+        // Wait for radio to boot (t_STARTUP is 2.3s per datasheet section 4.2.3)
+        defmt::trace!("Waiting for radio startup with timeout.");
+        match select(
+            self.nora_driver.wait_startup(),
+            Timer::after(Duration::from_millis(2500)),
+        )
+        .await
         {
-            defmt::debug!("error increasing radio baud rate.");
-            return Err(RobotRadioNoraError::ConnectUartBadRadioConfigUpdate);
+            Either::First(res) => {
+                if res.is_err() {
+                    defmt::debug!("radio startup packet wait failed");
+                    return Err(RobotRadioNoraError::ConnectUartBadStartup);
+                }
+            }
+            Either::Second(_) => {
+                defmt::debug!("radio startup packet wait timed out");
+                return Err(RobotRadioNoraError::ConnectUartBadStartup);
+            }
         }
-        defmt::trace!("configured radio link speed");
 
-        if self
-            .nora_driver
-            .update_host_uart_config(self.get_highspeed_uart_config())
-            .await
-            .is_err()
-        {
-            defmt::debug!("error increasing host baud rate.");
-            return Err(RobotRadioNoraError::ConnectUartBadHostConfigUpdate);
-        }
-        defmt::trace!("configured host link speed");
+        defmt::trace!("Radio UART Startup received");
 
-        // Datasheet says wait at least 40ms after UART config change
-        Timer::after(Duration::from_millis(50)).await;
+        //defmt::trace!("increasing link speed");
+        //// NORA config_uart only takes baudrate and flow control (no data_bits/parity params)
+        //if self
+        //    .nora_driver
+        //    .config_uart(baudrate, self.use_flow_control)
+        //    .await
+        //    .is_err()
+        //{
+        //    defmt::debug!("error increasing radio baud rate.");
+        //    return Err(RobotRadioNoraError::ConnectUartBadRadioConfigUpdate);
+        //}
+        //defmt::trace!("configured radio link speed");
+
+        // TODO Make this happen ahead of time.
+        //if self
+        //    .nora_driver
+        //    .update_host_uart_config(self.get_highspeed_uart_config())
+        //    .await
+        //    .is_err()
+        //{
+        //    defmt::debug!("error increasing host baud rate.");
+        //    return Err(RobotRadioNoraError::ConnectUartBadHostConfigUpdate);
+        //}
+        //defmt::trace!("configured host link speed");
+
+        // Allow the radio time to stabilize after baud rate switch
+        //Timer::after(Duration::from_millis(50)).await;
 
         // NORA-W36x does not use EDM mode - it stays in AT command mode.
         // Enable direct binary mode for inline data delivery in +UESODB/+UESODBF events
@@ -256,14 +278,14 @@ impl<
             return Err(RobotRadioNoraError::ConnectWifiBadHostName);
         }
 
-        // load the wifi network configuration into config slot 1
+        // Load the wifi network configuration (only supports one profile, at index 0)
         let wifi_ssid = wifi_credential.get_ssid();
         let wifi_pass = WifiAuth::WPA {
             passphrase: wifi_credential.get_password(),
         };
         if self
             .nora_driver
-            .config_wifi(1, wifi_ssid, wifi_pass)
+            .config_wifi(wifi_ssid, wifi_pass)
             .await
             .is_err()
         {
@@ -271,8 +293,8 @@ impl<
             return Err(RobotRadioNoraError::ConnectWifiBadConfig);
         }
 
-        // connect to config slot 1
-        if self.nora_driver.connect_wifi(1).await.is_err() {
+        // Connect to config slot (only supports one, at index 0)
+        if self.nora_driver.connect_wifi().await.is_err() {
             defmt::trace!("could not connect to wifi");
 
             let _ = self.disconnect_network().await;
@@ -294,7 +316,7 @@ impl<
 
         let socket = self
             .nora_driver
-            .connect_socket(socket_id, MULTICAST_IP, MULTICAST_PORT)
+            .connect_socket(socket_id, MULTICAST_IP, MULTICAST_PORT, SocketProtocol::UDP)
             .await
             .map_err(|_| RobotRadioNoraError::OpenMulticastError)?;
 
@@ -322,7 +344,7 @@ impl<
 
         let socket = self
             .nora_driver
-            .connect_socket(socket_id, addr.as_str(), port)
+            .connect_socket(socket_id, addr.as_str(), port, SocketProtocol::UDP)
             .await?;
 
         self.socket = Some(socket);

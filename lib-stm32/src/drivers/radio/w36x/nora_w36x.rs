@@ -34,6 +34,8 @@ pub enum NoraRadioError {
     SocketCloseFailed,
     SocketWriteFailed,
     SocketReadFailed,
+    HostNameTooLong,
+    SsidTooLong,
 }
 
 impl From<AtPacketError> for NoraRadioError {
@@ -106,6 +108,18 @@ impl<
             .await
     }
 
+    /// Drain one queued packet from the read buffer (discard it).
+    pub async fn drain_one(&self) {
+        self.reader.dequeue(|_buf| {}).await;
+    }
+
+    /// Send a bare "AT" command and wait for OK to verify UART communication.
+    pub async fn probe(&self) -> Result<(), NoraRadioError> {
+        self.send_command("AT").await?;
+        self.read_ok().await?;
+        Ok(())
+    }
+
     pub async fn set_echo(&self, echo_on: bool) -> Result<(), NoraRadioError> {
         let echo_on = if echo_on { '1' } else { '0' };
         let mut str: String<4> = String::new();
@@ -117,17 +131,17 @@ impl<
 
     /// Configure UART on the NORA-W36 module.
     /// Uses AT+USYUS=<baud_rate>[,<flow_control>[,<change_after_confirm>]]
-    ///   - flow_control: 0=disabled, 1=CTS/RTS (default)
-    ///   - change_after_confirm: 0=change now (default), 1=change after reboot
+    ///   - flow_control: 0=disabled (default), 1=CTS/RTS
+    ///   - change_after_confirm: 0=switch after reboot (requires AT&W), 1=switch immediately after OK
     /// Note: data_bits, stop_bits, and parity are not configurable on W36.
     pub async fn config_uart(
         &self,
         baudrate: u32,
         flow_control: bool,
     ) -> Result<(), NoraRadioError> {
-        let mut str: String<28> = String::new();
+        let mut str: String<32> = String::new();
         let flow_control = if flow_control { 1 } else { 0 };
-        write!(&mut str, "AT+USYUS={baudrate},{flow_control}")
+        write!(&mut str, "AT+USYUS={baudrate},{flow_control},1")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
@@ -150,12 +164,17 @@ impl<
     /// Set the host name on the NORA-W36 module.
     /// Uses AT+UWHN="<host_name>"
     pub async fn set_host_name(&self, host_name: &str) -> Result<(), NoraRadioError> {
+        if host_name.len() > 40 {
+            defmt::error!("host name too long: {}, must be less than or equal to 40 characters", host_name);
+            return Err(NoraRadioError::HostNameTooLong);
+        }
+
         let mut str: String<64> = String::new();
         write!(str, "AT+UWHN=\"{host_name}\"")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
         defmt::trace!("host configuration string: {}", str.as_str());
         self.send_command(str.as_str()).await?;
-        defmt::trace!("sent configuration command");
+        defmt::trace!("sent host configuration command");
         self.read_ok().await?;
         defmt::trace!("read OK");
 
@@ -164,37 +183,59 @@ impl<
 
     /// Configure WiFi on the NORA-W36 module.
     /// Uses separate commands per configuration aspect:
-    ///   1. Set SSID:     AT+UWSCP=<config_id>,<ssid>
+    ///   1. Set SSID:     AT+UWSCP=<wlan_handle>,<ssid>
+    ///     - <wlan_handle> can only be 0.
+    ///     - <ssid> must be 32 characters or fewer.
     ///   2. Set security:
-    ///      - Open:       AT+UWSSO=<config_id>
-    ///      - WPA/WPA2:   AT+UWSSW=<config_id>,<passphrase>
+    ///      - Open:       AT+UWSSO=<wlan_handle>
+    ///      - WPA:        AT+UWSSW=<wlan_handle>,<passphrase>,<wpa_threshold>
+    ///     - <wlan_handle> can only be 0.
+    ///     - <passphrase> must be 8 to 63 characters.
+    ///     - <wpa_threshold> is optional, defaults to 0 (WPA2 or up), 1 WPA3 only.
     pub async fn config_wifi(
         &self,
-        config_id: u8,
         ssid: &str,
         auth: WifiAuth<'_>,
     ) -> Result<(), NoraRadioError> {
         // Set SSID
-        let mut str: String<64> = String::new();
-        write!(str, "AT+UWSCP={config_id},\"{ssid}\"")
+        if ssid.len() > 32 {
+            defmt::error!("SSID too long: {}, must be less than or equal to 32 characters", ssid);
+            return Err(NoraRadioError::SsidTooLong);
+        }
+
+        // Bytes set to accommodate max command length with longest expected SSID and WPA passphrase.
+        let mut str: String<76> = String::new();
+        write!(str, "AT+UWSCP=0,\"{ssid}\"")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
+
         self.send_command(str.as_str()).await?;
+        defmt::trace!("WiFi network connection sent.");
         self.read_ok().await?;
+        defmt::trace!("WiFi network connection accepted.");
 
         // Set authentication
         str.clear();
         match auth {
             WifiAuth::Open => {
-                write!(str, "AT+UWSSO={config_id}")
+                write!(str, "AT+UWSSO=0")
                     .or(Err(NoraRadioError::CommandConstructionFailed))?;
                 self.send_command(str.as_str()).await?;
+                defmt::trace!("WiFi open network authentication sent.");
                 self.read_ok().await?;
+                defmt::trace!("WiFi open network authentication accepted.");
             }
             WifiAuth::WPA { passphrase } => {
-                write!(str, "AT+UWSSW={config_id},\"{passphrase}\"")
+                if passphrase.len() < 8 || passphrase.len() > 63 {
+                    defmt::error!("WPA passphrase length invalid: {}, must be between 8 and 63 characters", passphrase);
+                    return Err(NoraRadioError::CommandConstructionFailed);
+                }
+
+                write!(str, "AT+UWSSW=0,\"{passphrase}\",0")
                     .or(Err(NoraRadioError::CommandConstructionFailed))?;
                 self.send_command(str.as_str()).await?;
+                defmt::trace!("WiFi WPA network authentication sent.");
                 self.read_ok().await?;
+                defmt::trace!("WiFi WPA network authentication accepted.");
             }
             _ => return Err(NoraRadioError::AuthModeUnsupported),
         }
@@ -254,16 +295,21 @@ impl<
 
     /// Connect to WiFi on the NORA-W36 module.
     /// Uses AT+UWSC=<config_id> to trigger connection using previously configured params.
-    pub async fn connect_wifi(&self, config_id: u8) -> Result<(), NoraRadioError> {
+    /// AT+UWSC=<wlan_handle>
+    ///  - <wlan_handle> can only be 0.
+    pub async fn connect_wifi(&self) -> Result<(), NoraRadioError> {
         let mut str: String<16> = String::new();
-        write!(str, "AT+UWSC={config_id}")
+        write!(str, "AT+UWSC=0")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
+        defmt::trace!("WiFi connection request sent.");
         self.read_ok().await?;
+        defmt::trace!("WiFi connection request acknowledged.");
 
         let mut link_up = false;
         let mut network_up = false;
 
+        // Wait for both link up and network up events before returning success.
         while !link_up || !network_up {
             self.reader
                 .dequeue(|buf| {
@@ -271,6 +317,7 @@ impl<
 
                     if let NoraPacket::Event(ATEvent::StationNetworkUp) = packet {
                         network_up = true;
+                        defmt::trace!("WiFi network is up.");
                     } else if let NoraPacket::Event(ATEvent::WifiLinkUp {
                         wlan_handle: _,
                         bssid: _,
@@ -278,6 +325,7 @@ impl<
                     }) = packet
                     {
                         link_up = true;
+                        defmt::trace!("WiFi link is up.");
                     } else {
                         return Err(NoraRadioError::AtEventUnsupported);
                     }
@@ -290,7 +338,9 @@ impl<
     }
 
     /// Create a TCP or UDP socket.
-    /// Uses AT+USOCR=<protocol> where protocol is 6 (TCP) or 17 (UDP).
+    /// AT+USOCR=<protocol>[,<pref_ip_ver>]
+    /// - <protocol>: 6 for TCP, 17 for UDP
+    /// - <pref_ip_ver> is optional, 0 for IPv4 (default) or 1 for IPv6.
     /// Returns the socket ID assigned by the module.
     pub async fn create_socket(&self, protocol: SocketProtocol) -> Result<u8, NoraRadioError> {
         let mut str: String<16> = String::new();
@@ -298,9 +348,10 @@ impl<
         write!(str, "AT+USOCR={proto_num}")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
+        defmt::trace!("Socket creation request sent.");
 
-        // Response: +USOCR:<socket_id>\r\nOK\r\n
-        let socket_id = self
+        // Response: +USOCR:<socket_handle>\r\nOK\r\n
+        let socket_handle = self
             .reader
             .dequeue(|buf| {
                 match self.parse_packet(buf)? {
@@ -319,46 +370,68 @@ impl<
             })
             .await?;
 
-        Ok(socket_id)
+        defmt::trace!("Socket creation response received, socket handle: {}", socket_handle);
+        Ok(socket_handle)
     }
 
     /// Connect a socket to a remote address and port.
-    /// Uses AT+USOC=<socket_id>,"<remote_addr>",<remote_port>
-    /// Waits for +UESOC URC confirming the connection.
+    /// Uses AT+USOC=<socket_handle>,"<host_address>",<remote_port>
+    /// - <socket_handle> is assigned by the module when the socket is created.
+    /// - <host_address> is the IP address or domain name of the remote host. Must be 0 to 128 characters. If using a domain name, the module will perform DNS resolution before connecting.
+    /// - <remote_port> is the port number on the remote host to connect to. Must be 1-65535.
+    /// protocol is the socket protocol (TCP or UDP). For TCP, waits for +UESOC URC confirming the connection.
     pub async fn connect_socket(
         &self,
-        socket_id: u8,
+        socket_handle: u8,
         addr: &str,
         port: u16,
+        protocol: SocketProtocol,
     ) -> Result<SocketConnection, NoraRadioError> {
-        let mut str: String<64> = String::new();
-        write!(str, "AT+USOC={socket_id},\"{addr}\",{port}")
+        if addr.len() > 128 {
+            defmt::error!("host address length invalid: {}, must be less than 128 characters", addr);
+            return Err(NoraRadioError::HostNameTooLong);
+        }
+        else if port == 0 {
+            defmt::error!("port number out of range: {}, must be between 1 and 65535", port);
+            return Err(NoraRadioError::CommandConstructionFailed);
+        }
+
+        // Bytes set to accommodate max command length with longest expected address (128 chars) and port (5 chars) plus AT command syntax.
+        let mut str: String<148> = String::new();
+        write!(str, "AT+USOC={socket_handle},\"{addr}\",{port}")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
+        defmt::trace!("Socket connect command sent: {}", str.as_str());
         self.read_ok().await?;
+        defmt::trace!("Socket connect command acknowledged");
 
-        // Wait for +UESOC URC confirming connection
-        self.reader
-            .dequeue(|buf| {
-                match self.parse_packet(buf)? {
-                    NoraPacket::Event(ATEvent::SocketConnected { socket_id: sid })
-                        if sid == socket_id =>
-                    {
-                        Ok(())
+        // TCP requires waiting for +UESOC URC confirming connection; UDP does not.
+        if protocol == SocketProtocol::TCP {
+            self.reader
+                .dequeue(|buf| {
+                    match self.parse_packet(buf)? {
+                        NoraPacket::Event(ATEvent::SocketConnected { socket_id: sid })
+                            if sid == socket_handle =>
+                        {
+                            defmt::trace!("Socket connect command accepted for TCP");
+                            Ok(())
+                        }
+                        _ => Err(NoraRadioError::SocketConnectionFailed),
                     }
-                    _ => Err(NoraRadioError::SocketConnectionFailed),
-                }
-            })
-            .await?;
+                })
+                .await?;
+        } else {
+            defmt::trace!("No socket connection confirmation needed for UDP");
+        }
 
-        Ok(SocketConnection { socket_id })
+        Ok(SocketConnection { socket_id: socket_handle })
     }
 
     /// Close a socket.
-    /// Uses AT+USOCL=<socket_id>
-    pub async fn close_socket(&self, socket_id: u8) -> Result<(), NoraRadioError> {
+    /// Uses AT+USOCL=<socket_handle>
+    pub async fn close_socket(&self, socket_handle: u8) -> Result<(), NoraRadioError> {
         let mut str: String<16> = String::new();
-        write!(str, "AT+USOCL={socket_id}")
+        write!(str, "AT+USOCL={socket_handle}")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
 
@@ -370,7 +443,7 @@ impl<
                 .dequeue(|buf| {
                     match self.parse_packet(buf)? {
                         NoraPacket::Event(ATEvent::SocketClosed { socket_id: sid })
-                            if sid == socket_id =>
+                            if sid == socket_handle =>
                         {
                             socket_closed = true;
                         }
@@ -391,70 +464,125 @@ impl<
     }
 
     /// Write binary data to a socket.
-    /// Uses AT+USOWB=<socket_id>,<length> followed by raw binary data after '>' prompt.
-    pub async fn send_data(&self, socket_id: u8, data: &[u8]) -> Result<(), NoraRadioError> {
-        let mut str: String<24> = String::new();
-        write!(str, "AT+USOWB={socket_id},{}", data.len())
+    /// AT+USOWB=<socket_handle>{binary_data}
+    /// - <socket_handle> is assigned by the module when the socket is created.
+    /// - {binary_data} uses the u-blox binary format: 0x01 (SOH), MSB of length, LSB of length,
+    ///   followed by the raw data bytes. No \r terminator is used.
+    /// - The response is +USOWB:<socket_handle>,<written_length>.
+    pub async fn send_data(&self, socket_handle: u8, data: &[u8]) -> Result<(), NoraRadioError> {
+        let mut cmd: String<24> = String::new();
+        write!(cmd, "AT+USOWB={socket_handle}")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
-        self.send_command(str.as_str()).await?;
 
-        // TODO: wait for '>' prompt from module before sending data
+        let data_len = data.len() as u16;
 
-        // Send raw binary data
+        // Send command + binary header + data in one buffer write (no \r terminator).
         let res = self.writer.enqueue(|buf| {
-            buf[..data.len()].copy_from_slice(data);
-            data.len()
+            let cmd_bytes = cmd.as_bytes();
+            let cmd_len = cmd_bytes.len();
+            buf[..cmd_len].copy_from_slice(cmd_bytes);
+            buf[cmd_len] = 0x01; // SOH
+            buf[cmd_len + 1] = (data_len >> 8) as u8; // MSB
+            buf[cmd_len + 2] = (data_len & 0xFF) as u8; // LSB
+            buf[cmd_len + 3..cmd_len + 3 + data.len()].copy_from_slice(data);
+            cmd_len + 3 + data.len()
         });
 
         if res.is_err() {
             return Err(NoraRadioError::SendCommandLowLevelBufferFull);
         }
 
-        self.read_ok().await?;
+        // Read +USOWB:<socket_handle>,<written_length>\r\nOK\r\n response and validate written length.
+        self.reader
+            .dequeue(|buf| {
+                match self.parse_packet(buf)? {
+                    NoraPacket::Response(ATResponse::Ok(resp)) => {
+                        if let Some(i) = resp.find("+USOWB:") {
+                            let payload = &resp[i + 7..];
+                            let mut parts = payload.splitn(2, ',');
+                            let _handle = parts.next();
+                            if let Some(len_str) = parts.next() {
+                                if let Ok(written) = len_str.trim().parse::<usize>() {
+                                    if written != data.len() {
+                                        defmt::warn!(
+                                            "AT+USOWB: written length {} does not match intended length {}",
+                                            written,
+                                            data.len()
+                                        );
+                                    }
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        Err(NoraRadioError::SocketWriteFailed)
+                    }
+                    _ => Err(NoraRadioError::SocketWriteFailed),
+                }
+            })
+            .await?;
+
         Ok(())
     }
 
     /// Read binary data from a socket.
-    /// Uses AT+USORB=<socket_id>,<length>
-    /// Response: +USORB:<socket_id>,<length>,<hex_data>\r\nOK\r\n
+    /// Uses AT+USORB=<socket_handle>,<length>
+    /// - <socket_handle> is assigned by the module when the socket is created.
+    /// - <length> is the number of bytes to read, from 1 to 1000.
+    /// Response: +USORB:<socket_handle>{binary_data}\r\nOK\r\n
+    /// The {binary_data} uses the u-blox binary format: 0x01 (SOH), MSB of length, LSB of length,
+    /// followed by the raw data bytes.
     pub async fn read_data<RET, FN>(
         &'a self,
-        socket_id: u8,
+        socket_handle: u8,
         max_length: u16,
         fn_read: FN,
     ) -> Result<RET, NoraRadioError>
     where
         FN: FnOnce(&[u8]) -> RET,
     {
+        if max_length == 0 || max_length > 1000 {
+            defmt::error!("read length out of range: {}, must be between 1 and 1000", max_length);
+            return Err(NoraRadioError::CommandConstructionFailed);
+        }
+
         let mut str: String<24> = String::new();
-        write!(str, "AT+USORB={socket_id},{max_length}")
+        write!(str, "AT+USORB={socket_handle},{max_length}")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
 
-        self.reader
+        let ret = self
+            .reader
             .dequeue(|buf| {
                 match self.parse_packet(buf)? {
                     NoraPacket::Response(ATResponse::Ok(resp)) => {
-                        // Parse +USORB:<socket_id>,<length>,<data>
+                        // Response is +USORB:<socket_handle>{binary_data}
+                        // Find the +USORB: prefix, skip socket_handle, then decode binary header.
                         if let Some(i) = resp.find("+USORB:") {
-                            let payload = &resp[i + 7..];
-                            // Skip socket_id and length fields to get to data
-                            let mut parts = payload.splitn(3, ',');
-                            let _sid = parts.next(); // socket_id
-                            let _len = parts.next(); // length
-                            if let Some(data_str) = parts.next() {
-                                Ok(fn_read(data_str.as_bytes()))
-                            } else {
-                                Err(NoraRadioError::SocketReadFailed)
+                            let after_prefix = &resp.as_bytes()[i + 7..];
+                            // Find the SOH (0x01) byte that starts the binary header
+                            if let Some(soh_pos) = after_prefix.iter().position(|&b| b == 0x01) {
+                                let binary = &after_prefix[soh_pos..];
+                                if binary.len() >= 3 {
+                                    let data_len =
+                                        ((binary[1] as usize) << 8) | (binary[2] as usize);
+                                    let data_start = 3;
+                                    if binary.len() >= data_start + data_len {
+                                        return Ok(fn_read(
+                                            &binary[data_start..data_start + data_len],
+                                        ));
+                                    }
+                                }
                             }
-                        } else {
-                            Err(NoraRadioError::SocketReadFailed)
                         }
+                        Err(NoraRadioError::SocketReadFailed)
                     }
                     _ => Err(NoraRadioError::ReadDataInvalid),
                 }
             })
-            .await
+            .await?;
+
+        self.read_ok().await?;
+        Ok(ret)
     }
 
     pub fn can_read_data(&'a self) -> bool {
