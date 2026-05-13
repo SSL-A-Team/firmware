@@ -5,7 +5,7 @@ use embassy_stm32::usart;
 use embassy_time::Timer;
 use heapless::String;
 
-use crate::queue;
+use ateam_lib_crossarch::queue;
 use crate::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
 
 use super::at_protocol::{AtPacketError, ATEvent, ATResponse, SocketProtocol};
@@ -315,19 +315,29 @@ impl<
                 .dequeue(|buf| {
                     let packet = self.parse_packet(buf)?;
 
-                    if let NoraPacket::Event(ATEvent::StationNetworkUp) = packet {
-                        network_up = true;
-                        defmt::trace!("WiFi network is up.");
-                    } else if let NoraPacket::Event(ATEvent::WifiLinkUp {
-                        wlan_handle: _,
-                        bssid: _,
-                        channel: _,
-                    }) = packet
-                    {
-                        link_up = true;
-                        defmt::trace!("WiFi link is up.");
-                    } else {
-                        return Err(NoraRadioError::AtEventUnsupported);
+                    match packet {
+                        NoraPacket::Event(ATEvent::StationNetworkUp) => {
+                            defmt::info!("nora - station network up");
+                            network_up = true;
+                        }
+                        NoraPacket::Event(ATEvent::WifiLinkUp {
+                            wlan_handle,
+                            bssid,
+                            channel,
+                        }) => {
+                            defmt::info!("nora - wifi link up {} {} {}", wlan_handle, bssid, channel);
+                            link_up = true;
+                        }
+                        NoraPacket::Event(ATEvent::WifiLinkDown {
+                            wlan_handle,
+                            reason,
+                        }) => {
+                            defmt::info!("nora - got WifiLinkDown during initial connect. handle: {}, reason: {}", wlan_handle, reason);
+                        }
+                        other => {
+                            defmt::error!("nora - connect_wifi: unsupported packet: {}", other);
+                            return Err(NoraRadioError::AtEventUnsupported);
+                        }
                     }
                     Ok(())
                 })
@@ -445,12 +455,15 @@ impl<
                         NoraPacket::Event(ATEvent::SocketClosed { socket_id: sid })
                             if sid == socket_handle =>
                         {
+                            defmt::debug!("nora - close socket - ATEvent::SocketClosed");
                             socket_closed = true;
                         }
                         NoraPacket::Response(ATResponse::Ok("")) => {
+                            defmt::debug!("nora - close socket - ATResponse::Ok");
                             ok = true;
                         }
-                        _ => {
+                        other => {
+                            defmt::warn!("nora - close_socket: unsupported packet: {}", other);
                             return Err(NoraRadioError::SocketCloseFailed);
                         }
                     };
@@ -602,9 +615,18 @@ impl<
                     _ => Err(NoraRadioError::ReadDataInvalid),
                 }
             }
-            Err(queue::Error::QueueFull) => Err(NoraRadioError::ReadLowLevelBufferEmpty),
-            Err(queue::Error::QueueEmpty) => Err(NoraRadioError::ReadLowLevelBufferEmpty),
-            Err(queue::Error::InProgress) => Err(NoraRadioError::ReadLowLevelBufferBusy),
+            Err(queue::Error::QueueFull) => {
+                defmt::warn!("NoraW36x - ReadLowLevelBufferEmpty - QueueFull");
+                Err(NoraRadioError::ReadLowLevelBufferEmpty)
+            }
+            Err(queue::Error::QueueEmpty) => {
+                defmt::warn!("NoraW36x - ReadLowLevelBufferEmpty - QueueEmpty");
+                Err(NoraRadioError::ReadLowLevelBufferEmpty)
+            }
+            Err(queue::Error::InProgress) => {
+                defmt::error!("NoraW36x - ReadLowLevelBufferBusy");
+                Err(NoraRadioError::ReadLowLevelBufferBusy)
+            }
         }
     }
 
@@ -624,12 +646,24 @@ impl<
                     Ok(NoraPacket::Event(ATEvent::SocketDataBinaryFrom { socket_id: _, data, .. })) => {
                         Ok(Some(fn_read(data)))
                     }
-                    _ => Err(NoraRadioError::ReadDataInvalid),
+                    other => {
+                        defmt::warn!("NoraW36x - expected binary data event, got {:?}", other);
+                        Err(NoraRadioError::ReadDataInvalid)
+                    }
                 }
             }
-            Err(queue::Error::QueueFull) => Err(NoraRadioError::ReadLowLevelBufferEmpty),
-            Err(queue::Error::QueueEmpty) => Err(NoraRadioError::ReadLowLevelBufferEmpty),
-            Err(queue::Error::InProgress) => Err(NoraRadioError::ReadLowLevelBufferBusy),
+            Err(queue::Error::QueueFull) => {
+                defmt::warn!("NoraW36x - ReadLowLevelBufferEmpty - QueueFull");
+                Err(NoraRadioError::ReadLowLevelBufferEmpty)
+            }
+            Err(queue::Error::QueueEmpty) => {
+                defmt::warn!("NoraW36x - ReadLowLevelBufferEmpty - QueueEmpty");
+                Err(NoraRadioError::ReadLowLevelBufferEmpty)
+            }
+            Err(queue::Error::InProgress) => {
+                defmt::error!("NoraW36x - ReadLowLevelBufferBusy");
+                Err(NoraRadioError::ReadLowLevelBufferBusy)
+            }
         }
     }
 
