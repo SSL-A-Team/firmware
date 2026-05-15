@@ -24,7 +24,6 @@ pub struct BodyController {
     pub trajectory: Option<BangBangTraj3D>,
     pub trajectory_time: f32,
     pub trajectory_state: Vector6f,
-    pub trajectory_params: TrajectoryParams,
     pub prev_body_cmd: Option<Vector3f>,
     pub body_twist_out: Vector3f,
     pub body_accel_out: Vector3f,
@@ -56,7 +55,6 @@ impl BodyController {
             traj_recompute_error: Vector4f::new(0.5, 1.0, 1.0, 2.0),
             trajectory: None,
             trajectory_state: Vector6f::zeros(),
-            trajectory_params: TrajectoryParams::default(),
             trajectory_time: 0.0,
             prev_body_cmd: None,
             body_twist_out: Vector3f::default(),
@@ -137,15 +135,33 @@ impl BodyController {
         let skill_telem;
         match last_command.get_skill_command() {
             SkillCommand::GlobalPosition(gpos_cmd) => {
-                (body_twist_out, body_accel_out) = self.global_pose_bangbang_pid_control_policy(state_estimate, gpos_cmd.as_vec3f())?;
+                let traj_params = TrajectoryParams {
+                    max_vel_linear: gpos_cmd.max_linear_vel,
+                    max_vel_angular: gpos_cmd.max_angular_vel,
+                    max_accel_linear: gpos_cmd.max_linear_acc,
+                    max_accel_angular: gpos_cmd.max_angular_acc,
+                };
+                (body_twist_out, body_accel_out) = self.global_pose_bangbang_pid_control_policy(state_estimate, gpos_cmd.as_vec3f(), traj_params)?;
                 skill_telem = SkillExtendedTelemetry::GlobalPosition(ExtendedGlobalPositionTelemetry { cmd_echo: gpos_cmd });
             }
             SkillCommand::GlobalVelocity(gvel_cmd) => {
-                (body_twist_out, body_accel_out) = self.global_twist_control_policy(state_estimate, gvel_cmd.as_vec3f())?;
+                let traj_params = TrajectoryParams {
+                    max_vel_linear: 0.0,
+                    max_vel_angular: 0.0,
+                    max_accel_linear: gvel_cmd.max_linear_acc,
+                    max_accel_angular: gvel_cmd.max_angular_acc,
+                };
+                (body_twist_out, body_accel_out) = self.global_twist_control_policy(state_estimate, gvel_cmd.as_vec3f(), traj_params)?;
                 skill_telem = SkillExtendedTelemetry::GlobalVelocity(ExtendedGlobalVelocityTelemetry { cmd_echo: gvel_cmd });
             }
             SkillCommand::LocalVelocity(lvel_cmd) => {
-                (body_twist_out, body_accel_out) = self.local_twist_control_policy(state_estimate, lvel_cmd.as_vec3f())?;
+                let traj_params = TrajectoryParams {
+                    max_vel_linear: 0.0,
+                    max_vel_angular: 0.0,
+                    max_accel_linear: lvel_cmd.max_linear_acc,
+                    max_accel_angular: lvel_cmd.max_angular_acc,
+                };
+                (body_twist_out, body_accel_out) = self.local_twist_control_policy(state_estimate, lvel_cmd.as_vec3f(), traj_params)?;
                 skill_telem = SkillExtendedTelemetry::LocalVelocity(ExtendedLocalVelocityTelemetry { cmd_echo: lvel_cmd });
             }
             SkillCommand::GlobalAcceleration(gacc_cmd) => {
@@ -256,12 +272,12 @@ impl BodyController {
         self.global_accel_control_policy(state_estimate, target_accel)
     }
 
-    fn local_twist_control_policy(&mut self, state_estimate: Vector6f, local_target_twist: Vector3f) -> Result<(Vector3f, Vector3f), ControlsError> {
+    fn local_twist_control_policy(&mut self, state_estimate: Vector6f, local_target_twist: Vector3f, traj_params: TrajectoryParams) -> Result<(Vector3f, Vector3f), ControlsError> {
         let target_twist = z_rotation_mat(state_estimate.z) * local_target_twist;
-        self.global_twist_control_policy(state_estimate, target_twist)
+        self.global_twist_control_policy(state_estimate, target_twist, traj_params)
     }
 
-    fn global_twist_control_policy(&mut self, state_estimate: Vector6f, target_twist: Vector3f) -> Result<(Vector3f, Vector3f), ControlsError> {
+    fn global_twist_control_policy(&mut self, state_estimate: Vector6f, target_twist: Vector3f, traj_params: TrajectoryParams) -> Result<(Vector3f, Vector3f), ControlsError> {
         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
 
         // Compute trajectory to target twist if
@@ -276,7 +292,7 @@ impl BodyController {
             self.trajectory = Some(BangBangTraj3D::from_target_twist(
                 twist_estimate,
                 target_twist,
-                self.trajectory_params,
+                traj_params,
             )?);
             self.trajectory_state = state_estimate;
             self.trajectory_time = 0.0;
@@ -323,6 +339,7 @@ impl BodyController {
         &mut self,
         state_estimate: Vector6f,
         target_pose: Vector3f,
+        traj_params: TrajectoryParams,
     ) -> Result<(Vector3f, Vector3f), ControlsError> {
         let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
@@ -342,7 +359,7 @@ impl BodyController {
             self.trajectory = Some(BangBangTraj3D::from_target_pose(
                 state_estimate,
                 target_pose,
-                self.trajectory_params,
+                traj_params,
             )?);
             self.trajectory_state = state_estimate;
             self.trajectory_time = 0.0;
@@ -399,13 +416,10 @@ impl BodyController {
             ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::POSE_CONTROL_GAIN => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRAJ_RECOMPUTE_ERROR => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::TRAJ_MAX => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::POSE_FB_PIDII_X => Some(ParameterDataFormat::VEC5_F32),
-            ParameterName::POSE_FB_PIDII_Y => Some(ParameterDataFormat::VEC5_F32),
-            ParameterName::POSE_FB_PIDII_THETA => Some(ParameterDataFormat::VEC5_F32),
-            ParameterName::TWIST_FB_PIDII_X => Some(ParameterDataFormat::VEC5_F32),
-            ParameterName::TWIST_FB_PIDII_Y => Some(ParameterDataFormat::VEC5_F32),
-            ParameterName::TWIST_FB_PIDII_THETA => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::POSE_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::TWIST_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::TWIST_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
             _ => None,
         }
     }
@@ -466,21 +480,11 @@ impl BodyController {
                     self.traj_recompute_error[3],
                 ];
             }
-            ParameterName::TRAJ_MAX => {
-                reply.data.vec4_f32 = [
-                    self.trajectory_params.max_vel_linear,
-                    self.trajectory_params.max_vel_angular,
-                    self.trajectory_params.max_accel_linear,
-                    self.trajectory_params.max_accel_angular,
-                ];
-            }
-            ParameterName::POSE_FB_PIDII_X
-            | ParameterName::POSE_FB_PIDII_Y
-            | ParameterName::POSE_FB_PIDII_THETA => {
+            ParameterName::POSE_FB_PIDII_LINEAR
+            | ParameterName::POSE_FB_PIDII_ANGULAR => {
                 let gain = self.pose_pid_controller.get_gain();
                 let row = match name {
-                    ParameterName::POSE_FB_PIDII_X => 0,
-                    ParameterName::POSE_FB_PIDII_Y => 1,
+                    ParameterName::POSE_FB_PIDII_LINEAR => 0,
                     _ => 2,
                 };
                 reply.data.vec5_f32 = [
@@ -491,13 +495,11 @@ impl BodyController {
                     gain[(row, 4)],
                 ];
             }
-            ParameterName::TWIST_FB_PIDII_X
-            | ParameterName::TWIST_FB_PIDII_Y
-            | ParameterName::TWIST_FB_PIDII_THETA => {
+            ParameterName::TWIST_FB_PIDII_LINEAR
+            | ParameterName::TWIST_FB_PIDII_ANGULAR => {
                 let gain = self.twist_pid_controller.get_gain();
                 let row = match name {
-                    ParameterName::TWIST_FB_PIDII_X => 0,
-                    ParameterName::TWIST_FB_PIDII_Y => 1,
+                    ParameterName::TWIST_FB_PIDII_LINEAR => 0,
                     _ => 2,
                 };
                 reply.data.vec5_f32 = [
@@ -581,40 +583,35 @@ impl BodyController {
                 let v = unsafe { cmd.data.vec4_f32 };
                 self.traj_recompute_error = Vector4f::new(v[0], v[1], v[2], v[3]);
             }
-            ParameterName::TRAJ_MAX => {
-                let v = unsafe { cmd.data.vec4_f32 };
-                self.trajectory_params.max_vel_linear = v[0];
-                self.trajectory_params.max_vel_angular = v[1];
-                self.trajectory_params.max_accel_linear = v[2];
-                self.trajectory_params.max_accel_angular = v[3];
-            }
-            ParameterName::POSE_FB_PIDII_X
-            | ParameterName::POSE_FB_PIDII_Y
-            | ParameterName::POSE_FB_PIDII_THETA => {
+            ParameterName::POSE_FB_PIDII_LINEAR
+            | ParameterName::POSE_FB_PIDII_ANGULAR => {
                 let v = unsafe { cmd.data.vec5_f32 };
-                let row = match cmd.parameter_name {
-                    ParameterName::POSE_FB_PIDII_X => 0,
-                    ParameterName::POSE_FB_PIDII_Y => 1,
-                    _ => 2,
-                };
                 let mut gain = self.pose_pid_controller.get_gain();
-                for col in 0..5 {
-                    gain[(row, col)] = v[col];
+                if cmd.parameter_name == ParameterName::POSE_FB_PIDII_LINEAR {
+                    for col in 0..5 {
+                        gain[(0, col)] = v[col];
+                        gain[(1, col)] = v[col];
+                    }
+                } else {
+                    for col in 0..5 {
+                        gain[(2, col)] = v[col];
+                    }
                 }
                 self.pose_pid_controller.set_gain(gain);
             }
-            ParameterName::TWIST_FB_PIDII_X
-            | ParameterName::TWIST_FB_PIDII_Y
-            | ParameterName::TWIST_FB_PIDII_THETA => {
+            ParameterName::TWIST_FB_PIDII_LINEAR
+            | ParameterName::TWIST_FB_PIDII_ANGULAR => {
                 let v = unsafe { cmd.data.vec5_f32 };
-                let row = match cmd.parameter_name {
-                    ParameterName::TWIST_FB_PIDII_X => 0,
-                    ParameterName::TWIST_FB_PIDII_Y => 1,
-                    _ => 2,
-                };
                 let mut gain = self.twist_pid_controller.get_gain();
-                for col in 0..5 {
-                    gain[(row, col)] = v[col];
+                if cmd.parameter_name == ParameterName::TWIST_FB_PIDII_LINEAR {
+                    for col in 0..5 {
+                        gain[(0, col)] = v[col];
+                        gain[(1, col)] = v[col];
+                    }
+                } else {
+                    for col in 0..5 {
+                        gain[(2, col)] = v[col];
+                    }
                 }
                 self.twist_pid_controller.set_gain(gain);
             }
