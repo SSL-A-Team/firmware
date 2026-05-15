@@ -27,6 +27,8 @@ pub struct SharedRobotState {
     battery_low: AtomicBool,
     battery_crit: AtomicBool,
 
+    controls_err: AtomicBool,
+
     robot_tipped: AtomicBool,
 
     shutdown_requested: AtomicBool,
@@ -56,6 +58,7 @@ impl SharedRobotState {
             radio_send_extended_telem: AtomicBool::new(false),
             battery_low: AtomicBool::new(false),
             battery_crit: AtomicBool::new(false),
+            controls_err: AtomicBool::new(false),
             robot_tipped: AtomicBool::new(false),
             shutdown_requested: AtomicBool::new(false),
             ball_detected: AtomicBool::new(false),
@@ -248,6 +251,14 @@ impl SharedRobotState {
     pub fn set_radio_send_extended_telem(&self, send_extended_telem: bool) {
         self.radio_send_extended_telem
             .store(send_extended_telem, Ordering::SeqCst);
+    }
+
+    pub fn get_controls_err(&self) -> bool {
+        self.controls_err.load(Ordering::Relaxed)
+    }
+
+    pub fn set_controls_err(&self, controls_err: bool) {
+        self.controls_err.store(controls_err, Ordering::Relaxed);
     }
 
     pub fn ball_detected(&self) -> bool {
