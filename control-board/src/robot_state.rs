@@ -19,6 +19,7 @@ pub struct SharedRobotState {
     // systick is 1us which in a u64 gives an uptime of ~500000 yrs,
     // 32bit Cortex M has no AtomicU64, so we'll sync on milliseconds
     // overflow occurs in ~49.7 days
+    #[allow(dead_code)]
     last_packet_receive_time_ticks_ms: AtomicU32,
     radio_network_ok: AtomicBool,
     radio_bridge_ok: AtomicBool,

@@ -1,6 +1,6 @@
 use ateam_common_packets::{
     bindings::{
-        BasicControl, BasicTelemetry, BodyControlCommand, BodyControlMode, CcmMotionControlType, ExtendedTelemetry, KickerTelemetry, MotionCommandType, PowerTelemetry
+        BasicControl, BasicTelemetry, BodyControlCommand, BodyControlMode, CcmMotionControlType, ExtendedTelemetry, KickerTelemetry, PowerTelemetry
     },
     radio::TelemetryPacket,
 };
@@ -313,8 +313,8 @@ impl<
 
         let mut robot_controller = BodyController::new(loop_period.as_micros() as f32 * 1e-6);
 
-        let mut cmd_mode = BodyControlMode::BCM_OFF;
-        let mut cmd = BodyControlCommand::default();
+        let mut _cmd_mode = BodyControlMode::BCM_OFF;
+        let mut _cmd = BodyControlCommand::default();
         let mut last_vision_pose_meas = Vector3f::default();
         let mut vision_update = false;
         let mut ticks_since_control_packet = 0;
@@ -361,8 +361,8 @@ impl<
                             self.shared_robot_state.flag_shutdown_requested();
                         }
 
-                        cmd_mode = latest_control.body_control_mode;
-                        cmd = latest_control.cmd;
+                        _cmd_mode = latest_control.body_control_mode;
+                        _cmd = latest_control.cmd;
                         last_vision_pose_meas = latest_control.vision_position_update.into();
                         vision_update = latest_control.vision_update() != 0;
 

@@ -38,6 +38,7 @@ pub struct CurrentControlledMotor<
     current_state: CcmTelemetry,
     current_params_state: CcmParameterPacket,
     current_state_seq_num: u8,
+    #[allow(dead_code)]
     torque_limit: f32,
 
     setpoint: f32,

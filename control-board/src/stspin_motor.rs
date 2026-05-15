@@ -36,13 +36,21 @@ pub struct WheelMotor<
     current_timestamp_ms: u32,
     current_state: MotorTelemetry,
     current_params_state: ParameterMotorResponse,
+    #[allow(dead_code)]
     version_major: u8,
+    #[allow(dead_code)]
     version_minor: u8,
+    #[allow(dead_code)]
     version_patch: u16,
+    #[allow(dead_code)]
     vel_pid_constants: Vector3<f32>,
+    #[allow(dead_code)]
     vel_pid_i_max: f32,
+    #[allow(dead_code)]
     torque_pid_constants: Vector3<f32>,
+    #[allow(dead_code)]
     torque_pid_i_max: f32,
+    #[allow(dead_code)]
     torque_limit: f32,
 
     setpoint: f32,
