@@ -1,10 +1,12 @@
 use ateam_common_packets::{
     bindings::{
-        BasicControl, BasicTelemetry, BodyControlCommand, BodyControlMode, CcmMotionControlType, ExtendedTelemetry, KickerTelemetry, MotionCommandType, PowerTelemetry
+        BasicControl, BasicTelemetry, BodyControlCommand, BodyControlMode, CcmMotionControlType, ExtendedTelemetry, KickerTelemetry, PowerTelemetry
     },
     radio::TelemetryPacket,
 };
 use ateam_controls::{Vector3f, Vector4f};
+
+use crate::create_error_telemetry_from_string;
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
 };
@@ -129,8 +131,8 @@ pub struct ControlTask<
     last_power_telemetry: PowerTelemetry,
     last_kicker_telemetry: KickerTelemetry,
 
-    ticks_since_extended_telem: usize,
     ticks_since_basic_telem: usize,
+    ticks_since_extended_telem: usize,
 
     motor_fl: ControlWheelMotor,
     motor_bl: ControlWheelMotor,
@@ -241,6 +243,7 @@ impl<
                 self.last_kicker_telemetry.error_detected() as u32,
                 false as u32, // chipper available
                 (!cur_state.kicker_inop && self.last_kicker_telemetry.error_detected() == 0) as u32,
+                (self.last_command.reset_controller() != 0) as u32,
                 Default::default(),
             ),
             battery_percent: self.last_power_telemetry.battery_info.battery_pct as u16,
@@ -311,31 +314,24 @@ impl<
 
         let mut robot_controller = BodyController::new(loop_period.as_micros() as f32 * 1e-6);
 
-        let mut cmd_mode = BodyControlMode::BCM_OFF;
-        let mut cmd = BodyControlCommand::default();
+        let mut _cmd_mode = BodyControlMode::BCM_OFF;
+        let mut _cmd = BodyControlCommand::default();
         let mut last_vision_pose_meas = Vector3f::default();
         let mut vision_update = false;
         let mut ticks_since_control_packet = 0;
 
-        // //////////////////////// Frequency Measurement Vars //////////////////////////
-        // let mut loop_ticks_since_freqeuncy_measurement = 0;
-        // let mut frequency_measurement_time_elapsed_sum_ms: f32 = 0.;
-        // let frequency_measurement_window_length = 60;
-        // let mut last_frequency_measurement_time = Instant::now();
-        // //////////////////////////////////////////////////////////////////////////////
-
-        let mut last_loop_start_time = Instant::now();
+        let task_start_time = Instant::now();
         let mut last_loop_term_time = Instant::now();
         let mut ticks_since_trace_print = 0;
-        let mut t_us_at_loop_start = 0u64;
 
         loop {
-            t_us_at_loop_start += (Instant::now() - last_loop_start_time).as_micros() as u64;
-            last_loop_start_time = Instant::now();
-            let mut start = last_loop_start_time;
-            let loop_invocation_dead_time = last_loop_start_time - last_loop_term_time;
+            let t_loop_start = Instant::now();
+            let loop_invocation_dead_time = t_loop_start - last_loop_term_time;
             if loop_invocation_dead_time > Duration::from_micros(CONTROL_DT_US) {
                 defmt::warn!("control loop scheuling lagged. Expected <{:?}us between loop invocations, but got {:?}us", CONTROL_DT_US, loop_invocation_dead_time.as_micros());
+                self.telemetry_publisher.publish_immediate(
+                    TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string("control loop scheduling lagged")),
+                );
             }
 
             self.motor_fl.process_packets();
@@ -343,8 +339,7 @@ impl<
             self.motor_br.process_packets();
             self.motor_fr.process_packets();
 
-            let motor_packet_process_time = Instant::now() - start;
-            start = Instant::now();
+            let t_after_motor = Instant::now();
 
             let cur_state = self.shared_robot_state.get_state();
 
@@ -357,19 +352,6 @@ impl<
             while let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
                 match latest_packet {
                     ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
-                        // //////////////////////// Loop Rate Measurement ///////////////////////////////
-                        // let frequency_measurement_loop_time_elapsed = ((Instant::now() - last_frequency_measurement_time).as_micros() as f32) / 1000.0;
-                        // frequency_measurement_time_elapsed_sum_ms += frequency_measurement_loop_time_elapsed;
-                        // if loop_ticks_since_freqeuncy_measurement == frequency_measurement_window_length {
-                        //     let frequency: f32 = loop_ticks_since_freqeuncy_measurement as f32 / (frequency_measurement_time_elapsed_sum_ms / 1000.0);
-                        //     defmt::debug!("Command RX Frequency - {} hz", frequency);
-                        //     frequency_measurement_time_elapsed_sum_ms = 0.;
-                        //     loop_ticks_since_freqeuncy_measurement = 0;
-                        // }
-                        // last_frequency_measurement_time = Instant::now();
-                        // loop_ticks_since_freqeuncy_measurement += 1;
-                        // //////////////////////////////////////////////////////////////////////////////
-
                         if latest_control.reboot_robot() != 0 {
                             loop {
                                 cortex_m::peripheral::SCB::sys_reset();
@@ -380,8 +362,8 @@ impl<
                             self.shared_robot_state.flag_shutdown_requested();
                         }
 
-                        cmd_mode = latest_control.body_control_mode;
-                        cmd = latest_control.cmd;
+                        _cmd_mode = latest_control.body_control_mode;
+                        _cmd = latest_control.cmd;
                         last_vision_pose_meas = latest_control.vision_position_update.into();
                         vision_update = latest_control.vision_update() != 0;
 
@@ -418,7 +400,8 @@ impl<
                             let tp_resp = TelemetryPacket::ParameterCommandResponse(resp);
                             self.telemetry_publisher.publish(tp_resp).await;
                         } else if let Err(resp) = param_cmd_resp {
-                            defmt::warn!("sending failed parameter updated command response");
+                            defmt::error!("parameter update command failed");
+                            defmt::info!("sending failed parameter response");
                             let tp_resp = TelemetryPacket::ParameterCommandResponse(resp);
                             self.telemetry_publisher.publish(tp_resp).await;
                         }
@@ -426,8 +409,7 @@ impl<
                 }
             }
 
-            let command_packet_process_time = Instant::now() - start;
-            start = Instant::now();
+            let t_after_cmd = Instant::now();
 
             let wheel_vel_meas = Vector4f::new(
                 self.motor_fl.read_rads(),
@@ -461,9 +443,12 @@ impl<
                 // TODO impl 1.5m/s clamping or something
             }
 
-            robot_controller.control_update(
-                cmd,
-                cmd_mode,
+            if self.last_command.reset_controller() != 0 {
+                robot_controller.reset();
+            }
+
+            match robot_controller.control_update(
+                self.last_command,
                 last_vision_pose_meas,
                 vision_update,
                 wheel_vel_meas,
@@ -471,13 +456,22 @@ impl<
                 self.last_imu_accel_x,
                 self.last_imu_accel_y,
                 ticks_since_trace_print >= TRACE_PRINT_INTERVAL_TICKS,
-            );
+            ) {
+                Ok(_) => {}
+                Err(e) => {
+                    defmt::error!("control update error: {}", e);
+                    self.shared_robot_state.set_controls_err(true);
+                    let err_telem = create_error_telemetry_from_string(e.as_str());
+                    self.telemetry_publisher
+                        .publish_immediate(TelemetryPacket::ErrorTelemetry(err_telem));
+                }
+            }
             vision_update = false; // reset vision update flag after use
 
             let (wheel_current_cmd, wheel_vel_cmd) =
                 if self.stop_wheels() || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
                     if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS {
-                        // defmt::warn!("control task - motor commands locked out");
+                        defmt::warn!("control task - motor commands locked out");
                     }
                     (Vector4f::default(), Vector4f::default())
                 } else {
@@ -486,17 +480,6 @@ impl<
                         robot_controller.get_wheel_velocities(),
                     )
                 };
-
-            // // RAW CURRENT COMMAND TESTING
-            // let mut wheel_current_cmd = Vector4f::default();
-            // let mut wheel_vel_cmd = Vector4f::default();
-            // if cmd.x.abs() > 0.01 || cmd.y.abs() > 0.01 || cmd.z.abs() > 0.01 {
-            //     defmt::trace!("cmd: {} {} {}", cmd.x, cmd.y, cmd.z);
-            //     wheel_current_cmd.x = -0.1745;
-            //     wheel_current_cmd.y = -0.2137;
-            //     wheel_current_cmd.z = 0.2137;
-            //     wheel_current_cmd.w = 0.1745;
-            // }
 
             ////////////////// TODO: Move this/delete this //////////////////////
 
@@ -513,6 +496,9 @@ impl<
                     wheel_ma.y as i16,
                     wheel_ma.z as i16,
                     wheel_ma.w as i16
+                );
+                self.telemetry_publisher.publish_immediate(
+                    TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string("high wheel current rejected")),
                 );
                 wheel_ma = Vector4f::default();
             }
@@ -567,15 +553,13 @@ impl<
             self.motor_br.set_current_setpoint(wheel_ma.z as i16);
             self.motor_fr.set_current_setpoint(wheel_ma.w as i16);
 
-            let control_update_time = Instant::now() - start;
-            start = Instant::now();
+            let t_after_control = Instant::now();
 
             ///////////////////////////////////
             //  send commands and telemetry  //
             ///////////////////////////////////
 
-            let timestamp_us =
-                t_us_at_loop_start + (Instant::now() - last_loop_start_time).as_micros() as u64;
+            let timestamp_us = (Instant::now() - task_start_time).as_micros();
             self.send_motor_commands_and_telemetry(
                 ctrl_seq_number,
                 timestamp_us,
@@ -586,13 +570,16 @@ impl<
             // increment seq number
             ctrl_seq_number = (ctrl_seq_number + 1) & 0x00FF;
 
-            let channel_update_time = Instant::now() - start;
-            start = Instant::now();
+            let t_after_telem = Instant::now();
 
-            let loop_execution_time_us = Instant::now()
-                .duration_since(last_loop_start_time)
-                .as_micros();
-            if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS || loop_execution_time_us > 300
+            let motor_packet_process_time = t_after_motor - t_loop_start;
+            let command_packet_process_time = t_after_cmd - t_after_motor;
+            let control_update_time = t_after_control - t_after_cmd;
+            let channel_update_time = t_after_telem - t_after_control;
+            let loop_execution_time_us = (t_after_telem - t_loop_start).as_micros();
+
+            /////////// TRACE LOGGING ///////////
+            if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS
             {
                 defmt::trace!(
                     "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
@@ -606,15 +593,27 @@ impl<
                     loop_execution_time_us
                 );
             }
-
-            if loop_execution_time_us > 300 {
-                defmt::warn!("control loop is taking >300us: {} us (it may be interrupted by higher priority tasks). This is >30% of an execution frame.", loop_execution_time_us);
-            }
-
             if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS {
                 ticks_since_trace_print = 0;
             }
             ticks_since_trace_print += 1;
+            /////////////////////////////////////
+
+            ////////// WARNING LOGGING //////////
+            if loop_execution_time_us > 400 {
+                defmt::warn!(
+                    "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
+                    motor_packet_process_time.as_micros(),
+                    command_packet_process_time.as_micros(),
+                    control_update_time.as_micros(),
+                    channel_update_time.as_micros(),
+                );
+                defmt::warn!("control loop is taking >400us: {} us (it may be interrupted by higher priority tasks). This is >40% of an execution frame.", loop_execution_time_us);
+                self.telemetry_publisher.publish_immediate(
+                    TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string("control loop >400us execution time")),
+                );
+            }
+            /////////////////////////////////////
 
             last_loop_term_time = Instant::now();
             loop_rate_ticker.next().await;
@@ -737,7 +736,10 @@ impl<
         // defmt::debug!("hco: {}, sd req: {}, estop: {}", self.last_power_telemetry.high_current_operations_allowed() == 0, self.shared_robot_state.shutdown_requested(), self.last_command.emergency_stop() != 0);
 
         // self.last_power_telemetry.high_current_operations_allowed() == 0
-        self.shared_robot_state.shutdown_requested() || self.last_command.emergency_stop() != 0
+        self.shared_robot_state.shutdown_requested()
+            || self.shared_robot_state.get_controls_err()
+            || self.last_command.emergency_stop() != 0
+            || self.last_command.reset_controller() != 0
     }
 }
 

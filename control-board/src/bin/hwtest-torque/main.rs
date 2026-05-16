@@ -279,7 +279,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         if curr_ctr > 5000 {
             curr_ctr = 0
         } else if curr_ctr > 2500 {
-            ccm.set_current_setpoint(-40);
+            ccm.set_current_setpoint(-100);
             // ccm.set_setpoint(-2500.0);
             // ccm.set_setpoint(-0.1);
         } else {

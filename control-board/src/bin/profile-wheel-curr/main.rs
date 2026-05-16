@@ -3,6 +3,7 @@
 #![feature(sync_unsafe_cell)]
 
 use ateam_common_packets::bindings::{CcmMotionControlType, CcmTelemetry};
+use ateam_lib_stm32::filter::{Filter, IirFilter};
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
 };
@@ -264,15 +265,34 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     defmt::info!("flasing motor...");
 
-    let res = fl_ccm.init_default_firmware_image(true).await;
-    let res = bl_ccm.init_default_firmware_image(true).await;
-    let res = br_ccm.init_default_firmware_image(true).await;
-    let res = fr_ccm.init_default_firmware_image(true).await;
+    let force_flash = false;
+    let res1 = fl_ccm.init_default_firmware_image(force_flash).await;
+    let res2 = bl_ccm.init_default_firmware_image(force_flash).await;
+    let res3 = br_ccm.init_default_firmware_image(force_flash).await;
+    let res4 = fr_ccm.init_default_firmware_image(force_flash).await;
 
-    if res.is_ok() {
-        defmt::info!("motor flashed.");
+    if res1.is_ok() {
+        defmt::info!("fl motor flashed.");
     } else {
-        defmt::error!("motor failed to flash!");
+        defmt::error!("fl motor failed to flash!");
+    }
+    
+    if res2.is_ok() {
+        defmt::info!("bl motor flashed.");
+    } else {
+        defmt::error!("bl motor failed to flash!");
+    }
+    
+    if res3.is_ok() {
+        defmt::info!("br motor flashed.");
+    } else {
+        defmt::error!("br motor failed to flash!");
+    }
+    
+    if res4.is_ok() {
+        defmt::info!("fr motor flashed.");
+    } else {
+        defmt::error!("fr motor failed to flash!");
     }
 
     // ccm.set_motion_type(CcmMotionControlType::CCM_MCT_VOLTAGE_OPENLOOP);
@@ -305,6 +325,11 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut mv_cmd_counting_up = true;
     let mut mv_cmd = 0.0;
 
+    let mut fl_curr_iir = IirFilter::new(0.01);
+    let mut bl_curr_iir = IirFilter::new(0.01);
+    let mut br_curr_iir = IirFilter::new(0.01);
+    let mut fr_curr_iir = IirFilter::new(0.01);
+
     let mut curr_ctr = 0;
 
     let mut ctr = 0;
@@ -329,37 +354,82 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             last_seq_num = cur_seq_num;
         }
 
+        // if ctr > 19 {
+        //     defmt::info!(
+        //         "motion control type: {}",
+        //         fl_ccm.get_latest_state().motion_control_type
+        //     );
+        //     defmt::info!(
+        //         "vrail: {}, Isp: {}, Iref: {}, vel: {}, Vmv: {}",
+        //         v,
+        //         i_sp,
+        //         i_ref,
+        //         w,
+        //         Vm
+        //     );
+        //     ctr = 0;
+        // } else {
+        //     ctr += 1;
+        // }
+
+        fl_curr_iir.add_sample(fl_ccm.read_current_estimate_ma() as f32);
+        bl_curr_iir.add_sample(bl_ccm.read_current_estimate_ma() as f32);
+        br_curr_iir.add_sample(br_ccm.read_current_estimate_ma() as f32);
+        fr_curr_iir.add_sample(fr_ccm.read_current_estimate_ma() as f32);
+
+        fl_curr_iir.update();
+        bl_curr_iir.update();
+        br_curr_iir.update();
+        fr_curr_iir.update();
+
+        let fl_filt_curr = fl_curr_iir.filtered_value().unwrap();
+        let bl_filt_curr = bl_curr_iir.filtered_value().unwrap();
+        let br_filt_curr = br_curr_iir.filtered_value().unwrap();
+        let fr_filt_curr = fr_curr_iir.filtered_value().unwrap();
+        let filt_currs = [fl_filt_curr, bl_filt_curr, br_filt_curr, fr_filt_curr];
+
+
+        let min_current: f32 = filt_currs.into_iter().reduce(f32::min).unwrap();
+        let max_current: f32 = filt_currs.into_iter().reduce(f32::max).unwrap();
+        let avg_current: f32 = filt_currs.iter().sum::<f32>() / filt_currs.len() as f32;
+        
+        let min_as_pct_of_mean = (1.0 - (min_current / avg_current)) * 100.0;
+        let max_as_pct_of_mean = (1.0 - (avg_current / max_current)) * 100.0;
+
         if ctr > 19 {
-            defmt::info!(
-                "motion control type: {}",
-                fl_ccm.get_latest_state().motion_control_type
-            );
-            defmt::info!(
-                "vrail: {}, Isp: {}, Iref: {}, vel: {}, Vmv: {}",
-                v,
-                i_sp,
-                i_ref,
-                w,
-                Vm
-            );
+            defmt::info!("motor curr stats - avg: {}, min: {}, max: {}, min_pct: {}, max_pct: {}", avg_current, min_current, max_current, min_as_pct_of_mean, max_as_pct_of_mean);
             ctr = 0;
         } else {
             ctr += 1;
         }
 
-        if curr_ctr > 1000 {
+        if curr_ctr > 10000 {
             curr_ctr = 0
-        } else if curr_ctr > 500 {
-            fl_ccm.set_current_setpoint(40);
-            bl_ccm.set_current_setpoint(40);
-            br_ccm.set_current_setpoint(40);
-            fr_ccm.set_current_setpoint(40);
+        } else if curr_ctr > 5000 {
+            fl_ccm.set_current_setpoint(50);
+            bl_ccm.set_current_setpoint(50);
+            br_ccm.set_current_setpoint(50);
+            fr_ccm.set_current_setpoint(50);
         } else {
-            fl_ccm.set_current_setpoint(-40);
-            bl_ccm.set_current_setpoint(-40);
-            br_ccm.set_current_setpoint(-40);
-            fr_ccm.set_current_setpoint(-40);
+            fl_ccm.set_current_setpoint(150);
+            bl_ccm.set_current_setpoint(150);
+            br_ccm.set_current_setpoint(150);
+            fr_ccm.set_current_setpoint(150);
         }
+
+        // if curr_ctr > 1000 {
+        //     curr_ctr = 0
+        // } else if curr_ctr > 500 {
+        //     fl_ccm.set_current_setpoint(40);
+        //     bl_ccm.set_current_setpoint(40);
+        //     br_ccm.set_current_setpoint(40);
+        //     fr_ccm.set_current_setpoint(40);
+        // } else {
+        //     fl_ccm.set_current_setpoint(-40);
+        //     bl_ccm.set_current_setpoint(-40);
+        //     br_ccm.set_current_setpoint(-40);
+        //     fr_ccm.set_current_setpoint(-40);
+        // }
 
         curr_ctr += 1;
 

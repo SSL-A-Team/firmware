@@ -51,7 +51,9 @@ pub const DEBUG_MOTOR_UART_QUEUES: bool = false;
 pub const DEBUG_POWER_UART_QUEUES: bool = false;
 pub const DEBUG_KICKER_UART_QUEUES: bool = false;
 
+#[allow(dead_code)]
 const ROBOT_VERSION_MAJOR: u8 = 3;
+#[allow(dead_code)]
 const ROBOT_VERSION_MINOR: u8 = 1;
 
 #[derive(Debug, Clone, Copy, defmt::Format)]

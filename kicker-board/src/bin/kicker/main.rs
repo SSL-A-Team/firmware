@@ -4,7 +4,7 @@
 #![feature(sync_unsafe_cell)]
 
 use core::sync::atomic::Ordering::Relaxed;
-use core::sync::atomic::{AtomicBool, AtomicU32};
+use core::sync::atomic::AtomicBool;
 
 use ateam_kicker_board::{
     drivers::{breakbeam::Breakbeam, DribblerMotor},

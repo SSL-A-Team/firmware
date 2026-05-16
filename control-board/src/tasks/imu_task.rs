@@ -8,8 +8,10 @@ use embassy_stm32::Peri;
 use embassy_time::{Instant, Timer};
 use nalgebra::Vector3;
 
+use ateam_common_packets::radio::TelemetryPacket;
 use ateam_lib_stm32::drivers::imu::bmi323::{self, *};
 
+use crate::create_error_telemetry_from_string;
 use crate::pins::*;
 use crate::robot_state::SharedRobotState;
 use crate::tasks::dotstar_task::{ControlBoardLedCommand, ImuStatusLedCommand};
@@ -18,13 +20,14 @@ const TIPPED_MIN_DURATION_MS: u64 = 1000;
 
 #[macro_export]
 macro_rules! create_imu_task {
-    ($main_spawner:ident, $robot_state:ident, $imu_gyro_data_publisher:ident, $imu_accel_data_publisher:ident, $imu_led_cmd_pub:ident, $p:ident) => {
+    ($main_spawner:ident, $robot_state:ident, $imu_gyro_data_publisher:ident, $imu_accel_data_publisher:ident, $imu_led_cmd_pub:ident, $imu_telemetry_publisher:ident, $p:ident) => {
         ateam_control_board::tasks::imu_task::start_imu_task(
             &$main_spawner,
             $robot_state,
             $imu_gyro_data_publisher,
             $imu_accel_data_publisher,
             $imu_led_cmd_pub,
+            $imu_telemetry_publisher,
             $p.SPI1,
             $p.PA5,
             $p.PA7,
@@ -45,13 +48,14 @@ macro_rules! create_imu_task {
 
 #[macro_export]
 macro_rules! create_imu_task_ie {
-    ($main_spawner:ident, $robot_state:ident, $imu_gyro_data_publisher:ident, $imu_accel_data_publisher:ident, $imu_led_cmd_pub:ident, $p:ident) => {
+    ($main_spawner:ident, $robot_state:ident, $imu_gyro_data_publisher:ident, $imu_accel_data_publisher:ident, $imu_led_cmd_pub:ident, $imu_telemetry_publisher:ident, $p:ident) => {
         ateam_control_board::tasks::imu_task::start_imu_task_ie(
             &$main_spawner,
             $robot_state,
             $imu_gyro_data_publisher,
             $imu_accel_data_publisher,
             $imu_led_cmd_pub,
+            $imu_telemetry_publisher,
             $p.SPI1,
             $p.PA5,
             $p.PA7,
@@ -79,6 +83,7 @@ async fn imu_task_entry(
     gyro_pub: GyroDataPublisher,
     accel_pub: AccelDataPublisher,
     led_command_pub: LedCommandPublisher,
+    telemetry_pub: TelemetryPublisher,
     mut imu: Bmi323<'static, 'static>,
     mut _accel_int: ExtiInput<'static>,
     mut gyro_int: ExtiInput<'static>,
@@ -100,6 +105,9 @@ async fn imu_task_entry(
         let self_test_res = imu.self_test().await;
         if self_test_res.is_err() {
             defmt::error!("IMU self test failed");
+            telemetry_pub.publish_immediate(
+                TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string("IMU self test failed")),
+            );
             led_command_pub
                 .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
                 .await;
@@ -125,6 +133,9 @@ async fn imu_task_entry(
                 .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
                 .await;
             defmt::error!("gyro configration failed.");
+            telemetry_pub.publish_immediate(
+                TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string("IMU gyro configuration failed")),
+            );
         }
 
         // configure the gyro, map int to int pin 1
@@ -145,6 +156,9 @@ async fn imu_task_entry(
                 .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
                 .await;
             defmt::error!("accel configration failed.");
+            telemetry_pub.publish_immediate(
+                TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string("IMU accel configuration failed")),
+            );
         }
 
         // configure the phys properties of the int pins
@@ -207,6 +221,9 @@ async fn imu_task_entry(
                 }
                 Either::Second(_) => {
                     defmt::warn!("imu interrupt based data acq timed out.");
+                    telemetry_pub.publish_immediate(
+                        TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string("IMU interrupt timeout")),
+                    );
                     // attempt connect validation and reconfig
                     break 'imu_data_loop;
                 }
@@ -221,6 +238,7 @@ pub fn start_imu_task(
     gyro_data_publisher: GyroDataPublisher,
     accel_data_publisher: AccelDataPublisher,
     led_cmd_publisher: LedCommandPublisher,
+    telemetry_publisher: TelemetryPublisher,
     peri: Peri<'static, ImuSpi>,
     sck: Peri<'static, impl SckPin<ImuSpi>>,
     mosi: Peri<'static, impl MosiPin<ImuSpi>>,
@@ -264,6 +282,7 @@ pub fn start_imu_task(
             gyro_data_publisher,
             accel_data_publisher,
             led_cmd_publisher,
+            telemetry_publisher,
             imu,
             accel_int,
             gyro_int,
@@ -277,6 +296,7 @@ pub fn start_imu_task_via_ie(
     gyro_data_publisher: GyroDataPublisher,
     accel_data_publisher: AccelDataPublisher,
     led_cmd_publisher: LedCommandPublisher,
+    telemetry_publisher: TelemetryPublisher,
     peri: Peri<'static, ImuSpi>,
     sck: Peri<'static, impl SckPin<ImuSpi>>,
     mosi: Peri<'static, impl MosiPin<ImuSpi>>,
@@ -320,6 +340,7 @@ pub fn start_imu_task_via_ie(
             gyro_data_publisher,
             accel_data_publisher,
             led_cmd_publisher,
+            telemetry_publisher,
             imu,
             accel_int,
             gyro_int,
