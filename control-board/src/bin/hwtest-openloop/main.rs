@@ -214,6 +214,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let wheel_vel_control_enabled = 0;
     let wheel_torque_control_enabled = 1;
     let vision_update = 0;
+    let reset_controller = 0;
     let reserved = 0;
 
     let mut control = BasicControl {
@@ -225,6 +226,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             wheel_vel_control_enabled,
             wheel_torque_control_enabled,
             vision_update,
+            reset_controller,
             reserved
         ),
         _bitfield_align_1: Default::default(),

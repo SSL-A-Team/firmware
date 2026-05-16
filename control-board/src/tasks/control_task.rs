@@ -243,6 +243,7 @@ impl<
                 self.last_kicker_telemetry.error_detected() as u32,
                 false as u32, // chipper available
                 (!cur_state.kicker_inop && self.last_kicker_telemetry.error_detected() == 0) as u32,
+                (self.last_command.reset_controller() != 0) as u32,
                 Default::default(),
             ),
             battery_percent: self.last_power_telemetry.battery_info.battery_pct as u16,
@@ -440,6 +441,10 @@ impl<
 
             if self.last_command.game_state_in_stop() != 0 {
                 // TODO impl 1.5m/s clamping or something
+            }
+
+            if self.last_command.reset_controller() != 0 {
+                robot_controller.reset();
             }
 
             match robot_controller.control_update(
@@ -731,7 +736,10 @@ impl<
         // defmt::debug!("hco: {}, sd req: {}, estop: {}", self.last_power_telemetry.high_current_operations_allowed() == 0, self.shared_robot_state.shutdown_requested(), self.last_command.emergency_stop() != 0);
 
         // self.last_power_telemetry.high_current_operations_allowed() == 0
-        self.shared_robot_state.shutdown_requested() || self.shared_robot_state.get_controls_err() || self.last_command.emergency_stop() != 0
+        self.shared_robot_state.shutdown_requested()
+            || self.shared_robot_state.get_controls_err()
+            || self.last_command.emergency_stop() != 0
+            || self.last_command.reset_controller() != 0
     }
 }
 

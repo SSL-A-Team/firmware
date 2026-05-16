@@ -143,7 +143,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         }
 
         test_command_publisher.publish_immediate(DataPacket::BasicControl(BasicControl {
-            _bitfield_1: BasicControl::new_bitfield_1(0, 0, 0, 0, WHEEL_VEL_CONTROL_ENABLED.into(), WHEEL_TORQUE_CONTROL_ENABLED.into(), 0, 0),
+            _bitfield_1: BasicControl::new_bitfield_1(0, 0, 0, 0, WHEEL_VEL_CONTROL_ENABLED.into(), WHEEL_TORQUE_CONTROL_ENABLED.into(), 0, 0, 0),
             _bitfield_align_1: Default::default(),
 
             vision_position_update: [0.0, 0.0, 0.0],

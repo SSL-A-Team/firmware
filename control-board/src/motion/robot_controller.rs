@@ -13,6 +13,9 @@ use nalgebra::{vector, Matrix3x5};
 use ateam_common_packets::bindings::ParameterCommand;
 
 
+/// Time (seconds) without a vision update after which vision is considered "inactive".
+const VISION_ACTIVE_TIMEOUT_S: f32 = 0.2;
+
 pub struct BodyController {
     pub robot_model: RobotModel,
     pub pose_pid_controller: PidController<3>,
@@ -33,6 +36,8 @@ pub struct BodyController {
     pub telemetry: BodyControlTelemetry,
     pub debug_telemetry: BodyControlExtendedTelemetry,
     pub dt: f32,
+    pub first_vision_received: bool,
+    pub time_since_vision_update_s: f32,
 }
 
 impl BodyController {
@@ -65,6 +70,8 @@ impl BodyController {
             telemetry: Default::default(),
             debug_telemetry: Default::default(),
             dt,
+            first_vision_received: false,
+            time_since_vision_update_s: VISION_ACTIVE_TIMEOUT_S + 1.0,  // Set to higher than timeout
         }
     }
 
@@ -83,6 +90,12 @@ impl BodyController {
         self.wheel_torque_out = Vector4f::default();
         self.telemetry = Default::default();
         self.debug_telemetry = Default::default();
+        self.first_vision_received = false;
+        self.time_since_vision_update_s = VISION_ACTIVE_TIMEOUT_S + 1.0;  // Set to higher than timeout
+    }
+
+    pub fn vision_active(&self) -> bool {
+        self.first_vision_received && self.time_since_vision_update_s <= VISION_ACTIVE_TIMEOUT_S
     }
 
     pub fn control_update(
@@ -99,6 +112,18 @@ impl BodyController {
         let t_start = Instant::now();
 
         // Working in global frame, unless variable is specified as local
+
+        if vision_update {
+            if !self.first_vision_received {
+                self.robot_model.kf_set_pose(vision_pose_meas);
+                self.first_vision_received = true;
+            }
+            self.time_since_vision_update_s = 0.0;
+        } else {
+            if self.time_since_vision_update_s <= VISION_ACTIVE_TIMEOUT_S {
+                self.time_since_vision_update_s += self.dt;  // Only add when less than timeout
+            }
+        }
 
         let state_prediction = self.robot_model.get_state();
 
@@ -341,6 +366,15 @@ impl BodyController {
         target_pose: Vector3f,
         traj_params: TrajectoryParams,
     ) -> Result<(Vector3f, Vector3f), ControlsError> {
+        // Vision required for pose control
+        if !self.vision_active() {
+            self.trajectory = None;
+            self.trajectory_state = Vector6f::zeros();
+            self.trajectory_time = 0.0;
+            self.prev_body_cmd = None;
+            return Ok((Vector3f::zeros(), Vector3f::zeros()));
+        }
+
         let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
 
