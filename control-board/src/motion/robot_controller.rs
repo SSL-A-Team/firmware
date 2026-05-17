@@ -4,11 +4,11 @@ use ateam_common_packets::bindings::{BasicControl, BodyControlExtendedTelemetry,
 use ateam_common_packets::radio::{SkillCommand, SkillExtendedTelemetry};
 use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
 use ateam_controls::robot_model::RobotModel;
-use ateam_controls::{z_rotation_mat, ControlsError, Vector2f, Vector3f, Vector4f, Vector5f, Vector6f, Vector8f};
+use ateam_controls::{z_rotation_mat, ControlsError, Vector2f, Vector3f, Vector4f, Vector6f, Vector8f};
 use embassy_time::Instant;
 use libm::{fabsf, remainderf};
 use core::f32::consts::PI;
-use nalgebra::{vector, Matrix3x5};
+use nalgebra::vector;
 
 use ateam_common_packets::bindings::ParameterCommand;
 
@@ -43,21 +43,20 @@ pub struct BodyController {
 impl BodyController {
     pub fn new(dt: f32) -> BodyController {
 
-        let linear_pose_pid_gains = Vector5f::new(125.0, 0.5, 10.0, -1.0, 1.0).transpose();
-        let angular_pose_pid_gains = Vector5f::new(125.0, 0.5, 15.0, -1.0, 1.0).transpose();
-        let pose_pid_gains = Matrix3x5::from_rows(&[linear_pose_pid_gains, linear_pose_pid_gains, angular_pose_pid_gains]);
-
-        let linear_twist_pid_gains = Vector5f::new(100.0, 0.0, 0.0, 0.0, 0.0).transpose();
-        let angular_twist_pid_gains = Vector5f::new(20.0, 0.0, 0.0, 0.0, 0.0).transpose();
-        let twist_pid_gains = Matrix3x5::from_rows(&[linear_twist_pid_gains, linear_twist_pid_gains, angular_twist_pid_gains]);
+        use crate::motion::params::controller_params;
+        use crate::motion::params::robot_params;
 
         BodyController {
-            robot_model: RobotModel::new_from_default_params(dt)
-                .expect("Failed to create RobotModel, check that default parameters are valid"),
-            pose_pid_controller: PidController::<3>::from_gains_matrix(&pose_pid_gains),
-            twist_pid_controller: PidController::<3>::from_gains_matrix(&twist_pid_gains),
-            pose_control_gain: Vector2f::new(1.0, 1.0),
-            traj_recompute_error: Vector4f::new(0.5, 1.0, 1.0, 2.0),
+            robot_model: RobotModel::new(
+                    dt,
+                    robot_params::KF_PARAMS,
+                    robot_params::PHYSICAL_PARAMS,
+                )
+                .expect("Failed to create RobotModel, check that parameters are valid"),
+            pose_pid_controller: PidController::<3>::from_gains_matrix(&controller_params::pose_pid_gains()),
+            twist_pid_controller: PidController::<3>::from_gains_matrix(&controller_params::twist_pid_gains()),
+            pose_control_gain: controller_params::POSE_CONTROL_GAIN,
+            traj_recompute_error: controller_params::TRAJ_RECOMPUTE_ERROR,
             trajectory: None,
             trajectory_state: Vector6f::zeros(),
             trajectory_time: 0.0,
