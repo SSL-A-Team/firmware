@@ -1,4 +1,4 @@
-use ateam_common_packets::{bindings::BasicTelemetry, radio::TelemetryPacket};
+use ateam_common_packets::{bindings::BasicTelemetry, radio::{is_data_packet_safe, TelemetryPacket}};
 use ateam_lib_stm32::{
     idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart,
     uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue},
@@ -17,7 +17,6 @@ use crate::{
     create_error_telemetry_from_string,
     drivers::radio_robot::TeamColor,
     drivers::radio_robot_nora::RobotRadioNora,
-    is_command_packet_safe,
     pins::*,
     robot_state::SharedRobotState,
     tasks::dotstar_task::{ControlBoardLedCommand, RadioStatusLedCommand},
@@ -542,7 +541,7 @@ impl<
                 if let Some(c2_pkt) = pkt {
                     // update the last packet timestamp
                     self.last_software_packet = Instant::now();
-                    if is_command_packet_safe(c2_pkt) {
+                    if is_data_packet_safe(&c2_pkt) {
                         self.command_publisher.publish_immediate(c2_pkt);
                     } else {
                         defmt::error!("RadioNoraTask - received unsafe packet");

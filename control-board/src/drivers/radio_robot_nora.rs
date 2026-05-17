@@ -1,6 +1,6 @@
 use ateam_common_packets::bindings::{
     self, BasicControl, BasicTelemetry, CommandCode, ErrorTelemetry, ExtendedTelemetry,
-    HelloRequest, HelloResponse, ParameterCommand, RadioPacket, RadioPacket_Data,
+    HelloRequest, HelloResponse, ParameterCommand, RadioData, RadioHeader, RadioPacket,
 };
 use ateam_common_packets::radio::DataPacket;
 use ateam_lib_stm32::drivers::radio::nora_w36x::{
@@ -20,7 +20,7 @@ use heapless::String;
 
 use defmt::Format;
 
-use super::radio_robot::{TeamColor, WifiNetwork};
+use super::radio_robot::TeamColor;
 
 const MULTICAST_IP: &str = "224.4.20.69";
 const MULTICAST_PORT: u16 = 42069;
@@ -419,21 +419,22 @@ impl<
 
     pub async fn send_ack(&self, nack: bool) -> Result<(), RobotRadioNoraError> {
         let packet = RadioPacket {
-            crc32: 0,
-            major_version: bindings::kProtocolVersionMajor,
-            minor_version: bindings::kProtocolVersionMinor,
-            command_code: if nack {
-                CommandCode::CC_NACK
-            } else {
-                CommandCode::CC_ACK
+            header: RadioHeader {
+                crc32: 0,
+                _reserved: 0,
+                command_code: if nack {
+                    CommandCode::CC_NACK
+                } else {
+                    CommandCode::CC_ACK
+                },
+                data_length: 0,
             },
-            data_length: 0,
             data: unsafe { core::mem::zeroed() },
         };
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioPacket_Data>(),
+                size_of::<RadioPacket>() - size_of::<RadioData>(),
             )
         };
         self.send_data(packet_bytes).await?;
@@ -443,12 +444,12 @@ impl<
 
     pub async fn wait_ack(&self, timeout: Duration) -> Result<bool, RobotRadioNoraError> {
         let read_fut = self.read_data(|data| {
-            if data.len() != size_of::<RadioPacket>() - size_of::<RadioPacket_Data>() {
+            if data.len() != size_of::<RadioPacket>() - size_of::<RadioData>() {
                 return Err(RobotRadioNoraError::SoftwareConnectAckHeaderInvalid);
             }
             let packet = unsafe { &*(data as *const _ as *const RadioPacket) };
 
-            match packet.command_code {
+            match packet.header.command_code {
                 CommandCode::CC_ACK => Ok(true),
                 CommandCode::CC_NACK => Ok(false),
                 _ => Err(RobotRadioNoraError::SoftwareConnectAckHeaderInvalid),
@@ -461,14 +462,25 @@ impl<
     }
 
     pub async fn send_hello(&self, id: u8, team: TeamColor) -> Result<(), RobotRadioNoraError> {
+        let coms_repo_dirty = false;
+        let controls_repo_dirty = false;
+        let firmware_repo_dirty = false;
+
         let packet = RadioPacket {
-            crc32: 0,
-            major_version: bindings::kProtocolVersionMajor,
-            minor_version: bindings::kProtocolVersionMinor,
-            command_code: CommandCode::CC_HELLO_REQ,
-            data_length: size_of::<HelloRequest>() as u16,
-            data: RadioPacket_Data {
+            header: RadioHeader {
+                crc32: 0,
+                _reserved: 0,
+                command_code: CommandCode::CC_HELLO_REQ,
+                data_length: size_of::<HelloRequest>() as u16,
+            },
+            data: RadioData {
                 hello_request: HelloRequest {
+                    _bitfield_align_1: Default::default(),
+                    _bitfield_1: HelloRequest::new_bitfield_1(coms_repo_dirty.into(), controls_repo_dirty.into(), firmware_repo_dirty.into(), 0),
+                    reserved: Default::default(),
+                    coms_hash: [0; 4],
+                    controls_hash: [0; 4],
+                    firmware_hash: [0; 4],
                     robot_id: id,
                     color: match team {
                         TeamColor::Yellow => bindings::TeamColor::TC_YELLOW,
@@ -480,7 +492,7 @@ impl<
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                size_of::<RadioPacket>() - size_of::<RadioData>()
                     + size_of::<HelloRequest>(),
             )
         };
@@ -491,19 +503,20 @@ impl<
 
     pub async fn send_telemetry(&self, telemetry: BasicTelemetry) -> Result<(), RobotRadioNoraError> {
         let packet = RadioPacket {
-            crc32: 0,
-            major_version: bindings::kProtocolVersionMajor,
-            minor_version: bindings::kProtocolVersionMinor,
-            command_code: CommandCode::CC_TELEMETRY,
-            data_length: size_of::<BasicTelemetry>() as u16,
-            data: RadioPacket_Data {
+            header: RadioHeader {
+                crc32: 0,
+                _reserved: 0,
+                command_code: CommandCode::CC_TELEMETRY,
+                data_length: size_of::<BasicTelemetry>() as u16,
+            },
+            data: RadioData {
                 telemetry: telemetry,
             },
         };
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                size_of::<RadioPacket>() - size_of::<RadioData>()
                     + size_of::<BasicTelemetry>(),
             )
         };
@@ -517,19 +530,20 @@ impl<
         telemetry: ExtendedTelemetry,
     ) -> Result<(), RobotRadioNoraError> {
         let packet = RadioPacket {
-            crc32: 0,
-            major_version: bindings::kProtocolVersionMajor,
-            minor_version: bindings::kProtocolVersionMinor,
-            command_code: CommandCode::CC_CONTROL_DEBUG_TELEMETRY,
-            data_length: size_of::<ExtendedTelemetry>() as u16,
-            data: RadioPacket_Data {
-                control_debug_telemetry: telemetry,
+            header: RadioHeader {
+                crc32: 0,
+                _reserved: 0,
+                command_code: CommandCode::CC_CONTROL_DEBUG_TELEMETRY,
+                data_length: size_of::<ExtendedTelemetry>() as u16,
+            },
+            data: RadioData {
+                extended_telemetry: telemetry,
             },
         };
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                size_of::<RadioPacket>() - size_of::<RadioData>()
                     + size_of::<ExtendedTelemetry>(),
             )
         };
@@ -543,19 +557,20 @@ impl<
         parameter_cmd: ParameterCommand,
     ) -> Result<(), RobotRadioNoraError> {
         let packet = RadioPacket {
-            crc32: 0,
-            major_version: bindings::kProtocolVersionMajor,
-            minor_version: bindings::kProtocolVersionMinor,
-            command_code: CommandCode::CC_ROBOT_PARAMETER_COMMAND,
-            data_length: size_of::<ParameterCommand>() as u16,
-            data: RadioPacket_Data {
+            header: RadioHeader {
+                crc32: 0,
+                _reserved: 0,
+                command_code: CommandCode::CC_ROBOT_PARAMETER_COMMAND,
+                data_length: size_of::<ParameterCommand>() as u16,
+            },
+            data: RadioData {
                 robot_parameter_command: parameter_cmd,
             },
         };
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                size_of::<RadioPacket>() - size_of::<RadioData>()
                     + size_of::<ParameterCommand>(),
             )
         };
@@ -569,17 +584,18 @@ impl<
         error_telemetry: ErrorTelemetry,
     ) -> Result<(), RobotRadioNoraError> {
         let packet = RadioPacket {
-            crc32: 0,
-            major_version: bindings::kProtocolVersionMajor,
-            minor_version: bindings::kProtocolVersionMinor,
-            command_code: CommandCode::CC_ERROR_TELEMETRY,
-            data_length: size_of::<ParameterCommand>() as u16,
-            data: RadioPacket_Data { error_telemetry },
+            header: RadioHeader {
+                crc32: 0,
+                _reserved: 0,
+                command_code: CommandCode::CC_ERROR_TELEMETRY,
+                data_length: size_of::<ParameterCommand>() as u16,
+            },
+            data: RadioData { error_telemetry },
         };
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+                size_of::<RadioPacket>() - size_of::<RadioData>()
                     + size_of::<ErrorTelemetry>(),
             )
         };
@@ -590,7 +606,7 @@ impl<
 
     pub async fn wait_hello(&self, timeout: Duration) -> Result<HelloResponse, RobotRadioNoraError> {
         let read_fut = self.read_data(|data| {
-            const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioPacket_Data>()
+            const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioData>()
                 + size_of::<HelloResponse>();
             if data.len() != PACKET_SIZE {
                 return Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid);
@@ -601,7 +617,7 @@ impl<
 
             let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
 
-            if packet.command_code != CommandCode::CC_HELLO_RESP {
+            if packet.header.command_code != CommandCode::CC_HELLO_RESP {
                 return Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid);
             }
 
@@ -616,9 +632,9 @@ impl<
 
     pub fn parse_data_packet(&self, data: &[u8]) -> Result<DataPacket, RobotRadioNoraError> {
         const CONTROL_PACKET_SIZE: usize =
-            size_of::<RadioPacket>() - size_of::<RadioPacket_Data>() + size_of::<BasicControl>();
+            size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<BasicControl>();
         const PARAMERTER_PACKET_SIZE: usize = size_of::<RadioPacket>()
-            - size_of::<RadioPacket_Data>()
+            - size_of::<RadioData>()
             + size_of::<ParameterCommand>();
 
         if data.len() == CONTROL_PACKET_SIZE {
@@ -627,7 +643,7 @@ impl<
 
             let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
 
-            if packet.command_code != CommandCode::CC_CONTROL {
+            if packet.header.command_code != CommandCode::CC_CONTROL {
                 return Err(RobotRadioNoraError::ControlPacketDecodeInvalid);
             }
 
@@ -638,7 +654,7 @@ impl<
 
             let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
 
-            if packet.command_code != CommandCode::CC_ROBOT_PARAMETER_COMMAND {
+            if packet.header.command_code != CommandCode::CC_ROBOT_PARAMETER_COMMAND {
                 return Err(RobotRadioNoraError::ParameterPacketDecodeInvalid);
             }
 
