@@ -13,7 +13,7 @@ pub const KF_PARAMS: KalmanFilterParams = KalmanFilterParams {
     max_pos_linear: 64.0,
     max_pos_angular: 3.14,
     max_vel_linear: 3.0,
-    max_vel_angular: 20.0,
+    max_vel_angular: 3.0 * PI,
 };
 
 /// alpha: 30 deg (PI/6) - angle between robot y axis and front wheel axis
