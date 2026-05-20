@@ -44,13 +44,13 @@ impl BodyController {
     pub fn new(dt: f32) -> BodyController {
 
         use crate::motion::params::controller_params;
-        use crate::motion::params::robot_params;
+        use ateam_controls::robot_model::{KalmanFilterParams, RobotPhysicalParams};
 
         BodyController {
             robot_model: RobotModel::new(
                     dt,
-                    robot_params::KF_PARAMS,
-                    robot_params::PHYSICAL_PARAMS,
+                    KalmanFilterParams::default(),
+                    RobotPhysicalParams::default(),
                 )
                 .expect("Failed to create RobotModel, check that parameters are valid"),
             pose_pid_controller: PidController::<3>::from_gains_matrix(&controller_params::pose_pid_gains()),
@@ -159,31 +159,45 @@ impl BodyController {
         let skill_telem;
         match last_command.get_skill_command() {
             SkillCommand::GlobalPosition(gpos_cmd) => {
-                let traj_params = TrajectoryParams {
-                    max_vel_linear: gpos_cmd.max_linear_vel,
-                    max_vel_angular: gpos_cmd.max_angular_vel,
-                    max_accel_linear: gpos_cmd.max_linear_acc,
-                    max_accel_angular: gpos_cmd.max_angular_acc,
+                let traj_params = if gpos_cmd.max_linear_vel == 0.0 && gpos_cmd.max_angular_vel == 0.0
+                    && gpos_cmd.max_linear_acc == 0.0 && gpos_cmd.max_angular_acc == 0.0
+                {
+                    TrajectoryParams::default()
+                } else {
+                    TrajectoryParams {
+                        max_vel_linear: gpos_cmd.max_linear_vel,
+                        max_vel_angular: gpos_cmd.max_angular_vel,
+                        max_accel_linear: gpos_cmd.max_linear_acc,
+                        max_accel_angular: gpos_cmd.max_angular_acc,
+                    }
                 };
                 (body_twist_out, body_accel_out) = self.global_pose_bangbang_pid_control_policy(state_estimate, gpos_cmd.as_vec3f(), traj_params)?;
                 skill_telem = SkillExtendedTelemetry::GlobalPosition(ExtendedGlobalPositionTelemetry { cmd_echo: gpos_cmd });
             }
             SkillCommand::GlobalVelocity(gvel_cmd) => {
-                let traj_params = TrajectoryParams {
-                    max_vel_linear: 0.0,
-                    max_vel_angular: 0.0,
-                    max_accel_linear: gvel_cmd.max_linear_acc,
-                    max_accel_angular: gvel_cmd.max_angular_acc,
+                let traj_params = if gvel_cmd.max_linear_acc == 0.0 && gvel_cmd.max_angular_acc == 0.0 {
+                    TrajectoryParams::default()
+                } else {
+                    TrajectoryParams {
+                        max_vel_linear: 0.0,
+                        max_vel_angular: 0.0,
+                        max_accel_linear: gvel_cmd.max_linear_acc,
+                        max_accel_angular: gvel_cmd.max_angular_acc,
+                    }
                 };
                 (body_twist_out, body_accel_out) = self.global_twist_control_policy(state_estimate, gvel_cmd.as_vec3f(), traj_params)?;
                 skill_telem = SkillExtendedTelemetry::GlobalVelocity(ExtendedGlobalVelocityTelemetry { cmd_echo: gvel_cmd });
             }
             SkillCommand::LocalVelocity(lvel_cmd) => {
-                let traj_params = TrajectoryParams {
-                    max_vel_linear: 0.0,
-                    max_vel_angular: 0.0,
-                    max_accel_linear: lvel_cmd.max_linear_acc,
-                    max_accel_angular: lvel_cmd.max_angular_acc,
+                let traj_params = if lvel_cmd.max_linear_acc == 0.0 && lvel_cmd.max_angular_acc == 0.0 {
+                    TrajectoryParams::default()
+                } else {
+                    TrajectoryParams {
+                        max_vel_linear: 0.0,
+                        max_vel_angular: 0.0,
+                        max_accel_linear: lvel_cmd.max_linear_acc,
+                        max_accel_angular: lvel_cmd.max_angular_acc,
+                    }
                 };
                 (body_twist_out, body_accel_out) = self.local_twist_control_policy(state_estimate, lvel_cmd.as_vec3f(), traj_params)?;
                 skill_telem = SkillExtendedTelemetry::LocalVelocity(ExtendedLocalVelocityTelemetry { cmd_echo: lvel_cmd });

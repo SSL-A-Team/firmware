@@ -5,6 +5,7 @@ use ateam_common_packets::{
     radio::TelemetryPacket,
 };
 use ateam_controls::{Vector3f, Vector4f};
+use ateam_controls::defaults::DEFAULT_CONTROL_DT;
 
 use crate::create_error_telemetry_from_string;
 use ateam_lib_stm32::{
@@ -46,14 +47,13 @@ static_idle_buffered_uart!(BACK_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_P
 static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(FRONT_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
-const CONTROL_FREQ: f32 = 1000.0; // Hz
+const CONTROL_FREQ: f32 = 1.0 / DEFAULT_CONTROL_DT; // Hz
 const BASIC_TELEM_FREQ: f32 = 100.0; // Hz, send basic telemetry at this frequency
 const EXTENDED_TELEM_FREQ: f32 = 100.0; // Hz, send extended telemetry at this frequency, or immediately when a vision update is received
 const TRACE_PRINT_FREQ: f32 = 10.0; // Hz, print trace info at this frequency
 const TIME_WITHOUT_PACKET_STOP: f32 = 0.2; // seconds, time without receiving a control packet before locking out motor commands
 
-const CONTROL_DT: f32 = 1.0 / CONTROL_FREQ; // seconds
-const CONTROL_DT_US: u64 = (CONTROL_DT * 1e6) as u64;  // us
+const CONTROL_DT_US: u64 = (DEFAULT_CONTROL_DT * 1e6) as u64;  // us
 const BASIC_TELEM_INTERVAL_TICKS: usize = (1.0 / BASIC_TELEM_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between basic telemetry sends
 const EXTENDED_TELEM_INTERVAL_TICKS: usize = (1.0 / EXTENDED_TELEM_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between extended telemetry sends
 const TRACE_PRINT_INTERVAL_TICKS: usize = (1.0 / TRACE_PRINT_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between trace prints
@@ -312,7 +312,7 @@ impl<
         let loop_period = Duration::from_micros(CONTROL_DT_US);
         let mut loop_rate_ticker = Ticker::every(loop_period);
 
-        let mut robot_controller = BodyController::new(loop_period.as_micros() as f32 * 1e-6);
+        let mut robot_controller = BodyController::new(DEFAULT_CONTROL_DT);
 
         let mut _cmd_mode = BodyControlMode::BCM_OFF;
         let mut _cmd = BodyControlCommand::default();
