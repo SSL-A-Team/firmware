@@ -320,6 +320,10 @@ impl<
                             defmt::info!("nora - station network up");
                             network_up = true;
                         }
+                        NoraPacket::Event(ATEvent::StationNetworkDown) => {
+                            defmt::warn!("nora - station network down");
+                            network_up = false;
+                        }
                         NoraPacket::Event(ATEvent::WifiLinkUp {
                             wlan_handle,
                             bssid,
@@ -332,7 +336,8 @@ impl<
                             wlan_handle,
                             reason,
                         }) => {
-                            defmt::info!("nora - got WifiLinkDown during initial connect. handle: {}, reason: {}", wlan_handle, reason);
+                            defmt::warn!("nora - got WifiLinkDown during initial connect. handle: {}, reason: {}", wlan_handle, reason);
+                            link_up = false;
                         }
                         other => {
                             defmt::error!("nora - connect_wifi: unsupported packet: {}", other);
@@ -483,11 +488,17 @@ impl<
     ///   followed by the raw data bytes. No \r terminator is used.
     /// - The response is +USOWB:<socket_handle>,<written_length>.
     pub async fn send_data(&self, socket_handle: u8, data: &[u8]) -> Result<(), NoraRadioError> {
+        let data_len = data.len() as u16;
+
+        if data_len == 0 || data_len > 1460 {
+            defmt::error!("data length out of range: {}, must be between 1 and 1460", data_len);
+            return Err(NoraRadioError::CommandConstructionFailed);
+        }
+
+        // Prepare the command string with the socket handle.
         let mut cmd: String<24> = String::new();
         write!(cmd, "AT+USOWB={socket_handle}")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
-
-        let data_len = data.len() as u16;
 
         // Send command + binary header + data in one buffer write (no \r terminator).
         let res = self.writer.enqueue(|buf| {
@@ -498,6 +509,7 @@ impl<
             buf[cmd_len + 1] = (data_len >> 8) as u8; // MSB
             buf[cmd_len + 2] = (data_len & 0xFF) as u8; // LSB
             buf[cmd_len + 3..cmd_len + 3 + data.len()].copy_from_slice(data);
+            defmt::trace!("send_data buffer: {:?}", &buf[..cmd_len + 3 + data.len()]);
             cmd_len + 3 + data.len()
         });
 
@@ -508,6 +520,7 @@ impl<
         // Read +USOWB:<socket_handle>,<written_length>\r\nOK\r\n response and validate written length.
         self.reader
             .dequeue(|buf| {
+                defmt::trace!("send_data response: {:?}", buf);
                 match self.parse_packet(buf)? {
                     NoraPacket::Response(ATResponse::Ok(resp)) => {
                         if let Some(i) = resp.find("+USOWB:") {

@@ -15,7 +15,7 @@ use embassy_futures::select::{select, Either};
 use embassy_stm32::gpio::{AnyPin, Level, Output, Speed};
 use embassy_stm32::usart::{self, DataBits, Parity, StopBits};
 use embassy_stm32::{uid, Peri};
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Instant, Timer};
 use heapless::String;
 
 use defmt::Format;
@@ -469,23 +469,23 @@ impl<
         let packet = RadioPacket {
             header: RadioHeader {
                 crc32: 0,
-                _reserved: 0,
                 command_code: CommandCode::CC_HELLO_REQ,
+                _reserved: 0,
                 data_length: size_of::<HelloRequest>() as u16,
             },
             data: RadioData {
                 hello_request: HelloRequest {
-                    _bitfield_align_1: Default::default(),
-                    _bitfield_1: HelloRequest::new_bitfield_1(coms_repo_dirty.into(), controls_repo_dirty.into(), firmware_repo_dirty.into(), 0),
-                    reserved: Default::default(),
-                    coms_hash: [0; 4],
-                    controls_hash: [0; 4],
-                    firmware_hash: [0; 4],
                     robot_id: id,
                     color: match team {
                         TeamColor::Yellow => bindings::TeamColor::TC_YELLOW,
                         TeamColor::Blue => bindings::TeamColor::TC_BLUE,
                     },
+                    _bitfield_1: HelloRequest::new_bitfield_1(coms_repo_dirty.into(), controls_repo_dirty.into(), firmware_repo_dirty.into(), 0),
+                    _bitfield_align_1: Default::default(),
+                    reserved: Default::default(),
+                    coms_hash: [0; 4],
+                    controls_hash: [0; 4],
+                    firmware_hash: [0; 4],
                 },
             },
         };
@@ -605,28 +605,52 @@ impl<
     }
 
     pub async fn wait_hello(&self, timeout: Duration) -> Result<HelloResponse, RobotRadioNoraError> {
-        let read_fut = self.read_data(|data| {
-            const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioData>()
-                + size_of::<HelloResponse>();
-            if data.len() != PACKET_SIZE {
-                return Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid);
+        let deadline = Instant::now() + timeout;
+
+        loop {
+            if Instant::now() >= deadline {
+                return Err(RobotRadioNoraError::RequestTimedOut);
             }
 
-            let mut data_copy = [0u8; size_of::<RadioPacket>()];
-            data_copy[0..PACKET_SIZE].clone_from_slice(&data[0..PACKET_SIZE]);
-
-            let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
-
-            if packet.header.command_code != CommandCode::CC_HELLO_RESP {
-                return Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid);
+            if !self.nora_driver.can_read_data() {
+                Timer::after_millis(1).await;
+                continue;
             }
 
-            Ok(unsafe { packet.data.hello_response })
-        });
+            match self.nora_driver.try_read_data_binary(|data| {
+                defmt::trace!("wait_hello read data: {:?}", data);
+                const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioData>()
+                    + size_of::<HelloResponse>();
+                if data.len() != PACKET_SIZE {
+                    return Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid);
+                }
 
-        match select(read_fut, Timer::after(timeout)).await {
-            Either::First(ret) => ret?,
-            Either::Second(_) => Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid),
+                let mut data_copy = [0u8; size_of::<RadioPacket>()];
+                data_copy[0..PACKET_SIZE].clone_from_slice(&data[0..PACKET_SIZE]);
+
+                let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
+
+                if packet.header.command_code != CommandCode::CC_HELLO_RESP {
+                    return Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid);
+                }
+
+                Ok(unsafe { packet.data.hello_response })
+            }) {
+                Ok(Some(result)) => return result,
+                Ok(None) => {
+                    Timer::after_millis(1).await;
+                    continue;
+                }
+                Err(NoraRadioError::ReadLowLevelBufferEmpty) => {
+                    Timer::after_millis(1).await;
+                    continue;
+                }
+                Err(NoraRadioError::ReadDataInvalid) => {
+                    defmt::trace!("wait_hello: non-data event in queue, skipping");
+                    continue;
+                }
+                Err(e) => return Err(RobotRadioNoraError::DriverError(e)),
+            }
         }
     }
 

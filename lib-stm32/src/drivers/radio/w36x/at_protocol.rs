@@ -110,6 +110,15 @@ impl ATEvent<'_> {
         }
         let s = &s[..s.len() - Self::CR_LF.len()];
 
+        // Handle compound URC buffers (multiple events in one UART read).
+        // Only parse the first event; remaining events in the buffer are discarded.
+        let s = if let Some(pos) = s.find(Self::CR_LF) {
+            defmt::warn!("compound URC buffer detected, parsing first event only");
+            &s[..pos]
+        } else {
+            s
+        };
+
         let d = s.find(':').unwrap_or(s.len());
         let event = &s[..d];
 

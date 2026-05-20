@@ -528,7 +528,8 @@ impl<
 
                 return Ok(true);
             }
-            Err(_) => {
+            Err(e) => {
+                defmt::warn!("hello response failed: {}", e);
                 return Ok(false);
             }
         }
