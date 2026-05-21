@@ -31,3 +31,8 @@ pub const POSE_CONTROL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
 /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
 /// Thresholds for when to recompute the trajectory
 pub const TRAJ_RECOMPUTE_ERROR: Vector4f = Vector4f::new(0.5, 1.0, 1.0, 2.0);
+
+/// Accel magnitude threshold for coulomb friction compensation gating.
+/// When body_accel_out magnitude is above this, coulomb comp uses target twist direction
+/// (helps overcome static friction). Below this, uses deadzoned estimated twist (stable at rest).
+pub const COULOMB_COMP_ACCEL_DEADZONE: f32 = 0.5;

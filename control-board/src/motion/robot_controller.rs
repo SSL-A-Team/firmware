@@ -24,6 +24,8 @@ pub struct BodyController {
     pub pose_control_gain: Vector2f,
     /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR] thresholds for when to recompute the trajectory
     pub traj_recompute_error: Vector4f,
+    /// Accel magnitude threshold for coulomb friction comp gating
+    pub coulomb_comp_accel_deadzone: f32,
     pub trajectory: Option<BangBangTraj3D>,
     pub trajectory_time: f32,
     pub trajectory_state: Vector6f,
@@ -57,6 +59,7 @@ impl BodyController {
             twist_pid_controller: PidController::<3>::from_gains_matrix(&controller_params::twist_pid_gains()),
             pose_control_gain: controller_params::POSE_CONTROL_GAIN,
             traj_recompute_error: controller_params::TRAJ_RECOMPUTE_ERROR,
+            coulomb_comp_accel_deadzone: controller_params::COULOMB_COMP_ACCEL_DEADZONE,
             trajectory: None,
             trajectory_state: Vector6f::zeros(),
             trajectory_time: 0.0,
@@ -220,12 +223,15 @@ impl BodyController {
         self.body_accel_out = body_accel_out;
 
         // Compensate for modeled friction forces
-
-        // // Using the target twist will activate coulomb friction compensation even when the robot is stationary, which helps to overcome static friction. Using the estimated twist would cause the controller to not apply any torque when the robot is stationary due to zero estimated velocity, which would make it unable to overcome static friction to start moving. However, it's causing small oscillations at the setpoint.
-        // self.body_accel_out_fric_comp = self.body_accel_out - self.robot_model.i_inv * self.robot_model.compute_friction_force(self.body_twist_out);
-
-        // Using the deadzoned estimated twist will prevent oscillations at the setpoint, but will fail to use coulomb friction compensation to overcome static friction when at rest.
-        self.body_accel_out_fric_comp = self.body_accel_out - self.robot_model.i_inv * self.robot_model.compute_friction_force(state_estimate.fixed_rows::<3>(3).into());
+        // Gate coulomb friction on accel command magnitude: when actively commanding motion,
+        // use target twist direction (overcomes static friction). When at rest, use deadzoned
+        // estimated twist (stable equilibrium).
+        let fric_twist: Vector3f = if self.body_accel_out.magnitude() > self.coulomb_comp_accel_deadzone {
+            self.body_twist_out
+        } else {
+            state_estimate.fixed_rows::<3>(3).into()
+        };
+        self.body_accel_out_fric_comp = self.body_accel_out - self.robot_model.i_inv * self.robot_model.compute_friction_force(fric_twist);
 
         // Calculate wheel commands from body commands
         self.wheel_vel_out =
@@ -467,6 +473,7 @@ impl BodyController {
             ParameterName::POSE_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
             ParameterName::TWIST_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
             ParameterName::TWIST_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => Some(ParameterDataFormat::F32),
             _ => None,
         }
     }
@@ -556,6 +563,9 @@ impl BodyController {
                     gain[(row, 3)],
                     gain[(row, 4)],
                 ];
+            }
+            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => {
+                reply.data.f32_ = self.coulomb_comp_accel_deadzone;
             }
             _ => unreachable!(),
         }
@@ -661,6 +671,10 @@ impl BodyController {
                     }
                 }
                 self.twist_pid_controller.set_gain(gain);
+            }
+            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => {
+                let v = unsafe { cmd.data.f32_ };
+                self.coulomb_comp_accel_deadzone = v;
             }
             _ => unreachable!(),
         };
