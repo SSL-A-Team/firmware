@@ -269,6 +269,8 @@ int main() {
                 break;
         }
 
+        response_packet.velocity_telemetry.vel_setpoint_rads = motor_command_packet.setpoint;
+
         // load errors into packets and set LEDs
         update_errors();
 
