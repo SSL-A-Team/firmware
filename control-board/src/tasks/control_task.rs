@@ -468,18 +468,20 @@ impl<
             }
             vision_update = false; // reset vision update flag after use
 
-            let (wheel_current_cmd, wheel_vel_cmd) =
-                if self.stop_wheels() || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP {
-                    if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS {
-                        defmt::warn!("control task - motor commands locked out");
-                    }
-                    (Vector4f::default(), Vector4f::default())
-                } else {
-                    (
-                        robot_controller.get_wheel_currents(),
-                        robot_controller.get_wheel_velocities(),
-                    )
-                };
+            let (wheel_current_cmd, wheel_vel_cmd) = if self.stop_wheels()
+                || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP
+                || _cmd_mode == BodyControlMode::BCM_OFF
+            {
+                if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS {
+                    defmt::warn!("control task - motor commands locked out");
+                }
+                (Vector4f::default(), Vector4f::default())
+            } else {
+                (
+                    robot_controller.get_wheel_currents(),
+                    robot_controller.get_wheel_velocities(),
+                )
+            };
 
             ////////////////// TODO: Move this/delete this //////////////////////
 
