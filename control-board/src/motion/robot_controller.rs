@@ -467,13 +467,13 @@ impl BodyController {
             ParameterName::PHYS_INERTIA => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::PHYS_MOTOR_MODEL => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => Some(ParameterDataFormat::F32),
             ParameterName::POSE_CONTROL_GAIN => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRAJ_RECOMPUTE_ERROR => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
             ParameterName::POSE_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
             ParameterName::TWIST_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
             ParameterName::TWIST_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
-            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => Some(ParameterDataFormat::F32),
             _ => None,
         }
     }
@@ -523,6 +523,9 @@ impl BodyController {
                     phys.viscous_friction_coefficient_angular,
                 ];
             }
+            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => {
+                reply.data.f32_ = self.coulomb_comp_accel_deadzone;
+            }
             ParameterName::POSE_CONTROL_GAIN => {
                 reply.data.vec2_f32 = [self.pose_control_gain[0], self.pose_control_gain[1]];
             }
@@ -563,9 +566,6 @@ impl BodyController {
                     gain[(row, 3)],
                     gain[(row, 4)],
                 ];
-            }
-            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => {
-                reply.data.f32_ = self.coulomb_comp_accel_deadzone;
             }
             _ => unreachable!(),
         }
@@ -632,6 +632,10 @@ impl BodyController {
                 p.viscous_friction_coefficient_angular = v[3];
                 let _ = self.robot_model.update_physical_params(p);
             }
+            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => {
+                let v = unsafe { cmd.data.f32_ };
+                self.coulomb_comp_accel_deadzone = v;
+            }
             ParameterName::POSE_CONTROL_GAIN => {
                 let v = unsafe { cmd.data.vec2_f32 };
                 self.pose_control_gain = Vector2f::new(v[0], v[1]);
@@ -671,10 +675,6 @@ impl BodyController {
                     }
                 }
                 self.twist_pid_controller.set_gain(gain);
-            }
-            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => {
-                let v = unsafe { cmd.data.f32_ };
-                self.coulomb_comp_accel_deadzone = v;
             }
             _ => unreachable!(),
         };
