@@ -24,6 +24,7 @@ use super::radio_robot::TeamColor;
 
 const MULTICAST_IP: &str = "224.4.20.69";
 const MULTICAST_PORT: u16 = 42069;
+#[allow(dead_code)]
 const LOCAL_PORT: u16 = 42069;
 
 #[derive(Clone, Copy, PartialEq, Debug, Format)]
@@ -83,6 +84,7 @@ pub struct RobotRadioNora<
 > {
     nora_driver: NoraW36x<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, DEBUG_UART_QUEUES>,
     reset_pin: Output<'a>,
+    #[allow(dead_code)]
     use_flow_control: bool,
     socket: Option<SocketConnection>,
 }
