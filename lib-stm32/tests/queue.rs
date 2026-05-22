@@ -7,8 +7,8 @@ use panic_probe as _;
 
 #[defmt_test::tests]
 mod tests {
-    use core::cell::SyncUnsafeCell;
     use ateam_lib_crossarch::queue::{Buffer, Queue};
+    use core::cell::SyncUnsafeCell;
 
     // Each test gets its own static buffers — Queue has no reset method and
     // static state persists across the lifetime of the test binary.
@@ -92,7 +92,10 @@ mod tests {
             let buf = T2_Q.try_dequeue().unwrap();
             defmt::assert_eq!(buf.data()[0], expected);
         }
-        defmt::assert!(!T2_Q.can_dequeue(), "queue should be empty after draining 2 entries");
+        defmt::assert!(
+            !T2_Q.can_dequeue(),
+            "queue should be empty after draining 2 entries"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -117,17 +120,28 @@ mod tests {
         buf.cancel();
 
         // Queue must still report full — eviction was a no-op
-        defmt::assert!(T3_Q.is_full(), "queue must still be full after eviction+cancel");
+        defmt::assert!(
+            T3_Q.is_full(),
+            "queue must still be full after eviction+cancel"
+        );
 
         // Entries 0-2 are intact; the evicted slot (entry 3) is discarded — its buffer
         // was handed to the DMA engine so the old data cannot be trusted. It comes back
         // as a 0-length entry.
         for expected in 0u8..3 {
             let buf = T3_Q.try_dequeue().unwrap();
-            defmt::assert_eq!(buf.data()[0], expected, "entry corrupted after eviction+cancel");
+            defmt::assert_eq!(
+                buf.data()[0],
+                expected,
+                "entry corrupted after eviction+cancel"
+            );
         }
         let discarded = T3_Q.try_dequeue().unwrap();
-        defmt::assert_eq!(discarded.data().len(), 0, "evicted+cancelled slot must be empty");
+        defmt::assert_eq!(
+            discarded.data().len(),
+            0,
+            "evicted+cancelled slot must be empty"
+        );
         defmt::assert!(!T3_Q.can_dequeue());
     }
 
@@ -152,7 +166,10 @@ mod tests {
             *buf.len() = 1;
         }
 
-        defmt::assert!(T4_Q.is_full(), "queue must remain full after committed override");
+        defmt::assert!(
+            T4_Q.is_full(),
+            "queue must remain full after committed override"
+        );
 
         let expected = [0u8, 1, 2, 99];
         for &exp in &expected {
@@ -192,10 +209,18 @@ mod tests {
         // always comes back empty (DMA may have touched it).
         for expected in 0u8..3 {
             let buf = T5_Q.try_dequeue().unwrap();
-            defmt::assert_eq!(buf.data()[0], expected, "entry corrupted by repeated eviction+cancel");
+            defmt::assert_eq!(
+                buf.data()[0],
+                expected,
+                "entry corrupted by repeated eviction+cancel"
+            );
         }
         let discarded = T5_Q.try_dequeue().unwrap();
-        defmt::assert_eq!(discarded.data().len(), 0, "repeatedly evicted+cancelled slot must be empty");
+        defmt::assert_eq!(
+            discarded.data().len(),
+            0,
+            "repeatedly evicted+cancelled slot must be empty"
+        );
     }
 
     // -----------------------------------------------------------------------

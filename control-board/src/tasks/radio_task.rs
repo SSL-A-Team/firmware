@@ -1,6 +1,11 @@
-use ateam_common_packets::{bindings::BasicTelemetry, radio::{is_data_packet_safe, TelemetryPacket}};
+use ateam_common_packets::{
+    bindings::BasicTelemetry,
+    radio::{is_data_packet_safe, TelemetryPacket},
+};
 use ateam_lib_stm32::{
-    drivers::radio::w26x::edm_protocol::EDM_PACKET_WIRE_OVERHEAD, idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}
+    drivers::radio::w26x::edm_protocol::EDM_PACKET_WIRE_OVERHEAD,
+    idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart,
+    uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue},
 };
 use credentials::WifiCredential;
 use embassy_executor::{SendSpawner, Spawner};
@@ -52,9 +57,11 @@ macro_rules! create_radio_task {
 pub const RADIO_LOOP_RATE_MS: u64 = 10;
 pub const RADIO_BASIC_TELEM_INTERVAL_MS: u64 = 0; // 0 binds basic telem to task loop rate
 
-pub const RADIO_MAX_TX_PACKET_SIZE: usize = ateam_common_packets::MAX_ROBOT_TX_PACKET_SIZE + EDM_PACKET_WIRE_OVERHEAD;
+pub const RADIO_MAX_TX_PACKET_SIZE: usize =
+    ateam_common_packets::MAX_ROBOT_TX_PACKET_SIZE + EDM_PACKET_WIRE_OVERHEAD;
 pub const RADIO_TX_BUF_DEPTH: usize = 6;
-pub const RADIO_MAX_RX_PACKET_SIZE: usize = ateam_common_packets::MAX_ROBOT_RX_PACKET_SIZE + EDM_PACKET_WIRE_OVERHEAD;
+pub const RADIO_MAX_RX_PACKET_SIZE: usize =
+    ateam_common_packets::MAX_ROBOT_RX_PACKET_SIZE + EDM_PACKET_WIRE_OVERHEAD;
 pub const RADIO_RX_BUF_DEPTH: usize = 6;
 
 static_idle_buffered_uart!(RADIO, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, DEBUG_RADIO_UART_QUEUES, #[link_section = ".axisram.buffers"]);
@@ -211,7 +218,6 @@ impl<
         #[allow(unused_assignments)]
         // let mut next_connection_state = self.connection_state;
         loop {
-
             let loop_start_time = Instant::now();
             let loop_invocation_dead_time = loop_start_time - last_loop_term_time;
             if loop_start_time - last_loop_term_time > Duration::from_millis(11) {
@@ -247,7 +253,10 @@ impl<
                         // this is really only an error if we think we're connected
                         // this separation is really poorly handled right now
                         // TODO move all statefulness down into driver
-                        defmt::error!("failed to cleanly disconnect - consider radio reboot: {}", e);
+                        defmt::error!(
+                            "failed to cleanly disconnect - consider radio reboot: {}",
+                            e
+                        );
                     }
 
                     // Go back to reset the full network flow.
@@ -440,18 +449,16 @@ impl<
         )
         .await
         {
-            Either::First(res) => {
-                match res {
-                    Err(e) => {
-                        defmt::error!("failed to establish radio UART connection: {}", e);
-                        return Err(());
-                    }
-                    Ok(_) => {
-                        defmt::debug!("established radio uart coms");
-                        return Ok(());
-                    }
+            Either::First(res) => match res {
+                Err(e) => {
+                    defmt::error!("failed to establish radio UART connection: {}", e);
+                    return Err(());
                 }
-            }
+                Ok(_) => {
+                    defmt::debug!("established radio uart coms");
+                    return Ok(());
+                }
+            },
             Either::Second(_) => {
                 defmt::error!("initial radio uart connection timed out");
                 return Err(());
@@ -464,7 +471,11 @@ impl<
         wifi_network: WifiCredential,
         robot_id: u8,
     ) -> Result<(), ()> {
-        defmt::info!("connecting to wifi network: {} ({})", wifi_network.get_ssid(), wifi_network.get_password());
+        defmt::info!(
+            "connecting to wifi network: {} ({})",
+            wifi_network.get_ssid(),
+            wifi_network.get_password()
+        );
 
         if let Err(e) = self.radio.connect_to_network(wifi_network, robot_id).await {
             defmt::error!("failed to connect to wifi network: {}", e);
@@ -552,7 +563,10 @@ impl<
                         );
                         defmt::warn!("RadioTask - sending error telemetry packet");
                         if let Err(e) = self.radio.send_error_telemetry(error_telemetry).await {
-                            defmt::warn!("RadioTask - failed to send error telemetry packet: {}", e);
+                            defmt::warn!(
+                                "RadioTask - failed to send error telemetry packet: {}",
+                                e
+                            );
                         }
                     }
                 }

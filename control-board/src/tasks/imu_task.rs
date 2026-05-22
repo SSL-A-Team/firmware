@@ -105,9 +105,9 @@ async fn imu_task_entry(
         let self_test_res = imu.self_test().await;
         if self_test_res.is_err() {
             defmt::error!("IMU self test failed");
-            telemetry_pub.publish_immediate(
-                TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string("IMU self test failed")),
-            );
+            telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
+                create_error_telemetry_from_string("IMU self test failed"),
+            ));
             led_command_pub
                 .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
                 .await;
@@ -133,9 +133,9 @@ async fn imu_task_entry(
                 .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
                 .await;
             defmt::error!("gyro configration failed.");
-            telemetry_pub.publish_immediate(
-                TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string("IMU gyro configuration failed")),
-            );
+            telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
+                create_error_telemetry_from_string("IMU gyro configuration failed"),
+            ));
         }
 
         // configure the gyro, map int to int pin 1
@@ -156,9 +156,9 @@ async fn imu_task_entry(
                 .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
                 .await;
             defmt::error!("accel configration failed.");
-            telemetry_pub.publish_immediate(
-                TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string("IMU accel configuration failed")),
-            );
+            telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
+                create_error_telemetry_from_string("IMU accel configuration failed"),
+            ));
         }
 
         // configure the phys properties of the int pins
@@ -221,9 +221,9 @@ async fn imu_task_entry(
                 }
                 Either::Second(_) => {
                     defmt::warn!("imu interrupt based data acq timed out.");
-                    telemetry_pub.publish_immediate(
-                        TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string("IMU interrupt timeout")),
-                    );
+                    telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
+                        create_error_telemetry_from_string("IMU interrupt timeout"),
+                    ));
                     // attempt connect validation and reconfig
                     break 'imu_data_loop;
                 }

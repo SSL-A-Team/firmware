@@ -58,8 +58,8 @@ pub enum ATEvent<'a> {
         wlan_handle: u16,
         reason: u16,
     }, // +UEWLD (reason is standard 802.11 reason code)
-    WifiAccessPointUp,          // +UEWAPU (no parameters)
-    WifiAccessPointDown,        // +UEWAPD (no parameters)
+    WifiAccessPointUp,   // +UEWAPU (no parameters)
+    WifiAccessPointDown, // +UEWAPD (no parameters)
     WifiAccessPointStationAssociated {
         mac_addr: &'a str,
     }, // +UEWAPSA
@@ -68,10 +68,10 @@ pub enum ATEvent<'a> {
     }, // +UEWAPSDA
 
     // Network events (Section 9.2)
-    StationNetworkUp,           // +UEWSNU (no parameters)
-    StationNetworkDown,         // +UEWSND (no parameters)
-    AccessPointNetworkUp,       // +UEWAPNU (no parameters)
-    AccessPointNetworkDown,     // +UEWAPND (no parameters)
+    StationNetworkUp,       // +UEWSNU (no parameters)
+    StationNetworkDown,     // +UEWSND (no parameters)
+    AccessPointNetworkUp,   // +UEWAPNU (no parameters)
+    AccessPointNetworkDown, // +UEWAPND (no parameters)
 }
 
 impl ATEvent<'_> {
@@ -190,14 +190,13 @@ impl ATEvent<'_> {
                     .parse::<u16>()
                     .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
 
-                Ok(ATEvent::WifiLinkDown { wlan_handle, reason })
+                Ok(ATEvent::WifiLinkDown {
+                    wlan_handle,
+                    reason,
+                })
             }
-            Self::WIFI_ACCESS_POINT_UP => {
-                Ok(ATEvent::WifiAccessPointUp)
-            }
-            Self::WIFI_ACCESS_POINT_DOWN => {
-                Ok(ATEvent::WifiAccessPointDown)
-            }
+            Self::WIFI_ACCESS_POINT_UP => Ok(ATEvent::WifiAccessPointUp),
+            Self::WIFI_ACCESS_POINT_DOWN => Ok(ATEvent::WifiAccessPointDown),
             Self::WIFI_AP_STATION_ASSOCIATED => {
                 let mut params = s[d + 1..].split(',');
                 let mac_addr = params
@@ -214,18 +213,10 @@ impl ATEvent<'_> {
 
                 Ok(ATEvent::WifiAccessPointStationDisassociated { mac_addr })
             }
-            Self::STATION_NETWORK_UP => {
-                Ok(ATEvent::StationNetworkUp)
-            }
-            Self::STATION_NETWORK_DOWN => {
-                Ok(ATEvent::StationNetworkDown)
-            }
-            Self::ACCESS_POINT_NETWORK_UP => {
-                Ok(ATEvent::AccessPointNetworkUp)
-            }
-            Self::ACCESS_POINT_NETWORK_DOWN => {
-                Ok(ATEvent::AccessPointNetworkDown)
-            }
+            Self::STATION_NETWORK_UP => Ok(ATEvent::StationNetworkUp),
+            Self::STATION_NETWORK_DOWN => Ok(ATEvent::StationNetworkDown),
+            Self::ACCESS_POINT_NETWORK_UP => Ok(ATEvent::AccessPointNetworkUp),
+            Self::ACCESS_POINT_NETWORK_DOWN => Ok(ATEvent::AccessPointNetworkDown),
             _ => Err(AtPacketError::EventUnknown),
         }
     }

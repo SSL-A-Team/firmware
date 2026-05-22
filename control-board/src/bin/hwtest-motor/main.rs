@@ -1,7 +1,12 @@
 #![no_std]
 #![no_main]
 
-use ateam_common_packets::{bindings::{BasicControl, BodyControlCommand, BodyControlMode, KickRequest, LocalVelocityCommand}, radio::DataPacket};
+use ateam_common_packets::{
+    bindings::{
+        BasicControl, BodyControlCommand, BodyControlMode, KickRequest, LocalVelocityCommand,
+    },
+    radio::DataPacket,
+};
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{interrupt, pac::Interrupt};
 use embassy_sync::pubsub::PubSubChannel;
@@ -143,7 +148,17 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         }
 
         test_command_publisher.publish_immediate(DataPacket::BasicControl(BasicControl {
-            _bitfield_1: BasicControl::new_bitfield_1(0, 0, 0, 0, WHEEL_VEL_CONTROL_ENABLED.into(), WHEEL_TORQUE_CONTROL_ENABLED.into(), 0, 0, 0),
+            _bitfield_1: BasicControl::new_bitfield_1(
+                0,
+                0,
+                0,
+                0,
+                WHEEL_VEL_CONTROL_ENABLED.into(),
+                WHEEL_TORQUE_CONTROL_ENABLED.into(),
+                0,
+                0,
+                0,
+            ),
             _bitfield_align_1: Default::default(),
 
             vision_position_update: [0.0, 0.0, 0.0],
@@ -152,17 +167,19 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             kick_request: KickRequest::KR_DISABLE,
             play_song: 0,
             reserved2: [0; 1],
-            
+
             kick_vel: 0.0,
             dribbler_speed: 50.0,
 
-            cmd: BodyControlCommand { local_vel: LocalVelocityCommand {
-                local_xd: 0.0,
-                local_yd: 0.0,
-                local_omega: vel * 10.0,
-                max_linear_acc: 0.0,
-                max_angular_acc: 0.0,
-            }},
+            cmd: BodyControlCommand {
+                local_vel: LocalVelocityCommand {
+                    local_xd: 0.0,
+                    local_yd: 0.0,
+                    local_omega: vel * 10.0,
+                    max_linear_acc: 0.0,
+                    max_angular_acc: 0.0,
+                },
+            },
         }));
     }
 }

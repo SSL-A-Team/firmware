@@ -275,7 +275,8 @@ impl<
                 // Avoid spamming logs while the system starts up
                 defmt::error!("Kicker Interface - Kicker task has stopped receiving commands from the radio task and will de-arm the kicker board");
                 self.kicker_driver.set_kick_strength(0.0);
-                self.kicker_driver.request_kick(KickRequest::KR_DISABLE as u32);
+                self.kicker_driver
+                    .request_kick(KickRequest::KR_DISABLE as u32);
                 self.kicker_driver.set_drib_vel(0.0);
             }
 

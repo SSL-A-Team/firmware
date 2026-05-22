@@ -1,7 +1,12 @@
 #![no_std]
 #![no_main]
 
-use ateam_common_packets::{bindings::{BasicControl, BodyControlCommand, BodyControlMode, GlobalVelocityCommand, KickRequest}, radio::DataPacket};
+use ateam_common_packets::{
+    bindings::{
+        BasicControl, BodyControlCommand, BodyControlMode, GlobalVelocityCommand, KickRequest,
+    },
+    radio::DataPacket,
+};
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{interrupt, pac::Interrupt};
 use embassy_sync::pubsub::PubSubChannel;
@@ -98,17 +103,19 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             kick_request: KickRequest::KR_DISABLE,
             play_song: 0,
             reserved2: [0; 1],
-            
+
             kick_vel: 0.0,
             dribbler_speed: 50.0,
 
-            cmd: BodyControlCommand { global_vel: GlobalVelocityCommand {
-                global_xd: 0.0,
-                global_yd: 0.0,
-                global_omega: 0.0,
-                max_linear_acc: 0.0,
-                max_angular_acc: 0.0,
-            }},
+            cmd: BodyControlCommand {
+                global_vel: GlobalVelocityCommand {
+                    global_xd: 0.0,
+                    global_yd: 0.0,
+                    global_omega: 0.0,
+                    max_linear_acc: 0.0,
+                    max_angular_acc: 0.0,
+                },
+            },
         }));
     }
 }

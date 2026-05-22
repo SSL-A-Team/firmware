@@ -5,10 +5,10 @@ use embassy_stm32::usart;
 use embassy_time::Timer;
 use heapless::String;
 
-use ateam_lib_crossarch::queue;
 use crate::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
+use ateam_lib_crossarch::queue;
 
-use super::at_protocol::{AtPacketError, ATEvent, ATResponse, SocketProtocol};
+use super::at_protocol::{ATEvent, ATResponse, AtPacketError, SocketProtocol};
 
 /// Parsed AT packet from UART — either a command response or an unsolicited result code (URC).
 /// NORA-W36 is always in AT command mode (no EDM).
@@ -99,7 +99,9 @@ impl<
     pub async fn wait_startup(&self) -> Result<(), NoraRadioError> {
         self.reader
             .dequeue(|buf| {
-                if let NoraPacket::Response(ATResponse::Other("+STARTUP")) = self.parse_packet(buf)? {
+                if let NoraPacket::Response(ATResponse::Other("+STARTUP")) =
+                    self.parse_packet(buf)?
+                {
                     Ok(())
                 } else {
                     Err(NoraRadioError::ReadDataInvalid)
@@ -154,8 +156,7 @@ impl<
     ///   - 2: Direct binary mode — +UESODB/+UESODBF events with inline data
     pub async fn set_socket_receive_mode(&self, mode: u8) -> Result<(), NoraRadioError> {
         let mut str: String<12> = String::new();
-        write!(&mut str, "AT+USORM={mode}")
-            .or(Err(NoraRadioError::CommandConstructionFailed))?;
+        write!(&mut str, "AT+USORM={mode}").or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
         Ok(())
@@ -165,7 +166,10 @@ impl<
     /// Uses AT+UWHN="<host_name>"
     pub async fn set_host_name(&self, host_name: &str) -> Result<(), NoraRadioError> {
         if host_name.len() > 40 {
-            defmt::error!("host name too long: {}, must be less than or equal to 40 characters", host_name);
+            defmt::error!(
+                "host name too long: {}, must be less than or equal to 40 characters",
+                host_name
+            );
             return Err(NoraRadioError::HostNameTooLong);
         }
 
@@ -192,21 +196,19 @@ impl<
     ///     - <wlan_handle> can only be 0.
     ///     - <passphrase> must be 8 to 63 characters.
     ///     - <wpa_threshold> is optional, defaults to 0 (WPA2 or up), 1 WPA3 only.
-    pub async fn config_wifi(
-        &self,
-        ssid: &str,
-        auth: WifiAuth<'_>,
-    ) -> Result<(), NoraRadioError> {
+    pub async fn config_wifi(&self, ssid: &str, auth: WifiAuth<'_>) -> Result<(), NoraRadioError> {
         // Set SSID
         if ssid.len() > 32 {
-            defmt::error!("SSID too long: {}, must be less than or equal to 32 characters", ssid);
+            defmt::error!(
+                "SSID too long: {}, must be less than or equal to 32 characters",
+                ssid
+            );
             return Err(NoraRadioError::SsidTooLong);
         }
 
         // Bytes set to accommodate max command length with longest expected SSID and WPA passphrase.
         let mut str: String<76> = String::new();
-        write!(str, "AT+UWSCP=0,\"{ssid}\"")
-            .or(Err(NoraRadioError::CommandConstructionFailed))?;
+        write!(str, "AT+UWSCP=0,\"{ssid}\"").or(Err(NoraRadioError::CommandConstructionFailed))?;
 
         self.send_command(str.as_str()).await?;
         defmt::trace!("WiFi network connection sent.");
@@ -217,8 +219,7 @@ impl<
         str.clear();
         match auth {
             WifiAuth::Open => {
-                write!(str, "AT+UWSSO=0")
-                    .or(Err(NoraRadioError::CommandConstructionFailed))?;
+                write!(str, "AT+UWSSO=0").or(Err(NoraRadioError::CommandConstructionFailed))?;
                 self.send_command(str.as_str()).await?;
                 defmt::trace!("WiFi open network authentication sent.");
                 self.read_ok().await?;
@@ -226,7 +227,10 @@ impl<
             }
             WifiAuth::WPA { passphrase } => {
                 if passphrase.len() < 8 || passphrase.len() > 63 {
-                    defmt::error!("WPA passphrase length invalid: {}, must be between 8 and 63 characters", passphrase);
+                    defmt::error!(
+                        "WPA passphrase length invalid: {}, must be between 8 and 63 characters",
+                        passphrase
+                    );
                     return Err(NoraRadioError::CommandConstructionFailed);
                 }
 
@@ -258,8 +262,7 @@ impl<
                         .dequeue(|buf| {
                             let packet = self.parse_packet(buf);
                             if let Ok(packet) = packet {
-                                if let NoraPacket::Event(ATEvent::StationNetworkDown) = packet
-                                {
+                                if let NoraPacket::Event(ATEvent::StationNetworkDown) = packet {
                                     defmt::debug!("got station network down event.");
                                     run = false;
                                 } else if let NoraPacket::Event(ATEvent::WifiLinkDown {
@@ -299,8 +302,7 @@ impl<
     ///  - <wlan_handle> can only be 0.
     pub async fn connect_wifi(&self) -> Result<(), NoraRadioError> {
         let mut str: String<16> = String::new();
-        write!(str, "AT+UWSC=0")
-            .or(Err(NoraRadioError::CommandConstructionFailed))?;
+        write!(str, "AT+UWSC=0").or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
         defmt::trace!("WiFi connection request sent.");
         self.read_ok().await?;
@@ -360,32 +362,32 @@ impl<
     pub async fn create_socket(&self, protocol: SocketProtocol) -> Result<u8, NoraRadioError> {
         let mut str: String<16> = String::new();
         let proto_num = protocol as u8;
-        write!(str, "AT+USOCR={proto_num}")
-            .or(Err(NoraRadioError::CommandConstructionFailed))?;
+        write!(str, "AT+USOCR={proto_num}").or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
         defmt::trace!("Socket creation request sent.");
 
         // Response: +USOCR:<socket_handle>\r\nOK\r\n
         let socket_handle = self
             .reader
-            .dequeue(|buf| {
-                match self.parse_packet(buf)? {
-                    NoraPacket::Response(ATResponse::Ok(resp)) => {
-                        if let Some(i) = resp.find("+USOCR:") {
-                            resp[i + 7..]
-                                .trim()
-                                .parse::<u8>()
-                                .or(Err(NoraRadioError::SocketCreationFailed))
-                        } else {
-                            Err(NoraRadioError::SocketCreationFailed)
-                        }
+            .dequeue(|buf| match self.parse_packet(buf)? {
+                NoraPacket::Response(ATResponse::Ok(resp)) => {
+                    if let Some(i) = resp.find("+USOCR:") {
+                        resp[i + 7..]
+                            .trim()
+                            .parse::<u8>()
+                            .or(Err(NoraRadioError::SocketCreationFailed))
+                    } else {
+                        Err(NoraRadioError::SocketCreationFailed)
                     }
-                    _ => Err(NoraRadioError::SocketCreationFailed),
                 }
+                _ => Err(NoraRadioError::SocketCreationFailed),
             })
             .await?;
 
-        defmt::trace!("Socket creation response received, socket handle: {}", socket_handle);
+        defmt::trace!(
+            "Socket creation response received, socket handle: {}",
+            socket_handle
+        );
         Ok(socket_handle)
     }
 
@@ -403,11 +405,16 @@ impl<
         protocol: SocketProtocol,
     ) -> Result<SocketConnection, NoraRadioError> {
         if addr.len() > 128 {
-            defmt::error!("host address length invalid: {}, must be less than 128 characters", addr);
+            defmt::error!(
+                "host address length invalid: {}, must be less than 128 characters",
+                addr
+            );
             return Err(NoraRadioError::HostNameTooLong);
-        }
-        else if port == 0 {
-            defmt::error!("port number out of range: {}, must be between 1 and 65535", port);
+        } else if port == 0 {
+            defmt::error!(
+                "port number out of range: {}, must be between 1 and 65535",
+                port
+            );
             return Err(NoraRadioError::CommandConstructionFailed);
         }
 
@@ -423,23 +430,23 @@ impl<
         // TCP requires waiting for +UESOC URC confirming connection; UDP does not.
         if protocol == SocketProtocol::TCP {
             self.reader
-                .dequeue(|buf| {
-                    match self.parse_packet(buf)? {
-                        NoraPacket::Event(ATEvent::SocketConnected { socket_id: sid })
-                            if sid == socket_handle =>
-                        {
-                            defmt::trace!("Socket connect command accepted for TCP");
-                            Ok(())
-                        }
-                        _ => Err(NoraRadioError::SocketConnectionFailed),
+                .dequeue(|buf| match self.parse_packet(buf)? {
+                    NoraPacket::Event(ATEvent::SocketConnected { socket_id: sid })
+                        if sid == socket_handle =>
+                    {
+                        defmt::trace!("Socket connect command accepted for TCP");
+                        Ok(())
                     }
+                    _ => Err(NoraRadioError::SocketConnectionFailed),
                 })
                 .await?;
         } else {
             defmt::trace!("No socket connection confirmation needed for UDP");
         }
 
-        Ok(SocketConnection { socket_id: socket_handle })
+        Ok(SocketConnection {
+            socket_id: socket_handle,
+        })
     }
 
     /// Close a socket.
@@ -491,7 +498,10 @@ impl<
         let data_len = data.len() as u16;
 
         if data_len == 0 || data_len > 1460 {
-            defmt::error!("data length out of range: {}, must be between 1 and 1460", data_len);
+            defmt::error!(
+                "data length out of range: {}, must be between 1 and 1460",
+                data_len
+            );
             return Err(NoraRadioError::CommandConstructionFailed);
         }
 
@@ -567,7 +577,10 @@ impl<
         FN: FnOnce(&[u8]) -> RET,
     {
         if max_length == 0 || max_length > 1000 {
-            defmt::error!("read length out of range: {}, must be between 1 and 1000", max_length);
+            defmt::error!(
+                "read length out of range: {}, must be between 1 and 1000",
+                max_length
+            );
             return Err(NoraRadioError::CommandConstructionFailed);
         }
 
@@ -620,14 +633,12 @@ impl<
     /// Used in buffered mode (AT+USORM=0).
     pub fn try_read_data_ready(&'a self) -> Result<(u8, u16), NoraRadioError> {
         match self.reader.try_dequeue() {
-            Ok(buf) => {
-                match self.parse_packet(buf.data()) {
-                    Ok(NoraPacket::Event(ATEvent::SocketDataAvailable { socket_id, length })) => {
-                        Ok((socket_id, length))
-                    }
-                    _ => Err(NoraRadioError::ReadDataInvalid),
+            Ok(buf) => match self.parse_packet(buf.data()) {
+                Ok(NoraPacket::Event(ATEvent::SocketDataAvailable { socket_id, length })) => {
+                    Ok((socket_id, length))
                 }
-            }
+                _ => Err(NoraRadioError::ReadDataInvalid),
+            },
             Err(queue::Error::QueueFull) => {
                 defmt::warn!("NoraW36x - ReadLowLevelBufferEmpty - QueueFull");
                 Err(NoraRadioError::ReadLowLevelBufferEmpty)
@@ -646,25 +657,26 @@ impl<
     /// Try to read inline binary data from a queued +UESODB or +UESODBF event.
     /// Used in direct binary mode (AT+USORM=2).
     /// Returns the data via the provided callback, or None if no data is queued.
-    pub fn try_read_data_binary<RET, FN>(&'a self, fn_read: FN) -> Result<Option<RET>, NoraRadioError>
+    pub fn try_read_data_binary<RET, FN>(
+        &'a self,
+        fn_read: FN,
+    ) -> Result<Option<RET>, NoraRadioError>
     where
         FN: FnOnce(&[u8]) -> RET,
     {
         match self.reader.try_dequeue() {
-            Ok(buf) => {
-                match self.parse_packet(buf.data()) {
-                    Ok(NoraPacket::Event(ATEvent::SocketDataBinary { socket_id: _, data })) => {
-                        Ok(Some(fn_read(data)))
-                    }
-                    Ok(NoraPacket::Event(ATEvent::SocketDataBinaryFrom { socket_id: _, data, .. })) => {
-                        Ok(Some(fn_read(data)))
-                    }
-                    other => {
-                        defmt::warn!("NoraW36x - expected binary data event, got {:?}", other);
-                        Err(NoraRadioError::ReadDataInvalid)
-                    }
+            Ok(buf) => match self.parse_packet(buf.data()) {
+                Ok(NoraPacket::Event(ATEvent::SocketDataBinary { socket_id: _, data })) => {
+                    Ok(Some(fn_read(data)))
                 }
-            }
+                Ok(NoraPacket::Event(ATEvent::SocketDataBinaryFrom {
+                    socket_id: _, data, ..
+                })) => Ok(Some(fn_read(data))),
+                other => {
+                    defmt::warn!("NoraW36x - expected binary data event, got {:?}", other);
+                    Err(NoraRadioError::ReadDataInvalid)
+                }
+            },
             Err(queue::Error::QueueFull) => {
                 defmt::warn!("NoraW36x - ReadLowLevelBufferEmpty - QueueFull");
                 Err(NoraRadioError::ReadLowLevelBufferEmpty)
@@ -700,61 +712,75 @@ impl<
     async fn read_ok(&self) -> Result<(), NoraRadioError> {
         let mut res = Err(NoraRadioError::ReadDataInvalid);
         loop {
-            let brk = self.reader.dequeue(|buf| {
-                let brk = if let Ok(packet) = self.parse_packet(buf) {
-                    match packet {
-                        NoraPacket::Response(at_resp) => {
-                            match at_resp {
+            let brk = self
+                .reader
+                .dequeue(|buf| {
+                    let brk = if let Ok(packet) = self.parse_packet(buf) {
+                        match packet {
+                            NoraPacket::Response(at_resp) => match at_resp {
                                 ATResponse::Ok(_) => {
                                     res = Ok(());
                                     true
-                                },
+                                }
                                 ATResponse::Error => return true,
                                 ATResponse::Other(_) => {
                                     defmt::debug!("unhandled ATResponse in read_ok()");
                                     false
-                                },
+                                }
+                            },
+                            NoraPacket::Event(at_event) => {
+                                match at_event {
+                                    ATEvent::SocketConnected { socket_id: _ } => false,
+                                    ATEvent::SocketClosed { socket_id: _ } => false,
+                                    ATEvent::SocketDataAvailable {
+                                        socket_id: _,
+                                        length: _,
+                                    } => false,
+                                    // TODO: In direct binary mode, +UESODB/+UESODBF events
+                                    // arriving during AT command processing will be dropped here.
+                                    // This is acceptable during init (no connections yet) and
+                                    // during send_data (brief window). For robustness, consider
+                                    // a side-buffer to stash data events.
+                                    ATEvent::SocketDataBinary { .. } => {
+                                        defmt::warn!("dropping +UESODB data event in read_ok()");
+                                        false
+                                    }
+                                    ATEvent::SocketDataBinaryFrom { .. } => {
+                                        defmt::warn!("dropping +UESODBF data event in read_ok()");
+                                        false
+                                    }
+                                    ATEvent::WifiLinkUp {
+                                        wlan_handle: _,
+                                        bssid: _,
+                                        channel: _,
+                                    } => false,
+                                    ATEvent::WifiLinkDown {
+                                        wlan_handle: _,
+                                        reason: _,
+                                    } => false,
+                                    ATEvent::WifiAccessPointUp => false,
+                                    ATEvent::WifiAccessPointDown => false,
+                                    ATEvent::WifiAccessPointStationAssociated { mac_addr: _ } => {
+                                        false
+                                    }
+                                    ATEvent::WifiAccessPointStationDisassociated {
+                                        mac_addr: _,
+                                    } => false,
+                                    ATEvent::StationNetworkUp => false,
+                                    ATEvent::StationNetworkDown => false,
+                                    ATEvent::AccessPointNetworkUp => false,
+                                    ATEvent::AccessPointNetworkDown => false,
+                                }
                             }
-                        },
-                        NoraPacket::Event(at_event) => {
-                            match at_event {
-                                ATEvent::SocketConnected { socket_id: _ } => false,
-                                ATEvent::SocketClosed { socket_id: _ } => false,
-                                ATEvent::SocketDataAvailable { socket_id: _, length: _ } => false,
-                                // TODO: In direct binary mode, +UESODB/+UESODBF events
-                                // arriving during AT command processing will be dropped here.
-                                // This is acceptable during init (no connections yet) and
-                                // during send_data (brief window). For robustness, consider
-                                // a side-buffer to stash data events.
-                                ATEvent::SocketDataBinary { .. } => {
-                                    defmt::warn!("dropping +UESODB data event in read_ok()");
-                                    false
-                                },
-                                ATEvent::SocketDataBinaryFrom { .. } => {
-                                    defmt::warn!("dropping +UESODBF data event in read_ok()");
-                                    false
-                                },
-                                ATEvent::WifiLinkUp { wlan_handle: _, bssid: _, channel: _ } => false,
-                                ATEvent::WifiLinkDown { wlan_handle: _, reason: _ } => false,
-                                ATEvent::WifiAccessPointUp => false,
-                                ATEvent::WifiAccessPointDown => false,
-                                ATEvent::WifiAccessPointStationAssociated { mac_addr: _ } => false,
-                                ATEvent::WifiAccessPointStationDisassociated { mac_addr: _ } => false,
-                                ATEvent::StationNetworkUp => false,
-                                ATEvent::StationNetworkDown => false,
-                                ATEvent::AccessPointNetworkUp => false,
-                                ATEvent::AccessPointNetworkDown => false,
-                            }
-                        },
-                    }
-                } else {
-                    defmt::debug!("read ok could not parse packet");
-                    false
-                };
+                        }
+                    } else {
+                        defmt::debug!("read ok could not parse packet");
+                        false
+                    };
 
-                brk
-            })
-            .await;
+                    brk
+                })
+                .await;
 
             if brk {
                 break;

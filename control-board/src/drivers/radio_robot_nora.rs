@@ -214,12 +214,7 @@ impl<
         // NORA-W36x does not use EDM mode - it stays in AT command mode.
         // Enable direct binary mode for inline data delivery in +UESODB/+UESODBF events
         // (replaces the 2-step buffered approach of +UESODA then AT+USORB).
-        if self
-            .nora_driver
-            .set_socket_receive_mode(2)
-            .await
-            .is_err()
-        {
+        if self.nora_driver.set_socket_receive_mode(2).await.is_err() {
             defmt::debug!("error setting direct binary receive mode");
             return Err(RobotRadioNoraError::ConnectUartBadRadioConfigUpdate);
         }
@@ -232,7 +227,12 @@ impl<
         let mut had_error = false;
         if let Some(socket) = self.socket.take() {
             defmt::debug!("closing socket..");
-            if self.nora_driver.close_socket(socket.socket_id).await.is_err() {
+            if self
+                .nora_driver
+                .close_socket(socket.socket_id)
+                .await
+                .is_err()
+            {
                 defmt::warn!("failed to close socket on network dc");
                 had_error = true;
             } else {
@@ -324,17 +324,13 @@ impl<
         Ok(())
     }
 
-    pub async fn open_unicast(&mut self, ipv4: [u8; 4], port: u16) -> Result<(), RobotRadioNoraError> {
+    pub async fn open_unicast(
+        &mut self,
+        ipv4: [u8; 4],
+        port: u16,
+    ) -> Result<(), RobotRadioNoraError> {
         let mut addr = String::<16>::new();
-        core::write!(
-            &mut addr,
-            "{}.{}.{}.{}",
-            ipv4[0],
-            ipv4[1],
-            ipv4[2],
-            ipv4[3],
-        )
-        .unwrap();
+        core::write!(&mut addr, "{}.{}.{}.{}", ipv4[0], ipv4[1], ipv4[2], ipv4[3],).unwrap();
 
         let socket_id = self
             .nora_driver
@@ -386,7 +382,10 @@ impl<
         }
     }
 
-    fn read_data_nonblocking<RET, FN>(&'a self, fn_read: FN) -> Result<Option<RET>, RobotRadioNoraError>
+    fn read_data_nonblocking<RET, FN>(
+        &'a self,
+        fn_read: FN,
+    ) -> Result<Option<RET>, RobotRadioNoraError>
     where
         FN: FnOnce(&[u8]) -> RET,
     {
@@ -480,7 +479,12 @@ impl<
                         TeamColor::Yellow => bindings::TeamColor::TC_YELLOW,
                         TeamColor::Blue => bindings::TeamColor::TC_BLUE,
                     },
-                    _bitfield_1: HelloRequest::new_bitfield_1(coms_repo_dirty.into(), controls_repo_dirty.into(), firmware_repo_dirty.into(), 0),
+                    _bitfield_1: HelloRequest::new_bitfield_1(
+                        coms_repo_dirty.into(),
+                        controls_repo_dirty.into(),
+                        firmware_repo_dirty.into(),
+                        0,
+                    ),
                     _bitfield_align_1: Default::default(),
                     reserved: Default::default(),
                     coms_hash: [0; 4],
@@ -492,8 +496,7 @@ impl<
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>()
-                    + size_of::<HelloRequest>(),
+                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloRequest>(),
             )
         };
         self.send_data(packet_bytes).await?;
@@ -501,7 +504,10 @@ impl<
         Ok(())
     }
 
-    pub async fn send_telemetry(&self, telemetry: BasicTelemetry) -> Result<(), RobotRadioNoraError> {
+    pub async fn send_telemetry(
+        &self,
+        telemetry: BasicTelemetry,
+    ) -> Result<(), RobotRadioNoraError> {
         let packet = RadioPacket {
             header: RadioHeader {
                 crc32: 0,
@@ -516,8 +522,7 @@ impl<
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>()
-                    + size_of::<BasicTelemetry>(),
+                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<BasicTelemetry>(),
             )
         };
         self.send_data(packet_bytes).await?;
@@ -543,8 +548,7 @@ impl<
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>()
-                    + size_of::<ExtendedTelemetry>(),
+                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<ExtendedTelemetry>(),
             )
         };
         self.send_data(packet_bytes).await?;
@@ -570,8 +574,7 @@ impl<
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>()
-                    + size_of::<ParameterCommand>(),
+                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<ParameterCommand>(),
             )
         };
         self.send_data(packet_bytes).await?;
@@ -595,8 +598,7 @@ impl<
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>()
-                    + size_of::<ErrorTelemetry>(),
+                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<ErrorTelemetry>(),
             )
         };
         self.send_data(packet_bytes).await?;
@@ -604,7 +606,10 @@ impl<
         Ok(())
     }
 
-    pub async fn wait_hello(&self, timeout: Duration) -> Result<HelloResponse, RobotRadioNoraError> {
+    pub async fn wait_hello(
+        &self,
+        timeout: Duration,
+    ) -> Result<HelloResponse, RobotRadioNoraError> {
         let deadline = Instant::now() + timeout;
 
         loop {
@@ -619,8 +624,8 @@ impl<
 
             match self.nora_driver.try_read_data_binary(|data| {
                 defmt::trace!("wait_hello read data: {:?}", data);
-                const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioData>()
-                    + size_of::<HelloResponse>();
+                const PACKET_SIZE: usize =
+                    size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloResponse>();
                 if data.len() != PACKET_SIZE {
                     return Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid);
                 }
@@ -657,9 +662,8 @@ impl<
     pub fn parse_data_packet(&self, data: &[u8]) -> Result<DataPacket, RobotRadioNoraError> {
         const CONTROL_PACKET_SIZE: usize =
             size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<BasicControl>();
-        const PARAMERTER_PACKET_SIZE: usize = size_of::<RadioPacket>()
-            - size_of::<RadioData>()
-            + size_of::<ParameterCommand>();
+        const PARAMERTER_PACKET_SIZE: usize =
+            size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<ParameterCommand>();
 
         if data.len() == CONTROL_PACKET_SIZE {
             let mut data_copy = [0u8; size_of::<RadioPacket>()];
@@ -696,22 +700,18 @@ impl<
         let res = self.read_data_nonblocking(|data| self.parse_data_packet(data));
 
         match res {
-            Ok(res) => {
-                match res {
-                    Some(pkt) => {
-                        match pkt {
-                            Ok(pkt) => {
-                                return Ok(Some(pkt));
-                            }
-                            Err(_) => {
-                                defmt::debug!("got AT packet but wasn't A-Team");
-                                return Err(());
-                            }
-                        }
+            Ok(res) => match res {
+                Some(pkt) => match pkt {
+                    Ok(pkt) => {
+                        return Ok(Some(pkt));
                     }
-                    None => return Ok(None),
-                }
-            }
+                    Err(_) => {
+                        defmt::debug!("got AT packet but wasn't A-Team");
+                        return Err(());
+                    }
+                },
+                None => return Ok(None),
+            },
             Err(err_res) => {
                 defmt::debug!("radio in invalid state {:?}", err_res);
                 return Err(());

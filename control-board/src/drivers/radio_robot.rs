@@ -1,5 +1,6 @@
 use ateam_common_packets::bindings::{
-    self, BasicControl, BasicTelemetry, CommandCode, ErrorTelemetry, ExtendedTelemetry, HelloRequest, HelloResponse, ParameterCommand, RadioData, RadioHeader, RadioPacket
+    self, BasicControl, BasicTelemetry, CommandCode, ErrorTelemetry, ExtendedTelemetry,
+    HelloRequest, HelloResponse, ParameterCommand, RadioData, RadioHeader, RadioPacket,
 };
 use ateam_common_packets::radio::DataPacket;
 use ateam_lib_stm32::drivers::radio::odin_w26x::{
@@ -282,11 +283,7 @@ impl<
         let wifi_pass = WifiAuth::WPA {
             passphrase: wifi_credential.get_password(),
         };
-        if let Err(e) = self
-            .odin_driver
-            .config_wifi(1, wifi_ssid, wifi_pass)
-            .await
-        {
+        if let Err(e) = self.odin_driver.config_wifi(1, wifi_ssid, wifi_pass).await {
             defmt::trace!("could not configure wifi profile");
             return Err(RobotRadioError::ConnectWifiBadConfig(e));
         }
@@ -462,7 +459,12 @@ impl<
                         TeamColor::Yellow => bindings::TeamColor::TC_YELLOW,
                         TeamColor::Blue => bindings::TeamColor::TC_BLUE,
                     },
-                    _bitfield_1: HelloRequest::new_bitfield_1(coms_repo_dirty.into(), controls_repo_dirty.into(), firmware_repo_dirty.into(), 0),
+                    _bitfield_1: HelloRequest::new_bitfield_1(
+                        coms_repo_dirty.into(),
+                        controls_repo_dirty.into(),
+                        firmware_repo_dirty.into(),
+                        0,
+                    ),
                     _bitfield_align_1: Default::default(),
                     reserved: Default::default(),
                     coms_hash: [0; 4],
@@ -474,8 +476,7 @@ impl<
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>()
-                    + size_of::<HelloRequest>(),
+                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloRequest>(),
             )
         };
         self.send_data(packet_bytes)?;
@@ -498,8 +499,7 @@ impl<
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>()
-                    + size_of::<BasicTelemetry>(),
+                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<BasicTelemetry>(),
             )
         };
         self.send_data(packet_bytes)?;
@@ -525,8 +525,7 @@ impl<
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>()
-                    + size_of::<ExtendedTelemetry>(),
+                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<ExtendedTelemetry>(),
             )
         };
         self.send_data(packet_bytes)?;
@@ -552,8 +551,7 @@ impl<
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>()
-                    + size_of::<ParameterCommand>(),
+                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<ParameterCommand>(),
             )
         };
         self.send_data(packet_bytes)?;
@@ -567,18 +565,17 @@ impl<
     ) -> Result<(), RobotRadioError> {
         let packet = RadioPacket {
             header: RadioHeader {
-            crc32: 0,
-            _reserved: 0,
-            command_code: CommandCode::CC_ERROR_TELEMETRY,
-            data_length: size_of::<ParameterCommand>() as u16,
+                crc32: 0,
+                _reserved: 0,
+                command_code: CommandCode::CC_ERROR_TELEMETRY,
+                data_length: size_of::<ParameterCommand>() as u16,
             },
             data: RadioData { error_telemetry },
         };
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>()
-                    + size_of::<ErrorTelemetry>(),
+                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<ErrorTelemetry>(),
             )
         };
         self.send_data(packet_bytes)?;
@@ -588,10 +585,14 @@ impl<
 
     pub async fn wait_hello(&self, timeout: Duration) -> Result<HelloResponse, RobotRadioError> {
         let read_fut = self.read_data(|data| {
-            const PACKET_SIZE: usize = size_of::<RadioPacket>() - size_of::<RadioData>()
-                + size_of::<HelloResponse>();
+            const PACKET_SIZE: usize =
+                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloResponse>();
             if data.len() != PACKET_SIZE {
-                defmt::trace!("invalid hello response - got packet size {}, expected {}", data.len(), PACKET_SIZE);
+                defmt::trace!(
+                    "invalid hello response - got packet size {}, expected {}",
+                    data.len(),
+                    PACKET_SIZE
+                );
                 return Err(RobotRadioError::SoftwareHelloHeaderInvalid);
             }
 
@@ -601,7 +602,11 @@ impl<
             let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
 
             if packet.header.command_code != CommandCode::CC_HELLO_RESP {
-                defmt::trace!("invalid hello response - got command code {}, expected {}", packet.header.command_code, CommandCode::CC_HELLO_RESP);
+                defmt::trace!(
+                    "invalid hello response - got command code {}, expected {}",
+                    packet.header.command_code,
+                    CommandCode::CC_HELLO_RESP
+                );
                 return Err(RobotRadioError::SoftwareHelloHeaderInvalid);
             }
             // TODO: handle nack
@@ -614,16 +619,15 @@ impl<
             Either::Second(_) => {
                 defmt::trace!("software hello response timeout");
                 Err(RobotRadioError::SoftwareHelloResponseTimeout)
-            },
+            }
         }
     }
 
     pub fn parse_data_packet(&self, data: &[u8]) -> Result<DataPacket, RobotRadioError> {
         const CONTROL_PACKET_SIZE: usize =
             size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<BasicControl>();
-        const PARAMERTER_PACKET_SIZE: usize = size_of::<RadioPacket>()
-            - size_of::<RadioData>()
-            + size_of::<ParameterCommand>();
+        const PARAMERTER_PACKET_SIZE: usize =
+            size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<ParameterCommand>();
 
         if data.len() == CONTROL_PACKET_SIZE {
             let mut data_copy = [0u8; size_of::<RadioPacket>()];

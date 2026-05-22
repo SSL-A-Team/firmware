@@ -276,19 +276,19 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     } else {
         defmt::error!("fl motor failed to flash!");
     }
-    
+
     if res2.is_ok() {
         defmt::info!("bl motor flashed.");
     } else {
         defmt::error!("bl motor failed to flash!");
     }
-    
+
     if res3.is_ok() {
         defmt::info!("br motor flashed.");
     } else {
         defmt::error!("br motor failed to flash!");
     }
-    
+
     if res4.is_ok() {
         defmt::info!("fr motor flashed.");
     } else {
@@ -388,16 +388,22 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         let fr_filt_curr = fr_curr_iir.filtered_value().unwrap();
         let filt_currs = [fl_filt_curr, bl_filt_curr, br_filt_curr, fr_filt_curr];
 
-
         let min_current: f32 = filt_currs.into_iter().reduce(f32::min).unwrap();
         let max_current: f32 = filt_currs.into_iter().reduce(f32::max).unwrap();
         let avg_current: f32 = filt_currs.iter().sum::<f32>() / filt_currs.len() as f32;
-        
+
         let min_as_pct_of_mean = (1.0 - (min_current / avg_current)) * 100.0;
         let max_as_pct_of_mean = (1.0 - (avg_current / max_current)) * 100.0;
 
         if ctr > 19 {
-            defmt::info!("motor curr stats - avg: {}, min: {}, max: {}, min_pct: {}, max_pct: {}", avg_current, min_current, max_current, min_as_pct_of_mean, max_as_pct_of_mean);
+            defmt::info!(
+                "motor curr stats - avg: {}, min: {}, max: {}, min_pct: {}, max_pct: {}",
+                avg_current,
+                min_current,
+                max_current,
+                min_as_pct_of_mean,
+                max_as_pct_of_mean
+            );
             ctr = 0;
         } else {
             ctr += 1;

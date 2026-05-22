@@ -6,7 +6,8 @@ use std::{
 };
 
 use ateam_common_packets::bindings::{
-    BasicControl, BodyControlCommand, BodyControlMode, CommandCode, HelloRequest, HelloResponse, KickRequest, LocalVelocityCommand, RadioData, RadioHeader, RadioPacket
+    BasicControl, BodyControlCommand, BodyControlMode, CommandCode, HelloRequest, HelloResponse,
+    KickRequest, LocalVelocityCommand, RadioData, RadioHeader, RadioPacket,
 };
 use local_ip_address::local_ip;
 
@@ -27,9 +28,7 @@ fn main() -> std::io::Result<()> {
     let mut buf = [0; size_of::<RadioPacket>()];
     let src = loop {
         let (len, src) = socket.recv_from(&mut buf)?;
-        if len
-            == size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloRequest>()
-        {
+        if len == size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloRequest>() {
             let packet = unsafe { &*(buf.as_ptr() as *const RadioPacket) };
             if packet.header.command_code == CommandCode::CC_HELLO_REQ {
                 println!("Source: {src}");
@@ -41,10 +40,10 @@ fn main() -> std::io::Result<()> {
 
     let packet = RadioPacket {
         header: RadioHeader {
-        crc32: 0,
-        _reserved: 0,
-        command_code: CommandCode::CC_HELLO_RESP,
-        data_length: size_of::<HelloResponse>() as u16,
+            crc32: 0,
+            _reserved: 0,
+            command_code: CommandCode::CC_HELLO_RESP,
+            data_length: size_of::<HelloResponse>() as u16,
         },
         data: RadioData {
             hello_response: HelloResponse {
@@ -64,10 +63,10 @@ fn main() -> std::io::Result<()> {
 
     let mut packet = RadioPacket {
         header: RadioHeader {
-        crc32: 0,
-        _reserved: 0,
-        command_code: CommandCode::CC_CONTROL,
-        data_length: size_of::<BasicControl>() as u16,
+            crc32: 0,
+            _reserved: 0,
+            command_code: CommandCode::CC_CONTROL,
+            data_length: size_of::<BasicControl>() as u16,
         },
         data: RadioData {
             control: BasicControl {
@@ -83,13 +82,15 @@ fn main() -> std::io::Result<()> {
                 kick_vel: 0.,
                 dribbler_speed: 0.,
 
-                cmd: BodyControlCommand { local_vel: LocalVelocityCommand {
-                    local_xd: 0.0,
-                    local_yd: 0.0,
-                    local_omega: 0.0,
-                    max_linear_acc: 0.0,
-                    max_angular_acc: 0.0,
-                }},
+                cmd: BodyControlCommand {
+                    local_vel: LocalVelocityCommand {
+                        local_xd: 0.0,
+                        local_yd: 0.0,
+                        local_omega: 0.0,
+                        max_linear_acc: 0.0,
+                        max_angular_acc: 0.0,
+                    },
+                },
             },
         },
     };

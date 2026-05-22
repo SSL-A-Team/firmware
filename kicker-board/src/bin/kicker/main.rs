@@ -3,8 +3,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(sync_unsafe_cell)]
 
-use core::sync::atomic::Ordering::Relaxed;
 use core::sync::atomic::AtomicBool;
+use core::sync::atomic::Ordering::Relaxed;
 
 use ateam_kicker_board::{
     drivers::{breakbeam::Breakbeam, DribblerMotor},

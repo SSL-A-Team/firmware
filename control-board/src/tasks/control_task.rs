@@ -1,11 +1,12 @@
 use ateam_common_packets::{
     bindings::{
-        BasicControl, BasicTelemetry, BodyControlCommand, BodyControlMode, CcmMotionControlType, ExtendedTelemetry, KickerTelemetry, PowerTelemetry
+        BasicControl, BasicTelemetry, BodyControlCommand, BodyControlMode, CcmMotionControlType,
+        ExtendedTelemetry, KickerTelemetry, PowerTelemetry,
     },
     radio::TelemetryPacket,
 };
-use ateam_controls::{Vector3f, Vector4f};
 use ateam_controls::defaults::DEFAULT_CONTROL_DT;
+use ateam_controls::{Vector3f, Vector4f};
 
 use crate::create_error_telemetry_from_string;
 use ateam_lib_stm32::{
@@ -53,7 +54,7 @@ const EXTENDED_TELEM_FREQ: f32 = 100.0; // Hz, send extended telemetry at this f
 const TRACE_PRINT_FREQ: f32 = 10.0; // Hz, print trace info at this frequency
 const TIME_WITHOUT_PACKET_STOP: f32 = 0.2; // seconds, time without receiving a control packet before locking out motor commands
 
-const CONTROL_DT_US: u64 = (DEFAULT_CONTROL_DT * 1e6) as u64;  // us
+const CONTROL_DT_US: u64 = (DEFAULT_CONTROL_DT * 1e6) as u64; // us
 const BASIC_TELEM_INTERVAL_TICKS: usize = (1.0 / BASIC_TELEM_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between basic telemetry sends
 const EXTENDED_TELEM_INTERVAL_TICKS: usize = (1.0 / EXTENDED_TELEM_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between extended telemetry sends
 const TRACE_PRINT_INTERVAL_TICKS: usize = (1.0 / TRACE_PRINT_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between trace prints
@@ -329,9 +330,10 @@ impl<
             let loop_invocation_dead_time = t_loop_start - last_loop_term_time;
             if loop_invocation_dead_time > Duration::from_micros(CONTROL_DT_US) {
                 defmt::warn!("control loop scheuling lagged. Expected <{:?}us between loop invocations, but got {:?}us", CONTROL_DT_US, loop_invocation_dead_time.as_micros());
-                self.telemetry_publisher.publish_immediate(
-                    TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string("control loop scheduling lagged")),
-                );
+                self.telemetry_publisher
+                    .publish_immediate(TelemetryPacket::ErrorTelemetry(
+                        create_error_telemetry_from_string("control loop scheduling lagged"),
+                    ));
             }
 
             self.motor_fl.process_packets();
@@ -499,9 +501,10 @@ impl<
                     wheel_ma.z as i16,
                     wheel_ma.w as i16
                 );
-                self.telemetry_publisher.publish_immediate(
-                    TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string("high wheel current rejected")),
-                );
+                self.telemetry_publisher
+                    .publish_immediate(TelemetryPacket::ErrorTelemetry(
+                        create_error_telemetry_from_string("high wheel current rejected"),
+                    ));
                 wheel_ma = Vector4f::default();
             }
 
@@ -581,8 +584,7 @@ impl<
             let loop_execution_time_us = (t_after_telem - t_loop_start).as_micros();
 
             /////////// TRACE LOGGING ///////////
-            if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS
-            {
+            if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS {
                 defmt::trace!(
                     "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
                     motor_packet_process_time.as_micros(),
@@ -611,9 +613,10 @@ impl<
                     channel_update_time.as_micros(),
                 );
                 defmt::warn!("control loop is taking >400us: {} us (it may be interrupted by higher priority tasks). This is >40% of an execution frame.", loop_execution_time_us);
-                self.telemetry_publisher.publish_immediate(
-                    TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string("control loop >400us execution time")),
-                );
+                self.telemetry_publisher
+                    .publish_immediate(TelemetryPacket::ErrorTelemetry(
+                        create_error_telemetry_from_string("control loop >400us execution time"),
+                    ));
             }
             /////////////////////////////////////
 
