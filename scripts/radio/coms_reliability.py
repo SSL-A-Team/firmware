@@ -50,12 +50,9 @@ MULTICAST_IP = "224.4.20.69"
 MULTICAST_PORT = 42069
 LOCAL_PORT = 42069
 
-PROTOCOL_VERSION_MAJOR = 0
-PROTOCOL_VERSION_MINOR = 1
-
-RADIO_PACKET_TOTAL_SIZE = 408
-RADIO_HEADER_SIZE = 12      # crc32(4) + major(2) + minor(2) + cmd(1) + data_len(2) + reserved(1)
-RADIO_DATA_MAX_SIZE = RADIO_PACKET_TOTAL_SIZE - RADIO_HEADER_SIZE  # 396
+RADIO_PACKET_TOTAL_SIZE = 524
+RADIO_HEADER_SIZE = 8       # crc32(4) + command_code(1) + reserved(1) + data_length(2)
+RADIO_DATA_MAX_SIZE = RADIO_PACKET_TOTAL_SIZE - RADIO_HEADER_SIZE  # 516
 
 
 class CommandCode(IntEnum):
@@ -63,14 +60,13 @@ class CommandCode(IntEnum):
     CC_NACK                     = 2
     CC_GOODBYE                  = 3
     CC_KEEPALIVE                = 4
-    CC_HELLO_REQ                = 101
-    CC_TELEMETRY                = 102
-    CC_CONTROL_DEBUG_TELEMETRY  = 103
-    CC_ROBOT_PARAMETER_COMMAND  = 104
-    CC_ERROR_TELEMETRY          = 105
-    CC_CONTROL                  = 201
-    CC_HELLO_RESP               = 202
-
+    CC_HELLO_REQ                = 21
+    CC_HELLO_RESP               = 22
+    CC_TELEMETRY                = 41
+    CC_CONTROL_DEBUG_TELEMETRY  = 42
+    CC_ROBOT_PARAMETER_COMMAND  = 43
+    CC_ERROR_TELEMETRY          = 44
+    CC_CONTROL                  = 61
 
 class TeamColor(IntEnum):
     TC_YELLOW = 0
@@ -78,9 +74,23 @@ class TeamColor(IntEnum):
 
 
 class KickRequest(IntEnum):
-    NO_KICK    = 0
-    KICK       = 1
-    CHIP_KICK  = 2
+    KR_ARM           = 0
+    KR_DISABLE       = 1
+    KR_KICK_NOW      = 2
+    KR_KICK_TOUCH    = 3
+    KR_KICK_CAPTURED = 4
+    KR_CHIP_NOW      = 5
+    KR_CHIP_TOUCH    = 6
+    KR_CHIP_CAPTURED = 7
+
+
+class BodyControlMode(IntEnum):
+    BCM_OFF              = 0
+    BCM_GLOBAL_POSITION  = 1
+    BCM_GLOBAL_VELOCITY  = 2
+    BCM_LOCAL_VELOCITY   = 3
+    BCM_GLOBAL_ACCEL     = 4
+    BCM_LOCAL_ACCEL      = 5
 
 
 # ---------------------------------------------------------------------------
@@ -94,23 +104,19 @@ def _compute_crc32(data: bytes) -> int:
 
 def build_packet(command_code: int, data: bytes) -> bytes:
     """
-    Build a RadioPacket at exact length (no padding).
+    Build a RadioPacket with header + data (no padding to total size).
 
-    Layout (little-endian):
-      u32  crc32         (computed over packet with this field = 0)
-      u16  major_version
-      u16  minor_version
+    Layout (little-endian, packed):
+      u32  crc32           (computed over packet with this field = 0)
       u8   command_code
-      u16  data_length
       u8   _reserved
+      u16  data_length
       u8[] data
     """
     assert len(data) <= RADIO_DATA_MAX_SIZE, f"data too large: {len(data)} > {RADIO_DATA_MAX_SIZE}"
 
     header_no_crc = struct.pack(
-        "<xxxx HH B H x",          # 4 bytes reserved for crc32, then rest of header
-        PROTOCOL_VERSION_MAJOR,
-        PROTOCOL_VERSION_MINOR,
+        "<xxxx B x H",             # 4 bytes reserved for crc32, then rest of header
         int(command_code),
         len(data),
     )
@@ -121,8 +127,21 @@ def build_packet(command_code: int, data: bytes) -> bytes:
 
 
 def build_hello_request(robot_id: int, color: TeamColor) -> bytes:
-    """CC_HELLO_REQ payload: robot_id (u8) + color (u8)."""
-    data = struct.pack("<BB", robot_id, int(color))
+    """
+    CC_HELLO_REQ payload (16 bytes):
+      robot_id (u8) + color (u8) + dirty_bitfield (u8) + reserved (u8)
+      + coms_hash (4 bytes) + controls_hash (4 bytes) + firmware_hash (4 bytes)
+    """
+    data = struct.pack(
+        "<BB B x 4s 4s 4s",
+        robot_id,
+        int(color),
+        0,                      # dirty bitfield (none dirty)
+        b'\x00' * 4,            # coms_hash
+        b'\x00' * 4,            # controls_hash
+        b'\x00' * 4,            # firmware_hash
+    )
+    assert len(data) == 16, f"HelloRequest size mismatch: {len(data)}"
     return build_packet(CommandCode.CC_HELLO_REQ, data)
 
 
@@ -140,57 +159,79 @@ def build_control_packet(
     body_w: float = 0.0,
     kick_vel: float = 0.0,
     dribbler_speed: float = 0.0,
-    dribbler_multiplier: int = 0,
-    kick_request: KickRequest = KickRequest.NO_KICK,
+    kick_request: KickRequest = KickRequest.KR_ARM,
     emergency_stop: bool = False,
-    body_twist_control_enabled: bool = True,
+    body_control_mode: BodyControlMode = BodyControlMode.BCM_LOCAL_VELOCITY,
+    vision_x: float = 0.0,
+    vision_y: float = 0.0,
+    vision_theta: float = 0.0,
+    vision_update: bool = False,
+    reset_controller: bool = False,
 ) -> bytes:
     """
-    Build a CC_CONTROL packet with BasicControl payload (40 bytes).
+    Build a CC_CONTROL packet with BasicControl payload (56 bytes).
 
     Bitfield (u32):
       bit 0:  request_shutdown
       bit 1:  reboot_robot
       bit 2:  game_state_in_stop
       bit 3:  emergency_stop
-      bit 4:  body_pose_control_enabled
-      bit 5:  body_twist_control_enabled
-      bit 6:  body_accel_control_enabled
-      bit 7:  wheel_vel_control_enabled
-      bit 8:  wheel_torque_control_enabled
-      bit 9:  vision_update
-      bits 10-17: dribbler_multiplier (8 bits)
-      bits 18-23: _reserved (6 bits)
-      bits 24-31: play_song (8 bits)
+      bit 4:  wheel_vel_control_enabled
+      bit 5:  wheel_torque_control_enabled
+      bit 6:  vision_update
+      bit 7:  reset_controller
+      bits 8-31: reserved
 
-    Floats (7 x f32): pose_x_vision, pose_y_vision, pose_z_vision,
-                       x_linear_cmd, y_linear_cmd, z_linear_cmd,
-                       kick_vel, dribbler_speed
+    float[3] vision_position_update
 
-    KickRequest (u8), padded to align.
+    u8 body_control_mode
+    u8 kick_request
+    u8 play_song
+    u8 reserved
+
+    float kick_vel
+    float dribbler_speed
+
+    BodyControlCommand (28 bytes, union zero-padded)
     """
     bitfield = 0
     if emergency_stop:
         bitfield |= (1 << 3)
-    if body_twist_control_enabled:
-        bitfield |= (1 << 5)
-    bitfield |= ((dribbler_multiplier & 0xFF) << 10)
+    if vision_update:
+        bitfield |= (1 << 6)
+    if reset_controller:
+        bitfield |= (1 << 7)
 
-    # 40 bytes: u32 bitfield + 8 floats + KickRequest(u8) + 3 pad bytes
+    # Build the BodyControlCommand union (always 28 bytes, zero-padded)
+    BODY_CONTROL_CMD_SIZE = 28
+    if body_control_mode == BodyControlMode.BCM_LOCAL_VELOCITY:
+        cmd_data = struct.pack("<5f", body_x, body_y, body_w, 0.0, 0.0)  # xd, yd, omega, max_lin_acc, max_ang_acc
+    elif body_control_mode == BodyControlMode.BCM_GLOBAL_VELOCITY:
+        cmd_data = struct.pack("<5f", body_x, body_y, body_w, 0.0, 0.0)
+    elif body_control_mode == BodyControlMode.BCM_GLOBAL_POSITION:
+        cmd_data = struct.pack("<7f", body_x, body_y, body_w, 0.0, 0.0, 0.0, 0.0)
+    elif body_control_mode == BodyControlMode.BCM_GLOBAL_ACCEL:
+        cmd_data = struct.pack("<3f", body_x, body_y, body_w)
+    elif body_control_mode == BodyControlMode.BCM_LOCAL_ACCEL:
+        cmd_data = struct.pack("<3f", body_x, body_y, body_w)
+    else:
+        cmd_data = b''
+    cmd_data = cmd_data.ljust(BODY_CONTROL_CMD_SIZE, b'\x00')
+
+    # 56 bytes: u32 bitfield + 3 floats + 4 u8s + 2 floats + 28 bytes cmd
     data = struct.pack(
-        "<I 8f B 3x",
+        "<I 3f BB B x 2f",
         bitfield,
-        0.0,           # pose_x_vision
-        0.0,           # pose_y_vision
-        0.0,           # pose_z_vision
-        body_x,        # x_linear_cmd
-        body_y,        # y_linear_cmd
-        body_w,        # z_linear_cmd
+        vision_x,              # vision_position_update[0]
+        vision_y,              # vision_position_update[1]
+        vision_theta,          # vision_position_update[2]
+        int(body_control_mode),
+        int(kick_request),
+        0,                     # play_song
         kick_vel,
         dribbler_speed,
-        int(kick_request),
-    )
-    assert len(data) == 40, f"BasicControl size mismatch: {len(data)}"
+    ) + cmd_data
+    assert len(data) == 56, f"BasicControl size mismatch: {len(data)}"
     return build_packet(CommandCode.CC_CONTROL, data)
 
 
@@ -207,13 +248,13 @@ def make_bad_crc(packet: bytes) -> bytes:
 
 def make_bad_command_code(packet: bytes) -> bytes:
     """Replace command_code with 0xFF (undefined)."""
-    return packet[:8] + b'\xFF' + packet[9:]
+    return packet[:4] + b'\xFF' + packet[5:]
 
 
 def make_wrong_length(packet: bytes) -> bytes:
     """Set data_length field to a value inconsistent with the actual data."""
-    bad_len = struct.unpack_from("<H", packet, 9)[0] ^ 0x00FF
-    return packet[:9] + struct.pack("<H", bad_len) + packet[11:]
+    bad_len = struct.unpack_from("<H", packet, 6)[0] ^ 0x00FF
+    return packet[:6] + struct.pack("<H", bad_len) + packet[8:]
 
 
 def make_truncated(packet: bytes) -> bytes:
@@ -307,14 +348,14 @@ def discover_robot(
                     return None
                 continue
 
-            cmd = raw[8]
+            cmd = raw[4]
             if cmd != CommandCode.CC_HELLO_REQ:
                 print(f"[discovery] Unexpected command code 0x{cmd:02X}, ignoring")
                 if not infinite and attempt >= max_retries:
                     return None
                 continue
 
-            data_len = struct.unpack_from("<H", raw, 9)[0]
+            data_len = struct.unpack_from("<H", raw, 6)[0]
             if data_len < 2:
                 print(f"[discovery] CC_HELLO_REQ data too short ({data_len} bytes)")
                 if not infinite and attempt >= max_retries:
@@ -392,6 +433,7 @@ def run_sender(
     invalid_rate: float,
     duplicate_rate: float,
     control_padding: int,
+    send_hello: bool,
     verbose: bool,
 ) -> Stats:
     """
@@ -421,13 +463,18 @@ def run_sender(
         try:
             sock.sendto(payload, robot_addr)
             if verbose:
-                cmd = payload[8] if len(payload) > 8 else 0xFF
+                cmd = payload[4] if len(payload) > 4 else 0xFF
                 print(f"  -> {label} cmd=0x{cmd:02X} len={len(payload)}")
             return True
         except OSError as e:
             print(f"  [send error] {e}")
             stats.send_errors += 1
             return False
+
+    hello_pkt = None
+    if send_hello:
+        local_ip = _get_local_ip(robot_addr[0])
+        hello_pkt = build_hello_response(local_ip, LOCAL_PORT)
 
     try:
         base_delay = 1.0 / rate_hz if rate_hz > 0 else 0.0
@@ -440,8 +487,11 @@ def run_sender(
             if verbose:
                 print(f"[burst {burst_count}] sending {burst_actual} packet(s)")
 
+            if hello_pkt is not None:
+                _send(hello_pkt, "HELLO_RESP")
+
             for i in range(burst_actual):
-                valid_pkt = build_control_packet(body_twist_control_enabled=True)
+                valid_pkt = build_control_packet()
                 valid_pkt += b'\x00' * control_padding
 
                 # Decide what to actually send
@@ -539,6 +589,8 @@ def _build_parser() -> argparse.ArgumentParser:
     inject.add_argument("--control-padding", type=int, default=0, metavar="BYTES",
                         help="Extra zero bytes appended to each control packet (default: 0)")
 
+    p.add_argument("--send-hello", action="store_true",
+                   help="Send a CC_HELLO_RESP before each burst to keep the connection alive")
     p.add_argument("--verbose", "-v", action="store_true",
                    help="Print each packet send")
 
@@ -631,6 +683,7 @@ def main() -> None:
         invalid_rate=args.invalid_rate,
         duplicate_rate=args.duplicate_rate,
         control_padding=args.control_padding,
+        send_hello=args.send_hello,
         verbose=args.verbose,
     )
 

@@ -523,14 +523,15 @@ impl<const LENGTH: usize, const DEPTH: usize, const DEBUG: bool>
                     Either::First(len) => {
                         if let Ok(len) = len {
                             if len == 0 {
-                                // defmt::debug!("uart zero");
+                                //defmt::debug!("uart zero");
                                 buf.cancel();
                             } else {
+                                //defmt::debug!("uart rx {} bytes: {:x}", len, &buf.data()[..len]);
                                 *buf.len() = len;
                             }
                         } else {
                             // Framing and Parity Error occur here
-                            // defmt::warn!("{}", len);
+                            //defmt::warn!("uart rx error: {}", len);
                             buf.cancel();
                         }
                     }

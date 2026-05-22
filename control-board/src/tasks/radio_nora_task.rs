@@ -1,6 +1,7 @@
 use ateam_common_packets::{bindings::BasicTelemetry, radio::{is_data_packet_safe, TelemetryPacket}};
 use ateam_lib_stm32::{
-    drivers::radio::w26x::edm_protocol::EDM_PACKET_WIRE_OVERHEAD, idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart, uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue}
+    idle_buffered_uart_read_task, idle_buffered_uart_write_task, static_idle_buffered_uart,
+    uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue},
 };
 use credentials::WifiCredential;
 use embassy_executor::{SendSpawner, Spawner};
@@ -14,7 +15,8 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{
     create_error_telemetry_from_string,
-    drivers::radio_robot::{RobotRadio, RobotRadioError, TeamColor},
+    drivers::radio_robot::TeamColor,
+    drivers::radio_robot_nora::RobotRadioNora,
     pins::*,
     robot_state::SharedRobotState,
     tasks::dotstar_task::{ControlBoardLedCommand, RadioStatusLedCommand},
@@ -22,11 +24,11 @@ use crate::{
 };
 
 #[macro_export]
-macro_rules! create_radio_task {
+macro_rules! create_radio_nora_task {
     ($main_spawner:ident, $rx_uart_queue_spawner:ident, $tx_uart_queue_spawner:ident, $robot_state:ident,
         $radio_command_publisher:ident, $radio_telemetry_subscriber:ident, $led_command_pub:ident,
         $wifi_credentials:ident, $p:ident) => {
-        ateam_control_board::tasks::radio_task::start_radio_task(
+        ateam_control_board::tasks::radio_nora_task::start_radio_nora_task(
             $main_spawner,
             $rx_uart_queue_spawner,
             $tx_uart_queue_spawner,
@@ -50,14 +52,13 @@ macro_rules! create_radio_task {
 }
 
 pub const RADIO_LOOP_RATE_MS: u64 = 10;
-pub const RADIO_BASIC_TELEM_INTERVAL_MS: u64 = 0; // 0 binds basic telem to task loop rate
 
-pub const RADIO_MAX_TX_PACKET_SIZE: usize = ateam_common_packets::MAX_ROBOT_TX_PACKET_SIZE + EDM_PACKET_WIRE_OVERHEAD;
-pub const RADIO_TX_BUF_DEPTH: usize = 6;
-pub const RADIO_MAX_RX_PACKET_SIZE: usize = ateam_common_packets::MAX_ROBOT_RX_PACKET_SIZE + EDM_PACKET_WIRE_OVERHEAD;
-pub const RADIO_RX_BUF_DEPTH: usize = 6;
+pub const RADIO_MAX_TX_PACKET_SIZE: usize = 448;
+pub const RADIO_TX_BUF_DEPTH: usize = 4;
+pub const RADIO_MAX_RX_PACKET_SIZE: usize = 256;
+pub const RADIO_RX_BUF_DEPTH: usize = 4;
 
-static_idle_buffered_uart!(RADIO, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, DEBUG_RADIO_UART_QUEUES, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(RADIO_NORA, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, DEBUG_RADIO_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
 enum RadioConnectionState {
@@ -68,7 +69,7 @@ enum RadioConnectionState {
     Connected,
 }
 
-pub struct RadioTask<
+pub struct RadioNoraTask<
     const RADIO_MAX_TX_PACKET_SIZE: usize,
     const RADIO_MAX_RX_PACKET_SIZE: usize,
     const RADIO_TX_BUF_DEPTH: usize,
@@ -79,7 +80,7 @@ pub struct RadioTask<
     command_publisher: CommandsPublisher,
     telemetry_subscriber: TelemetrySubcriber,
     led_command_pub: LedCommandPublisher,
-    radio: RobotRadio<
+    radio: RobotRadioNora<
         'static,
         RADIO_MAX_TX_PACKET_SIZE,
         RADIO_MAX_RX_PACKET_SIZE,
@@ -93,7 +94,6 @@ pub struct RadioTask<
     wifi_credentials: &'static [WifiCredential],
 
     last_software_packet: Instant,
-    last_basic_telem_tx: Instant,
     last_basic_telemetry: BasicTelemetry,
     seq_number: u16,
 }
@@ -105,7 +105,7 @@ impl<
         const RADIO_RX_BUF_DEPTH: usize,
         const DEBUG_UART_QUEUES: bool,
     >
-    RadioTask<
+    RadioNoraTask<
         RADIO_MAX_TX_PACKET_SIZE,
         RADIO_MAX_RX_PACKET_SIZE,
         RADIO_TX_BUF_DEPTH,
@@ -113,18 +113,16 @@ impl<
         DEBUG_UART_QUEUES,
     >
 {
-    // pub type TaskRobotRadio = RobotRadio<'static, RADIO_MAX_TX_PACKET_SIZE, RADIO_MAX_RX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, RADIO_RX_BUF_DEPTH>;
-
     const RETRY_DELAY_MS: u64 = 1000;
     const RESPONSE_FROM_PC_TIMEOUT_MS: u64 = 1000;
-    const UART_CONNECT_TIMEOUT_MS: u64 = 5000;
+    const UART_CONNECT_TIMEOUT_MS: u64 = 8000;
 
     pub fn new(
         robot_state: &'static SharedRobotState,
         command_publisher: CommandsPublisher,
         telemetry_subscriber: TelemetrySubcriber,
         led_command_pub: LedCommandPublisher,
-        radio: RobotRadio<
+        radio: RobotRadioNora<
             'static,
             RADIO_MAX_TX_PACKET_SIZE,
             RADIO_MAX_RX_PACKET_SIZE,
@@ -135,7 +133,7 @@ impl<
         radio_ndet_input: Input<'static>,
         wifi_credentials: &'static [WifiCredential],
     ) -> Self {
-        RadioTask {
+        RadioNoraTask {
             shared_robot_state: robot_state,
             command_publisher: command_publisher,
             telemetry_subscriber: telemetry_subscriber,
@@ -145,7 +143,6 @@ impl<
             connection_state: RadioConnectionState::Unconnected,
             wifi_credentials: wifi_credentials,
             last_software_packet: Instant::now(),
-            last_basic_telem_tx: Instant::now(),
             last_basic_telemetry: Default::default(),
             seq_number: Default::default(),
         }
@@ -177,7 +174,7 @@ impl<
         radio_ndet_pin: Peri<'static, AnyPin>,
         wifi_credentials: &'static [WifiCredential],
     ) -> Self {
-        let radio = RobotRadio::new(
+        let radio = RobotRadioNora::new(
             radio_uart,
             radio_rx_uart_queue,
             radio_tx_uart_queue,
@@ -199,18 +196,21 @@ impl<
     }
 
     async fn radio_task_entry(&mut self) {
-        defmt::info!("radio task startup");
+        defmt::info!("radio nora task startup");
 
         let mut radio_loop_rate_ticker = Ticker::every(Duration::from_millis(RADIO_LOOP_RATE_MS));
         let mut last_loop_term_time = Instant::now();
+
+        let mut tx_ctr = 0;
 
         // initialize a copy of the robot state so we can track updates
         let mut last_robot_state = self.shared_robot_state.get_state();
 
         // allow default fallback state transition of none
         #[allow(unused_assignments)]
-        // let mut next_connection_state = self.connection_state;
         loop {
+            tx_ctr += 1;
+            tx_ctr &= 0x03;
 
             let loop_start_time = Instant::now();
             let loop_invocation_dead_time = loop_start_time - last_loop_term_time;
@@ -243,11 +243,11 @@ impl<
                 {
                     defmt::info!("dip state change triggering wifi network change");
 
-                    if let Err(e) = self.radio.disconnect_network().await {
+                    if self.radio.disconnect_network().await.is_err() {
                         // this is really only an error if we think we're connected
                         // this separation is really poorly handled right now
                         // TODO move all statefulness down into driver
-                        defmt::error!("failed to cleanly disconnect - consider radio reboot: {}", e);
+                        defmt::error!("failed to cleanly disconnect - consider radio reboot");
                     }
 
                     // Go back to reset the full network flow.
@@ -382,7 +382,7 @@ impl<
                     radio_loop_rate_ticker.reset();
                 }
                 RadioConnectionState::Connected => {
-                    let _ = self.process_packets().await;
+                    let _ = self.process_packets(tx_ctr).await;
                     // if we're stably connected, process packets at 100Hz
 
                     // If timeout have elapsed since we last got a packet,
@@ -441,15 +441,12 @@ impl<
         .await
         {
             Either::First(res) => {
-                match res {
-                    Err(e) => {
-                        defmt::error!("failed to establish radio UART connection: {}", e);
-                        return Err(());
-                    }
-                    Ok(_) => {
-                        defmt::debug!("established radio uart coms");
-                        return Ok(());
-                    }
+                if res.is_err() {
+                    defmt::error!("failed to establish radio UART connection.");
+                    return Err(());
+                } else {
+                    defmt::debug!("established radio uart coms");
+                    return Ok(());
                 }
             }
             Either::Second(_) => {
@@ -464,25 +461,29 @@ impl<
         wifi_network: WifiCredential,
         robot_id: u8,
     ) -> Result<(), ()> {
-        defmt::info!("connecting to wifi network: {} ({})", wifi_network.get_ssid(), wifi_network.get_password());
-
-        if let Err(e) = self.radio.connect_to_network(wifi_network, robot_id).await {
-            defmt::error!("failed to connect to wifi network: {}", e);
+        if self
+            .radio
+            .connect_to_network(wifi_network, robot_id)
+            .await
+            .is_err()
+        {
+            defmt::error!("failed to connect to wifi network.");
             return Err(());
         }
-        defmt::info!("Radio Task - radio connected to WiFi");
+        defmt::info!("radio connected");
 
-        if let Err(e) = self.radio.open_multicast().await {
-            defmt::error!("failed to establish multicast socket to network: {}", e);
+        let res = self.radio.open_multicast().await;
+        if res.is_err() {
+            defmt::error!("failed to establish multicast socket to network.");
             return Err(());
         }
-        defmt::info!("Radio Task - multicast discovery open");
+        defmt::info!("multicast open");
 
         return Ok(());
     }
 
     async fn connect_software(&mut self, robot_id: u8, is_blue: bool) -> Result<bool, ()> {
-        defmt::info!("Radio Task - sending hello");
+        defmt::info!("sending hello");
 
         let team_color = if is_blue {
             TeamColor::Blue
@@ -490,8 +491,8 @@ impl<
             TeamColor::Yellow
         };
 
-        if let Err(e) = self.radio.send_hello(robot_id, team_color).await {
-            defmt::error!("send hello failed: {}", e);
+        if self.radio.send_hello(robot_id, team_color).await.is_err() {
+            defmt::error!("send hello failed.");
             return Err(());
         }
 
@@ -502,7 +503,7 @@ impl<
         match hello {
             Ok(hello) => {
                 defmt::info!(
-                    "Radio Task - received hello resp to: {}.{}.{}.{}:{}",
+                    "recieved hello resp to: {}.{}.{}.{}:{}",
                     hello.ipv4[0],
                     hello.ipv4[1],
                     hello.ipv4[2],
@@ -517,50 +518,51 @@ impl<
                     .open_unicast(hello.ipv4, hello.port)
                     .await
                     .expect("failed to open unicast port");
-                defmt::info!("Radio Task - unicast open");
+                defmt::info!("unicast open");
 
                 let end_time = Instant::now();
                 defmt::info!(
-                    "Radio Task - multicast peer closed (took {} ms)",
+                    "multicast peer closed (took {} ms)",
                     (end_time - start_time).as_millis()
                 );
 
                 return Ok(true);
             }
             Err(e) => {
-                if e != RobotRadioError::SoftwareHelloResponseTimeout {
-                    defmt::warn!("invalid hello response received: {}", e);
-                }
+                defmt::warn!("hello response failed: {}", e);
                 return Ok(false);
             }
         }
     }
 
-    async fn process_packets(&mut self) -> Result<(), ()> {
+    async fn process_packets(&mut self, tx_ctr: i32) -> Result<(), ()> {
         // read any packets
         loop {
-            match self.radio.read_packet_nonblocking() {
-                Ok(Some(c2_pkt)) => {
+            if let Ok(pkt) = self.radio.read_packet_nonblocking() {
+                if let Some(c2_pkt) = pkt {
                     // update the last packet timestamp
                     self.last_software_packet = Instant::now();
                     if is_data_packet_safe(&c2_pkt) {
                         self.command_publisher.publish_immediate(c2_pkt);
                     } else {
-                        defmt::error!("RadioTask - received unsafe packet");
+                        defmt::error!("RadioNoraTask - received unsafe packet");
                         let error_telemetry = create_error_telemetry_from_string(
                             "Received unsafe command packet - check for NaNs",
                         );
-                        defmt::warn!("RadioTask - sending error telemetry packet");
-                        if let Err(e) = self.radio.send_error_telemetry(error_telemetry).await {
-                            defmt::warn!("RadioTask - failed to send error telemetry packet: {}", e);
+                        if self
+                            .radio
+                            .send_error_telemetry(error_telemetry)
+                            .await
+                            .is_err()
+                        {
+                            defmt::warn!("RadioNoraTask - failed to send error telemetry packet");
                         }
                     }
-                }
-                Ok(None) => break,
-                Err(e) => {
-                    defmt::warn!("RadioTask - error reading data packet: {}", e);
+                } else {
                     break;
                 }
+            } else {
+                defmt::warn!("RadioNoraTask - error reading data packet");
             }
         }
 
@@ -573,27 +575,28 @@ impl<
                     }
                     TelemetryPacket::Extended(control) => {
                         if self.shared_robot_state.get_radio_send_extended_telem() {
-                            defmt::trace!("RadioTask - sending extended telemetry");
-                            if let Err(e) = self.radio.send_control_debug_telemetry(control).await {
+                            if self
+                                .radio
+                                .send_control_debug_telemetry(control)
+                                .await
+                                .is_err()
+                            {
                                 defmt::warn!(
-                                    "RadioTask - failed to send control debug telemetry packet: {}",
-                                    e
+                                    "RadioNoraTask - failed to send control debug telemetry packet"
                                 );
                             }
                         }
                     }
                     TelemetryPacket::ParameterCommandResponse(pc_resp) => {
-                        if let Err(e) = self.radio.send_parameter_response(pc_resp).await {
+                        if self.radio.send_parameter_response(pc_resp).await.is_err() {
                             defmt::warn!(
-                                "RadioTask - failed to send control parameter response packet: {}",
-                                e
+                                "RadioNoraTask - failed to send control parameter response packet"
                             );
                         }
                     }
                     TelemetryPacket::ErrorTelemetry(error_packet) => {
-                        defmt::warn!("RadioTask - sending error telemetry packet");
-                        if let Err(e) = self.radio.send_error_telemetry(error_packet).await {
-                            defmt::warn!("RadioTask - failed to send error packet: {}", e);
+                        if self.radio.send_error_telemetry(error_packet).await.is_err() {
+                            defmt::warn!("RadioNoraTask - failed to send error packet");
                         }
                     }
                 }
@@ -602,17 +605,13 @@ impl<
             }
         }
 
-        // send basic telemetry at RADIO_BASIC_TELEM_INTERVAL_MS rate
-        if Instant::now() - self.last_basic_telem_tx
-            >= Duration::from_millis(RADIO_BASIC_TELEM_INTERVAL_MS)
-        {
-            self.last_basic_telem_tx = Instant::now();
+        // always send the latest telemetry
+        if tx_ctr == 0 {
             self.last_basic_telemetry.transmission_sequence_number = self.seq_number as u8;
             self.seq_number = (self.seq_number + 1) & 0x00FF;
 
-            defmt::trace!("sending telem");
-            if let Err(e) = self.radio.send_telemetry(self.last_basic_telemetry) {
-                defmt::warn!("RadioTask - failed to send basic telem packet {:?}", e);
+            if let Err(e) = self.radio.send_telemetry(self.last_basic_telemetry).await {
+                defmt::warn!("RadioNoraTask - failed to send basic telem packet {:?}", e);
             }
         }
 
@@ -631,8 +630,8 @@ pub fn startup_uart_config() -> usart::Config {
 }
 
 #[embassy_executor::task]
-async fn radio_task_entry(
-    mut radio_task: RadioTask<
+async fn radio_nora_task_entry(
+    mut radio_task: RadioNoraTask<
         RADIO_MAX_TX_PACKET_SIZE,
         RADIO_MAX_RX_PACKET_SIZE,
         RADIO_TX_BUF_DEPTH,
@@ -642,11 +641,11 @@ async fn radio_task_entry(
 ) {
     loop {
         radio_task.radio_task_entry().await;
-        defmt::error!("radio task returned");
+        defmt::error!("radio nora task returned");
     }
 }
 
-pub async fn start_radio_task(
+pub async fn start_radio_nora_task(
     radio_task_spawner: Spawner,
     rx_queue_spawner: SendSpawner,
     tx_queue_spawner: SendSpawner,
@@ -707,34 +706,34 @@ pub async fn start_radio_task(
     let (radio_uart_tx, radio_uart_rx) = Uart::split(radio_uart);
 
     defmt::info!("uart initialized");
-    RADIO_IDLE_BUFFERED_UART.init();
+    RADIO_NORA_IDLE_BUFFERED_UART.init();
 
     defmt::info!("uart queue init");
 
     rx_queue_spawner
-        .spawn(idle_buffered_uart_read_task!(RADIO, radio_uart_rx))
+        .spawn(idle_buffered_uart_read_task!(RADIO_NORA, radio_uart_rx))
         .unwrap();
     defmt::info!("radio uart read task online");
     tx_queue_spawner
-        .spawn(idle_buffered_uart_write_task!(RADIO, radio_uart_tx))
+        .spawn(idle_buffered_uart_write_task!(RADIO_NORA, radio_uart_tx))
         .unwrap();
     defmt::info!("radio uart write task online");
 
-    let radio_task = RadioTask::new_from_pins(
+    let radio_task = RadioNoraTask::new_from_pins(
         robot_state,
         command_publisher,
         telemetry_subscriber,
         led_command_pub,
-        &RADIO_IDLE_BUFFERED_UART,
-        RADIO_IDLE_BUFFERED_UART.get_uart_read_queue(),
-        RADIO_IDLE_BUFFERED_UART.get_uart_write_queue(),
+        &RADIO_NORA_IDLE_BUFFERED_UART,
+        RADIO_NORA_IDLE_BUFFERED_UART.get_uart_read_queue(),
+        RADIO_NORA_IDLE_BUFFERED_UART.get_uart_write_queue(),
         radio_reset_pin.into(),
         radio_ndet_pin.into(),
         wifi_credentials,
     );
 
     radio_task_spawner
-        .spawn(radio_task_entry(radio_task))
+        .spawn(radio_nora_task_entry(radio_task))
         .unwrap();
-    defmt::info!("radio task online");
+    defmt::info!("radio nora task online");
 }

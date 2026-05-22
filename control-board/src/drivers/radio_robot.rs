@@ -447,28 +447,27 @@ impl<
         let coms_repo_dirty = false;
         let controls_repo_dirty = false;
         let firmware_repo_dirty = false;
-        
+
         let packet = RadioPacket {
             header: RadioHeader {
                 crc32: 0,
-                _reserved: 0,
                 command_code: CommandCode::CC_HELLO_REQ,
+                _reserved: 0,
                 data_length: size_of::<HelloRequest>() as u16,
             },
             data: RadioData {
                 hello_request: HelloRequest {
-                    _bitfield_align_1: Default::default(),
-                    _bitfield_1: HelloRequest::new_bitfield_1(coms_repo_dirty.into(), controls_repo_dirty.into(), firmware_repo_dirty.into(), 0),
-                    reserved: Default::default(),
-                    coms_hash: [0; 4],
-                    controls_hash: [0; 4],
-                    firmware_hash: [0; 4],
                     robot_id: id,
                     color: match team {
                         TeamColor::Yellow => bindings::TeamColor::TC_YELLOW,
                         TeamColor::Blue => bindings::TeamColor::TC_BLUE,
                     },
-
+                    _bitfield_1: HelloRequest::new_bitfield_1(coms_repo_dirty.into(), controls_repo_dirty.into(), firmware_repo_dirty.into(), 0),
+                    _bitfield_align_1: Default::default(),
+                    reserved: Default::default(),
+                    coms_hash: [0; 4],
+                    controls_hash: [0; 4],
+                    firmware_hash: [0; 4],
                 },
             },
         };
@@ -614,7 +613,7 @@ impl<
             Either::First(ret) => ret?,
             Either::Second(_) => {
                 defmt::trace!("software hello response timeout");
-                Err(RobotRadioError::SoftwareHelloResponseTimeout) 
+                Err(RobotRadioError::SoftwareHelloResponseTimeout)
             },
         }
     }
