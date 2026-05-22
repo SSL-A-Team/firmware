@@ -547,7 +547,9 @@ int main() {
                 response_packet.data.params.torque_i_max = torque_pid_constants.kI_max;
                 response_packet.data.params.cur_clamp = (uint16_t) cur_limit;
 
-                memcpy(response_packet.data.params.firmware_img_hash, wheel_img_hash_struct.img_hash, sizeof(response_packet.data.params.firmware_img_hash));
+                for (size_t i = 0; i < sizeof(response_packet.data.params.firmware_img_hash); i++) {
+                    response_packet.data.params.firmware_img_hash[i] = wheel_img_hash_struct.img_hash[i];
+                }
 #ifdef UART_ENABLED
                 uart_transmit((uint8_t *) &response_packet, sizeof(MotorResponse));
                 // Capture the status for the response packet / LED.

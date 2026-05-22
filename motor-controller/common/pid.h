@@ -16,14 +16,14 @@ typedef struct PidConstants {
 } PidConstants_t;
 
 typedef struct Pid {
-    PidConstants_t *pid_constants;
+    const PidConstants_t *pid_constants;
 
     float eI;
     float prev_err;
 } Pid_t;
 
 void pid_constants_initialize(PidConstants_t *pid_constants);
-void pid_initialize(Pid_t *pid, PidConstants_t *pid_constants);
+void pid_initialize(Pid_t *pid, const PidConstants_t *pid_constants);
 float pid_calculate(Pid_t *pid, float r, float y, float dt);
 
 typedef enum GainScheduledPidResult {
@@ -38,8 +38,8 @@ typedef enum GainScheduledPidResult {
 
 typedef struct GainScheduledPid {
     size_t num_gain_stages;
-    PidConstants_t *pid_constants;
-    float *gain_schedule;
+    const PidConstants_t *pid_constants;
+    const float *gain_schedule;
     size_t cur_gain_stage_ind;
     PidConstants_t cur_pid_constants;
     bool gain_schedule_abs;

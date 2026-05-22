@@ -14,7 +14,7 @@ void pid_constants_initialize(PidConstants_t *pid_constants) {
     pid_constants->kI_min = FLT_MIN;
 }
 
-void pid_initialize(Pid_t *pid, PidConstants_t *pid_constants) {
+void pid_initialize(Pid_t *pid, const PidConstants_t *pid_constants) {
     pid->pid_constants = pid_constants;
 
     //pid->prev_u = 0.0f;

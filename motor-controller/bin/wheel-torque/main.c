@@ -503,7 +503,9 @@ static void send_packets() {
         response_pkt.data.params.parameter_direction = CCM_PARAMDIR_REPLY;
 
         // load the hash
-        memcpy(response_pkt.data.params.value.val_u8x4, wheel_img_hash_struct.img_hash, sizeof(response_pkt.data.params.value));
+        for (size_t i = 0; i < sizeof(response_pkt.data.params.value); i++) {
+            response_pkt.data.params.value.val_u8x4[i] = wheel_img_hash_struct.img_hash[i];
+        }
     } else {
         response_pkt.type = CCM_RESP_TELEM;
         response_pkt.timestamp = time_local_epoch_s();
