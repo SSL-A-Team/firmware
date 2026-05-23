@@ -21,7 +21,7 @@ use ateam_control_board::{
     robot_state::SharedRobotState, SystemIrqs,
 };
 
-use embassy_time::{Duration, Ticker};
+use embassy_time::{Duration, Ticker, Timer};
 // provide embedded panic probe
 use panic_probe as _;
 use static_cell::ConstStaticCell;
@@ -227,7 +227,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     ccm.set_telemetry_enabled(true);
     ccm.set_motion_enabled(true);
 
-    ccm.leave_reset().await;
+    ccm.reset().await;
+    Timer::after_millis(100).await;
 
     let mut last_seq_num = 0;
 
@@ -276,10 +277,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             ctr += 1;
         }
 
-        if curr_ctr > 5000 {
+        if curr_ctr > 10000 {
             curr_ctr = 0
-        } else if curr_ctr > 2500 {
-            ccm.set_current_setpoint(-100);
+        } else if curr_ctr > 5000 {
+            ccm.set_current_setpoint(-50);
             // ccm.set_setpoint(-2500.0);
             // ccm.set_setpoint(-0.1);
         } else {

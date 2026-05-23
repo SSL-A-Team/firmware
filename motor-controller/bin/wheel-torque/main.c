@@ -54,6 +54,7 @@ static IIRFilter_t encoder_filter;
 
 // motor model
 static MotorModel_t df45_model;
+static bool current_limited = false;
 
 // joint velocity + current controller
 // static FixedPointS12F4_PiConstants_t vel_curvel_controller_constants = {
@@ -74,8 +75,8 @@ static MotorModel_t df45_model;
 // static FixedPointS12F4_PiController_t vel_curvel_controller;
 
 const PidConstants_t vel_velcur_controller_constants = {
-    .kP = 10.0f,
-    .kI = 5.0f,
+    .kP = 1.0f,
+    .kI = 10.0f,
     .kD = 0.0f,
     .kI_max = 100.0f,
     .kI_min = -100.0f,
@@ -120,6 +121,7 @@ const float vel_gain_schedule[3] = {
 ////////////////////////////
 
 static bool allow_motor_to_run();
+static int16_t apply_current_limits(int16_t);
 static void update_wheel_vel_est();
 static float do_vel_control();
 static void do_vel_cur_control();
@@ -286,8 +288,12 @@ int main() {
                 pwm6step_set_voltage((int16_t) motor_command_packet.setpoint);
                 break;
             case CCM_MCT_CURRENT:
-                pwm6step_set_current(motor_command_packet.current_setpoint_ma);
-                response_packet.current_telemetry.current_setpoint_ma = motor_command_packet.current_setpoint_ma;
+                int16_t motor_current = motor_command_packet.current_setpoint_ma;
+                motor_current = apply_current_limits(motor_current);
+
+                response_packet.current_telemetry.current_setpoint_ma = motor_current;
+                pwm6step_set_current(motor_current);
+
                 break;
             case CCM_MCT_VELOCITY:
                 float dc_f = do_vel_control();
@@ -298,10 +304,11 @@ int main() {
                 do_vel_cur_control();
 
                 // add the feedforward current to the velocity PID output
-                int16_t motor_current = motor_command_packet.current_setpoint_ma + (int16_t) vel_cur_component;
-                response_packet.current_telemetry.current_setpoint_ma = motor_current;
+                int16_t joint_motor_current = motor_command_packet.current_setpoint_ma + (int16_t) vel_cur_component;
+                joint_motor_current = apply_current_limits(joint_motor_current);
 
-                pwm6step_set_current(motor_current);
+                response_packet.current_telemetry.current_setpoint_ma = joint_motor_current;
+                pwm6step_set_current(joint_motor_current);
 
                 break;
         }
@@ -331,6 +338,40 @@ static bool allow_motor_to_run() {
         && !response_packet.master_error
         && uart_logging_status_receive == UART_LOGGING_OK
         && uart_logging_status_send == UART_LOGGING_OK;
+}
+
+static int16_t apply_current_limits(int16_t desired_current) {
+    int16_t applied_current = desired_current;
+
+    // enforce hard current limits based on wheel velocity. If wheel is not turning at all
+    // do not allow current above 90% of the max continuous rated current
+    if (fabsf(response_packet.velocity_telemetry.wheel_vel_rads) < WHEEL_TURNING_VEL_THRESH_RADS) {
+        if (desired_current > MAX_CURR_WHEEL_NOT_TURNING) {
+            applied_current = (int16_t) MAX_CURR_WHEEL_NOT_TURNING;
+            current_limited = true;
+        }
+
+        if (desired_current < -MAX_CURR_WHEEL_NOT_TURNING) {
+            applied_current = (int16_t) -MAX_CURR_WHEEL_NOT_TURNING;
+            current_limited = true;
+        }
+
+        current_limited = false;
+    } else {
+        if (desired_current > MAX_CURR_WHEEL_TURNING) {
+            applied_current = (int16_t) MAX_CURR_WHEEL_TURNING;
+            current_limited = true;
+        }
+
+        if (desired_current < -MAX_CURR_WHEEL_TURNING) {
+            applied_current = (int16_t) -MAX_CURR_WHEEL_TURNING;
+            current_limited = true;
+        }
+
+        current_limited = false;
+    }
+
+    return applied_current;
 }
 
 static void read_packets() {
@@ -394,7 +435,7 @@ static void update_wheel_vel_est() {
 }
 
 static void do_vel_cur_control() {
-    vel_cur_component = pid_calculate(&vel_velcur_controller, motor_command_packet.setpoint, response_packet.velocity_telemetry.wheel_vel_rads, VELOCITY_LOOP_RATE_S);
+    vel_cur_component = pid_calculate_err_resp_only(&vel_velcur_controller, motor_command_packet.setpoint, response_packet.velocity_telemetry.wheel_vel_rads, VELOCITY_LOOP_RATE_S);
 }
 
 static float do_vel_control() {

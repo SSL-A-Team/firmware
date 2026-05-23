@@ -227,18 +227,24 @@ impl<
             self.stm32_uart_interface
                 .load_firmware_image(fw_image_bytes, true)
                 .await?;
+
+            // Flashing used the bootloader UART config; switch back to application speed
+            // while the motor is still held in reset (DMA is idle, safe to reconfigure).
+            self.stm32_uart_interface
+                .update_uart_config(2_000_000, Parity::ParityEven)
+                .await;
+
+            Timer::after(Duration::from_millis(1)).await;
+
+            // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
+            self.stm32_uart_interface.leave_reset().await;
         } else {
             defmt::info!("Wheel Interface - Skipping firmware flash");
+            // UART is already at 2MHz from check_device_has_latest_default_image;
+            // calling update_uart_config here while the motor is running and streaming
+            // telemetry can corrupt the DMA state and break the TX queue.
+            self.stm32_uart_interface.leave_reset().await;
         }
-
-        self.stm32_uart_interface
-            .update_uart_config(2_000_000, Parity::ParityEven)
-            .await;
-
-        Timer::after(Duration::from_millis(1)).await;
-
-        // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
-        self.stm32_uart_interface.leave_reset().await;
 
         return Ok(());
     }

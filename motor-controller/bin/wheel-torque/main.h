@@ -52,6 +52,16 @@
 //  FILTERING/TUNING  //
 ////////////////////////
 
+// 1 rotation/sec
+#define WHEEL_TURNING_VEL_THRESH_RADS 6.28f
+// 90% of rated continuous current in mA
+#define MAX_CURR_WHEEL_NOT_TURNING 2160
+// 90% of peak current in mA
+#define MAX_CURR_WHEEL_TURNING 6300
+// Allowable control autority by the wheel vel PID as a percentage of the commanded feedforward current
+#define MAX_VEL_CONTROL_AUTH 0.50f 
+
+
 #define ENCODER_IIR_TF_MS 190.0f
 #define TORQUE_IIR_TF_MS 0.40f
 // #define DC_IIR_TF_MS 0.20f

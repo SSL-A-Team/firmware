@@ -21,7 +21,7 @@ use ateam_control_board::{
     robot_state::SharedRobotState, SystemIrqs,
 };
 
-use embassy_time::{Duration, Ticker};
+use embassy_time::{Duration, Ticker, Timer};
 // provide embedded panic probe
 use panic_probe as _;
 use static_cell::ConstStaticCell;
@@ -264,15 +264,35 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     defmt::info!("flasing motor...");
 
-    let res = fl_ccm.init_default_firmware_image(true).await;
-    let res = bl_ccm.init_default_firmware_image(true).await;
-    let res = br_ccm.init_default_firmware_image(true).await;
-    let res = fr_ccm.init_default_firmware_image(true).await;
+    let force_flash = true;
+    let res1 = fl_ccm.init_default_firmware_image(force_flash).await;
+    let res2 = bl_ccm.init_default_firmware_image(force_flash).await;
+    let res3 = br_ccm.init_default_firmware_image(force_flash).await;
+    let res4 = fr_ccm.init_default_firmware_image(force_flash).await;
 
-    if res.is_ok() {
-        defmt::info!("motor flashed.");
+
+    if res1.is_ok() {
+        defmt::info!("fl motor flashed.");
     } else {
-        defmt::error!("motor failed to flash!");
+        defmt::error!("fl motor failed to flash!");
+    }
+
+    if res2.is_ok() {
+        defmt::info!("bl motor flashed.");
+    } else {
+        defmt::error!("bl motor failed to flash!");
+    }
+
+    if res3.is_ok() {
+        defmt::info!("br motor flashed.");
+    } else {
+        defmt::error!("br motor failed to flash!");
+    }
+
+    if res4.is_ok() {
+        defmt::info!("fr motor flashed.");
+    } else {
+        defmt::error!("fr motor failed to flash!");
     }
 
     // ccm.set_motion_type(CcmMotionControlType::CCM_MCT_VOLTAGE_OPENLOOP);
@@ -295,10 +315,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     fr_ccm.set_telemetry_enabled(true);
     fr_ccm.set_motion_enabled(true);
 
-    fl_ccm.leave_reset().await;
-    bl_ccm.leave_reset().await;
-    br_ccm.leave_reset().await;
-    fr_ccm.leave_reset().await;
+    embassy_futures::join::join4(fl_ccm.reset(), bl_ccm.reset(), br_ccm.reset(), fr_ccm.reset()).await;
+    Timer::after(Duration::from_millis(100)).await;
 
     let mut last_seq_num = 0;
 
@@ -347,31 +365,31 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             ctr += 1;
         }
 
-        if curr_ctr > 1000 {
+        if curr_ctr > 10000 {
             curr_ctr = 0
-        } else if curr_ctr > 500 {
-            fl_ccm.set_current_setpoint(40);
-            bl_ccm.set_current_setpoint(40);
-            br_ccm.set_current_setpoint(40);
-            fr_ccm.set_current_setpoint(40);
+        } else if curr_ctr > 5000 {
+            fl_ccm.set_current_setpoint(50);
+            bl_ccm.set_current_setpoint(50);
+            br_ccm.set_current_setpoint(50);
+            fr_ccm.set_current_setpoint(50);
 
-            fl_ccm.set_setpoint(12.0);
-            bl_ccm.set_setpoint(12.0);
-            br_ccm.set_setpoint(12.0);
-            fr_ccm.set_setpoint(12.0);
+            fl_ccm.set_setpoint(160.0);
+            bl_ccm.set_setpoint(160.0);
+            br_ccm.set_setpoint(160.0);
+            fr_ccm.set_setpoint(160.0);
         } else {
-            fl_ccm.set_current_setpoint(-40);
-            bl_ccm.set_current_setpoint(-40);
-            br_ccm.set_current_setpoint(-40);
-            fr_ccm.set_current_setpoint(-40);
+            fl_ccm.set_current_setpoint(-50);
+            bl_ccm.set_current_setpoint(-50);
+            br_ccm.set_current_setpoint(-50);
+            fr_ccm.set_current_setpoint(-50);
 
-            fl_ccm.set_setpoint(-12.0);
-            bl_ccm.set_setpoint(-12.0);
-            br_ccm.set_setpoint(-12.0);
-            fr_ccm.set_setpoint(-12.0);
+            fl_ccm.set_setpoint(-120.0);
+            bl_ccm.set_setpoint(-160.0);
+            br_ccm.set_setpoint(-160.0);
+            fr_ccm.set_setpoint(-160.0);
         }
 
-        curr_ctr += 1;
+        // curr_ctr += 1;
 
         // if mv_cmd_counting_up {
         //     mv_cmd += 0.1;

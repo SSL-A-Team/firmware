@@ -22,7 +22,7 @@ use ateam_control_board::{
     robot_state::SharedRobotState, SystemIrqs,
 };
 
-use embassy_time::{Duration, Ticker};
+use embassy_time::{Duration, Ticker, Timer};
 // provide embedded panic probe
 use panic_probe as _;
 use static_cell::ConstStaticCell;
@@ -315,10 +315,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     fr_ccm.set_telemetry_enabled(true);
     fr_ccm.set_motion_enabled(true);
 
-    fl_ccm.leave_reset().await;
-    bl_ccm.leave_reset().await;
-    br_ccm.leave_reset().await;
-    fr_ccm.leave_reset().await;
+    embassy_futures::join::join4(fl_ccm.reset(), bl_ccm.reset(), br_ccm.reset(), fr_ccm.reset()).await;
+    Timer::after(Duration::from_millis(100)).await;
 
     let mut last_seq_num = 0;
 
