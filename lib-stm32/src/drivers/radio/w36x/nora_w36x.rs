@@ -135,6 +135,7 @@ impl<
     /// Uses AT+USYUS=<baud_rate>[,<flow_control>[,<change_after_confirm>]]
     ///   - flow_control: 0=disabled (default), 1=CTS/RTS
     ///   - change_after_confirm: 0=switch after reboot (requires AT&W), 1=switch immediately after OK
+    ///
     /// Note: data_bits, stop_bits, and parity are not configurable on W36.
     pub async fn config_uart(
         &self,
@@ -188,14 +189,14 @@ impl<
     /// Configure WiFi on the NORA-W36 module.
     /// Uses separate commands per configuration aspect:
     ///   1. Set SSID:     AT+UWSCP=<wlan_handle>,<ssid>
-    ///     - <wlan_handle> can only be 0.
-    ///     - <ssid> must be 32 characters or fewer.
+    ///      - <wlan_handle> can only be 0.
+    ///      - <ssid> must be 32 characters or fewer.
     ///   2. Set security:
     ///      - Open:       AT+UWSSO=<wlan_handle>
     ///      - WPA:        AT+UWSSW=<wlan_handle>,<passphrase>,<wpa_threshold>
-    ///     - <wlan_handle> can only be 0.
-    ///     - <passphrase> must be 8 to 63 characters.
-    ///     - <wpa_threshold> is optional, defaults to 0 (WPA2 or up), 1 WPA3 only.
+    ///        - <wlan_handle> can only be 0.
+    ///        - <passphrase> must be 8 to 63 characters.
+    ///        - <wpa_threshold> is optional, defaults to 0 (WPA2 or up), 1 WPA3 only.
     pub async fn config_wifi(&self, ssid: &str, auth: WifiAuth<'_>) -> Result<(), NoraRadioError> {
         // Set SSID
         if ssid.len() > 32 {
@@ -358,6 +359,7 @@ impl<
     /// AT+USOCR=<protocol>[,<pref_ip_ver>]
     /// - <protocol>: 6 for TCP, 17 for UDP
     /// - <pref_ip_ver> is optional, 0 for IPv4 (default) or 1 for IPv6.
+    ///
     /// Returns the socket ID assigned by the module.
     pub async fn create_socket(&self, protocol: SocketProtocol) -> Result<u8, NoraRadioError> {
         let mut str: String<16> = String::new();
@@ -396,6 +398,7 @@ impl<
     /// - <socket_handle> is assigned by the module when the socket is created.
     /// - <host_address> is the IP address or domain name of the remote host. Must be 0 to 128 characters. If using a domain name, the module will perform DNS resolution before connecting.
     /// - <remote_port> is the port number on the remote host to connect to. Must be 1-65535.
+    ///
     /// protocol is the socket protocol (TCP or UDP). For TCP, waits for +UESOC URC confirming the connection.
     pub async fn connect_socket(
         &self,
@@ -564,8 +567,9 @@ impl<
     /// Uses AT+USORB=<socket_handle>,<length>
     /// - <socket_handle> is assigned by the module when the socket is created.
     /// - <length> is the number of bytes to read, from 1 to 1000.
-    /// Response: +USORB:<socket_handle>{binary_data}\r\nOK\r\n
-    /// The {binary_data} uses the u-blox binary format: 0x01 (SOH), MSB of length, LSB of length,
+    ///
+    /// Response: `+USORB:<socket_handle>{binary_data}\r\nOK\r\n`
+    /// The `{binary_data}` uses the u-blox binary format: 0x01 (SOH), MSB of length, LSB of length,
     /// followed by the raw data bytes.
     pub async fn read_data<RET, FN>(
         &'a self,

@@ -386,7 +386,7 @@ impl<
         self.reader
             .read(|buf| {
                 // defmt::info!("Read cmd reply {:?}", buf);
-                if buf.len() >= 1 {
+                if !buf.is_empty() {
                     if buf[0] == STM32_BOOTLOADER_ACK {
                         res = Ok(());
                     } else {
@@ -398,9 +398,7 @@ impl<
             })
             .await?;
 
-        if res.is_err() {
-            return res;
-        }
+        res?;
 
         // defmt::debug!("sending the load address {:?}...", read_base_addr);
         self.writer
@@ -422,7 +420,7 @@ impl<
         self.reader
             .read(|buf| {
                 // defmt::info!("go cmd reply {:?}", buf);
-                if buf.len() >= 1 {
+                if !buf.is_empty() {
                     if buf[0] == STM32_BOOTLOADER_ACK {
                         res = Ok(());
                     } else {
@@ -434,9 +432,7 @@ impl<
             })
             .await?;
 
-        if res.is_err() {
-            return res;
-        }
+        res?;
 
         // defmt::debug!("sending the data length...");
         self.writer
@@ -454,7 +450,7 @@ impl<
         self.reader
             .read(|buf| {
                 // defmt::info!("data reply {:?}", buf);
-                if buf.len() >= 1 {
+                if !buf.is_empty() {
                     if buf[0] == STM32_BOOTLOADER_ACK {
                         data.copy_from_slice(&buf[1..]);
                         res = Ok(());
@@ -502,7 +498,7 @@ impl<
         self.reader
             .read(|buf| {
                 // defmt::info!("erase cmd reply {:?}", buf);
-                if buf.len() >= 1 {
+                if !buf.is_empty() {
                     if buf[0] == STM32_BOOTLOADER_ACK {
                         res = Ok(());
                     } else {
@@ -514,9 +510,7 @@ impl<
             })
             .await?;
 
-        if res.is_err() {
-            return res;
-        }
+        res?;
 
         // defmt::debug!("sending the page number...");
         self.writer
@@ -549,7 +543,7 @@ impl<
         self.reader
             .read(|buf| {
                 // defmt::info!("erase reply {:?}", buf);
-                if buf.len() >= 1 {
+                if !buf.is_empty() {
                     if buf[0] == STM32_BOOTLOADER_ACK {
                         res = Ok(());
                         // defmt::info!("erase accepted.");
@@ -806,14 +800,10 @@ impl<
 
     pub async fn load_motor_firmware_image(&mut self, fw_image_bytes: &[u8]) -> Result<(), ()> {
         if !self.in_bootloader {
-            if let Err(err) = self.reset_into_bootloader().await {
-                return Err(err);
-            }
+            self.reset_into_bootloader().await?;
         }
 
-        if let Err(err) = self.verify_bootloader().await {
-            return Err(err);
-        }
+        self.verify_bootloader().await?;
 
         match self.get_device_id().await {
             Err(err) => return Err(err),
@@ -835,22 +825,14 @@ impl<
         };
 
         // Erase up to Page 31 since the last page is used for current calibration constants.
-        if let Err(err) = self.erase_device_memory_to_page(0, 15).await {
-            return Err(err);
-        }
+        self.erase_device_memory_to_page(0, 15).await?;
 
         // Split up to 2 commands to reduce UART packet size.
-        if let Err(err) = self
-            .erase_device_memory_to_page(16, MOTOR_CURRENT_PAGE)
-            .await
-        {
-            return Err(err);
-        }
+        self.erase_device_memory_to_page(16, MOTOR_CURRENT_PAGE)
+            .await?;
 
         // program image
-        if let Err(err) = self.write_device_memory(fw_image_bytes, None).await {
-            return Err(err);
-        }
+        self.write_device_memory(fw_image_bytes, None).await?;
 
         self.reset_into_program(true).await;
 
@@ -862,14 +844,10 @@ impl<
         current_constant: f32,
     ) -> Result<(), ()> {
         if !self.in_bootloader {
-            if let Err(err) = self.reset_into_bootloader().await {
-                return Err(err);
-            }
+            self.reset_into_bootloader().await?;
         }
 
-        if let Err(err) = self.verify_bootloader().await {
-            return Err(err);
-        }
+        self.verify_bootloader().await?;
 
         match self.get_device_id().await {
             Err(err) => return Err(err),
@@ -888,9 +866,7 @@ impl<
         };
 
         // Erase the last page
-        if let Err(err) = self.erase_device_memory_single(MOTOR_CURRENT_PAGE).await {
-            return Err(err);
-        }
+        self.erase_device_memory_single(MOTOR_CURRENT_PAGE).await?;
 
         // Write the constants to the last page but with the magic number prepended
         let mut data_to_write = [0u8; 8];
@@ -899,12 +875,8 @@ impl<
         let current_bytes = current_constant.to_le_bytes();
         data_to_write[4..8].copy_from_slice(&current_bytes);
 
-        if let Err(err) = self
-            .write_device_memory(&data_to_write, Some(MOTOR_CURRENT_START_ADDRESS))
-            .await
-        {
-            return Err(err);
-        }
+        self.write_device_memory(&data_to_write, Some(MOTOR_CURRENT_START_ADDRESS))
+            .await?;
 
         Ok(())
     }
