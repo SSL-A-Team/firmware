@@ -143,7 +143,7 @@ int main() {
     quadenc_reset_encoder_delta();
 
     // setup the velocity filter
-    iir_filter_init(&encoder_filter, iir_filter_alpha_from_Tf(ENCODER_IIR_TF_MS, VELOCITY_LOOP_RATE_MS));
+    iir_filter_init(&encoder_filter, iir_filter_alpha_from_cutoff_hz(200.0f, VELOCITY_LOOP_RATE_MS));
 
     ////////////////////////////////////
     //  Current Sense Initialization  //
