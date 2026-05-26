@@ -270,7 +270,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let res3 = br_ccm.init_default_firmware_image(force_flash).await;
     let res4 = fr_ccm.init_default_firmware_image(force_flash).await;
 
-
     if res1.is_ok() {
         defmt::info!("fl motor flashed.");
     } else {
@@ -315,7 +314,13 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     fr_ccm.set_telemetry_enabled(true);
     fr_ccm.set_motion_enabled(true);
 
-    embassy_futures::join::join4(fl_ccm.reset(), bl_ccm.reset(), br_ccm.reset(), fr_ccm.reset()).await;
+    embassy_futures::join::join4(
+        fl_ccm.reset(),
+        bl_ccm.reset(),
+        br_ccm.reset(),
+        fr_ccm.reset(),
+    )
+    .await;
     Timer::after(Duration::from_millis(100)).await;
 
     let mut last_seq_num = 0;
