@@ -336,7 +336,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     let mut curr_ctr = 0;
 
-
     let mut curr_setpoint: i16 = 0;
     let mut robot_moved_vel: f32 = f32::MAX;
     let mut robot_moved_curr: i16 = 0;
@@ -428,7 +427,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         br_ccm.set_current_setpoint(curr_setpoint);
         fr_ccm.set_current_setpoint(curr_setpoint);
 
-        let avg_wheel_vel = (fl_ccm.read_rads() + bl_ccm.read_rads() + br_ccm.read_rads() + fr_ccm.read_rads()) / 4.0;
+        let avg_wheel_vel =
+            (fl_ccm.read_rads() + bl_ccm.read_rads() + br_ccm.read_rads() + fr_ccm.read_rads())
+                / 4.0;
         if !robot_moved_yet && avg_wheel_vel > 6.28 {
             robot_moved_yet = true;
             robot_moved_vel = avg_wheel_vel;

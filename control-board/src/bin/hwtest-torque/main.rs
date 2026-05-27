@@ -326,7 +326,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             curr_setpoint = 0;
         }
 
-
         // if curr_ctr > 10000 {
         //     curr_ctr = 0
         // } else if curr_ctr > 5000 {
