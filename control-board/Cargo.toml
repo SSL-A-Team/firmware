@@ -131,6 +131,16 @@ name = "hwtest-radio-w36"
 test = false
 harness = false
 
+[[bin]]
+name = "hwtest-torque"
+test = false
+harness = false
+
+[[bin]]
+name = "profile-ang-fric"
+test = false
+harness = false
+
 [[test]]
 name = "basic-test"
 harness = false

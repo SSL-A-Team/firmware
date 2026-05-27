@@ -321,7 +321,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         fr_ccm.reset(),
     )
     .await;
-    Timer::after(Duration::from_millis(100)).await;
+    Timer::after(Duration::from_millis(50)).await;
 
     let mut last_seq_num = 0;
 

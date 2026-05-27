@@ -822,22 +822,33 @@ static void set_current(uint16_t current_ma) {
     fxptpi_setpoint(&current_controller, (Int16FixedPoint_t) scaled_current);
 }
 
+static int16_t last_current = 0;
 void pwm6step_set_current(int16_t current_ma) {
     if (current_ma < 0) {
         pwm6step_set_direction(COUNTER_CLOCKWISE);
-    } else {
+    } else if (current_ma > 0) {
         pwm6step_set_direction(CLOCKWISE);
     }
+
+    bool starting_from_zero = false;
+    if (last_current == 0 && current_ma != 0) {
+        starting_from_zero = true;
+    }
+    last_current = current_ma;
 
     motor_control_mode = CURRENT;
 
     uint16_t abs_current_ma = (uint16_t) abs((int) current_ma);
     set_current(abs_current_ma);
 
-    if (TIM2->DIER == 0) {
+    if (TIM2->DIER == 0 || starting_from_zero) {
         // enable it and force an update
         TIM2->DIER = TIM_DIER_UIE;
         TIM2->EGR = TIM_EGR_UG;
+    }
+
+    if (starting_from_zero) {
+        trigger_commutation();
     }
 }
 
