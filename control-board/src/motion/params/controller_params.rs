@@ -35,4 +35,8 @@ pub const TRAJ_RECOMPUTE_ERROR: Vector4f = Vector4f::new(0.5, 1.0, 1.0, 2.0);
 /// Accel magnitude threshold for coulomb friction compensation gating.
 /// When body_accel_out magnitude is above this, coulomb comp uses target twist direction
 /// (helps overcome static friction). Below this, uses deadzoned estimated twist (stable at rest).
-pub const COULOMB_COMP_ACCEL_DEADZONE: f32 = 0.5;
+/// TODO: separate this to linear and angular
+pub const COULOMB_COMP_ACCEL_DEADZONE: f32 = 2.0;
+
+pub const LINEAR_STATE_TWIST_DEADZONE: f32 = 0.05;
+pub const ANGULAR_STATE_TWIST_DEADZONE: f32 = 0.3;

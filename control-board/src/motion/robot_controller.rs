@@ -1,3 +1,6 @@
+use crate::motion::params::controller_params::{
+    ANGULAR_STATE_TWIST_DEADZONE, LINEAR_STATE_TWIST_DEADZONE,
+};
 use crate::motion::pid::PidController;
 use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::{
@@ -154,13 +157,13 @@ impl BodyController {
         let mut state_estimate = self.robot_model.get_state();
 
         // Deadzone the velocity estimate
-        if fabsf(state_estimate[3]) < 0.1 {
+        if fabsf(state_estimate[3]) < LINEAR_STATE_TWIST_DEADZONE {
             state_estimate[3] = 0.0;
         }
-        if fabsf(state_estimate[4]) < 0.1 {
+        if fabsf(state_estimate[4]) < LINEAR_STATE_TWIST_DEADZONE {
             state_estimate[4] = 0.0;
         }
-        if fabsf(state_estimate[5]) < 0.2 {
+        if fabsf(state_estimate[5]) < ANGULAR_STATE_TWIST_DEADZONE {
             state_estimate[5] = 0.0;
         }
 
