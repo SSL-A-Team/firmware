@@ -49,15 +49,12 @@ impl<'a, const NUM_CELLS: usize, F: Filter<f32>> LipoModel<'a, NUM_CELLS, F> {
     }
 
     pub fn add_cell_voltage_samples(&mut self, cell_adc_voltage_samples: &[f32]) {
-        // place raw samples into cell_voltage buffer and use it as scratch space
         self.cell_voltages.copy_from_slice(cell_adc_voltage_samples);
 
-        // inplace convert raw voltage samples to cell range
         for (cv, cv_map) in self.cell_voltages.iter_mut().zip(self.cell_range_maps) {
             *cv = cv_map.map(*cv);
         }
 
-        // update filters and inplace update value with filtered value
         for (cv, cv_filt) in self
             .cell_voltages
             .iter_mut()
@@ -67,8 +64,6 @@ impl<'a, const NUM_CELLS: usize, F: Filter<f32>> LipoModel<'a, NUM_CELLS, F> {
             cv_filt.update();
             *cv = cv_filt.filtered_value().unwrap_or(0.0);
         }
-
-        // defmt::info!("unconverted cell volatages {}", self.cell_voltages);
 
         if self.cell_voltage_compute_mode == CellVoltageComputeMode::Chained {
             for i in (1..NUM_CELLS).rev() {

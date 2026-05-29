@@ -389,7 +389,6 @@ void DMA1_Channel2_3_IRQHandler() {
  * @brief callback handler for uart
  *
  */
-__attribute((__optimize__("O0")))
 void USART1_IRQHandler() {
     const uint32_t uart_status_register = USART1->ISR;
 

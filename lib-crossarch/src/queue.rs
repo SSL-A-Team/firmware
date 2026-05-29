@@ -55,6 +55,9 @@ pub struct EnqueueRef<'a, const LENGTH: usize, const DEPTH: usize> {
     queue: &'a Queue<LENGTH, DEPTH>,
     data: &'a mut [u8],
     len: &'a mut usize,
+    /// True when try_enqueue_override performed an eviction (decremented write_index and size)
+    /// to make room. cancel() must restore those decrements so the queue state is coherent.
+    evicted: bool,
 }
 
 impl<const LENGTH: usize, const DEPTH: usize> EnqueueRef<'_, LENGTH, DEPTH> {
@@ -67,7 +70,15 @@ impl<const LENGTH: usize, const DEPTH: usize> EnqueueRef<'_, LENGTH, DEPTH> {
     }
 
     pub fn cancel(self) {
-        self.queue.cancel_enqueue();
+        if self.evicted {
+            // Restore write_index and size so the queue stays at DEPTH entries.
+            // Do NOT restore buf.len: the DMA engine may have already written into
+            // this buffer, so the old data is gone. Leave len=0 so the slot is
+            // treated as an empty/discarded entry by the next consumer.
+            self.queue.cancel_enqueue_restore_eviction();
+        } else {
+            self.queue.cancel_enqueue();
+        }
     }
 }
 
@@ -77,7 +88,8 @@ impl<const LENGTH: usize, const DEPTH: usize> Drop for EnqueueRef<'_, LENGTH, DE
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug, defmt::Format)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Error {
     QueueEmpty,
     QueueFull,
@@ -131,19 +143,8 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
             if self.size.load(Ordering::SeqCst) > 0 {
                 self.read_in_progress.store(true, Ordering::SeqCst);
 
-                /* Safety: the async access to buffer data is guarded by atomic read/write and queue size flags.
-                 * The flagging logic should ensure a buffer can only be referenced be a user or a DMA engine but
-                 * not both at once.
-                 */
                 let buf = unsafe { &*self.buffers[self.read_index.load(Ordering::SeqCst)].get() };
-                // let len = unsafe { buf.len.assume_init() } ;
-                /* Saftey: this is safe because &buf.data is const/static allocated legally in the main.rs file
-                 * (where a user can specify the link section) and so the compiler knows the type and satisfied
-                 * defined behavior constraints w.r.t data alignment and init values, and therefore referencing
-                 * the buffer means the internal data is valid.
-                 */
                 let data = &buf.data[..buf.len];
-                // let data = unsafe { &MaybeUninit::slice_assume_init_ref(&buf.data)[..buf.len] };
 
                 Ok(DequeueRef { queue: self, data })
             } else {
@@ -153,18 +154,10 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
     }
 
     pub async fn dequeue(&'_ self) -> Result<DequeueRef<'_, LENGTH, DEPTH>, Error> {
-        // TODO: look at this (when uncommented causes issue cancelling dequeue)
-        // if critical_section::with(|_| unsafe { (*self.dequeue_waker.get()).is_some() }) {
-        //     return Err(Error::InProgress);
-        // }
-
         poll_fn(|cx| {
             critical_section::with(|_| {
                 match self.try_dequeue() {
                     Err(Error::QueueEmpty) => {
-                        /* Safety: this raw pointer write is safe because the underlying memory is statically allocated
-                         * and the total write operation is atomic across tasks because of the critical_section closure
-                         */
                         unsafe { *self.dequeue_waker.get() = Some(cx.waker().clone()) };
                         Poll::Pending
                     }
@@ -189,15 +182,10 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                     Ordering::SeqCst,
                 );
 
-                // NOTE: this was an atomic fetch_add but that isn't supported on
-                // thumbv6m
                 let cur_size = self.size.load(Ordering::SeqCst);
                 self.size.store(cur_size - 1, Ordering::SeqCst);
             }
 
-            /* Safety: this raw pointer write is safe because the underlying memory is statically allocated
-             * and the total write operation is atomic across tasks because of the critical_section closure
-             */
             if let Some(w) = unsafe { (*self.enqueue_waker.get()).take() } {
                 w.wake();
             }
@@ -212,29 +200,16 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
 
             if self.size.load(Ordering::SeqCst) < DEPTH {
                 self.write_in_progress.store(true, Ordering::SeqCst);
-                /* Safety: the async access to buffer data is guarded by atomic read/write and queue size flags.
-                 * The flagging logic should ensure a buffer can only be referenced be a user or a DMA engine but
-                 * not both at once.
-                 */
                 let buf =
                     unsafe { &mut *self.buffers[self.write_index.load(Ordering::SeqCst)].get() };
-                /* Saftey: this is safe because &buf.data is const/static allocated legally in the main.rs file
-                 * (where a user can specify the link section) and so the compiler knows the type and satisfied
-                 * defined behavior constraints w.r.t data alignment and init values, and therefore referencing
-                 * the buffer means the internal data is valid.
-                 */
-                // let data = unsafe { MaybeUninit::slice_assume_init_mut(&mut buf.data) };
                 let data = &mut buf.data;
-
-                // TODO CHCEK: https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#method.write-1 this should overwrite the value and
-                // return a mut ref to the new value
-                // let len = buf.len.write(0);
                 buf.len = 0;
 
                 Ok(EnqueueRef {
                     queue: self,
                     data,
                     len: &mut buf.len,
+                    evicted: false,
                 })
             } else {
                 Err(Error::QueueFull)
@@ -248,66 +223,36 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                 return Err(Error::InProgress);
             }
 
-            // Doesn't check if the queue is full and just pulls the next buffer.
-
             self.write_in_progress.store(true, Ordering::SeqCst);
-            /* Safety: the async access to buffer data is guarded by atomic read/write and queue size flags.
-             * The flagging logic should ensure a buffer can only be referenced be a user or a DMA engine but
-             * not both at once.
-             */
 
-            // we will return an available write buffer
-            // if the queue is currently full, we need to evict the tail entry
             let mut write_index = self.write_index.load(Ordering::SeqCst);
             let cur_size = self.size.load(Ordering::SeqCst);
-            if cur_size >= DEPTH {
-                // queue is full, free the back entry
+            let evicted = cur_size >= DEPTH;
+            if evicted {
                 if write_index == 0 {
                     write_index = DEPTH - 1;
                 } else {
                     write_index -= 1;
                 }
 
-                // write back decremented write index. Write index is incremented to the next buffer
-                // when any enqueue is finalized. The size guards if an enqueue can actually write into
-                // the buffer pointed to by the write index
                 self.write_index.store(write_index, Ordering::SeqCst);
-
-                // write back decremented size, this guards the dequeue from using the
-                // entry and seeing it as valid. This is valid because we know any pending dequeue
-                // must be on another buffer beacuse the queue is full, and the assert in the constructor
-                // requres we are *at least* double buffered, so any dequeue in a lower prio thread is
-                // pointing to the other buffer meaning we can just purge the current one
                 self.size.store(cur_size - 1, Ordering::SeqCst);
-
-                // the memory in the backing buffer intact but it's now available for writing
             }
 
             let buf = unsafe { &mut *self.buffers[write_index].get() };
-            /* Saftey: this is safe because &buf.data is const/static allocated legally in the main.rs file
-             * (where a user can specify the link section) and so the compiler knows the type and satisfied
-             * defined behavior constraints w.r.t data alignment and init values, and therefore referencing
-             * the buffer means the internal data is valid.
-             */
             let data = &mut buf.data;
-
-            // TODO CHCEK: https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#method.write-1 this should overwrite the value and
-            // return a mut ref to the new value
-            // let len = buf.len.write(0);
             buf.len = 0;
 
             Ok(EnqueueRef {
                 queue: self,
                 data,
                 len: &mut buf.len,
+                evicted,
             })
         })
     }
 
     pub async fn enqueue(&'_ self) -> Result<EnqueueRef<'_, LENGTH, DEPTH>, Error> {
-        /* Safety: this raw pointer access is safe because the underlying memory is statically allocated
-         * and the total read operation is atomic across tasks because of the critical_section closure
-         */
         if critical_section::with(|_| unsafe { (*self.enqueue_waker.get()).is_some() }) {
             return Err(Error::InProgress);
         }
@@ -316,9 +261,6 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
             critical_section::with(|_| {
                 match self.try_enqueue() {
                     Err(Error::QueueFull) => {
-                        /* Safety: this raw pointer write is safe because the underlying memory is statically allocated
-                         * and the total write operation is atomic across tasks because of the critical_section closure
-                         */
                         unsafe { *self.enqueue_waker.get() = Some(cx.waker().clone()) };
                         Poll::Pending
                     }
@@ -333,6 +275,22 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
         self.write_in_progress.store(false, Ordering::SeqCst);
     }
 
+    fn cancel_enqueue_restore_eviction(&self) {
+        // The eviction in try_enqueue_override decremented write_index and size to free the
+        // newest slot. If the DMA produced no data we must undo those decrements so the queue
+        // remains at its pre-eviction depth rather than permanently losing one slot.
+        critical_section::with(|_| {
+            let write_index = self.write_index.load(Ordering::SeqCst);
+            self.write_index
+                .store((write_index + 1) % DEPTH, Ordering::SeqCst);
+
+            let cur_size = self.size.load(Ordering::SeqCst);
+            self.size.store(cur_size + 1, Ordering::SeqCst);
+
+            self.write_in_progress.store(false, Ordering::SeqCst);
+        });
+    }
+
     fn finish_enqueue(&self) {
         critical_section::with(|_| {
             if self.write_in_progress.load(Ordering::SeqCst) {
@@ -343,15 +301,10 @@ impl<const LENGTH: usize, const DEPTH: usize> Queue<LENGTH, DEPTH> {
                     Ordering::SeqCst,
                 );
 
-                // NOTE: this was an atomic fetch_add but that isn't supported on
-                // thumbv6m
                 let cur_size = self.size.load(Ordering::SeqCst);
                 self.size.store(cur_size + 1, Ordering::SeqCst);
             }
 
-            /* Safety: this raw pointer write is safe because the underlying memory is statically allocated
-             * and the total write operation is atomic across tasks because of the critical_section closure
-             */
             if let Some(w) = unsafe { (*self.dequeue_waker.get()).take() } {
                 w.wake();
             }

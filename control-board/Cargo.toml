@@ -23,6 +23,7 @@ embassy-time = { version = "0.4.0", features = [
     "defmt-timestamp-uptime",
     "tick-hz-32_768",
 ] }
+embassy-usb = { version = "0.5.0", features = ["defmt"] }
 embassy-stm32 = { version = "0.3.0", features = [
     "defmt",
     "stm32h723zg",
@@ -51,6 +52,7 @@ apa102-spi = "0.5.1"
 
 ateam-lib-stm32 = { path = "../lib-stm32", default-features = false  }
 ateam-common-packets = { path = "../software-communication/ateam-common-packets/rust-lib" }
+ateam-controls = { path = "../controls/ateam-controls", features = ["defmt"] }
 credentials = { path = "../credentials" }
 
 [features]
@@ -121,6 +123,21 @@ harness = false
 
 [[bin]]
 name = "hwtest-radio"
+test = false
+harness = false
+
+[[bin]]
+name = "hwtest-radio-w36"
+test = false
+harness = false
+
+[[bin]]
+name = "hwtest-torque"
+test = false
+harness = false
+
+[[bin]]
+name = "profile-ang-fric"
 test = false
 harness = false
 

@@ -27,6 +27,8 @@ impl From<AtPacketError> for EdmPacketError {
     }
 }
 
+pub const EDM_PACKET_WIRE_OVERHEAD: usize = 8;
+
 #[repr(C)]
 #[derive(Debug)]
 struct EdmPacketRaw<P: ?Sized = [u8]> {

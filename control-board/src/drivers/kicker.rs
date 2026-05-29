@@ -128,11 +128,11 @@ impl<
     pub fn set_telemetry_enabled(&mut self, telemetry_enabled: bool) {
         self.telemetry_enabled = telemetry_enabled;
         self.command_state
-            .set_telemetry_enabled(telemetry_enabled as u32);
+            .set_telemetry_enabled(telemetry_enabled as u16);
     }
 
     pub fn request_kick(&mut self, request: u32) {
-        self.command_state.kick_request = request;
+        self.command_state.kick_request = request as u8;
     }
 
     pub fn set_kick_strength(&mut self, kick_str: f32) {
@@ -141,16 +141,6 @@ impl<
 
     pub fn set_drib_vel(&mut self, drib_vel: f32) {
         self.command_state.drib_speed = drib_vel;
-    }
-
-    pub fn set_drib_multiplier(&mut self, drib_mult: u32) {
-        let multiplier;
-        if drib_mult == 0 || drib_mult > 100 {
-            multiplier = 100;
-        } else {
-            multiplier = drib_mult;
-        }
-        self.command_state.set_dribbler_mult(multiplier);
     }
 
     pub fn ball_detected(&self) -> bool {

@@ -78,8 +78,7 @@ common--clean:
 #  motor controller binaries  #
 ###############################
 
-.PHONY: .motor-controller-setup
-.motor-controller-setup:
+ motor-controller/build/CMakeCache.txt: motor-controller/CMakeLists.txt
 	cd motor-controller/ && \
 	cmake -B build/ \
 
@@ -87,7 +86,7 @@ common--clean:
 motor_controller_binaries := ${shell cd motor-controller/bin && ls -d * && cd ../..}
 
 define create-motor-controller-targets
-$1--$2: .motor-controller-setup
+$1--$2: motor-controller/build/CMakeCache.txt
 	cd $1/build/ && \
 	make $2
 $1--all:: $1--$2
@@ -163,7 +162,7 @@ control_openocd_cfg_file := board/st_nucleo_h743zi.cfg
 
 define create-control-board-rust-targets
 .PHONY: .$1-$2-cargo-build
-.$1-$2-cargo-build: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel
+.$1-$2-cargo-build: kicker-board--kicker kicker-board--hwtest-coms motor-controller--wheel motor-controller--wheel-torque
 	cd $1/ && \
 	cargo build $(additional_control_cargo_flags) --target thumbv7em-none-eabihf --release --bin $2
 

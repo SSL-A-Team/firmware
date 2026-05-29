@@ -10,7 +10,7 @@ use defmt_rtt as _;
 
 use ateam_control_board::{
     create_dotstar_task, create_imu_task, create_io_task, get_system_config,
-    pins::{AccelDataPubSub, GyroDataPubSub, LedCommandPubSub},
+    pins::{AccelDataPubSub, GyroDataPubSub, LedCommandPubSub, TelemetryPubSub},
     robot_state::SharedRobotState,
 };
 
@@ -25,6 +25,7 @@ static ROBOT_STATE: ConstStaticCell<SharedRobotState> =
 static GYRO_DATA_CHANNEL: GyroDataPubSub = PubSubChannel::new();
 static ACCEL_DATA_CHANNEL: AccelDataPubSub = PubSubChannel::new();
 static LED_COMMAND_PUBSUB: LedCommandPubSub = PubSubChannel::new();
+static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
@@ -59,6 +60,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let imu_accel_data_publisher = ACCEL_DATA_CHANNEL.publisher().unwrap();
     let mut imu_accel_data_subscriber = ACCEL_DATA_CHANNEL.subscriber().unwrap();
     let imu_led_cmd_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
+    let imu_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
 
     ///////////////////
     //  start tasks  //
@@ -76,6 +78,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         imu_gyro_data_publisher,
         imu_accel_data_publisher,
         imu_led_cmd_publisher,
+        imu_telemetry_publisher,
         p
     );
 

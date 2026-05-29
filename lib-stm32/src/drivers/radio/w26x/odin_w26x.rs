@@ -5,8 +5,8 @@ use embassy_stm32::usart;
 use embassy_time::Timer;
 use heapless::String;
 
-use crate::queue;
 use crate::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
+use ateam_lib_crossarch::queue;
 
 use super::at_protocol::{ATEvent, ATResponse, WifiLinkDisconnectedReason};
 use super::edm_protocol::{EdmPacket, EdmPacketError};
@@ -322,20 +322,27 @@ impl<
         while network_up < 2 {
             self.reader
                 .dequeue(|buf| {
-                    let packet = self.to_packet(buf)?;
-
-                    if let EdmPacket::ATEvent(ATEvent::NetworkUp { interface_id: 0 }) = packet {
-                        network_up += 1;
-                    } else if let EdmPacket::ATEvent(ATEvent::WifiLinkConnected {
-                        conn_id: _,
-                        bssid: _,
-                        channel: _,
-                    }) = packet
-                    {
-                        // TODO
-                        // self.wifiConnected = true;
-                    } else {
-                        return Err(OdinRadioError::AtEventUnsupported);
+                    match self.to_packet(buf)? {
+                        EdmPacket::ATEvent(ATEvent::NetworkUp { interface_id: 0 }) => {
+                            defmt::info!("odin - network up");
+                            network_up += 1;
+                        }
+                        EdmPacket::ATEvent(ATEvent::WifiLinkConnected {
+                            conn_id,
+                            bssid,
+                            channel,
+                        }) => {
+                            defmt::info!("odin - wifi link connected {} {} {}", conn_id, bssid, channel);
+                            // TODO
+                            // self.wifiConnected = true;
+                        }
+                        EdmPacket::ATEvent(ATEvent::WifiLinkDisconnected { conn_id, reason }) => {
+                            defmt::info!("odin - got WifiLinkDisconnected during initial connect. id: {}, reason: {}", conn_id, reason);
+                        }
+                        other => {
+                            defmt::error!("odin - connect_wifi: unsupported EDM packet: {}", other);
+                            return Err(OdinRadioError::AtEventUnsupported);
+                        }
                     }
                     Ok(())
                 })
@@ -412,7 +419,8 @@ impl<
                                 return Err(OdinRadioError::PeerConnectionFailed);
                             }
                         }
-                        _ => {
+                        other => {
+                            defmt::warn!("connect_peer: unsupported EDM packet: {}", other);
                             return Err(OdinRadioError::AtEventUnsupported);
                         }
                     };
@@ -439,14 +447,18 @@ impl<
         while !ok || !peer_disconnect || !disconnect {
             self.reader
                 .dequeue(|buf| {
+                    defmt::trace!("{}", buf);
                     match self.to_packet(buf)? {
                         EdmPacket::ATEvent(ATEvent::PeerDisconnected { peer_handle: _ }) => {
+                            defmt::debug!("odin - close peer - ATEvent::PeerDisconnected");
                             peer_disconnect = true
                         }
                         EdmPacket::DisconnectEvent { channel: _ } => {
+                            defmt::debug!("odin - close peer - DisconnectEvent");
                             disconnect = true;
                         }
                         EdmPacket::ATResponse(ATResponse::Ok("")) => {
+                            defmt::debug!("odin - close peer - ATResponse::Ok");
                             ok = true;
                         }
                         EdmPacket::DataEvent {
@@ -514,12 +526,12 @@ impl<
                         if let EdmPacket::DataEvent { channel: _, data } = pkt {
                             Ok(fn_read(data))
                         } else {
-                            // defmt::trace!("got non data event");
+                            defmt::warn!("OdinW26x - expected DataEvent, got {}", pkt);
                             Err(OdinRadioError::ReadDataInvalid)
                         }
                     }
-                    Err(_) => {
-                        // defmt::trace!("got data that wasn't an edm packet: {}", buf.data());
+                    Err(e) => {
+                        defmt::warn!("OdinW26x - EDM framing error: {}", e);
                         Err(OdinRadioError::ReadDataInvalid)
                     }
                 }
@@ -527,14 +539,17 @@ impl<
             }
             Err(queue::Error::QueueFull) => {
                 // nothing to read
+                defmt::warn!("OdinW26x - ReadLowLevelBufferEmpty - QueueFull");
                 Err(OdinRadioError::ReadLowLevelBufferEmpty)
             }
             Err(queue::Error::QueueEmpty) => {
                 // nothing to read
+                defmt::warn!("OdinW26x - ReadLowLevelBufferEmpty - QueueEmpty");
                 Err(OdinRadioError::ReadLowLevelBufferEmpty)
             }
             Err(queue::Error::InProgress) => {
                 // you did something illegal
+                defmt::error!("OdinW26x - ReadLowLevelBufferBusy");
                 Err(OdinRadioError::ReadLowLevelBufferBusy)
             }
         }

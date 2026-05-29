@@ -47,11 +47,43 @@ impl<'a, const NUM_STATES: usize> PidController<NUM_STATES> {
         p + i + d
     }
 
+    /// Like `calculate`, but uses an externally provided derivative signal
+    /// for the D term instead of numerically differentiating the error.
+    pub fn calculate_with_derivative(
+        &mut self,
+        setpoint: &SVector<f32, NUM_STATES>,
+        process_variable: &SVector<f32, NUM_STATES>,
+        derivative: &SVector<f32, NUM_STATES>,
+        dt_s: f32,
+    ) -> SVector<f32, NUM_STATES> {
+        let error = setpoint - process_variable;
+
+        let cur_integrated_error = self.integrated_error + (error * dt_s);
+        self.integrated_error = cur_integrated_error.zip_zip_map(
+            &self.gain.column(3),
+            &self.gain.column(4),
+            |err, min_err, max_err| clamp(err, min_err, max_err),
+        );
+
+        self.prev_error = error;
+
+        let p = self.gain.column(0).component_mul(&error);
+        let i = self.gain.column(1).component_mul(&self.integrated_error);
+        let d = self.gain.column(2).component_mul(derivative);
+
+        p + i + d
+    }
+
     pub fn get_gain(&self) -> SMatrix<f32, NUM_STATES, 5> {
         return self.gain;
     }
 
     pub fn set_gain(&mut self, new_gain: SMatrix<f32, NUM_STATES, 5>) {
         self.gain.copy_from(&new_gain)
+    }
+
+    pub fn reset(&mut self) {
+        self.prev_error = SVector::<f32, NUM_STATES>::zeros();
+        self.integrated_error = SVector::<f32, NUM_STATES>::zeros();
     }
 }

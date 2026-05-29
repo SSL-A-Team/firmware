@@ -103,6 +103,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     // telemetry channel
     let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
+    let imu_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
     let radio_telemetry_subscriber = RADIO_TELEMETRY_CHANNEL.subscriber().unwrap();
     let radio_led_cmd_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
 
@@ -162,6 +163,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         imu_gyro_data_publisher,
         imu_accel_data_publisher,
         imu_led_cmd_publisher,
+        imu_telemetry_publisher,
         p
     );
 

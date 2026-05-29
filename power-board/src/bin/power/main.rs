@@ -97,9 +97,9 @@ async fn main(spawner: Spawner) {
         // read pwr button
         // shortest possible interrupt from pwr btn controller is 32ms
         if pwr_btn.get_level() == Level::Low || SHARED_POWER_STATE.get_shutdown_requested().await {
-            main_audio_publisher
-                .publish(AudioCommand::PlaySong(SongId::ShutdownRequested))
-                .await;
+            let _ =
+                main_audio_publisher.try_publish(AudioCommand::PlaySong(SongId::ShutdownRequested));
+            let mut last_shutdown_song_time = Instant::now();
             Timer::after_millis(250).await;
             shutdown_ind.set_low(); // indicate shutdown request
             let shutdown_requested_time = Instant::now();
@@ -117,9 +117,8 @@ async fn main(spawner: Spawner) {
                     || Instant::now() > shutdown_requested_time + Duration::from_secs(30)
                     || !cur_robot_state.coms_established
                 {
-                    main_audio_publisher
-                        .publish(AudioCommand::PlaySong(SongId::PowerOff))
-                        .await;
+                    let _ =
+                        main_audio_publisher.try_publish(AudioCommand::PlaySong(SongId::PowerOff));
                     // Wait long enough for the song to play :)
                     Timer::after_millis(500).await;
                     defmt::info!("MAIN TASK: Shutdown acknowledged, turning off power");
@@ -127,6 +126,12 @@ async fn main(spawner: Spawner) {
                     sequence_power_off(&mut en_3v3, &mut en_5v0, &mut en_12v0).await;
                     kill_sig.set_low();
                     break;
+                }
+
+                if last_shutdown_song_time.elapsed() >= Duration::from_millis(2000) {
+                    let _ = main_audio_publisher
+                        .try_publish(AudioCommand::PlaySong(SongId::ShutdownRequested));
+                    last_shutdown_song_time = Instant::now();
                 }
 
                 Timer::after_millis(10).await;

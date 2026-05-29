@@ -1,562 +1,812 @@
+use crate::motion::params::controller_params::{
+    ANGULAR_STATE_TWIST_DEADZONE, LINEAR_STATE_TWIST_DEADZONE,
+};
+use crate::motion::pid::PidController;
 use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::{
-    ParameterCommandCode::*,
-    ParameterDataFormat::{PID_LIMITED_INTEGRAL_F32, VEC3_F32, VEC4_F32},
-    ParameterName,
-    ParameterName::{
-        ANGULAR_VEL_PID_Z, RC_BODY_ACC_LIMIT, RC_BODY_VEL_LIMIT, RC_WHEEL_ACC_LIMIT,
-        VEL_CGFK_INITIAL_COVARIANCE, VEL_CGKF_ENCODER_NOISE, VEL_CGKF_GYRO_NOISE,
-        VEL_CGKF_K_MATRIX, VEL_CGKF_PROCESS_NOISE, VEL_PID_X, VEL_PID_Y,
-    },
+    BasicControl, BodyControlExtendedTelemetry, BodyControlTelemetry,
+    ExtendedGlobalAccelerationTelemetry, ExtendedGlobalPositionTelemetry,
+    ExtendedGlobalVelocityTelemetry, ExtendedLocalAccelerationTelemetry,
+    ExtendedLocalVelocityTelemetry, ParameterCommandCode::*, ParameterDataFormat, ParameterName,
 };
-use embassy_stm32::pac::adc::vals::Exten;
-use nalgebra::{SVector, Vector3, Vector4, Vector5};
-
-use super::constant_gain_kalman_filter::CgKalmanFilter;
-use super::pid::PidController;
-use super::robot_model::RobotModel;
-
-use super::params::body_vel_filter_params::{
-    CONTROL_INPUT, INIT_ESTIMATE_COV, KALMAN_GAIN, KF_NUM_CONTROL_INPUTS, KF_NUM_OBSERVATIONS,
-    KF_NUM_STATES, OBSERVATION_MODEL, PROCESS_COV, STATE_TRANSITION,
+use ateam_common_packets::radio::{SkillCommand, SkillExtendedTelemetry};
+use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
+use ateam_controls::robot_model::RobotModel;
+use ateam_controls::{
+    z_rotation_mat, ControlsError, Vector2f, Vector3f, Vector4f, Vector6f, Vector8f,
 };
+use core::f32::consts::PI;
+use embassy_time::Instant;
+use libm::{fabsf, remainderf};
+use nalgebra::vector;
 
-use super::params::body_vel_pid_params::{
-    BODY_ACC_LIM, BODY_DEACC_LIM, BODY_VEL_LIM, PID_GAIN, WHEEL_ACC_LIM,
-};
+use ateam_common_packets::bindings::ParameterCommand;
 
-use ateam_common_packets::bindings::{ExtendedTelemetry, ParameterCommand};
+/// Time (seconds) without a vision update after which vision is considered "inactive".
+const VISION_ACTIVE_TIMEOUT_S: f32 = 0.2;
 
-// TODO find some general numeric type trait(s) for D
-// Clamp the vector, but keep the direction consistent.
-pub fn clamp_vector_keep_dir<const D: usize>(
-    vec: &SVector<f32, D>,
-    limits_abs: &SVector<f32, D>,
-) -> SVector<f32, D> {
-    // Applies the clamping in a sign-less way by getting the scale of the vector compared to absolute value clamp region.
-    let scales: SVector<f32, D> = vec.abs().component_div(limits_abs);
-    // To maintain direction, do a scalar divison of the max of the scales. Limit to make sure to only scale down.
-    vec / f32::max(1.0, scales.max())
+pub struct BodyController {
+    pub robot_model: RobotModel,
+    pub pose_pid_controller: PidController<3>,
+    pub twist_pid_controller: PidController<3>,
+    /// [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
+    pub pose_control_gain: Vector2f,
+    /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR] thresholds for when to recompute the trajectory
+    pub traj_recompute_error: Vector4f,
+    /// Accel magnitude threshold for coulomb friction comp gating
+    pub coulomb_comp_accel_deadzone: f32,
+    pub trajectory: Option<BangBangTraj3D>,
+    pub trajectory_time: f32,
+    pub trajectory_state: Vector6f,
+    pub prev_body_cmd: Option<Vector3f>,
+    pub body_twist_out: Vector3f,
+    pub body_accel_out: Vector3f,
+    pub body_accel_out_fric_comp: Vector3f,
+    pub wheel_vel_out: Vector4f,
+    pub wheel_torque_out: Vector4f,
+    pub telemetry: BodyControlTelemetry,
+    pub debug_telemetry: BodyControlExtendedTelemetry,
+    pub dt: f32,
+    pub first_vision_received: bool,
+    pub time_since_vision_update_s: f32,
 }
 
-pub struct BodyVelocityController<'a> {
-    loop_dt_s: f32,
-    robot_model: RobotModel,
-    body_vel_filter: CgKalmanFilter<'a, 3, 4, 5>,
-    body_vel_controller: PidController<3>,
-    body_velocity_limit: Vector3<f32>,
-    body_acceleration_limit: Vector3<f32>,
-    body_deceleration_limit: Vector3<f32>,
-    wheel_acceleration_limits: Vector4<f32>,
-    prev_output: Vector3<f32>,
-    cmd_wheel_velocities: Vector4<f32>,
-    debug_telemetry: ExtendedTelemetry,
-}
+impl BodyController {
+    pub fn new(dt: f32) -> BodyController {
+        use crate::motion::params::controller_params;
+        use ateam_controls::robot_model::{KalmanFilterParams, RobotPhysicalParams};
 
-impl<'a> BodyVelocityController<'a> {
-    pub fn new_from_global_params(
-        loop_dt_s: f32,
-        robot_model: RobotModel,
-    ) -> BodyVelocityController<'a> {
-        let body_vel_filter: CgKalmanFilter<
-            KF_NUM_STATES,
-            KF_NUM_CONTROL_INPUTS,
-            KF_NUM_OBSERVATIONS,
-        > = CgKalmanFilter::new(
-            &STATE_TRANSITION,
-            &CONTROL_INPUT,
-            &OBSERVATION_MODEL,
-            &PROCESS_COV,
-            &KALMAN_GAIN,
-            &INIT_ESTIMATE_COV,
-        );
-
-        let body_vel_controller: PidController<KF_NUM_STATES> =
-            PidController::from_gains_matrix(&PID_GAIN);
-
-        let mut bvc = BodyVelocityController {
-            loop_dt_s: loop_dt_s,
-            robot_model: robot_model,
-            body_vel_filter: body_vel_filter,
-            body_vel_controller: body_vel_controller,
-            body_velocity_limit: Vector3::zeros(),
-            body_acceleration_limit: Vector3::zeros(),
-            body_deceleration_limit: Vector3::zeros(),
-            wheel_acceleration_limits: Vector4::zeros(),
-            prev_output: Vector3::zeros(),
-            cmd_wheel_velocities: Vector4::zeros(),
+        BodyController {
+            robot_model: RobotModel::new(
+                dt,
+                KalmanFilterParams::default(),
+                RobotPhysicalParams::default(),
+            )
+            .expect("Failed to create RobotModel, check that parameters are valid"),
+            pose_pid_controller: PidController::<3>::from_gains_matrix(
+                &controller_params::pose_pid_gains(),
+            ),
+            twist_pid_controller: PidController::<3>::from_gains_matrix(
+                &controller_params::twist_pid_gains(),
+            ),
+            pose_control_gain: controller_params::POSE_CONTROL_GAIN,
+            traj_recompute_error: controller_params::TRAJ_RECOMPUTE_ERROR,
+            coulomb_comp_accel_deadzone: controller_params::COULOMB_COMP_ACCEL_DEADZONE,
+            trajectory: None,
+            trajectory_state: Vector6f::zeros(),
+            trajectory_time: 0.0,
+            prev_body_cmd: None,
+            body_twist_out: Vector3f::default(),
+            body_accel_out: Vector3f::default(),
+            body_accel_out_fric_comp: Vector3f::default(),
+            wheel_vel_out: Vector4f::default(),
+            wheel_torque_out: Vector4f::default(),
+            telemetry: Default::default(),
             debug_telemetry: Default::default(),
-        };
-
-        bvc.body_velocity_limit.copy_from(&BODY_VEL_LIM);
-        bvc.body_acceleration_limit.copy_from(&BODY_ACC_LIM);
-        bvc.body_deceleration_limit.copy_from(&BODY_DEACC_LIM);
-        bvc.wheel_acceleration_limits.copy_from(&WHEEL_ACC_LIM);
-
-        bvc
+            dt,
+            first_vision_received: false,
+            time_since_vision_update_s: VISION_ACTIVE_TIMEOUT_S + 1.0, // Set to higher than timeout
+        }
     }
 
-    pub fn new(
-        loop_dt_s: f32,
-        robot_model: RobotModel,
-        body_vel_filter: CgKalmanFilter<'a, 3, 4, 5>,
-        pid_controller: PidController<3>,
-        bv_limit: Vector3<f32>,
-        ba_limit: Vector3<f32>,
-        bda_limit: Vector3<f32>,
-        wa_limit: Vector4<f32>,
-    ) -> BodyVelocityController<'a> {
-        BodyVelocityController {
-            loop_dt_s: loop_dt_s,
-            robot_model: robot_model,
-            body_vel_filter: body_vel_filter,
-            body_vel_controller: pid_controller,
-            body_velocity_limit: bv_limit,
-            body_acceleration_limit: ba_limit,
-            body_deceleration_limit: bda_limit,
-            wheel_acceleration_limits: wa_limit,
-            prev_output: Vector3::zeros(),
-            cmd_wheel_velocities: Vector4::zeros(),
-            debug_telemetry: Default::default(),
-        }
+    pub fn reset(&mut self) {
+        self.robot_model.reset();
+        self.pose_pid_controller.reset();
+        self.twist_pid_controller.reset();
+        self.trajectory = None;
+        self.trajectory_state = Vector6f::default();
+        self.trajectory_time = 0.0;
+        self.prev_body_cmd = None;
+        self.body_twist_out = Vector3f::default();
+        self.body_accel_out = Vector3f::default();
+        self.body_accel_out_fric_comp = Vector3f::default();
+        self.wheel_vel_out = Vector4f::default();
+        self.wheel_torque_out = Vector4f::default();
+        self.telemetry = Default::default();
+        self.debug_telemetry = Default::default();
+        self.first_vision_received = false;
+        self.time_since_vision_update_s = VISION_ACTIVE_TIMEOUT_S + 1.0; // Set to higher than timeout
+    }
+
+    pub fn vision_active(&self) -> bool {
+        self.first_vision_received && self.time_since_vision_update_s <= VISION_ACTIVE_TIMEOUT_S
     }
 
     pub fn control_update(
         &mut self,
-        body_vel_setpoint: &Vector3<f32>,
-        wheel_velocities: &Vector4<f32>,
-        _wheel_torques: &Vector4<f32>,
-        gyro_theta: f32,
-        controls_enabled: bool,
-    ) {
-        // Assign telemetry data
-        // TODO pass all of the gyro data up, not just theta
-        self.debug_telemetry.imu_gyro[2] = gyro_theta;
+        last_command: BasicControl,
+        vision_pose_meas: Vector3f,
+        vision_update: bool,
+        wheel_vel_meas: Vector4f,
+        imu_gyro_theta_meas: f32,
+        imu_accel_x_meas: f32,
+        imu_accel_y_meas: f32,
+        trace: bool,
+    ) -> Result<(), ControlsError> {
+        let t_start = Instant::now();
 
-        self.debug_telemetry
-            .commanded_body_velocity
-            .copy_from_slice(body_vel_setpoint.as_slice());
+        // Working in global frame, unless variable is specified as local
 
-        let measurement: Vector5<f32> = Vector5::new(
-            wheel_velocities[0],
-            wheel_velocities[1],
-            wheel_velocities[2],
-            wheel_velocities[3],
-            gyro_theta,
-        );
+        if vision_update {
+            if !self.first_vision_received {
+                self.robot_model.kf_set_pose(vision_pose_meas);
+                self.first_vision_received = true;
+            }
+            self.time_since_vision_update_s = 0.0;
+        } else {
+            if self.time_since_vision_update_s <= VISION_ACTIVE_TIMEOUT_S {
+                self.time_since_vision_update_s += self.dt; // Only add when less than timeout
+            }
+        }
 
-        // Update measurements process observation input into CGKF.
-        self.body_vel_filter.update(&measurement);
+        let state_prediction = self.robot_model.get_state();
 
-        // Read the current body velocity state estimate from the CGKF.
-        let mut body_vel_estimate = self.body_vel_filter.get_state();
+        let measurement: Vector8f = vector![
+            vision_pose_meas.x,
+            vision_pose_meas.y,
+            vision_pose_meas.z,
+            wheel_vel_meas.x,
+            wheel_vel_meas.y,
+            wheel_vel_meas.z,
+            wheel_vel_meas.w,
+            imu_gyro_theta_meas,
+        ];
+
+        self.robot_model
+            .kf_update(measurement, !vision_update, false, false)?;
+        let mut state_estimate = self.robot_model.get_state();
 
         // Deadzone the velocity estimate
-        if libm::fabsf(body_vel_estimate[0]) < 0.05 {
-            body_vel_estimate[0] = 0.0;
+        if fabsf(state_estimate[3]) < LINEAR_STATE_TWIST_DEADZONE {
+            state_estimate[3] = 0.0;
+        }
+        if fabsf(state_estimate[4]) < LINEAR_STATE_TWIST_DEADZONE {
+            state_estimate[4] = 0.0;
+        }
+        if fabsf(state_estimate[5]) < ANGULAR_STATE_TWIST_DEADZONE {
+            state_estimate[5] = 0.0;
         }
 
-        if libm::fabsf(body_vel_estimate[1]) < 0.05 {
-            body_vel_estimate[1] = 0.0;
+        let t_after_kf_update = Instant::now();
+
+        let body_twist_out;
+        let body_accel_out;
+        let skill_telem;
+        match last_command.get_skill_command() {
+            SkillCommand::GlobalPosition(gpos_cmd) => {
+                let traj_params = if gpos_cmd.max_linear_vel == 0.0
+                    && gpos_cmd.max_angular_vel == 0.0
+                    && gpos_cmd.max_linear_acc == 0.0
+                    && gpos_cmd.max_angular_acc == 0.0
+                {
+                    TrajectoryParams::default()
+                } else {
+                    TrajectoryParams {
+                        max_vel_linear: gpos_cmd.max_linear_vel,
+                        max_vel_angular: gpos_cmd.max_angular_vel,
+                        max_accel_linear: gpos_cmd.max_linear_acc,
+                        max_accel_angular: gpos_cmd.max_angular_acc,
+                    }
+                };
+                (body_twist_out, body_accel_out) = self.global_pose_bangbang_pid_control_policy(
+                    state_estimate,
+                    gpos_cmd.as_vec3f(),
+                    traj_params,
+                )?;
+                skill_telem =
+                    SkillExtendedTelemetry::GlobalPosition(ExtendedGlobalPositionTelemetry {
+                        cmd_echo: gpos_cmd,
+                    });
+            }
+            SkillCommand::GlobalVelocity(gvel_cmd) => {
+                let traj_params =
+                    if gvel_cmd.max_linear_acc == 0.0 && gvel_cmd.max_angular_acc == 0.0 {
+                        TrajectoryParams::default()
+                    } else {
+                        TrajectoryParams {
+                            max_vel_linear: 0.0,
+                            max_vel_angular: 0.0,
+                            max_accel_linear: gvel_cmd.max_linear_acc,
+                            max_accel_angular: gvel_cmd.max_angular_acc,
+                        }
+                    };
+                (body_twist_out, body_accel_out) = self.global_twist_control_policy(
+                    state_estimate,
+                    gvel_cmd.as_vec3f(),
+                    traj_params,
+                )?;
+                skill_telem =
+                    SkillExtendedTelemetry::GlobalVelocity(ExtendedGlobalVelocityTelemetry {
+                        cmd_echo: gvel_cmd,
+                    });
+            }
+            SkillCommand::LocalVelocity(lvel_cmd) => {
+                let traj_params =
+                    if lvel_cmd.max_linear_acc == 0.0 && lvel_cmd.max_angular_acc == 0.0 {
+                        TrajectoryParams::default()
+                    } else {
+                        TrajectoryParams {
+                            max_vel_linear: 0.0,
+                            max_vel_angular: 0.0,
+                            max_accel_linear: lvel_cmd.max_linear_acc,
+                            max_accel_angular: lvel_cmd.max_angular_acc,
+                        }
+                    };
+                (body_twist_out, body_accel_out) = self.local_twist_control_policy(
+                    state_estimate,
+                    lvel_cmd.as_vec3f(),
+                    traj_params,
+                )?;
+                skill_telem =
+                    SkillExtendedTelemetry::LocalVelocity(ExtendedLocalVelocityTelemetry {
+                        cmd_echo: lvel_cmd,
+                    });
+            }
+            SkillCommand::GlobalAcceleration(gacc_cmd) => {
+                (body_twist_out, body_accel_out) =
+                    self.global_accel_control_policy(state_estimate, gacc_cmd.as_vec3f());
+                skill_telem = SkillExtendedTelemetry::GlobalAcceleration(
+                    ExtendedGlobalAccelerationTelemetry { cmd_echo: gacc_cmd },
+                );
+            }
+            SkillCommand::LocalAcceleration(lacc_cmd) => {
+                (body_twist_out, body_accel_out) =
+                    self.local_accel_control_policy(state_estimate, lacc_cmd.as_vec3f());
+                skill_telem =
+                    SkillExtendedTelemetry::LocalAcceleration(ExtendedLocalAccelerationTelemetry {
+                        cmd_echo: lacc_cmd,
+                    });
+            }
+            _ => {
+                (body_twist_out, body_accel_out) = (Vector3f::zeros(), Vector3f::zeros());
+                skill_telem = SkillExtendedTelemetry::Off;
+            }
+        };
+
+        self.body_twist_out = body_twist_out;
+        self.body_accel_out = body_accel_out;
+
+        // Compensate for modeled friction forces
+        // Gate coulomb friction on accel command magnitude: when actively commanding motion,
+        // use target twist direction (overcomes static friction). When at rest, use deadzoned
+        // estimated twist (stable equilibrium).
+        let fric_twist: Vector3f =
+            if self.body_accel_out.magnitude() > self.coulomb_comp_accel_deadzone {
+                self.body_twist_out
+            } else {
+                state_estimate.fixed_rows::<3>(3).into()
+            };
+        self.body_accel_out_fric_comp = self.body_accel_out
+            - self.robot_model.i_inv * self.robot_model.compute_friction_force(fric_twist);
+
+        // Calculate wheel commands from body commands
+        self.wheel_vel_out =
+            self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_out;
+        self.wheel_torque_out = self.robot_model.transform_accel2wheel(state_estimate.z)
+            * self.body_accel_out_fric_comp;
+
+        let t_after_effort = Instant::now();
+
+        // Copy values to debug telemetry
+        self.debug_telemetry = BodyControlExtendedTelemetry {
+            _bitfield_align_1: Default::default(),
+            _bitfield_1: BodyControlExtendedTelemetry::new_bitfield_1(
+                vision_update as u8,
+                Default::default(),
+            ),
+            _reserved2: Default::default(),
+            imu_gyro: [0.0, 0.0, imu_gyro_theta_meas],
+            imu_accel: [imu_accel_x_meas, imu_accel_y_meas, 0.0],
+            vision_pose: vision_pose_meas.into(),
+            body_traj_pos: self.trajectory_state.fixed_rows::<3>(0).into(),
+            body_traj_vel: self.trajectory_state.fixed_rows::<3>(3).into(),
+            kf_body_pos_prediction: state_prediction.fixed_rows::<3>(0).into(),
+            kf_body_vel_prediction: state_prediction.fixed_rows::<3>(3).into(),
+            kf_body_pos_estimate: state_estimate.fixed_rows::<3>(0).into(),
+            kf_body_vel_estimate: state_estimate.fixed_rows::<3>(3).into(),
+            body_vel_u: self.body_twist_out.into(),
+            body_accel_u: self.body_accel_out.into(),
+            body_accel_u_fric_comp: self.body_accel_out_fric_comp.into(),
+            ..self.debug_telemetry
+        };
+        self.debug_telemetry.set_skill_telemetry(skill_telem);
+
+        let t_after_telem = Instant::now();
+
+        self.robot_model.kf_predict(self.body_accel_out);
+
+        let t_after_kf_predict = Instant::now();
+        if trace {
+            defmt::trace!("CONTROL UPDATE TRACE - KF update: {} us, effort compute: {} us, control outputs: {} us, KF predict: {} us",
+                (t_after_kf_update - t_start).as_micros(),
+                (t_after_effort - t_after_kf_update).as_micros(),
+                (t_after_telem - t_after_effort).as_micros(),
+                (t_after_kf_predict - t_after_telem).as_micros(),
+            );
         }
 
-        if libm::fabsf(body_vel_estimate[2]) < 0.05 {
-            body_vel_estimate[2] = 0.0;
-        }
+        Ok(())
+    }
 
+    pub fn get_wheel_velocities(&self) -> Vector4f {
+        self.wheel_vel_out
+    }
+
+    /// Get the 4 wheel torque commands in Nm
+    pub fn get_wheel_torques(&self) -> Vector4f {
+        self.wheel_torque_out
+    }
+
+    /// Get the 4 wheel currents in amps
+    pub fn get_wheel_currents(&self) -> Vector4f {
+        self.robot_model.torques_to_currents(self.wheel_torque_out)
+    }
+
+    pub fn get_control_telem(&self) -> BodyControlTelemetry {
+        self.telemetry
+    }
+
+    pub fn get_control_debug_telem(&self) -> BodyControlExtendedTelemetry {
         self.debug_telemetry
-            .cgkf_body_velocity_state_estimate
-            .copy_from_slice(body_vel_estimate.as_slice());
+    }
 
-        // Apply control policy.
-        let body_vel_control_pid = self.body_vel_controller.calculate(
-            &body_vel_setpoint,
-            &body_vel_estimate,
-            self.loop_dt_s,
+    fn global_accel_control_policy(
+        &mut self,
+        state_estimate: Vector6f,
+        target_accel: Vector3f,
+    ) -> (Vector3f, Vector3f) {
+        let next_state = self.robot_model.a * state_estimate + self.robot_model.b * target_accel;
+        let twist_out = next_state.fixed_rows::<3>(3).into();
+        let accel_out = target_accel;
+        (twist_out, accel_out)
+    }
+
+    fn local_accel_control_policy(
+        &mut self,
+        state_estimate: Vector6f,
+        local_target_accel: Vector3f,
+    ) -> (Vector3f, Vector3f) {
+        let target_accel = z_rotation_mat(state_estimate.z) * local_target_accel;
+        self.global_accel_control_policy(state_estimate, target_accel)
+    }
+
+    fn local_twist_control_policy(
+        &mut self,
+        state_estimate: Vector6f,
+        local_target_twist: Vector3f,
+        traj_params: TrajectoryParams,
+    ) -> Result<(Vector3f, Vector3f), ControlsError> {
+        let target_twist = z_rotation_mat(state_estimate.z) * local_target_twist;
+        self.global_twist_control_policy(state_estimate, target_twist, traj_params)
+    }
+
+    fn global_twist_control_policy(
+        &mut self,
+        state_estimate: Vector6f,
+        target_twist: Vector3f,
+        traj_params: TrajectoryParams,
+    ) -> Result<(Vector3f, Vector3f), ControlsError> {
+        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+
+        // Compute trajectory to target twist if
+        //   1) we don't have a trajectory yet
+        //   2) the target twist has changed
+        //   3) the current twist has strayed too far from the currently tracked trajectory
+        if self.trajectory.is_none()
+            || self.prev_body_cmd.is_none()
+            || self.prev_body_cmd.unwrap() != target_twist
+            || (self.trajectory_state[(3, 0)] - twist_estimate.x).abs()
+                > self.traj_recompute_error[(2, 0)]
+            || (self.trajectory_state[(4, 0)] - twist_estimate.y).abs()
+                > self.traj_recompute_error[(2, 0)]
+            || (self.trajectory_state[(5, 0)] - twist_estimate.z).abs()
+                > self.traj_recompute_error[(3, 0)]
+        {
+            self.trajectory = Some(BangBangTraj3D::from_target_twist(
+                twist_estimate,
+                target_twist,
+                traj_params,
+            )?);
+            self.trajectory_state = state_estimate;
+            self.trajectory_time = 0.0;
+        }
+
+        // Feedforward: acceleration from the tracked trajectory
+        let ff = self.trajectory
+            .as_ref()
+            .expect("Trajectory should always be Some at this point since we set it if it was None above")
+            .accel_at(self.trajectory_time)
+            .expect("Trajectory should always have valid accel at current time");
+
+        // Feedback: PID on twist error between tracked trajectory twist and estimated twist
+        let target_traj_twist: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
+        let fb = self
+            .twist_pid_controller
+            .calculate(&target_traj_twist, &twist_estimate, self.dt);
+
+        // Weighted sum of feedforward and feedback
+        // TODO: turn into params
+        let twist_control_gain_ff = 1.0;
+        let twist_control_gain_fb = 1.0;
+        let accel_out = twist_control_gain_ff * ff + twist_control_gain_fb * fb;
+
+        let twist_out: Vector3f = (state_estimate.fixed_rows::<3>(3) + accel_out * self.dt).into();
+
+        // Step trajectory forward
+        let next_state = self
+            .trajectory
+            .expect("Trajectory should never be None at this point.")
+            .state_at(
+                self.trajectory_state,
+                self.trajectory_time,
+                self.trajectory_time + self.dt,
+            )
+            .expect("Trajectory should always have valid state at current time + dt");
+
+        self.trajectory_state = next_state;
+        self.trajectory_time += self.dt;
+
+        self.prev_body_cmd = Some(target_twist);
+
+        Ok((twist_out, accel_out))
+    }
+
+    fn global_pose_bangbang_pid_control_policy(
+        &mut self,
+        state_estimate: Vector6f,
+        target_pose: Vector3f,
+        traj_params: TrajectoryParams,
+    ) -> Result<(Vector3f, Vector3f), ControlsError> {
+        // Vision required for pose control
+        if !self.vision_active() {
+            self.trajectory = None;
+            self.trajectory_state = Vector6f::zeros();
+            self.trajectory_time = 0.0;
+            self.prev_body_cmd = None;
+            return Ok((Vector3f::zeros(), Vector3f::zeros()));
+        }
+
+        let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
+        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+
+        // Compute trajectory to target pose if
+        //   1) we don't have a trajectory yet
+        //   2) the target pose has changed
+        //   3) the current body configuration has strayed too far from the currently tracked trajectory
+        if self.trajectory.is_none()
+            || self.prev_body_cmd.is_none()
+            || self.prev_body_cmd.unwrap() != target_pose
+            || (self.trajectory_state.x - pose_estimate.x).abs() > self.traj_recompute_error[(0, 0)]
+            || (self.trajectory_state.y - pose_estimate.y).abs() > self.traj_recompute_error[(0, 0)]
+            || remainderf(self.trajectory_state.z - pose_estimate.z, 2.0 * PI).abs()
+                > self.traj_recompute_error[(1, 0)]
+            || (self.trajectory_state[(3, 0)] - twist_estimate.x).abs()
+                > self.traj_recompute_error[(2, 0)]
+            || (self.trajectory_state[(4, 0)] - twist_estimate.y).abs()
+                > self.traj_recompute_error[(2, 0)]
+            || (self.trajectory_state[(5, 0)] - twist_estimate.z).abs()
+                > self.traj_recompute_error[(3, 0)]
+        {
+            self.trajectory = Some(BangBangTraj3D::from_target_pose(
+                state_estimate,
+                target_pose,
+                traj_params,
+            )?);
+            self.trajectory_state = state_estimate;
+            self.trajectory_time = 0.0;
+        }
+
+        // Compute feedforward as the tracked trajectory
+        let ff = self.trajectory
+            .as_ref()
+            .expect("Trajectory should always be Some at this point since we set it if it was None above")
+            .accel_at(self.trajectory_time)
+            .expect("Trajectory should always have valid accel at current time");
+
+        let mut target: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
+        // Wrap target theta so that (target.z - pose_estimate.z) lies in [-π, π],
+        target.z = pose_estimate.z + remainderf(target.z - pose_estimate.z, 2.0 * PI);
+        let target_twist: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
+        let twist_error = target_twist - twist_estimate;
+        let fb = self.pose_pid_controller.calculate_with_derivative(
+            &target,
+            &pose_estimate,
+            &twist_error,
+            self.dt,
         );
 
-        // Add the commanded setpoint as a feedforward component.
-        let body_vel_output = body_vel_control_pid + body_vel_setpoint;
-        // let body_vel_output = body_vel_setpoint;
+        // Weighted sum of feedback and feedforward terms to calculate the accel command
+        let accel_out = self.pose_control_gain[0] * ff + self.pose_control_gain[1] * fb;
 
-        self.debug_telemetry
-            .body_velocity_u
-            .copy_from_slice(body_vel_output.as_slice());
+        let twist_out: Vector3f = (state_estimate.fixed_rows::<3>(3) + accel_out * self.dt).into();
 
-        // Determine commanded body acceleration based on previous control output, and clamp and maintain the direction of acceleration.
-        // NOTE: Using previous control output instead of estimate so that collision disturbances would not impact.
-        let body_acc_output = (body_vel_output - self.prev_output) / self.loop_dt_s;
-        // Make a copy of acceleration to swap out with decel parts.
-        let mut temp_accel_decel_holder: Vector3<f32> = Vector3::zeros();
-        temp_accel_decel_holder.copy_from_slice(self.body_acceleration_limit.as_slice());
-        // Check if each part is decel (sign of acceleration != est velocity)
-        if (body_acc_output[0] > 0.0) != (body_vel_estimate[0] > 0.0) {
-            temp_accel_decel_holder[0] = self.body_deceleration_limit[0];
-        }
+        // Step trajectory forward
+        let next_state = self
+            .trajectory
+            .expect("Trajectory should never be None at this point.")
+            .state_at(
+                self.trajectory_state,
+                self.trajectory_time,
+                self.trajectory_time + self.dt,
+            )
+            .expect("Trajectory should always have valid state at current time + dt");
 
-        if (body_acc_output[1] > 0.0) != (body_vel_estimate[1] > 0.0) {
-            temp_accel_decel_holder[1] = self.body_deceleration_limit[1];
-        }
+        self.trajectory_state = next_state;
+        self.trajectory_time += self.dt;
 
-        if (body_acc_output[2] > 0.0) != (body_vel_estimate[2] > 0.0) {
-            temp_accel_decel_holder[2] = self.body_deceleration_limit[2];
-        }
+        self.prev_body_cmd = Some(target_pose);
 
-        let body_acc_output_clamp =
-            clamp_vector_keep_dir(&body_acc_output, &temp_accel_decel_holder);
+        Ok((twist_out, accel_out))
+    }
 
-        // Convert back to body velocity
-        let body_vel_output_acc_clamp = self.prev_output + (body_acc_output_clamp * self.loop_dt_s);
-
-        // Clamp and maintain direction of control body velocity.
-        let body_vel_output_full_clamp =
-            clamp_vector_keep_dir(&body_vel_output_acc_clamp, &self.body_velocity_limit);
-        self.prev_output
-            .copy_from_slice(body_vel_output_full_clamp.as_slice());
-        self.debug_telemetry
-            .clamped_commanded_body_velocity
-            .copy_from_slice(body_vel_output_full_clamp.as_slice());
-
-        // Transform body velocity commands into the wheel velocity domain.
-        let wheel_vel_output = self
-            .robot_model
-            .robot_vel_to_wheel_vel(&body_vel_output_full_clamp);
-        self.debug_telemetry
-            .wheel_velocity_u
-            .copy_from_slice(wheel_vel_output.as_slice());
-
-        // Use control law adjusted value to predict the next cycle's state.
-        self.body_vel_filter.predict(&wheel_vel_output);
-
-        // determine commanded wheel accleration, and clamp-scale the the control input
-        // TODO a linear clamp after the non-linear domain transformation is probably locally valid
-        // and globally invalid. Investiage this later. If problems are suspected, disable this section
-        // and lower the body acc limit (maybe something anatgonist based on 45/30 deg wheel angles?)
-        // TODO cross check in the future against wheel angle plots and analysis
-        //let wheel_acc_setpoint = (wheel_vel_output - self.cmd_wheel_velocities) / self.loop_dt_s;
-        //let wheel_acc_setpoint_clamp = clamp_vector_keep_dir(&wheel_acc_setpoint, &WHEEL_ACC_LIM);
-        //let wheel_vel_output_clamp = self.cmd_wheel_velocities + (wheel_acc_setpoint_clamp * self.loop_dt_s);
-        //self.debug_telemetry.wheel_velocity_clamped_u.copy_from_slice(wheel_vel_output_clamp.as_slice());
-
-        // Save command state.
-        if controls_enabled {
-            self.cmd_wheel_velocities = wheel_vel_output;
-        } else {
-            self.cmd_wheel_velocities = self.robot_model.robot_vel_to_wheel_vel(&body_vel_setpoint);
-            self.debug_telemetry
-                .wheel_velocity_u
-                .copy_from_slice(wheel_vel_output.as_slice());
+    /// Returns the expected data format for a parameter name handled by BodyController,
+    /// or None if the name is not recognized.
+    fn expected_format(name: ParameterName::Type) -> Option<ParameterDataFormat::Type> {
+        match name {
+            ParameterName::KF_PROCESS_STD => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::KF_MEASUREMENT_STD => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::KF_MAX_STATE => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::PHYS_WHEEL => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::PHYS_INERTIA => Some(ParameterDataFormat::VEC2_F32),
+            ParameterName::PHYS_MOTOR_MODEL => Some(ParameterDataFormat::VEC2_F32),
+            ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => Some(ParameterDataFormat::F32),
+            ParameterName::POSE_CONTROL_GAIN => Some(ParameterDataFormat::VEC2_F32),
+            ParameterName::TRAJ_RECOMPUTE_ERROR => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::POSE_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::TWIST_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::TWIST_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
+            _ => None,
         }
     }
 
-    pub fn get_wheel_velocities(&self) -> Vector4<f32> {
-        self.cmd_wheel_velocities
+    fn read_param(&self, name: ParameterName::Type, reply: &mut ParameterCommand) {
+        let kf = &self.robot_model.kf_params;
+        let phys = &self.robot_model.physical_params;
+        match name {
+            ParameterName::KF_PROCESS_STD => {
+                reply.data.vec4_f32 = [
+                    kf.process_noise_std_pos_linear,
+                    kf.process_noise_std_pos_angular,
+                    kf.process_noise_std_vel_linear,
+                    kf.process_noise_std_vel_angular,
+                ];
+            }
+            ParameterName::KF_MEASUREMENT_STD => {
+                reply.data.vec4_f32 = [
+                    kf.measurement_noise_std_vision_pos_linear,
+                    kf.measurement_noise_std_vision_pos_angular,
+                    kf.measurement_noise_std_encoder_vel_angular,
+                    kf.measurement_noise_std_gyro_vel_angular,
+                ];
+            }
+            ParameterName::KF_MAX_STATE => {
+                reply.data.vec4_f32 = [
+                    kf.max_pos_linear,
+                    kf.max_pos_angular,
+                    kf.max_vel_linear,
+                    kf.max_vel_angular,
+                ];
+            }
+            ParameterName::PHYS_WHEEL => {
+                reply.data.vec4_f32 = [phys.alpha, phys.beta, phys.l, phys.r];
+            }
+            ParameterName::PHYS_INERTIA => {
+                reply.data.vec2_f32 = [phys.mass, phys.iz];
+            }
+            ParameterName::PHYS_MOTOR_MODEL => {
+                reply.data.vec2_f32 = [phys.motor_torque_constant, phys.motor_efficiency_factor];
+            }
+            ParameterName::PHYS_FRICTION_MODEL => {
+                reply.data.vec4_f32 = [
+                    phys.coulomb_friction_coefficient_linear,
+                    phys.coulomb_friction_coefficient_angular,
+                    phys.viscous_friction_coefficient_linear,
+                    phys.viscous_friction_coefficient_angular,
+                ];
+            }
+            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => {
+                reply.data.f32_ = self.coulomb_comp_accel_deadzone;
+            }
+            ParameterName::POSE_CONTROL_GAIN => {
+                reply.data.vec2_f32 = [self.pose_control_gain[0], self.pose_control_gain[1]];
+            }
+            ParameterName::TRAJ_RECOMPUTE_ERROR => {
+                reply.data.vec4_f32 = [
+                    self.traj_recompute_error[0],
+                    self.traj_recompute_error[1],
+                    self.traj_recompute_error[2],
+                    self.traj_recompute_error[3],
+                ];
+            }
+            ParameterName::POSE_FB_PIDII_LINEAR | ParameterName::POSE_FB_PIDII_ANGULAR => {
+                let gain = self.pose_pid_controller.get_gain();
+                let row = match name {
+                    ParameterName::POSE_FB_PIDII_LINEAR => 0,
+                    _ => 2,
+                };
+                reply.data.vec5_f32 = [
+                    gain[(row, 0)],
+                    gain[(row, 1)],
+                    gain[(row, 2)],
+                    gain[(row, 3)],
+                    gain[(row, 4)],
+                ];
+            }
+            ParameterName::TWIST_FB_PIDII_LINEAR | ParameterName::TWIST_FB_PIDII_ANGULAR => {
+                let gain = self.twist_pid_controller.get_gain();
+                let row = match name {
+                    ParameterName::TWIST_FB_PIDII_LINEAR => 0,
+                    _ => 2,
+                };
+                reply.data.vec5_f32 = [
+                    gain[(row, 0)],
+                    gain[(row, 1)],
+                    gain[(row, 2)],
+                    gain[(row, 3)],
+                    gain[(row, 4)],
+                ];
+            }
+            _ => unreachable!(),
+        }
     }
 
-    pub fn get_control_debug_telem(&self) -> ExtendedTelemetry {
-        self.debug_telemetry
+    fn write_param(&mut self, cmd: &ParameterCommand) {
+        match cmd.parameter_name {
+            ParameterName::KF_PROCESS_STD => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                let mut kf = self.robot_model.kf_params;
+                kf.process_noise_std_pos_linear = v[0];
+                kf.process_noise_std_pos_angular = v[1];
+                kf.process_noise_std_vel_linear = v[2];
+                kf.process_noise_std_vel_angular = v[3];
+                self.robot_model.update_kf_params(kf);
+            }
+            ParameterName::KF_MEASUREMENT_STD => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                let mut kf = self.robot_model.kf_params;
+                kf.measurement_noise_std_vision_pos_linear = v[0];
+                kf.measurement_noise_std_vision_pos_angular = v[1];
+                kf.measurement_noise_std_encoder_vel_angular = v[2];
+                kf.measurement_noise_std_gyro_vel_angular = v[3];
+                self.robot_model.update_kf_params(kf);
+            }
+            ParameterName::KF_MAX_STATE => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                let mut kf = self.robot_model.kf_params;
+                kf.max_pos_linear = v[0];
+                kf.max_pos_angular = v[1];
+                kf.max_vel_linear = v[2];
+                kf.max_vel_angular = v[3];
+                self.robot_model.update_kf_params(kf);
+            }
+            ParameterName::PHYS_WHEEL => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                let mut p = self.robot_model.physical_params;
+                p.alpha = v[0];
+                p.beta = v[1];
+                p.l = v[2];
+                p.r = v[3];
+                let _ = self.robot_model.update_physical_params(p);
+            }
+            ParameterName::PHYS_INERTIA => {
+                let v = unsafe { cmd.data.vec2_f32 };
+                let mut p = self.robot_model.physical_params;
+                p.mass = v[0];
+                p.iz = v[1];
+                let _ = self.robot_model.update_physical_params(p);
+            }
+            ParameterName::PHYS_MOTOR_MODEL => {
+                let v = unsafe { cmd.data.vec2_f32 };
+                let mut p = self.robot_model.physical_params;
+                p.motor_torque_constant = v[0];
+                p.motor_efficiency_factor = v[1];
+                let _ = self.robot_model.update_physical_params(p);
+            }
+            ParameterName::PHYS_FRICTION_MODEL => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                let mut p = self.robot_model.physical_params;
+                p.coulomb_friction_coefficient_linear = v[0];
+                p.coulomb_friction_coefficient_angular = v[1];
+                p.viscous_friction_coefficient_linear = v[2];
+                p.viscous_friction_coefficient_angular = v[3];
+                let _ = self.robot_model.update_physical_params(p);
+            }
+            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => {
+                let v = unsafe { cmd.data.f32_ };
+                self.coulomb_comp_accel_deadzone = v;
+            }
+            ParameterName::POSE_CONTROL_GAIN => {
+                let v = unsafe { cmd.data.vec2_f32 };
+                self.pose_control_gain = Vector2f::new(v[0], v[1]);
+            }
+            ParameterName::TRAJ_RECOMPUTE_ERROR => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                self.traj_recompute_error = Vector4f::new(v[0], v[1], v[2], v[3]);
+            }
+            ParameterName::POSE_FB_PIDII_LINEAR | ParameterName::POSE_FB_PIDII_ANGULAR => {
+                let v = unsafe { cmd.data.vec5_f32 };
+                let mut gain = self.pose_pid_controller.get_gain();
+                if cmd.parameter_name == ParameterName::POSE_FB_PIDII_LINEAR {
+                    for col in 0..5 {
+                        gain[(0, col)] = v[col];
+                        gain[(1, col)] = v[col];
+                    }
+                } else {
+                    for col in 0..5 {
+                        gain[(2, col)] = v[col];
+                    }
+                }
+                self.pose_pid_controller.set_gain(gain);
+            }
+            ParameterName::TWIST_FB_PIDII_LINEAR | ParameterName::TWIST_FB_PIDII_ANGULAR => {
+                let v = unsafe { cmd.data.vec5_f32 };
+                let mut gain = self.twist_pid_controller.get_gain();
+                if cmd.parameter_name == ParameterName::TWIST_FB_PIDII_LINEAR {
+                    for col in 0..5 {
+                        gain[(0, col)] = v[col];
+                        gain[(1, col)] = v[col];
+                    }
+                } else {
+                    for col in 0..5 {
+                        gain[(2, col)] = v[col];
+                    }
+                }
+                self.twist_pid_controller.set_gain(gain);
+            }
+            _ => unreachable!(),
+        };
+        self.reset();
     }
 }
 
-impl<'a> ParameterInterface for BodyVelocityController<'a> {
+impl ParameterInterface for BodyController {
     fn processes_cmd(&self, param_cmd: &ParameterCommand) -> bool {
-        return self.has_name(param_cmd.parameter_name);
+        self.has_name(param_cmd.parameter_name)
     }
 
     fn has_name(&self, param_name: ParameterName::Type) -> bool {
-        return match param_name {
-            RC_BODY_VEL_LIMIT | RC_BODY_ACC_LIMIT | RC_WHEEL_ACC_LIMIT => true,
-            VEL_PID_X | VEL_PID_Y | ANGULAR_VEL_PID_Z => true,
-            VEL_CGKF_ENCODER_NOISE
-            | VEL_CGKF_PROCESS_NOISE
-            | VEL_CGKF_GYRO_NOISE
-            | VEL_CGFK_INITIAL_COVARIANCE
-            | VEL_CGKF_K_MATRIX => true,
-            _ => false,
-        };
+        Self::expected_format(param_name).is_some()
     }
 
     fn apply_command(
         &mut self,
         param_cmd: &ParameterCommand,
     ) -> Result<ParameterCommand, ParameterCommand> {
-        let mut reply_cmd = param_cmd.clone();
+        let mut reply = *param_cmd;
 
-        // if we haven't been given an actionable command code, ignore the call
-        if !(param_cmd.command_code == PCC_READ || param_cmd.command_code == PCC_WRITE) {
-            defmt::warn!("asked to apply a command with out and actional command code");
-            return Err(reply_cmd);
+        if param_cmd.command_code != PCC_READ && param_cmd.command_code != PCC_WRITE {
+            defmt::warn!("asked to apply a command without an actionable command code");
+            return Err(reply);
         }
 
-        // if we've been asked to apply a command we don't have a key for it
-        // error out
-        if !self.has_name(param_cmd.parameter_name) {
-            defmt::warn!(
-                "asked to apply a command with a parameter name not managed by this module"
-            );
-            reply_cmd.command_code = PCC_NACK_INVALID_NAME;
-            return Err(*param_cmd);
-        }
+        let fmt = match Self::expected_format(param_cmd.parameter_name) {
+            Some(f) => f,
+            None => {
+                defmt::warn!(
+                    "unexpected parameter name {}, cannot apply command",
+                    param_cmd.parameter_name
+                );
+                reply.command_code = PCC_NACK_INVALID_NAME;
+                return Err(reply);
+            }
+        };
 
         if param_cmd.command_code == PCC_READ {
-            match param_cmd.parameter_name {
-                VEL_PID_X => {
-                    // set the type
-                    reply_cmd.data_format = PID_LIMITED_INTEGRAL_F32;
-
-                    // readback the data
-                    let current_pid_gain = self.body_vel_controller.get_gain();
-
-                    // can't slice copy b/c backing storage is column-major
-                    // so a row slice isn't contiguous in backing memory and
-                    // therefore you can't do a slice copy
-                    unsafe {
-                        reply_cmd.data.pidii_f32[0] = current_pid_gain.row(0)[0];
-                        reply_cmd.data.pidii_f32[1] = current_pid_gain.row(0)[1];
-                        reply_cmd.data.pidii_f32[2] = current_pid_gain.row(0)[2];
-                        reply_cmd.data.pidii_f32[3] = current_pid_gain.row(0)[3];
-                        reply_cmd.data.pidii_f32[4] = current_pid_gain.row(0)[4];
-                    }
-
-                    reply_cmd.command_code = PCC_ACK;
-                }
-                VEL_PID_Y => {
-                    reply_cmd.data_format = PID_LIMITED_INTEGRAL_F32;
-
-                    let current_pid_gain = self.body_vel_controller.get_gain();
-                    unsafe {
-                        reply_cmd.data.pidii_f32[0] = current_pid_gain.row(1)[0];
-                        reply_cmd.data.pidii_f32[1] = current_pid_gain.row(1)[1];
-                        reply_cmd.data.pidii_f32[2] = current_pid_gain.row(1)[2];
-                        reply_cmd.data.pidii_f32[3] = current_pid_gain.row(1)[3];
-                        reply_cmd.data.pidii_f32[4] = current_pid_gain.row(1)[4];
-                    }
-
-                    reply_cmd.command_code = PCC_ACK;
-                }
-                ANGULAR_VEL_PID_Z => {
-                    reply_cmd.data_format = PID_LIMITED_INTEGRAL_F32;
-
-                    let current_pid_gain = self.body_vel_controller.get_gain();
-                    unsafe {
-                        reply_cmd.data.pidii_f32[0] = current_pid_gain.row(2)[0];
-                        reply_cmd.data.pidii_f32[1] = current_pid_gain.row(2)[1];
-                        reply_cmd.data.pidii_f32[2] = current_pid_gain.row(2)[2];
-                        reply_cmd.data.pidii_f32[3] = current_pid_gain.row(2)[3];
-                        reply_cmd.data.pidii_f32[4] = current_pid_gain.row(2)[4];
-                    }
-
-                    reply_cmd.command_code = PCC_ACK;
-                }
-                // VEL_CGKF_ENCODER_NOISE => {
-
-                // },
-                // VEL_CGKF_GYRO_NOISE => {
-
-                // }
-                // VEL_CGKF_PROCESS_NOISE => {
-
-                // },
-                // VEL_CGFK_INITIAL_COVARIANCE => {
-
-                // },
-                // VEL_CGKF_K_MATRIX => {
-
-                // },
-                RC_BODY_VEL_LIMIT => {
-                    // set the type
-                    reply_cmd.data_format = VEC3_F32;
-                    // read back the data
-                    unsafe {
-                        reply_cmd
-                            .data
-                            .vec3_f32
-                            .copy_from_slice(self.body_velocity_limit.as_slice());
-                    }
-
-                    reply_cmd.command_code = PCC_ACK;
-                }
-                RC_BODY_ACC_LIMIT => {
-                    reply_cmd.data_format = VEC3_F32;
-                    unsafe {
-                        reply_cmd
-                            .data
-                            .vec3_f32
-                            .copy_from_slice(self.body_acceleration_limit.as_slice());
-                    }
-                    reply_cmd.command_code = PCC_ACK;
-                }
-                RC_WHEEL_ACC_LIMIT => {
-                    reply_cmd.data_format = VEC4_F32;
-                    unsafe {
-                        reply_cmd
-                            .data
-                            .vec4_f32
-                            .copy_from_slice(self.wheel_acceleration_limits.as_slice());
-                    }
-                    reply_cmd.command_code = PCC_ACK;
-                }
-                _ => {
-                    defmt::debug!("unimplemented key read in RobotController");
-                    reply_cmd.command_code = PCC_NACK_INVALID_NAME;
-                    return Err(reply_cmd);
-                }
+            defmt::info!("Reading parameter {}", param_cmd.parameter_name);
+            reply.data_format = fmt;
+            self.read_param(param_cmd.parameter_name, &mut reply);
+        } else {
+            defmt::info!("Writing parameter {}", param_cmd.parameter_name);
+            if param_cmd.data_format != fmt {
+                reply.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+                return Err(reply);
             }
-        } else if param_cmd.command_code == PCC_WRITE {
-            match param_cmd.parameter_name {
-                VEL_PID_X => {
-                    if param_cmd.data_format == PID_LIMITED_INTEGRAL_F32 {
-                        // read data into matrix, modify the matrix row, then write the whole thing back
-                        let mut current_pid_gain = self.body_vel_controller.get_gain();
-                        current_pid_gain
-                            .row_mut(0)
-                            .copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
-                        self.body_vel_controller.set_gain(current_pid_gain);
-
-                        // can't slice copy b/c backing storage is column-major
-                        // so a row slice isn't contiguous in backing memory and
-                        // therefore you can't do a slice copy
-                        let updated_pid_gain = self.body_vel_controller.get_gain();
-                        unsafe {
-                            reply_cmd.data.pidii_f32[0] = updated_pid_gain.row(0)[0];
-                            reply_cmd.data.pidii_f32[1] = updated_pid_gain.row(0)[1];
-                            reply_cmd.data.pidii_f32[2] = updated_pid_gain.row(0)[2];
-                            reply_cmd.data.pidii_f32[3] = updated_pid_gain.row(0)[3];
-                            reply_cmd.data.pidii_f32[4] = updated_pid_gain.row(0)[4];
-                        }
-
-                        reply_cmd.command_code = PCC_ACK;
-                    } else {
-                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
-                        return Err(reply_cmd);
-                    }
-                }
-                VEL_PID_Y => {
-                    if param_cmd.data_format == PID_LIMITED_INTEGRAL_F32 {
-                        let mut current_pid_gain = self.body_vel_controller.get_gain();
-                        current_pid_gain
-                            .row_mut(1)
-                            .copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
-                        self.body_vel_controller.set_gain(current_pid_gain);
-
-                        let updated_pid_gain = self.body_vel_controller.get_gain();
-                        unsafe {
-                            reply_cmd.data.pidii_f32[0] = updated_pid_gain.row(1)[0];
-                            reply_cmd.data.pidii_f32[1] = updated_pid_gain.row(1)[1];
-                            reply_cmd.data.pidii_f32[2] = updated_pid_gain.row(1)[2];
-                            reply_cmd.data.pidii_f32[3] = updated_pid_gain.row(1)[3];
-                            reply_cmd.data.pidii_f32[4] = updated_pid_gain.row(1)[4];
-                        }
-
-                        reply_cmd.command_code = PCC_ACK;
-                    } else {
-                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
-                        return Err(reply_cmd);
-                    }
-                }
-                ANGULAR_VEL_PID_Z => {
-                    if param_cmd.data_format == PID_LIMITED_INTEGRAL_F32 {
-                        let mut current_pid_gain = self.body_vel_controller.get_gain();
-                        current_pid_gain
-                            .row_mut(2)
-                            .copy_from_slice(unsafe { &param_cmd.data.pidii_f32 });
-                        self.body_vel_controller.set_gain(current_pid_gain);
-
-                        let updated_pid_gain = self.body_vel_controller.get_gain();
-                        unsafe {
-                            reply_cmd.data.pidii_f32[0] = updated_pid_gain.row(2)[0];
-                            reply_cmd.data.pidii_f32[1] = updated_pid_gain.row(2)[1];
-                            reply_cmd.data.pidii_f32[2] = updated_pid_gain.row(2)[2];
-                            reply_cmd.data.pidii_f32[3] = updated_pid_gain.row(2)[3];
-                            reply_cmd.data.pidii_f32[4] = updated_pid_gain.row(2)[4];
-                        }
-
-                        reply_cmd.command_code = PCC_ACK;
-                    } else {
-                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
-                        return Err(reply_cmd);
-                    }
-                }
-                // VEL_CGKF_ENCODER_NOISE => {
-
-                // },
-                // VEL_CGKF_GYRO_NOISE => {
-
-                // }
-                // VEL_CGKF_PROCESS_NOISE => {
-
-                // },
-                // VEL_CGFK_INITIAL_COVARIANCE => {
-
-                // },
-                // VEL_CGKF_K_MATRIX => {
-
-                // },
-                RC_BODY_VEL_LIMIT => {
-                    if param_cmd.data_format == VEC3_F32 {
-                        // write the new data, then read it back into the reply
-                        self.body_velocity_limit
-                            .as_mut_slice()
-                            .copy_from_slice(unsafe { &param_cmd.data.vec3_f32 });
-                        unsafe {
-                            reply_cmd
-                                .data
-                                .vec3_f32
-                                .copy_from_slice(self.body_velocity_limit.as_slice());
-                        }
-
-                        reply_cmd.command_code = PCC_ACK;
-                    } else {
-                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
-                        return Err(reply_cmd);
-                    }
-                }
-                RC_BODY_ACC_LIMIT => {
-                    if param_cmd.data_format == VEC3_F32 {
-                        // write the new data, then read it back into the reply
-                        self.body_acceleration_limit
-                            .as_mut_slice()
-                            .copy_from_slice(unsafe { &param_cmd.data.vec3_f32 });
-                        unsafe {
-                            reply_cmd
-                                .data
-                                .vec3_f32
-                                .copy_from_slice(self.body_acceleration_limit.as_slice());
-                        }
-
-                        reply_cmd.command_code = PCC_ACK;
-                    } else {
-                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
-                        return Err(reply_cmd);
-                    }
-                }
-                RC_WHEEL_ACC_LIMIT => {
-                    if param_cmd.data_format == VEC4_F32 {
-                        // write the new data, then read it back into the reply
-                        self.wheel_acceleration_limits
-                            .as_mut_slice()
-                            .copy_from_slice(unsafe { &param_cmd.data.vec4_f32 });
-                        unsafe {
-                            reply_cmd
-                                .data
-                                .vec4_f32
-                                .copy_from_slice(self.wheel_acceleration_limits.as_slice());
-                        }
-
-                        reply_cmd.command_code = PCC_ACK;
-                    } else {
-                        reply_cmd.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
-                        return Err(reply_cmd);
-                    }
-                }
-                _ => {
-                    defmt::debug!("unimplemented key write in RobotController");
-                    reply_cmd.command_code = PCC_NACK_INVALID_NAME;
-                    return Err(reply_cmd);
-                }
-            }
+            self.write_param(param_cmd);
         }
 
-        return Ok(reply_cmd);
+        reply.command_code = PCC_ACK;
+        Ok(reply)
     }
 }
