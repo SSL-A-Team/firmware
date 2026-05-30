@@ -1,5 +1,6 @@
 use crate::motion::params::controller_params::{
-    ANGULAR_STATE_TWIST_DEADZONE, LINEAR_STATE_TWIST_DEADZONE,
+    ANGULAR_STATE_TWIST_DEADZONE, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE,
+    LINEAR_STATE_TWIST_DEADZONE, EncLagMode,
 };
 use crate::motion::pid::PidController;
 use crate::parameter_interface::ParameterInterface;
@@ -16,7 +17,9 @@ use ateam_controls::{
     z_rotation_mat, ControlsError, Vector2f, Vector3f, Vector4f, Vector6f, Vector8f,
 };
 use core::f32::consts::PI;
-use embassy_time::Instant;
+use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
+use embassy_time::{Duration, Instant};
+use nalgebra::SVector;
 use libm::{fabsf, remainderf};
 use nalgebra::vector;
 
@@ -49,6 +52,7 @@ pub struct BodyController {
     pub dt: f32,
     pub first_vision_received: bool,
     pub time_since_vision_update_s: f32,
+    pub enc_lag: FirstOrderLag<2>,
 }
 
 impl BodyController {
@@ -56,7 +60,7 @@ impl BodyController {
         use crate::motion::params::controller_params;
         use ateam_controls::robot_model::{KalmanFilterParams, RobotPhysicalParams};
 
-        BodyController {
+        let controller = BodyController {
             robot_model: RobotModel::new(
                 dt,
                 KalmanFilterParams::default(),
@@ -86,7 +90,25 @@ impl BodyController {
             dt,
             first_vision_received: false,
             time_since_vision_update_s: VISION_ACTIVE_TIMEOUT_S + 1.0, // Set to higher than timeout
-        }
+            enc_lag: FirstOrderLag::new_from_horizon(
+                FirstOrderLagParams {
+                    k:       SVector::<f32, 2>::new(ENC_LAG_K[0], ENC_LAG_K[1]),
+                    t_slope: SVector::<f32, 2>::new(ENC_LAG_T_SLOPE[0], ENC_LAG_T_SLOPE[1]),
+                },
+                None,
+                Duration::from_micros((dt * 1e6) as u64),
+                ENC_LAG_T_HORIZON,
+            ),
+        };
+
+        defmt::info!(
+            "enc lag: n_steps={}, cmd amplification @ 1 m/s: {}x, @ 5 m/s: {}x",
+            controller.enc_lag.n_steps(),
+            controller.enc_lag.cmd_amplification(1.0, 0),
+            controller.enc_lag.cmd_amplification(5.0, 0),
+        );
+
+        controller
     }
 
     pub fn reset(&mut self) {
@@ -106,6 +128,7 @@ impl BodyController {
         self.debug_telemetry = Default::default();
         self.first_vision_received = false;
         self.time_since_vision_update_s = VISION_ACTIVE_TIMEOUT_S + 1.0; // Set to higher than timeout
+        self.enc_lag.reset();
     }
 
     pub fn vision_active(&self) -> bool {
@@ -141,16 +164,36 @@ impl BodyController {
 
         let state_prediction = self.robot_model.get_state();
 
-        let measurement: Vector8f = vector![
-            vision_pose_meas.x,
-            vision_pose_meas.y,
-            vision_pose_meas.z,
-            wheel_vel_meas.x,
-            wheel_vel_meas.y,
-            wheel_vel_meas.z,
-            wheel_vel_meas.w,
-            imu_gyro_theta_meas,
-        ];
+        // When KfCorrectionOnly or Full the raw encoder rows are replaced with the lag
+        // model's prediction of what the encoders should be showing this tick
+        // (driven by last tick's command), so the KF update compares like-for-like.
+        let measurement: Vector8f = if matches!(ENC_LAG_MODE, EncLagMode::KfCorrectionOnly | EncLagMode::Full) {
+            let lag_state = self.enc_lag.state();
+            let lag_body = Vector3f::new(lag_state.x, lag_state.y, imu_gyro_theta_meas);
+            let lag_wheel =
+                self.robot_model.transform_twist2wheel(state_prediction[2]) * lag_body;
+            vector![
+                vision_pose_meas.x,
+                vision_pose_meas.y,
+                vision_pose_meas.z,
+                lag_wheel.x,
+                lag_wheel.y,
+                lag_wheel.z,
+                lag_wheel.w,
+                imu_gyro_theta_meas,
+            ]
+        } else {
+            vector![
+                vision_pose_meas.x,
+                vision_pose_meas.y,
+                vision_pose_meas.z,
+                wheel_vel_meas.x,
+                wheel_vel_meas.y,
+                wheel_vel_meas.z,
+                wheel_vel_meas.w,
+                imu_gyro_theta_meas,
+            ]
+        };
 
         self.robot_model
             .kf_update(measurement, !vision_update, false, false)?;
@@ -279,11 +322,28 @@ impl BodyController {
         self.body_accel_out_fric_comp = self.body_accel_out
             - self.robot_model.i_inv * self.robot_model.compute_friction_force(fric_twist);
 
-        // Calculate wheel commands from body commands
-        self.wheel_vel_out =
-            self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_out;
+        // Calculate wheel commands from body commands.
+        // When FeedforwardOnly or Full the XY body velocity is pre-compensated through
+        // the lag model inversion before the wheel transform; angular velocity is not lagged.
+        let body_xy = SVector::<f32, 2>::new(self.body_twist_out.x, self.body_twist_out.y);
+        self.wheel_vel_out = if matches!(ENC_LAG_MODE, EncLagMode::FeedforwardOnly | EncLagMode::Full) {
+            let compensated_xy = self.enc_lag.invert(&body_xy);
+            let compensated_twist = Vector3f::new(
+                compensated_xy.x,
+                compensated_xy.y,
+                self.body_twist_out.z,
+            );
+            self.robot_model.transform_twist2wheel(state_estimate.z) * compensated_twist
+        } else {
+            self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_out
+        };
+
         self.wheel_torque_out = self.robot_model.transform_accel2wheel(state_estimate.z)
             * self.body_accel_out_fric_comp;
+            
+        if !matches!(ENC_LAG_MODE, EncLagMode::Disabled) {
+            self.enc_lag.step(&body_xy);
+        }
 
         let t_after_effort = Instant::now();
 

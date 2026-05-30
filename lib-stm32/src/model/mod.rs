@@ -1,4 +1,5 @@
 use embassy_time::Duration;
+use libm::powf;
 use nalgebra::SVector;
 
 /// Physically-identified parameters for a [`FirstOrderLag`] model.
@@ -76,6 +77,22 @@ impl<const N: usize> FirstOrderLag<N> {
 
     pub fn state(&self) -> &SVector<f32, N> {
         &self.state
+    }
+
+    pub fn n_steps(&self) -> usize {
+        self.n_steps
+    }
+
+    /// Command amplification factor at reference input magnitude `u_ref` for a given `axis`.
+    ///
+    /// Returns the ratio by which `invert` scales a steady-state command of magnitude
+    /// `u_ref` (starting from rest). Amplification of 1.0 means no boost; larger values
+    /// mean stronger pre-compensation and larger peak transient commands. Use this to
+    /// characterise how aggressive the lag compensation is before enabling it.
+    pub fn cmd_amplification(&self, u_ref: f32, axis: usize) -> f32 {
+        let t_eff = self.params.t_slope[axis] * u_ref + self.t_min;
+        let a = self.dt * self.params.k[axis] / t_eff;
+        (1.0 / a) * (1.0 - powf(1.0 - a, (self.n_steps + 1) as f32))
     }
 
     pub fn reset(&mut self) {

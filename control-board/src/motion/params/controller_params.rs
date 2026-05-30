@@ -1,4 +1,5 @@
 use ateam_controls::{Vector2f, Vector4f, Vector5f};
+use embassy_time::Duration;
 use nalgebra::Matrix3x5;
 
 // PID gains per row: [Kp, Ki, Kd, Ki_err_min, Ki_err_max]
@@ -40,3 +41,35 @@ pub const COULOMB_COMP_ACCEL_DEADZONE: f32 = 2.0;
 
 pub const LINEAR_STATE_TWIST_DEADZONE: f32 = 0.05;
 pub const ANGULAR_STATE_TWIST_DEADZONE: f32 = 0.3;
+
+/// Encoder lag compensation operating mode.
+///
+/// Intended progression: `Disabled` → `FeedforwardOnly` (validate model params)
+///                        → `Full` (add KF correction once params are confirmed).
+/// `KfCorrectionOnly` is available for diagnostics but replaces sensor data with model
+/// predictions without improving command tracking — enable only with validated params.
+#[derive(PartialEq, Eq)]
+pub enum EncLagMode {
+    /// No lag compensation. Default safe state.
+    Disabled,
+    /// Pre-compensates wheel commands via model inversion. Graceful degradation if
+    /// model params are off — tracking suffers but the estimator is unaffected.
+    FeedforwardOnly,
+    /// Replaces encoder rows in the KF measurement with the model's predicted reading.
+    /// Degrades state estimation if model params are wrong. Validate with
+    /// `FeedforwardOnly` before enabling.
+    KfCorrectionOnly,
+    /// Both feedforward command compensation and KF measurement correction active.
+    Full,
+}
+
+/// Active encoder lag compensation mode. Change this to enable/disable features.
+pub const ENC_LAG_MODE: EncLagMode = EncLagMode::Disabled;
+
+// Encoder lag model physical parameters.
+// K[i]:       DC gain per axis (dimensionless).
+// T_SLOPE[i]: dT_eff/d|u| per axis [s / (m/s)].
+// N_STEPS:    fixed-point inversion iterations.
+pub const ENC_LAG_K: [f32; 2] = [0.95, 0.95];
+pub const ENC_LAG_T_SLOPE: [f32; 2] = [0.095, 0.095];
+pub const ENC_LAG_T_HORIZON: Duration = Duration::from_millis(10);
