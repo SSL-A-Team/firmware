@@ -22,6 +22,7 @@ pub mod audio;
 pub mod drivers;
 pub mod filter;
 pub mod math;
+pub mod model;
 pub mod power;
 pub mod time;
 pub mod uart;
