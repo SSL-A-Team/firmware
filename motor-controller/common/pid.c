@@ -12,6 +12,8 @@ void pid_constants_initialize(PidConstants_t *pid_constants) {
 
     pid_constants->kI_max = FLT_MAX;
     pid_constants->kI_min = FLT_MIN;
+
+    pid_constants->anti_jitter_thresh = 0.0f;
 }
 
 void pid_initialize(Pid_t *pid, PidConstants_t *pid_constants) {
@@ -42,8 +44,17 @@ float pid_calculate(Pid_t *pid, float r, float y, float dt) {
     float termD = ((err - pid->prev_err) / dt) * pid->pid_constants->kD; // flip err and prev_err???
     pid->prev_err = err;
 
-    float u = r + (termP + termI + termD);
-    return u;
+    float correction = termP + termI + termD;
+
+    float thresh = pid->pid_constants->anti_jitter_thresh;
+    if (thresh > 0.0f) {
+        float abs_err = fabsf(err);
+        if (abs_err < thresh) {
+            correction *= abs_err / thresh;
+        }
+    }
+
+    return r + correction;
 }
 
 // this graphic might be helpful
@@ -65,7 +76,17 @@ float pid_calculate_err_resp_only(Pid_t *pid, float r, float y, float dt) {
     float termD = ((err - pid->prev_err) / dt) * pid->pid_constants->kD; // flip err and prev_err???
     pid->prev_err = err;
 
-    return termP + termI + termD;
+    float correction = termP + termI + termD;
+
+    float thresh = pid->pid_constants->anti_jitter_thresh;
+    if (thresh > 0.0f) {
+        float abs_err = fabsf(err);
+        if (abs_err < thresh) {
+            correction *= abs_err / thresh;
+        }
+    }
+
+    return correction;
 }
 
 GainScheduledPidResult_t gspid_initialize(
@@ -172,6 +193,9 @@ static void gspid_update_gain_stage(GainScheduledPid_t *pid, float y) {
 
                 pid->cur_pid_constants.kI_min = pid->pid_constants[lower_gain_stage_ind].kI_min +
                     t * (pid->pid_constants[upper_gain_stage_ind].kI_min - pid->pid_constants[lower_gain_stage_ind].kI_min);
+
+                pid->cur_pid_constants.anti_jitter_thresh = pid->pid_constants[lower_gain_stage_ind].anti_jitter_thresh +
+                    t * (pid->pid_constants[upper_gain_stage_ind].anti_jitter_thresh - pid->pid_constants[lower_gain_stage_ind].anti_jitter_thresh);
                 return;
             }
         }
@@ -198,8 +222,17 @@ float gspid_calculate(GainScheduledPid_t *pid, float r, float y, float dt) {
     float termD = ((err - pid->prev_err) / dt) * cur_gains.kD; // flip err and prev_err???
     pid->prev_err = err;
 
-    float u = r + (termP + termI + termD);
-    return u;
+    float correction = termP + termI + termD;
+
+    float thresh = cur_gains.anti_jitter_thresh;
+    if (thresh > 0.0f) {
+        float abs_err = fabsf(err);
+        if (abs_err < thresh) {
+            correction *= abs_err / thresh;
+        }
+    }
+
+    return r + correction;
 }
 
 size_t gspid_get_cur_gain_stage_index(GainScheduledPid_t *pid) {
