@@ -26,8 +26,48 @@ pub fn twist_pid_gains() -> Matrix3x5<f32> {
     ])
 }
 
-/// [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
-pub const POSE_CONTROL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
+/// Acceleration (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
+/// Scales traj accel and PID feedback respectively in the wheel torque feedforward.
+pub const POSE_ACCEL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
+
+/// Velocity path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
+/// Scales traj velocity and PID feedback (× dt) respectively in the wheel velocity setpoint.
+/// Only active when POSE_VEL_MODE includes feedforward or feedback.
+pub const POSE_VEL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
+
+/// Pose velocity setpoint mode.
+///
+/// Controls what forms the wheel velocity setpoint.
+/// `Disabled`: integrate accel output from estimated twist (original behavior).
+/// `FeedforwardOnly`: trajectory velocity directly as the setpoint base, no PID correction.
+/// `FeedbackOnly`: integration base plus vel-gain-scaled PID correction term.
+/// `Full`: trajectory velocity base plus vel-gain-scaled PID correction.
+#[derive(PartialEq, Eq)]
+pub enum PoseVelMode {
+    Disabled,
+    FeedforwardOnly,
+    FeedbackOnly,
+    Full,
+}
+
+pub const POSE_VEL_MODE: PoseVelMode = PoseVelMode::Disabled;
+
+/// Pose acceleration (torque feedforward) mode.
+///
+/// Controls what contributes to the wheel torque feedforward via the accel path.
+/// `Disabled`: zero accel output.
+/// `FeedforwardOnly`: trajectory acceleration only, no PID feedback.
+/// `FeedbackOnly`: PID feedback acceleration only, no trajectory accel.
+/// `Full`: trajectory acceleration plus PID feedback (original behavior).
+#[derive(PartialEq, Eq)]
+pub enum PoseAccelMode {
+    Disabled,
+    FeedforwardOnly,
+    FeedbackOnly,
+    Full,
+}
+
+pub const POSE_ACCEL_MODE: PoseAccelMode = PoseAccelMode::Full;
 
 /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
 /// Thresholds for when to recompute the trajectory

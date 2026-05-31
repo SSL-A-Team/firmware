@@ -1,6 +1,7 @@
 use crate::motion::params::controller_params::{
     ANGULAR_STATE_TWIST_DEADZONE, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE,
     LINEAR_STATE_TWIST_DEADZONE, EncLagMode,
+    PoseAccelMode, POSE_ACCEL_MODE, PoseVelMode, POSE_VEL_MODE,
 };
 use crate::motion::pid::PidController;
 use crate::parameter_interface::ParameterInterface;
@@ -32,8 +33,10 @@ pub struct BodyController {
     pub robot_model: RobotModel,
     pub pose_pid_controller: PidController<3>,
     pub twist_pid_controller: PidController<3>,
-    /// [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
-    pub pose_control_gain: Vector2f,
+    /// Accel (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
+    pub pose_accel_gain: Vector2f,
+    /// Velocity setpoint path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
+    pub pose_vel_gain: Vector2f,
     /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR] thresholds for when to recompute the trajectory
     pub traj_recompute_error: Vector4f,
     /// Accel magnitude threshold for coulomb friction comp gating
@@ -73,7 +76,8 @@ impl BodyController {
             twist_pid_controller: PidController::<3>::from_gains_matrix(
                 &controller_params::twist_pid_gains(),
             ),
-            pose_control_gain: controller_params::POSE_CONTROL_GAIN,
+            pose_accel_gain: controller_params::POSE_ACCEL_GAIN,
+            pose_vel_gain: controller_params::POSE_VEL_GAIN,
             traj_recompute_error: controller_params::TRAJ_RECOMPUTE_ERROR,
             coulomb_comp_accel_deadzone: controller_params::COULOMB_COMP_ACCEL_DEADZONE,
             trajectory: None,
@@ -556,29 +560,62 @@ impl BodyController {
             self.trajectory_time = 0.0;
         }
 
-        // Compute feedforward as the tracked trajectory
-        let ff = self.trajectory
+        // PID feedback — computed unconditionally to keep integrator state current.
+        let mut traj_curstep_tgt_pos: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
+
+        let traj_curstep_tgt_vel: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
+
+        let traj_curstep_tgt_accel = self.trajectory
             .as_ref()
             .expect("Trajectory should always be Some at this point since we set it if it was None above")
             .accel_at(self.trajectory_time)
             .expect("Trajectory should always have valid accel at current time");
 
-        let mut target: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
-        // Wrap target theta so that (target.z - pose_estimate.z) lies in [-π, π],
-        target.z = pose_estimate.z + remainderf(target.z - pose_estimate.z, 2.0 * PI);
-        let target_twist: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
-        let twist_error = target_twist - twist_estimate;
-        let fb = self.pose_pid_controller.calculate_with_derivative(
-            &target,
+        // Wrap target theta so that (target.z - pose_estimate.z) lies in [-π, π]
+        traj_curstep_tgt_pos.z = pose_estimate.z + remainderf(traj_curstep_tgt_pos.z - pose_estimate.z, 2.0 * PI);
+        let twist_error = traj_curstep_tgt_vel - twist_estimate;
+        let pos_pid_feedback = self.pose_pid_controller.calculate_with_derivative(
+            &traj_curstep_tgt_pos,
             &pose_estimate,
             &twist_error,
             self.dt,
         );
 
-        // Weighted sum of feedback and feedforward terms to calculate the accel command
-        let accel_out = self.pose_control_gain[0] * ff + self.pose_control_gain[1] * fb;
+        // Accel output (torque path) — gated by POSE_ACCEL_MODE.
+        let accel_out: Vector3f = {
+            let accel_ff_term = if matches!(POSE_ACCEL_MODE, PoseAccelMode::FeedforwardOnly | PoseAccelMode::Full) {
+                self.pose_accel_gain[0] * traj_curstep_tgt_accel
+            } else {
+                Vector3f::zeros()
+            };
 
-        let twist_out: Vector3f = (state_estimate.fixed_rows::<3>(3) + accel_out * self.dt).into();
+            let accel_fb_term = if matches!(POSE_ACCEL_MODE, PoseAccelMode::FeedbackOnly | PoseAccelMode::Full) {
+                self.pose_accel_gain[1] * pos_pid_feedback
+            } else {
+                Vector3f::zeros()
+            };
+
+            accel_ff_term + accel_fb_term
+        };
+
+        // Velocity setpoint (wheel vel path) — gated by POSE_VEL_MODE.
+        // FeedforwardOnly and Full use trajectory velocity as the base;
+        // Disabled and FeedbackOnly derive velocity by integrating accel_out.
+        let twist_out: Vector3f = {
+            let vel_ff_term: Vector3f = if matches!(POSE_VEL_MODE, PoseVelMode::FeedforwardOnly | PoseVelMode::Full) {
+                self.pose_vel_gain[0] * traj_curstep_tgt_vel
+            } else {
+                (state_estimate.fixed_rows::<3>(3) + accel_out * self.dt).into()
+            };
+
+            let vel_fb_term = if matches!(POSE_VEL_MODE, PoseVelMode::FeedbackOnly | PoseVelMode::Full) {
+                self.pose_vel_gain[1] * pos_pid_feedback * self.dt
+            } else {
+                Vector3f::zeros()
+            };
+
+            vel_ff_term + vel_fb_term
+        };
 
         // Step trajectory forward
         let next_state = self
@@ -670,7 +707,7 @@ impl BodyController {
                 reply.data.f32_ = self.coulomb_comp_accel_deadzone;
             }
             ParameterName::POSE_CONTROL_GAIN => {
-                reply.data.vec2_f32 = [self.pose_control_gain[0], self.pose_control_gain[1]];
+                reply.data.vec2_f32 = [self.pose_accel_gain[0], self.pose_accel_gain[1]];
             }
             ParameterName::TRAJ_RECOMPUTE_ERROR => {
                 reply.data.vec4_f32 = [
@@ -779,7 +816,7 @@ impl BodyController {
             }
             ParameterName::POSE_CONTROL_GAIN => {
                 let v = unsafe { cmd.data.vec2_f32 };
-                self.pose_control_gain = Vector2f::new(v[0], v[1]);
+                self.pose_accel_gain = Vector2f::new(v[0], v[1]);
             }
             ParameterName::TRAJ_RECOMPUTE_ERROR => {
                 let v = unsafe { cmd.data.vec4_f32 };
