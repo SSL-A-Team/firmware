@@ -6,6 +6,7 @@ use nalgebra::{
 pub struct PidController<const NUM_STATES: usize> {
     gain: SMatrix<f32, NUM_STATES, 5>,
     anti_jitter_thresh: Option<SVector<f32, NUM_STATES>>,
+    output_limits: Option<(SVector<f32, NUM_STATES>, SVector<f32, NUM_STATES>)>,
     prev_error: SVector<f32, NUM_STATES>,
     integrated_error: SVector<f32, NUM_STATES>,
 }
@@ -15,6 +16,7 @@ impl<'a, const NUM_STATES: usize> PidController<NUM_STATES> {
         PidController {
             gain: gain.clone(),
             anti_jitter_thresh: None,
+            output_limits: None,
             prev_error: SVector::<f32, NUM_STATES>::zeros(),
             integrated_error: SVector::<f32, NUM_STATES>::zeros(),
         }
@@ -27,6 +29,7 @@ impl<'a, const NUM_STATES: usize> PidController<NUM_STATES> {
         PidController {
             gain: gain.clone(),
             anti_jitter_thresh,
+            output_limits: None,
             prev_error: SVector::<f32, NUM_STATES>::zeros(),
             integrated_error: SVector::<f32, NUM_STATES>::zeros(),
         }
@@ -34,6 +37,13 @@ impl<'a, const NUM_STATES: usize> PidController<NUM_STATES> {
 
     pub fn set_anti_jitter_thresh(&mut self, thresh: Option<SVector<f32, NUM_STATES>>) {
         self.anti_jitter_thresh = thresh;
+    }
+
+    pub fn set_output_limits(
+        &mut self,
+        limits: Option<(SVector<f32, NUM_STATES>, SVector<f32, NUM_STATES>)>,
+    ) {
+        self.output_limits = limits;
     }
 
     pub fn calculate(
@@ -62,7 +72,7 @@ impl<'a, const NUM_STATES: usize> PidController<NUM_STATES> {
         let i = self.gain.column(1).component_mul(&self.integrated_error);
         let d = self.gain.column(2).component_mul(&de_dt);
 
-        self.apply_anti_jitter(p + i + d, &error)
+        self.apply_output_limits(self.apply_anti_jitter(p + i + d, &error))
     }
 
     /// Like `calculate`, but uses an externally provided derivative signal
@@ -89,7 +99,7 @@ impl<'a, const NUM_STATES: usize> PidController<NUM_STATES> {
         let i = self.gain.column(1).component_mul(&self.integrated_error);
         let d = self.gain.column(2).component_mul(derivative);
 
-        self.apply_anti_jitter(p + i + d, &error)
+        self.apply_output_limits(self.apply_anti_jitter(p + i + d, &error))
     }
 
     /// Scales output to zero when per-axis |error| is below the threshold, matching
@@ -107,6 +117,14 @@ impl<'a, const NUM_STATES: usize> PidController<NUM_STATES> {
                     out
                 }
             })
+        } else {
+            output
+        }
+    }
+
+    fn apply_output_limits(&self, output: SVector<f32, NUM_STATES>) -> SVector<f32, NUM_STATES> {
+        if let Some((min, max)) = &self.output_limits {
+            output.zip_zip_map(min, max, |out, lo, hi| clamp(out, lo, hi))
         } else {
             output
         }
