@@ -4,6 +4,10 @@ use nalgebra::Matrix3x5;
 
 // PID gains per row: [Kp, Ki, Kd, Ki_err_min, Ki_err_max]
 
+//////////////////////////////
+//  current feedback gains  //
+//////////////////////////////
+
 const LINEAR_POSE_PID_GAINS: Vector5f = Vector5f::new(125.0, 0.5, 10.0, -1.0, 1.0);
 const ANGULAR_POSE_PID_GAINS: Vector5f = Vector5f::new(125.0, 0.5, 15.0, -1.0, 1.0);
 
@@ -50,7 +54,7 @@ pub enum PoseVelMode {
     Full,
 }
 
-pub const POSE_VEL_MODE: PoseVelMode = PoseVelMode::Disabled;
+pub const POSE_VEL_MODE: PoseVelMode = PoseVelMode::FeedforwardOnly;
 
 /// Pose acceleration (torque feedforward) mode.
 ///

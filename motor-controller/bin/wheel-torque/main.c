@@ -77,7 +77,7 @@ static bool current_limited = false;
 // kP saturation point: MAX_CURR_WHEEL_TURNING / (v_body_m_s / WHEEL_RADIUS_M)
 //   = 6300 mA / (1.0 m/s / 0.030 m) = 6300 / 33.33 = 189.0 mA/(rad/s) saturates at 1.0 m/s body error
 const PidConstants_t vel_velcur_controller_constants = {
-    .kP = 94.5f,
+    .kP = 5.0f,
     .kI = 0.0f,
     .kD = 0.0f,
     .kI_max = 100.0f,
