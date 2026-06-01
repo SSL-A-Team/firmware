@@ -1,5 +1,7 @@
 use crate::motion::params::controller_params::{
-    ANGULAR_STATE_TWIST_DEADZONE, LINEAR_STATE_TWIST_DEADZONE,
+    ANGULAR_STATE_TWIST_DEADZONE, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE,
+    LINEAR_STATE_TWIST_DEADZONE, EncLagMode,
+    PoseAccelMode, POSE_ACCEL_MODE, PoseVelMode, POSE_VEL_MODE,
 };
 use crate::motion::pid::PidController;
 use crate::parameter_interface::ParameterInterface;
@@ -16,7 +18,9 @@ use ateam_controls::{
     z_rotation_mat, ControlsError, Vector2f, Vector3f, Vector4f, Vector6f, Vector8f,
 };
 use core::f32::consts::PI;
-use embassy_time::Instant;
+use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
+use embassy_time::{Duration, Instant};
+use nalgebra::SVector;
 use libm::{fabsf, remainderf};
 use nalgebra::vector;
 
@@ -29,8 +33,10 @@ pub struct BodyController {
     pub robot_model: RobotModel,
     pub pose_pid_controller: PidController<3>,
     pub twist_pid_controller: PidController<3>,
-    /// [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
-    pub pose_control_gain: Vector2f,
+    /// Accel (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
+    pub pose_accel_gain: Vector2f,
+    /// Velocity setpoint path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
+    pub pose_vel_gain: Vector2f,
     /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR] thresholds for when to recompute the trajectory
     pub traj_recompute_error: Vector4f,
     /// Accel magnitude threshold for coulomb friction comp gating
@@ -49,6 +55,7 @@ pub struct BodyController {
     pub dt: f32,
     pub first_vision_received: bool,
     pub time_since_vision_update_s: f32,
+    pub enc_lag: FirstOrderLag<2>,
 }
 
 impl BodyController {
@@ -56,7 +63,7 @@ impl BodyController {
         use crate::motion::params::controller_params;
         use ateam_controls::robot_model::{KalmanFilterParams, RobotPhysicalParams};
 
-        BodyController {
+        let controller = BodyController {
             robot_model: RobotModel::new(
                 dt,
                 KalmanFilterParams::default(),
@@ -69,7 +76,8 @@ impl BodyController {
             twist_pid_controller: PidController::<3>::from_gains_matrix(
                 &controller_params::twist_pid_gains(),
             ),
-            pose_control_gain: controller_params::POSE_CONTROL_GAIN,
+            pose_accel_gain: controller_params::POSE_ACCEL_GAIN,
+            pose_vel_gain: controller_params::POSE_VEL_GAIN,
             traj_recompute_error: controller_params::TRAJ_RECOMPUTE_ERROR,
             coulomb_comp_accel_deadzone: controller_params::COULOMB_COMP_ACCEL_DEADZONE,
             trajectory: None,
@@ -86,7 +94,25 @@ impl BodyController {
             dt,
             first_vision_received: false,
             time_since_vision_update_s: VISION_ACTIVE_TIMEOUT_S + 1.0, // Set to higher than timeout
-        }
+            enc_lag: FirstOrderLag::new_from_horizon(
+                FirstOrderLagParams {
+                    k:       SVector::<f32, 2>::new(ENC_LAG_K[0], ENC_LAG_K[1]),
+                    t_slope: SVector::<f32, 2>::new(ENC_LAG_T_SLOPE[0], ENC_LAG_T_SLOPE[1]),
+                },
+                None,
+                Duration::from_micros((dt * 1e6) as u64),
+                ENC_LAG_T_HORIZON,
+            ),
+        };
+
+        defmt::info!(
+            "enc lag: n_steps={}, cmd amplification @ 1 m/s: {}x, @ 5 m/s: {}x",
+            controller.enc_lag.n_steps(),
+            controller.enc_lag.cmd_amplification(1.0, 0),
+            controller.enc_lag.cmd_amplification(5.0, 0),
+        );
+
+        controller
     }
 
     pub fn reset(&mut self) {
@@ -106,6 +132,7 @@ impl BodyController {
         self.debug_telemetry = Default::default();
         self.first_vision_received = false;
         self.time_since_vision_update_s = VISION_ACTIVE_TIMEOUT_S + 1.0; // Set to higher than timeout
+        self.enc_lag.reset();
     }
 
     pub fn vision_active(&self) -> bool {
@@ -141,16 +168,36 @@ impl BodyController {
 
         let state_prediction = self.robot_model.get_state();
 
-        let measurement: Vector8f = vector![
-            vision_pose_meas.x,
-            vision_pose_meas.y,
-            vision_pose_meas.z,
-            wheel_vel_meas.x,
-            wheel_vel_meas.y,
-            wheel_vel_meas.z,
-            wheel_vel_meas.w,
-            imu_gyro_theta_meas,
-        ];
+        // When KfCorrectionOnly or Full the raw encoder rows are replaced with the lag
+        // model's prediction of what the encoders should be showing this tick
+        // (driven by last tick's command), so the KF update compares like-for-like.
+        let measurement: Vector8f = if matches!(ENC_LAG_MODE, EncLagMode::KfCorrectionOnly | EncLagMode::Full) {
+            let lag_state = self.enc_lag.state();
+            let lag_body = Vector3f::new(lag_state.x, lag_state.y, imu_gyro_theta_meas);
+            let lag_wheel =
+                self.robot_model.transform_twist2wheel(state_prediction[2]) * lag_body;
+            vector![
+                vision_pose_meas.x,
+                vision_pose_meas.y,
+                vision_pose_meas.z,
+                lag_wheel.x,
+                lag_wheel.y,
+                lag_wheel.z,
+                lag_wheel.w,
+                imu_gyro_theta_meas,
+            ]
+        } else {
+            vector![
+                vision_pose_meas.x,
+                vision_pose_meas.y,
+                vision_pose_meas.z,
+                wheel_vel_meas.x,
+                wheel_vel_meas.y,
+                wheel_vel_meas.z,
+                wheel_vel_meas.w,
+                imu_gyro_theta_meas,
+            ]
+        };
 
         self.robot_model
             .kf_update(measurement, !vision_update, false, false)?;
@@ -174,19 +221,12 @@ impl BodyController {
         let skill_telem;
         match last_command.get_skill_command() {
             SkillCommand::GlobalPosition(gpos_cmd) => {
-                let traj_params = if gpos_cmd.max_linear_vel == 0.0
-                    && gpos_cmd.max_angular_vel == 0.0
-                    && gpos_cmd.max_linear_acc == 0.0
-                    && gpos_cmd.max_angular_acc == 0.0
-                {
-                    TrajectoryParams::default()
-                } else {
-                    TrajectoryParams {
-                        max_vel_linear: gpos_cmd.max_linear_vel,
-                        max_vel_angular: gpos_cmd.max_angular_vel,
-                        max_accel_linear: gpos_cmd.max_linear_acc,
-                        max_accel_angular: gpos_cmd.max_angular_acc,
-                    }
+                let default_params = TrajectoryParams::default();
+                let traj_params = TrajectoryParams {
+                    max_vel_linear: if gpos_cmd.max_linear_vel != 0.0 { gpos_cmd.max_linear_vel } else { default_params.max_vel_linear },
+                    max_vel_angular: if gpos_cmd.max_angular_vel != 0.0 { gpos_cmd.max_angular_vel } else { default_params.max_vel_angular },
+                    max_accel_linear: if gpos_cmd.max_linear_acc != 0.0 { gpos_cmd.max_linear_acc } else { default_params.max_accel_linear },
+                    max_accel_angular: if gpos_cmd.max_angular_acc != 0.0 { gpos_cmd.max_angular_acc } else { default_params.max_accel_angular },
                 };
                 (body_twist_out, body_accel_out) = self.global_pose_bangbang_pid_control_policy(
                     state_estimate,
@@ -199,17 +239,13 @@ impl BodyController {
                     });
             }
             SkillCommand::GlobalVelocity(gvel_cmd) => {
-                let traj_params =
-                    if gvel_cmd.max_linear_acc == 0.0 && gvel_cmd.max_angular_acc == 0.0 {
-                        TrajectoryParams::default()
-                    } else {
-                        TrajectoryParams {
-                            max_vel_linear: 0.0,
-                            max_vel_angular: 0.0,
-                            max_accel_linear: gvel_cmd.max_linear_acc,
-                            max_accel_angular: gvel_cmd.max_angular_acc,
-                        }
-                    };
+                let default_params = TrajectoryParams::default();
+                let traj_params = TrajectoryParams {
+                    max_vel_linear: default_params.max_vel_linear,
+                    max_vel_angular: default_params.max_vel_angular,
+                    max_accel_linear: if gvel_cmd.max_linear_acc != 0.0 { gvel_cmd.max_linear_acc } else { default_params.max_accel_linear },
+                    max_accel_angular: if gvel_cmd.max_angular_acc != 0.0 { gvel_cmd.max_angular_acc } else { default_params.max_accel_angular },
+                };
                 (body_twist_out, body_accel_out) = self.global_twist_control_policy(
                     state_estimate,
                     gvel_cmd.as_vec3f(),
@@ -221,17 +257,13 @@ impl BodyController {
                     });
             }
             SkillCommand::LocalVelocity(lvel_cmd) => {
-                let traj_params =
-                    if lvel_cmd.max_linear_acc == 0.0 && lvel_cmd.max_angular_acc == 0.0 {
-                        TrajectoryParams::default()
-                    } else {
-                        TrajectoryParams {
-                            max_vel_linear: 0.0,
-                            max_vel_angular: 0.0,
-                            max_accel_linear: lvel_cmd.max_linear_acc,
-                            max_accel_angular: lvel_cmd.max_angular_acc,
-                        }
-                    };
+                let default_params = TrajectoryParams::default();
+                let traj_params = TrajectoryParams {
+                    max_vel_linear: default_params.max_vel_linear,
+                    max_vel_angular: default_params.max_vel_angular,
+                    max_accel_linear: if lvel_cmd.max_linear_acc != 0.0 { lvel_cmd.max_linear_acc } else { default_params.max_accel_linear },
+                    max_accel_angular: if lvel_cmd.max_angular_acc != 0.0 { lvel_cmd.max_angular_acc } else { default_params.max_accel_angular },
+                };
                 (body_twist_out, body_accel_out) = self.local_twist_control_policy(
                     state_estimate,
                     lvel_cmd.as_vec3f(),
@@ -279,11 +311,28 @@ impl BodyController {
         self.body_accel_out_fric_comp = self.body_accel_out
             - self.robot_model.i_inv * self.robot_model.compute_friction_force(fric_twist);
 
-        // Calculate wheel commands from body commands
-        self.wheel_vel_out =
-            self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_out;
+        // Calculate wheel commands from body commands.
+        // When FeedforwardOnly or Full the XY body velocity is pre-compensated through
+        // the lag model inversion before the wheel transform; angular velocity is not lagged.
+        let body_xy = SVector::<f32, 2>::new(self.body_twist_out.x, self.body_twist_out.y);
+        self.wheel_vel_out = if matches!(ENC_LAG_MODE, EncLagMode::FeedforwardOnly | EncLagMode::Full) {
+            let compensated_xy = self.enc_lag.invert(&body_xy);
+            let compensated_twist = Vector3f::new(
+                compensated_xy.x,
+                compensated_xy.y,
+                self.body_twist_out.z,
+            );
+            self.robot_model.transform_twist2wheel(state_estimate.z) * compensated_twist
+        } else {
+            self.robot_model.transform_twist2wheel(state_estimate.z) * self.body_twist_out
+        };
+
         self.wheel_torque_out = self.robot_model.transform_accel2wheel(state_estimate.z)
             * self.body_accel_out_fric_comp;
+            
+        if !matches!(ENC_LAG_MODE, EncLagMode::Disabled) {
+            self.enc_lag.step(&body_xy);
+        }
 
         let t_after_effort = Instant::now();
 
@@ -496,29 +545,62 @@ impl BodyController {
             self.trajectory_time = 0.0;
         }
 
-        // Compute feedforward as the tracked trajectory
-        let ff = self.trajectory
+        // PID feedback — computed unconditionally to keep integrator state current.
+        let mut traj_curstep_tgt_pos: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
+
+        let traj_curstep_tgt_vel: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
+
+        let traj_curstep_tgt_accel = self.trajectory
             .as_ref()
             .expect("Trajectory should always be Some at this point since we set it if it was None above")
             .accel_at(self.trajectory_time)
             .expect("Trajectory should always have valid accel at current time");
 
-        let mut target: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
-        // Wrap target theta so that (target.z - pose_estimate.z) lies in [-π, π],
-        target.z = pose_estimate.z + remainderf(target.z - pose_estimate.z, 2.0 * PI);
-        let target_twist: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
-        let twist_error = target_twist - twist_estimate;
-        let fb = self.pose_pid_controller.calculate_with_derivative(
-            &target,
+        // Wrap target theta so that (target.z - pose_estimate.z) lies in [-π, π]
+        traj_curstep_tgt_pos.z = pose_estimate.z + remainderf(traj_curstep_tgt_pos.z - pose_estimate.z, 2.0 * PI);
+        let twist_error = traj_curstep_tgt_vel - twist_estimate;
+        let pos_pid_feedback = self.pose_pid_controller.calculate_with_derivative(
+            &traj_curstep_tgt_pos,
             &pose_estimate,
             &twist_error,
             self.dt,
         );
 
-        // Weighted sum of feedback and feedforward terms to calculate the accel command
-        let accel_out = self.pose_control_gain[0] * ff + self.pose_control_gain[1] * fb;
+        // Accel output (torque path) — gated by POSE_ACCEL_MODE.
+        let accel_out: Vector3f = {
+            let accel_ff_term = if matches!(POSE_ACCEL_MODE, PoseAccelMode::FeedforwardOnly | PoseAccelMode::Full) {
+                self.pose_accel_gain[0] * traj_curstep_tgt_accel
+            } else {
+                Vector3f::zeros()
+            };
 
-        let twist_out: Vector3f = (state_estimate.fixed_rows::<3>(3) + accel_out * self.dt).into();
+            let accel_fb_term = if matches!(POSE_ACCEL_MODE, PoseAccelMode::FeedbackOnly | PoseAccelMode::Full) {
+                self.pose_accel_gain[1] * pos_pid_feedback
+            } else {
+                Vector3f::zeros()
+            };
+
+            accel_ff_term + accel_fb_term
+        };
+
+        // Velocity setpoint (wheel vel path) — gated by POSE_VEL_MODE.
+        // FeedforwardOnly and Full use trajectory velocity as the base;
+        // Disabled and FeedbackOnly derive velocity by integrating accel_out.
+        let twist_out: Vector3f = {
+            let vel_ff_term: Vector3f = if matches!(POSE_VEL_MODE, PoseVelMode::FeedforwardOnly | PoseVelMode::Full) {
+                self.pose_vel_gain[0] * traj_curstep_tgt_vel
+            } else {
+                (state_estimate.fixed_rows::<3>(3) + accel_out * self.dt).into()
+            };
+
+            let vel_fb_term = if matches!(POSE_VEL_MODE, PoseVelMode::FeedbackOnly | PoseVelMode::Full) {
+                self.pose_vel_gain[1] * pos_pid_feedback * self.dt
+            } else {
+                Vector3f::zeros()
+            };
+
+            vel_ff_term + vel_fb_term
+        };
 
         // Step trajectory forward
         let next_state = self
@@ -610,7 +692,7 @@ impl BodyController {
                 reply.data.f32_ = self.coulomb_comp_accel_deadzone;
             }
             ParameterName::POSE_CONTROL_GAIN => {
-                reply.data.vec2_f32 = [self.pose_control_gain[0], self.pose_control_gain[1]];
+                reply.data.vec2_f32 = [self.pose_accel_gain[0], self.pose_accel_gain[1]];
             }
             ParameterName::TRAJ_RECOMPUTE_ERROR => {
                 reply.data.vec4_f32 = [
@@ -719,7 +801,7 @@ impl BodyController {
             }
             ParameterName::POSE_CONTROL_GAIN => {
                 let v = unsafe { cmd.data.vec2_f32 };
-                self.pose_control_gain = Vector2f::new(v[0], v[1]);
+                self.pose_accel_gain = Vector2f::new(v[0], v[1]);
             }
             ParameterName::TRAJ_RECOMPUTE_ERROR => {
                 let v = unsafe { cmd.data.vec4_f32 };
