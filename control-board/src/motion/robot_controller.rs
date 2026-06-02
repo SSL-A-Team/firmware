@@ -176,10 +176,26 @@ impl BodyController {
             SkillCommand::GlobalPosition(gpos_cmd) => {
                 let default_params = TrajectoryParams::default();
                 let traj_params = TrajectoryParams {
-                    max_vel_linear: if gpos_cmd.max_linear_vel != 0.0 { gpos_cmd.max_linear_vel } else { default_params.max_vel_linear },
-                    max_vel_angular: if gpos_cmd.max_angular_vel != 0.0 { gpos_cmd.max_angular_vel } else { default_params.max_vel_angular },
-                    max_accel_linear: if gpos_cmd.max_linear_acc != 0.0 { gpos_cmd.max_linear_acc } else { default_params.max_accel_linear },
-                    max_accel_angular: if gpos_cmd.max_angular_acc != 0.0 { gpos_cmd.max_angular_acc } else { default_params.max_accel_angular },
+                    max_vel_linear: if gpos_cmd.max_linear_vel != 0.0 {
+                        gpos_cmd.max_linear_vel
+                    } else {
+                        default_params.max_vel_linear
+                    },
+                    max_vel_angular: if gpos_cmd.max_angular_vel != 0.0 {
+                        gpos_cmd.max_angular_vel
+                    } else {
+                        default_params.max_vel_angular
+                    },
+                    max_accel_linear: if gpos_cmd.max_linear_acc != 0.0 {
+                        gpos_cmd.max_linear_acc
+                    } else {
+                        default_params.max_accel_linear
+                    },
+                    max_accel_angular: if gpos_cmd.max_angular_acc != 0.0 {
+                        gpos_cmd.max_angular_acc
+                    } else {
+                        default_params.max_accel_angular
+                    },
                 };
                 (body_twist_out, body_accel_out) = self.global_pose_bangbang_pid_control_policy(
                     state_estimate,
@@ -196,8 +212,16 @@ impl BodyController {
                 let traj_params = TrajectoryParams {
                     max_vel_linear: default_params.max_vel_linear,
                     max_vel_angular: default_params.max_vel_angular,
-                    max_accel_linear: if gvel_cmd.max_linear_acc != 0.0 { gvel_cmd.max_linear_acc } else { default_params.max_accel_linear },
-                    max_accel_angular: if gvel_cmd.max_angular_acc != 0.0 { gvel_cmd.max_angular_acc } else { default_params.max_accel_angular },
+                    max_accel_linear: if gvel_cmd.max_linear_acc != 0.0 {
+                        gvel_cmd.max_linear_acc
+                    } else {
+                        default_params.max_accel_linear
+                    },
+                    max_accel_angular: if gvel_cmd.max_angular_acc != 0.0 {
+                        gvel_cmd.max_angular_acc
+                    } else {
+                        default_params.max_accel_angular
+                    },
                 };
                 (body_twist_out, body_accel_out) = self.global_twist_control_policy(
                     state_estimate,
@@ -214,8 +238,16 @@ impl BodyController {
                 let traj_params = TrajectoryParams {
                     max_vel_linear: default_params.max_vel_linear,
                     max_vel_angular: default_params.max_vel_angular,
-                    max_accel_linear: if lvel_cmd.max_linear_acc != 0.0 { lvel_cmd.max_linear_acc } else { default_params.max_accel_linear },
-                    max_accel_angular: if lvel_cmd.max_angular_acc != 0.0 { lvel_cmd.max_angular_acc } else { default_params.max_accel_angular },
+                    max_accel_linear: if lvel_cmd.max_linear_acc != 0.0 {
+                        lvel_cmd.max_linear_acc
+                    } else {
+                        default_params.max_accel_linear
+                    },
+                    max_accel_angular: if lvel_cmd.max_angular_acc != 0.0 {
+                        lvel_cmd.max_angular_acc
+                    } else {
+                        default_params.max_accel_angular
+                    },
                 };
                 (body_twist_out, body_accel_out) = self.local_twist_control_policy(
                     state_estimate,
