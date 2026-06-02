@@ -174,19 +174,28 @@ impl BodyController {
         let skill_telem;
         match last_command.get_skill_command() {
             SkillCommand::GlobalPosition(gpos_cmd) => {
-                let traj_params = if gpos_cmd.max_linear_vel == 0.0
-                    && gpos_cmd.max_angular_vel == 0.0
-                    && gpos_cmd.max_linear_acc == 0.0
-                    && gpos_cmd.max_angular_acc == 0.0
-                {
-                    TrajectoryParams::default()
-                } else {
-                    TrajectoryParams {
-                        max_vel_linear: gpos_cmd.max_linear_vel,
-                        max_vel_angular: gpos_cmd.max_angular_vel,
-                        max_accel_linear: gpos_cmd.max_linear_acc,
-                        max_accel_angular: gpos_cmd.max_angular_acc,
-                    }
+                let default_params = TrajectoryParams::default();
+                let traj_params = TrajectoryParams {
+                    max_vel_linear: if gpos_cmd.max_linear_vel != 0.0 {
+                        gpos_cmd.max_linear_vel
+                    } else {
+                        default_params.max_vel_linear
+                    },
+                    max_vel_angular: if gpos_cmd.max_angular_vel != 0.0 {
+                        gpos_cmd.max_angular_vel
+                    } else {
+                        default_params.max_vel_angular
+                    },
+                    max_accel_linear: if gpos_cmd.max_linear_acc != 0.0 {
+                        gpos_cmd.max_linear_acc
+                    } else {
+                        default_params.max_accel_linear
+                    },
+                    max_accel_angular: if gpos_cmd.max_angular_acc != 0.0 {
+                        gpos_cmd.max_angular_acc
+                    } else {
+                        default_params.max_accel_angular
+                    },
                 };
                 (body_twist_out, body_accel_out) = self.global_pose_bangbang_pid_control_policy(
                     state_estimate,
@@ -199,17 +208,21 @@ impl BodyController {
                     });
             }
             SkillCommand::GlobalVelocity(gvel_cmd) => {
-                let traj_params =
-                    if gvel_cmd.max_linear_acc == 0.0 && gvel_cmd.max_angular_acc == 0.0 {
-                        TrajectoryParams::default()
+                let default_params = TrajectoryParams::default();
+                let traj_params = TrajectoryParams {
+                    max_vel_linear: default_params.max_vel_linear,
+                    max_vel_angular: default_params.max_vel_angular,
+                    max_accel_linear: if gvel_cmd.max_linear_acc != 0.0 {
+                        gvel_cmd.max_linear_acc
                     } else {
-                        TrajectoryParams {
-                            max_vel_linear: 0.0,
-                            max_vel_angular: 0.0,
-                            max_accel_linear: gvel_cmd.max_linear_acc,
-                            max_accel_angular: gvel_cmd.max_angular_acc,
-                        }
-                    };
+                        default_params.max_accel_linear
+                    },
+                    max_accel_angular: if gvel_cmd.max_angular_acc != 0.0 {
+                        gvel_cmd.max_angular_acc
+                    } else {
+                        default_params.max_accel_angular
+                    },
+                };
                 (body_twist_out, body_accel_out) = self.global_twist_control_policy(
                     state_estimate,
                     gvel_cmd.as_vec3f(),
@@ -221,17 +234,21 @@ impl BodyController {
                     });
             }
             SkillCommand::LocalVelocity(lvel_cmd) => {
-                let traj_params =
-                    if lvel_cmd.max_linear_acc == 0.0 && lvel_cmd.max_angular_acc == 0.0 {
-                        TrajectoryParams::default()
+                let default_params = TrajectoryParams::default();
+                let traj_params = TrajectoryParams {
+                    max_vel_linear: default_params.max_vel_linear,
+                    max_vel_angular: default_params.max_vel_angular,
+                    max_accel_linear: if lvel_cmd.max_linear_acc != 0.0 {
+                        lvel_cmd.max_linear_acc
                     } else {
-                        TrajectoryParams {
-                            max_vel_linear: 0.0,
-                            max_vel_angular: 0.0,
-                            max_accel_linear: lvel_cmd.max_linear_acc,
-                            max_accel_angular: lvel_cmd.max_angular_acc,
-                        }
-                    };
+                        default_params.max_accel_linear
+                    },
+                    max_accel_angular: if lvel_cmd.max_angular_acc != 0.0 {
+                        lvel_cmd.max_angular_acc
+                    } else {
+                        default_params.max_accel_angular
+                    },
+                };
                 (body_twist_out, body_accel_out) = self.local_twist_control_policy(
                     state_estimate,
                     lvel_cmd.as_vec3f(),
