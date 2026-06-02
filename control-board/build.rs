@@ -87,7 +87,10 @@ fn register_git_rerun(git_dir: &PathBuf) {
     }
 
     // packed-refs is updated by `git gc` and can hold the tip of any branch.
-    println!("cargo:rerun-if-changed={}", git_dir.join("packed-refs").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        git_dir.join("packed-refs").display()
+    );
 
     // The index changes on `git add` / `git reset`; watching it lets us detect
     // whether the working tree has staged changes at build time.
