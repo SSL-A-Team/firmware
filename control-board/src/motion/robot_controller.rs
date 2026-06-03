@@ -2,6 +2,7 @@ use crate::motion::params::controller_params::{
     ANGULAR_STATE_TWIST_DEADZONE, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE,
     LINEAR_STATE_TWIST_DEADZONE, EncLagMode,
     PoseAccelMode, POSE_ACCEL_MODE, PoseVelMode, POSE_VEL_MODE,
+    TRAJ_REPLAN_CMD_POS_DIST_M, TRAJ_REPLAN_CMD_ANGLE_RAD,
 };
 use crate::motion::pid::PidController;
 use crate::parameter_interface::ParameterInterface;
@@ -56,6 +57,11 @@ pub struct BodyController {
     pub first_vision_received: bool,
     pub time_since_vision_update_s: f32,
     pub enc_lag: FirstOrderLag<2>,
+}
+
+fn pose_cmd_changed(prev: Vector3f, next: Vector3f) -> bool {
+    Vector2f::new(next.x - prev.x, next.y - prev.y).norm() > TRAJ_REPLAN_CMD_POS_DIST_M
+        || remainderf(next.z - prev.z, 2.0 * PI).abs() > TRAJ_REPLAN_CMD_ANGLE_RAD
 }
 
 impl BodyController {
@@ -523,8 +529,7 @@ impl BodyController {
         //   2) the target pose has changed
         //   3) the current body configuration has strayed too far from the currently tracked trajectory
         if self.trajectory.is_none()
-            || self.prev_body_cmd.is_none()
-            || self.prev_body_cmd.unwrap() != target_pose
+            || self.prev_body_cmd.map_or(true, |prev| pose_cmd_changed(prev, target_pose))
             || (self.trajectory_state.x - pose_estimate.x).abs() > self.traj_recompute_error[(0, 0)]
             || (self.trajectory_state.y - pose_estimate.y).abs() > self.traj_recompute_error[(0, 0)]
             || remainderf(self.trajectory_state.z - pose_estimate.z, 2.0 * PI).abs()

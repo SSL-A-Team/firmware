@@ -75,10 +75,16 @@ pub const POSE_ACCEL_MODE: PoseAccelMode = PoseAccelMode::Full;
 
 /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
 /// Thresholds for when to recompute the trajectory
-pub const TRAJ_RECOMPUTE_ERROR: Vector4f = Vector4f::new(0.5, 1.0, 1.0, 2.0);
+pub const TRAJ_RECOMPUTE_ERROR: Vector4f = Vector4f::new(0.5, 1.0, 4.0, 8.0);
+
+/// Minimum XY Euclidean distance change (meters) in the target pose command to trigger a replan.
+pub const TRAJ_REPLAN_CMD_POS_DIST_M: f32 = 0.005;
+
+/// Minimum angular change (radians) in the target pose command to trigger a replan.
+pub const TRAJ_REPLAN_CMD_ANGLE_RAD: f32 = 0.015;
 
 /// Accel magnitude threshold for coulomb friction compensation gating.
-/// When body_accel_out magnitude is above this, coulomb comp uses target twist direction
+/// When body_accel_out magnitude is above this, coulomb comp uses target  twist direction
 /// (helps overcome static friction). Below this, uses deadzoned estimated twist (stable at rest).
 /// TODO: separate this to linear and angular
 pub const COULOMB_COMP_ACCEL_DEADZONE: f32 = 2.0;
