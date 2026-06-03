@@ -49,7 +49,12 @@ impl<const N: usize> FirstOrderLag<N> {
     /// Create with an explicit iteration count.
     ///
     /// `t_min` defaults to 1 ms when `None`.
-    pub fn new(params: FirstOrderLagParams<N>, t_min: Option<Duration>, dt: Duration, n_steps: usize) -> Self {
+    pub fn new(
+        params: FirstOrderLagParams<N>,
+        t_min: Option<Duration>,
+        dt: Duration,
+        n_steps: usize,
+    ) -> Self {
         Self {
             params,
             t_min: duration_to_secs(t_min.unwrap_or(T_MIN_DEFAULT)),
@@ -63,7 +68,12 @@ impl<const N: usize> FirstOrderLag<N> {
     /// `n_steps = max(1, round(t_horizon / dt))` once at construction.
     ///
     /// `t_min` defaults to 1 ms when `None`.
-    pub fn new_from_horizon(params: FirstOrderLagParams<N>, t_min: Option<Duration>, dt: Duration, t_horizon: Duration) -> Self {
+    pub fn new_from_horizon(
+        params: FirstOrderLagParams<N>,
+        t_min: Option<Duration>,
+        dt: Duration,
+        t_horizon: Duration,
+    ) -> Self {
         let dt_secs = duration_to_secs(dt);
         let n_steps = ((duration_to_secs(t_horizon) / dt_secs + 0.5) as usize).max(1);
         Self {
