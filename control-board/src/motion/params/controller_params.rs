@@ -1,4 +1,5 @@
 use ateam_controls::{Vector2f, Vector3f, Vector4f, Vector5f};
+use embassy_time::Duration;
 use nalgebra::Matrix3x5;
 
 // PID gains per row: [Kp, Ki, Kd, Ki_err_min, Ki_err_max]
@@ -95,9 +96,6 @@ pub const TRAJ_REPLAN_CMD_ANGLE_RAD: f32 = 0.015;
 /// FRICTION_COMP_GATING, to avoid unstable state at 0 velocity
 /// [LINEAR_VEL_THRESHOLD, LINEAR_ACCEL_THRESHOLD, ANGULAR_VEL_THRESHOLD, ANGULAR_ACCEL_THRESHOLD]
 pub const FRICTION_COMP_GATING: Vector4f = Vector4f::new(0.1, 0.5, 0.5, 1.0);
-
-pub const LINEAR_STATE_TWIST_DEADZONE: f32 = 0.05;
-pub const ANGULAR_STATE_TWIST_DEADZONE: f32 = 0.3;
 
 /// Encoder lag compensation operating mode.
 ///
