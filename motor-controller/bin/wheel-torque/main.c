@@ -74,12 +74,15 @@ static bool current_limited = false;
 
 // static FixedPointS12F4_PiController_t vel_curvel_controller;
 
+// kP saturation point: MAX_CURR_WHEEL_TURNING / (v_body_m_s / WHEEL_RADIUS_M)
+//   = 6300 mA / (1.0 m/s / 0.030 m) = 6300 / 33.33 = 189.0 mA/(rad/s) saturates at 1.0 m/s body error
 const PidConstants_t vel_velcur_controller_constants = {
-    .kP = 1.0f,
-    .kI = 10.0f,
+    .kP = 5.0f,
+    .kI = 0.0f,
     .kD = 0.0f,
     .kI_max = 100.0f,
     .kI_min = -100.0f,
+    .anti_jitter_thresh = (float) M_PI / 2.0f,
 };
 
 static Pid_t vel_velcur_controller;
@@ -94,6 +97,7 @@ const PidConstants_t vel_gains[3] = {
         .kD = 0.4f,
         .kI_max = 20.0f,
         .kI_min = -20.0f,
+        .anti_jitter_thresh = 0.0f,
     },
     {
         .kP = 7.0f,
@@ -101,6 +105,7 @@ const PidConstants_t vel_gains[3] = {
         .kD = 0.5f,
         .kI_max = 0.0f,
         .kI_min = 0.0f,
+        .anti_jitter_thresh = 0.0f,
     },
     {
         .kP = 2.0f,
@@ -108,6 +113,7 @@ const PidConstants_t vel_gains[3] = {
         .kD = 0.1f,
         .kI_max = 0.0f,
         .kI_min = 0.0f,
+        .anti_jitter_thresh = 0.0f,
     }
 };
 const float vel_gain_schedule[3] = {
