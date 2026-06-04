@@ -1,6 +1,3 @@
-use crate::motion::params::controller_params::{
-    ANGULAR_STATE_TWIST_DEADZONE, LINEAR_STATE_TWIST_DEADZONE,
-};
 use crate::motion::pid::PidController;
 use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::{
@@ -17,7 +14,7 @@ use ateam_controls::{
 };
 use core::f32::consts::PI;
 use embassy_time::Instant;
-use libm::{fabsf, remainderf};
+use libm::{fabsf, hypotf, remainderf};
 use nalgebra::vector;
 
 use ateam_common_packets::bindings::ParameterCommand;
@@ -33,8 +30,8 @@ pub struct BodyController {
     pub pose_control_gain: Vector2f,
     /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR] thresholds for when to recompute the trajectory
     pub traj_recompute_error: Vector4f,
-    /// Accel magnitude threshold for coulomb friction comp gating
-    pub coulomb_comp_accel_deadzone: f32,
+    /// [LINEAR_VEL_THRESHOLD, LINEAR_ACCEL_THRESHOLD, ANGULAR_VEL_THRESHOLD, ANGULAR_ACCEL_THRESHOLD]
+    pub friction_comp_gating: Vector4f,
     pub trajectory: Option<BangBangTraj3D>,
     pub trajectory_time: f32,
     pub trajectory_state: Vector6f,
@@ -63,15 +60,16 @@ impl BodyController {
                 RobotPhysicalParams::default(),
             )
             .expect("Failed to create RobotModel, check that parameters are valid"),
-            pose_pid_controller: PidController::<3>::from_gains_matrix(
+            pose_pid_controller: PidController::<3>::from_gains_matrix_with_anti_jitter(
                 &controller_params::pose_pid_gains(),
+                Some(controller_params::POSE_PID_ANTI_JITTER_THRESH),
             ),
             twist_pid_controller: PidController::<3>::from_gains_matrix(
                 &controller_params::twist_pid_gains(),
             ),
             pose_control_gain: controller_params::POSE_CONTROL_GAIN,
             traj_recompute_error: controller_params::TRAJ_RECOMPUTE_ERROR,
-            coulomb_comp_accel_deadzone: controller_params::COULOMB_COMP_ACCEL_DEADZONE,
+            friction_comp_gating: controller_params::FRICTION_COMP_GATING,
             trajectory: None,
             trajectory_state: Vector6f::zeros(),
             trajectory_time: 0.0,
@@ -154,18 +152,7 @@ impl BodyController {
 
         self.robot_model
             .kf_update(measurement, !vision_update, false, false)?;
-        let mut state_estimate = self.robot_model.get_state();
-
-        // Deadzone the velocity estimate
-        if fabsf(state_estimate[3]) < LINEAR_STATE_TWIST_DEADZONE {
-            state_estimate[3] = 0.0;
-        }
-        if fabsf(state_estimate[4]) < LINEAR_STATE_TWIST_DEADZONE {
-            state_estimate[4] = 0.0;
-        }
-        if fabsf(state_estimate[5]) < ANGULAR_STATE_TWIST_DEADZONE {
-            state_estimate[5] = 0.0;
-        }
+        let state_estimate = self.robot_model.get_state();
 
         let t_after_kf_update = Instant::now();
 
@@ -266,18 +253,9 @@ impl BodyController {
         self.body_twist_out = body_twist_out;
         self.body_accel_out = body_accel_out;
 
-        // Compensate for modeled friction forces
-        // Gate coulomb friction on accel command magnitude: when actively commanding motion,
-        // use target twist direction (overcomes static friction). When at rest, use deadzoned
-        // estimated twist (stable equilibrium).
-        let fric_twist: Vector3f =
-            if self.body_accel_out.magnitude() > self.coulomb_comp_accel_deadzone {
-                self.body_twist_out
-            } else {
-                state_estimate.fixed_rows::<3>(3).into()
-            };
-        self.body_accel_out_fric_comp = self.body_accel_out
-            - self.robot_model.i_inv * self.robot_model.compute_friction_force(fric_twist);
+        let friction_force_global = self.compute_friction_compensation(state_estimate);
+        self.body_accel_out_fric_comp =
+            self.body_accel_out - self.robot_model.i_inv * friction_force_global;
 
         // Calculate wheel commands from body commands
         self.wheel_vel_out =
@@ -350,6 +328,58 @@ impl BodyController {
         self.debug_telemetry
     }
 
+    /// Returns the modeled friction force in the global frame
+    /// 
+    /// Uses friction compensation gating to turn on/off linear and/or angular
+    /// friction compensation.
+    fn compute_friction_compensation(&self, state_estimate: Vector6f) -> Vector3f {
+        let theta = state_estimate.z;
+        let r_glob_to_loc = z_rotation_mat(-theta);
+        let r_loc_to_glob = z_rotation_mat(theta);
+
+        let est_twist_global: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+        let est_twist_local: Vector3f = r_glob_to_loc * est_twist_global;
+        let tgt_twist_local: Vector3f = r_glob_to_loc * self.body_twist_out;
+        let cmd_accel_local: Vector3f = r_glob_to_loc * self.body_accel_out;
+
+        let lin_vel_mag = hypotf(est_twist_local.x, est_twist_local.y);
+        let lin_accel_mag = hypotf(cmd_accel_local.x, cmd_accel_local.y);
+        let ang_vel_mag = fabsf(est_twist_local.z);
+        let ang_accel_mag = fabsf(cmd_accel_local.z);
+
+        let lin_vel_thresh = self.friction_comp_gating[0];
+        let lin_accel_thresh = self.friction_comp_gating[1];
+        let ang_vel_thresh = self.friction_comp_gating[2];
+        let ang_accel_thresh = self.friction_comp_gating[3];
+
+        // Gate priority: if the commanded acceleration is above the accel
+        // threshold, always compensate (the controller is actively pushing).
+        // Otherwise use the velocity threshold (if the robot is moving,
+        // compensate to overcome dynamic friction; if the robot is stationary,
+        // don't compensate to avoid oscillations from static friction).
+        let linear_comp_on = if lin_accel_mag >= lin_accel_thresh {
+            true
+        } else {
+            lin_vel_mag >= lin_vel_thresh
+        };
+        let angular_comp_on = if ang_accel_mag >= ang_accel_thresh {
+            true
+        } else {
+            ang_vel_mag >= ang_vel_thresh
+        };
+
+        let fric_twist_local = Vector3f::new(
+            if linear_comp_on { tgt_twist_local.x } else { 0.0 },
+            if linear_comp_on { tgt_twist_local.y } else { 0.0 },
+            if angular_comp_on { tgt_twist_local.z } else { 0.0 },
+        );
+
+        let friction_force_local = self
+            .robot_model
+            .compute_friction_force(fric_twist_local);
+        r_loc_to_glob * friction_force_local
+    }
+
     fn global_accel_control_policy(
         &mut self,
         state_estimate: Vector6f,
@@ -392,9 +422,11 @@ impl BodyController {
         //   1) we don't have a trajectory yet
         //   2) the target twist has changed
         //   3) the current twist has strayed too far from the currently tracked trajectory
+        let cmd_changed = self
+            .prev_body_cmd
+            .map_or(true, |cmd| cmd != target_twist);
         if self.trajectory.is_none()
-            || self.prev_body_cmd.is_none()
-            || self.prev_body_cmd.unwrap() != target_twist
+            || cmd_changed
             || (self.trajectory_state[(3, 0)] - twist_estimate.x).abs()
                 > self.traj_recompute_error[(2, 0)]
             || (self.trajectory_state[(4, 0)] - twist_estimate.y).abs()
@@ -473,9 +505,12 @@ impl BodyController {
         //   1) we don't have a trajectory yet
         //   2) the target pose has changed
         //   3) the current body configuration has strayed too far from the currently tracked trajectory
+        let cmd_changed = self.prev_body_cmd.map_or(true, |prev| {
+            let d = prev - target_pose;
+            fabsf(d.x) > 0.002 || fabsf(d.y) > 0.002 || fabsf(d.z) > 0.05
+        });
         if self.trajectory.is_none()
-            || self.prev_body_cmd.is_none()
-            || self.prev_body_cmd.unwrap() != target_pose
+            || cmd_changed
             || (self.trajectory_state.x - pose_estimate.x).abs() > self.traj_recompute_error[(0, 0)]
             || (self.trajectory_state.y - pose_estimate.y).abs() > self.traj_recompute_error[(0, 0)]
             || remainderf(self.trajectory_state.z - pose_estimate.z, 2.0 * PI).abs()
@@ -549,8 +584,8 @@ impl BodyController {
             ParameterName::PHYS_WHEEL => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::PHYS_INERTIA => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::PHYS_MOTOR_MODEL => Some(ParameterDataFormat::VEC2_F32),
-            ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => Some(ParameterDataFormat::F32),
+            ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC6_F32),
+            ParameterName::FRICTION_COMP_GATING => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::POSE_CONTROL_GAIN => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRAJ_RECOMPUTE_ERROR => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
@@ -599,15 +634,22 @@ impl BodyController {
                 reply.data.vec2_f32 = [phys.motor_torque_constant, phys.motor_efficiency_factor];
             }
             ParameterName::PHYS_FRICTION_MODEL => {
-                reply.data.vec4_f32 = [
-                    phys.coulomb_friction_coefficient_linear,
+                reply.data.vec6_f32 = [
+                    phys.coulomb_friction_coefficient_linear_x,
+                    phys.coulomb_friction_coefficient_linear_y,
                     phys.coulomb_friction_coefficient_angular,
-                    phys.viscous_friction_coefficient_linear,
+                    phys.viscous_friction_coefficient_linear_x,
+                    phys.viscous_friction_coefficient_linear_y,
                     phys.viscous_friction_coefficient_angular,
                 ];
             }
-            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => {
-                reply.data.f32_ = self.coulomb_comp_accel_deadzone;
+            ParameterName::FRICTION_COMP_GATING => {
+                reply.data.vec4_f32 = [
+                    self.friction_comp_gating[0],
+                    self.friction_comp_gating[1],
+                    self.friction_comp_gating[2],
+                    self.friction_comp_gating[3],
+                ];
             }
             ParameterName::POSE_CONTROL_GAIN => {
                 reply.data.vec2_f32 = [self.pose_control_gain[0], self.pose_control_gain[1]];
@@ -705,17 +747,19 @@ impl BodyController {
                 let _ = self.robot_model.update_physical_params(p);
             }
             ParameterName::PHYS_FRICTION_MODEL => {
-                let v = unsafe { cmd.data.vec4_f32 };
+                let v = unsafe { cmd.data.vec6_f32 };
                 let mut p = self.robot_model.physical_params;
-                p.coulomb_friction_coefficient_linear = v[0];
-                p.coulomb_friction_coefficient_angular = v[1];
-                p.viscous_friction_coefficient_linear = v[2];
-                p.viscous_friction_coefficient_angular = v[3];
+                p.coulomb_friction_coefficient_linear_x = v[0];
+                p.coulomb_friction_coefficient_linear_y = v[1];
+                p.coulomb_friction_coefficient_angular = v[2];
+                p.viscous_friction_coefficient_linear_x = v[3];
+                p.viscous_friction_coefficient_linear_y = v[4];
+                p.viscous_friction_coefficient_angular = v[5];
                 let _ = self.robot_model.update_physical_params(p);
             }
-            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => {
-                let v = unsafe { cmd.data.f32_ };
-                self.coulomb_comp_accel_deadzone = v;
+            ParameterName::FRICTION_COMP_GATING => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                self.friction_comp_gating = Vector4f::new(v[0], v[1], v[2], v[3]);
             }
             ParameterName::POSE_CONTROL_GAIN => {
                 let v = unsafe { cmd.data.vec2_f32 };

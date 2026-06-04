@@ -28,7 +28,7 @@ use crate::{
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel-torque.bin"}
 
-const MAX_CURRENT_MA: f32 = 1500.0; // mA
+const MAX_CURRENT_MA: f32 = 2500.0; // mA
 
 const MAX_TX_PACKET_SIZE: usize = 80;
 const TX_BUF_DEPTH: usize = 3;
