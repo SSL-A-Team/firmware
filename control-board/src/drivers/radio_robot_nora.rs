@@ -463,9 +463,7 @@ impl<
     }
 
     pub async fn send_hello(&self, id: u8, team: TeamColor) -> Result<(), RobotRadioNoraError> {
-        let coms_repo_dirty = false;
-        let controls_repo_dirty = false;
-        let firmware_repo_dirty = false;
+        use crate::git_version;
 
         let packet = RadioPacket {
             header: RadioHeader {
@@ -482,16 +480,16 @@ impl<
                         TeamColor::Blue => bindings::TeamColor::TC_BLUE,
                     },
                     _bitfield_1: HelloRequest::new_bitfield_1(
-                        coms_repo_dirty.into(),
-                        controls_repo_dirty.into(),
-                        firmware_repo_dirty.into(),
+                        git_version::COMS_DIRTY.into(),
+                        git_version::CONTROLS_DIRTY.into(),
+                        git_version::FIRMWARE_DIRTY.into(),
                         0,
                     ),
                     _bitfield_align_1: Default::default(),
                     reserved: Default::default(),
-                    coms_hash: [0; 4],
-                    controls_hash: [0; 4],
-                    firmware_hash: [0; 4],
+                    coms_hash: git_version::COMS_HASH,
+                    controls_hash: git_version::CONTROLS_HASH,
+                    firmware_hash: git_version::FIRMWARE_HASH,
                 },
             },
         };

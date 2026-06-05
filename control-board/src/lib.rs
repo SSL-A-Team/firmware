@@ -22,6 +22,7 @@ use embassy_stm32::{
 };
 use embassy_time::Instant;
 
+pub mod git_version;
 pub mod image_hash;
 pub mod motor;
 pub mod parameter_interface;
