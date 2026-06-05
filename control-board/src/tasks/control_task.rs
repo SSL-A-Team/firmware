@@ -473,6 +473,7 @@ impl<
             let (wheel_current_cmd, wheel_vel_cmd) = if self.stop_wheels()
                 || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP
                 || _cmd_mode == BodyControlMode::BCM_OFF
+                || robot_controller.wheels_disabled()
             {
                 if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS {
                     defmt::warn!("control task - motor commands locked out");

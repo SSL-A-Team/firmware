@@ -32,7 +32,6 @@ const VISION_ACTIVE_TIMEOUT_S: f32 = 0.2;
 pub struct BodyController {
     pub robot_model: RobotModel,
     pub pose_pid_controller: PidController<3>,
-    pub twist_pid_controller: PidController<3>,
     /// Accel (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
     pub pose_accel_gain: Vector2f,
     /// Velocity setpoint path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
@@ -56,6 +55,7 @@ pub struct BodyController {
     pub first_vision_received: bool,
     pub time_since_vision_update_s: f32,
     pub enc_lag: FirstOrderLag<2>,
+    pub wheels_disabled: bool,
 }
 
 fn pose_cmd_changed(prev: Vector3f, next: Vector3f) -> bool {
@@ -82,9 +82,6 @@ impl BodyController {
             pose_pid_controller: PidController::<3>::from_gains_matrix_with_anti_jitter(
                 &controller_params::pose_pid_gains(),
                 Some(controller_params::POSE_PID_ANTI_JITTER_THRESH),
-            ),
-            twist_pid_controller: PidController::<3>::from_gains_matrix(
-                &controller_params::twist_pid_gains(),
             ),
             pose_accel_gain: controller_params::POSE_ACCEL_GAIN,
             pose_vel_gain: controller_params::POSE_VEL_GAIN,
@@ -113,6 +110,7 @@ impl BodyController {
                 Duration::from_micros((dt * 1e6) as u64),
                 ENC_LAG_T_HORIZON,
             ),
+            wheels_disabled: true,
         };
 
         defmt::info!(
@@ -128,7 +126,6 @@ impl BodyController {
     pub fn reset(&mut self) {
         self.robot_model.reset();
         self.pose_pid_controller.reset();
-        self.twist_pid_controller.reset();
         self.trajectory = None;
         self.trajectory_state = Vector6f::default();
         self.trajectory_time = 0.0;
@@ -143,10 +140,15 @@ impl BodyController {
         self.first_vision_received = false;
         self.time_since_vision_update_s = VISION_ACTIVE_TIMEOUT_S + 1.0; // Set to higher than timeout
         self.enc_lag.reset();
+        self.wheels_disabled = true;
     }
 
     pub fn vision_active(&self) -> bool {
         self.first_vision_received && self.time_since_vision_update_s <= VISION_ACTIVE_TIMEOUT_S
+    }
+
+    pub fn wheels_disabled(&self) -> bool {
+        self.wheels_disabled
     }
 
     pub fn control_update(
@@ -162,12 +164,42 @@ impl BodyController {
     ) -> Result<(), ControlsError> {
         let t_start = Instant::now();
 
+        // Default to enabled; policies that need to lock out motors (e.g.,
+        // pose mode without vision) will set this back to true below.
+        self.wheels_disabled = false;
+
         // Working in global frame, unless variable is specified as local
 
         if vision_update {
             if !self.first_vision_received {
+                // First vision sample since controller init or reset. Snap
+                // the KF to it and force a replan on the next tracker call:
+                // any in-flight trajectory was built against a default-zero
+                // KF pose
                 self.robot_model.kf_set_pose(vision_pose_meas);
                 self.first_vision_received = true;
+                self.prev_body_cmd = None;
+                self.pose_pid_controller.reset();
+            } else if self.time_since_vision_update_s > VISION_ACTIVE_TIMEOUT_S {
+                // Vision returning after a dropout: if the integrated trajectory
+                // pose has drifted from the new vision pose beyond the replan
+                // thresholds, snap the KF to vision and force a replan on the
+                // next tracker call.
+                if self.trajectory.is_some() {
+                    let traj_state_pose: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
+                    let linear_drift = hypotf(
+                        traj_state_pose.x - vision_pose_meas.x,
+                        traj_state_pose.y - vision_pose_meas.y,
+                    );
+                    let angular_drift =
+                        fabsf(remainderf(traj_state_pose.z - vision_pose_meas.z, 2.0 * PI));
+                    if linear_drift > self.traj_recompute_error[0]
+                        || angular_drift > self.traj_recompute_error[1]
+                    {
+                        self.robot_model.kf_set_pose(vision_pose_meas);
+                        self.prev_body_cmd = None;
+                    }
+                }
             }
             self.time_since_vision_update_s = 0.0;
         } else {
@@ -533,6 +565,7 @@ impl BodyController {
         target_twist: Vector3f,
         traj_params: TrajectoryParams,
     ) -> Result<(Vector3f, Vector3f), ControlsError> {
+        let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
 
         let cmd_changed = self
@@ -540,18 +573,11 @@ impl BodyController {
             .map_or(true, |cmd| twist_cmd_changed(cmd, target_twist));
 
         // Replan trajectory if we don't have one, the command changed, or
-        // tracking errors have grown too large.
+        // tracking errors (pose against integrated traj pose, plus twist)
+        // have grown too large.
         let traj = match self.trajectory {
             Some(traj) if !cmd_changed => {
-                let traj_state_twist: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
-                let linear_twist_error = hypotf(
-                    traj_state_twist.x - twist_estimate.x,
-                    traj_state_twist.y - twist_estimate.y,
-                );
-                let angular_twist_error = fabsf(traj_state_twist.z - twist_estimate.z);
-                if linear_twist_error > self.traj_recompute_error[(2, 0)]
-                    || angular_twist_error > self.traj_recompute_error[(3, 0)]
-                {
+                if self.tracking_error_exceeded(pose_estimate, twist_estimate) {
                     self.plan_twist_trajectory(state_estimate, target_twist, traj_params)?
                 } else {
                     traj
@@ -560,38 +586,15 @@ impl BodyController {
             _ => self.plan_twist_trajectory(state_estimate, target_twist, traj_params)?,
         };
 
-        // PID feedback — computed unconditionally to keep integrator state current.
-        let target_traj_twist: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
-        let fb = self
-            .twist_pid_controller
-            .calculate(&target_traj_twist, &twist_estimate, self.dt);
+        let result = self.track_trajectory(state_estimate, traj)?;
 
-        // Feedforward: acceleration from the tracked trajectory
-        let ff = traj.accel_at(self.trajectory_time)?;
-
-        // Weighted sum of feedforward and feedback
-        // TODO: turn into params
-        let twist_control_gain_ff = 1.0;
-        let twist_control_gain_fb = 1.0;
-        let accel_out = twist_control_gain_ff * ff + twist_control_gain_fb * fb;
-
-        let twist_out: Vector3f = (state_estimate.fixed_rows::<3>(3) + accel_out * self.dt).into();
-
-        // Step trajectory forward
-        self.trajectory_state = traj.state_at(
-            self.trajectory_state,
-            self.trajectory_time,
-            self.trajectory_time + self.dt,
-        )?;
-        self.trajectory_time += self.dt;
-
-        // Don't latch a new command if it doesn't meet the change threshold
-        // Otherwise small twist command ramp could never trigger a replan
+        // Don't latch a new command if it doesn't meet the change threshold.
+        // Otherwise a small twist command ramp could never trigger a replan.
         if cmd_changed {
             self.prev_body_cmd = Some(target_twist);
         }
 
-        Ok((twist_out, accel_out))
+        Ok(result)
     }
 
     fn plan_pose_trajectory(
@@ -613,12 +616,17 @@ impl BodyController {
         target_pose: Vector3f,
         traj_params: TrajectoryParams,
     ) -> Result<(Vector3f, Vector3f), ControlsError> {
-        // Vision required for pose control
+        // Vision required for pose control. On the transition into the
+        // no-vision state, fully reset the controller so we start clean once
+        // vision returns. While in this state we signal `wheels_disabled`
         if !self.vision_active() {
-            self.trajectory = None;
-            self.trajectory_state = Vector6f::zeros();
-            self.trajectory_time = 0.0;
-            self.prev_body_cmd = None;
+            if self.first_vision_received {
+                // Transition: we had vision and now we don't. Wipe trajectory,
+                // PID, and KF state; `reset()` also clears `first_vision_received`
+                // so the next vision sample is treated as the first one.
+                self.reset();
+            }
+            self.wheels_disabled = true;
             return Ok((Vector3f::zeros(), Vector3f::zeros()));
         }
 
@@ -633,24 +641,7 @@ impl BodyController {
         // tracking errors have grown too large.
         let traj = match self.trajectory {
             Some(traj) if !cmd_changed => {
-                let traj_state_pose: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
-                let traj_state_twist: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
-                let linear_pose_error = hypotf(
-                    traj_state_pose.x - pose_estimate.x,
-                    traj_state_pose.y - pose_estimate.y,
-                );
-                let angular_pose_error =
-                    fabsf(remainderf(traj_state_pose.z - pose_estimate.z, 2.0 * PI));
-                let linear_twist_error = hypotf(
-                    traj_state_twist.x - twist_estimate.x,
-                    traj_state_twist.y - twist_estimate.y,
-                );
-                let angular_twist_error = fabsf(traj_state_twist.z - twist_estimate.z);
-                if linear_pose_error > self.traj_recompute_error[(0, 0)]
-                    || angular_pose_error > self.traj_recompute_error[(1, 0)]
-                    || linear_twist_error > self.traj_recompute_error[(2, 0)]
-                    || angular_twist_error > self.traj_recompute_error[(3, 0)]
-                {
+                if self.tracking_error_exceeded(pose_estimate, twist_estimate) {
                     self.plan_pose_trajectory(state_estimate, target_pose, traj_params)?
                 } else {
                     traj
@@ -658,6 +649,51 @@ impl BodyController {
             }
             _ => self.plan_pose_trajectory(state_estimate, target_pose, traj_params)?,
         };
+
+        let result = self.track_trajectory(state_estimate, traj)?;
+
+        // Don't latch a new command if it doesn't meet the change threshold.
+        // Otherwise a small pose command ramp could never trigger a replan.
+        if cmd_changed {
+            self.prev_body_cmd = Some(target_pose);
+        }
+
+        Ok(result)
+    }
+
+    /// Returns true if the integrated trajectory state has drifted from the
+    /// state estimate beyond `traj_recompute_error` thresholds     
+    fn tracking_error_exceeded(&self, pose_estimate: Vector3f, twist_estimate: Vector3f) -> bool {
+        let traj_state_pose: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
+        let traj_state_twist: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
+        let linear_pose_error = hypotf(
+            traj_state_pose.x - pose_estimate.x,
+            traj_state_pose.y - pose_estimate.y,
+        );
+        let angular_pose_error = fabsf(remainderf(traj_state_pose.z - pose_estimate.z, 2.0 * PI));
+        let linear_twist_error = hypotf(
+            traj_state_twist.x - twist_estimate.x,
+            traj_state_twist.y - twist_estimate.y,
+        );
+        let angular_twist_error = fabsf(traj_state_twist.z - twist_estimate.z);
+        linear_pose_error > self.traj_recompute_error[0]
+            || angular_pose_error > self.traj_recompute_error[1]
+            || linear_twist_error > self.traj_recompute_error[2]
+            || angular_twist_error > self.traj_recompute_error[3]
+    }
+
+    /// Shared trajectory tracker used by both pose and twist control policies.
+    ///
+    /// Pre-conditions: `self.trajectory == Some(traj)`, and
+    /// `self.trajectory_state` / `self.trajectory_time` correspond to the
+    /// current point on `traj` that should be tracked this tick.
+    fn track_trajectory(
+        &mut self,
+        state_estimate: Vector6f,
+        traj: BangBangTraj3D,
+    ) -> Result<(Vector3f, Vector3f), ControlsError> {
+        let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
+        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
 
         // PID feedback — computed unconditionally to keep integrator state current.
         let mut traj_curstep_tgt_pos: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
@@ -727,12 +763,6 @@ impl BodyController {
         )?;
         self.trajectory_time += self.dt;
 
-        // Don't latch a new command if it doesn't meet the change threshold
-        // Otherwise small pose command ramp could never trigger a replan
-        if cmd_changed {
-            self.prev_body_cmd = Some(target_pose);
-        }
-
         Ok((twist_out, accel_out))
     }
 
@@ -752,8 +782,6 @@ impl BodyController {
             ParameterName::TRAJ_RECOMPUTE_ERROR => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
             ParameterName::POSE_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
-            ParameterName::TWIST_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
-            ParameterName::TWIST_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
             _ => None,
         }
     }
@@ -828,20 +856,6 @@ impl BodyController {
                 let gain = self.pose_pid_controller.get_gain();
                 let row = match name {
                     ParameterName::POSE_FB_PIDII_LINEAR => 0,
-                    _ => 2,
-                };
-                reply.data.vec5_f32 = [
-                    gain[(row, 0)],
-                    gain[(row, 1)],
-                    gain[(row, 2)],
-                    gain[(row, 3)],
-                    gain[(row, 4)],
-                ];
-            }
-            ParameterName::TWIST_FB_PIDII_LINEAR | ParameterName::TWIST_FB_PIDII_ANGULAR => {
-                let gain = self.twist_pid_controller.get_gain();
-                let row = match name {
-                    ParameterName::TWIST_FB_PIDII_LINEAR => 0,
                     _ => 2,
                 };
                 reply.data.vec5_f32 = [
@@ -945,21 +959,6 @@ impl BodyController {
                     }
                 }
                 self.pose_pid_controller.set_gain(gain);
-            }
-            ParameterName::TWIST_FB_PIDII_LINEAR | ParameterName::TWIST_FB_PIDII_ANGULAR => {
-                let v = unsafe { cmd.data.vec5_f32 };
-                let mut gain = self.twist_pid_controller.get_gain();
-                if cmd.parameter_name == ParameterName::TWIST_FB_PIDII_LINEAR {
-                    for col in 0..5 {
-                        gain[(0, col)] = v[col];
-                        gain[(1, col)] = v[col];
-                    }
-                } else {
-                    for col in 0..5 {
-                        gain[(2, col)] = v[col];
-                    }
-                }
-                self.twist_pid_controller.set_gain(gain);
             }
             _ => unreachable!(),
         };
