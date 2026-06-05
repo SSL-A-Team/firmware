@@ -1,7 +1,7 @@
 use crate::motion::params::controller_params::{
-    EncLagMode, PoseAccelMode, PoseVelMode, ENC_LAG_K, ENC_LAG_MODE,
-    ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE, POSE_ACCEL_MODE,
-    POSE_VEL_MODE, TRAJ_REPLAN_CMD_ANGLE_RAD, TRAJ_REPLAN_CMD_POS_DIST_M,
+    EncLagMode, PoseAccelMode, PoseVelMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON,
+    ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE, TRAJ_REPLAN_CMD_ANGLE_RAD,
+    TRAJ_REPLAN_CMD_POS_DIST_M,
 };
 use crate::motion::pid::PidController;
 use crate::parameter_interface::ParameterInterface;
@@ -20,7 +20,7 @@ use ateam_controls::{
 use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
 use core::f32::consts::PI;
 use embassy_time::{Duration, Instant};
-use libm::{fabsf, remainderf, hypotf};
+use libm::{fabsf, hypotf, remainderf};
 use nalgebra::vector;
 use nalgebra::SVector;
 
@@ -64,8 +64,7 @@ fn pose_cmd_changed(prev: Vector3f, next: Vector3f) -> bool {
 }
 
 fn twist_cmd_changed(prev: Vector3f, next: Vector3f) -> bool {
-    Vector2f::new(next.x - prev.x, next.y - prev.y).norm() > 0.01
-        || fabsf(next.z - prev.z) > 0.1
+    Vector2f::new(next.x - prev.x, next.y - prev.y).norm() > 0.01 || fabsf(next.z - prev.z) > 0.1
 }
 
 impl BodyController {
@@ -423,7 +422,7 @@ impl BodyController {
     }
 
     /// Returns the modeled friction force in the global frame
-    /// 
+    ///
     /// Uses friction compensation gating to turn on/off linear and/or angular
     /// friction compensation.
     fn compute_friction(&self, state_estimate: Vector6f) -> Vector3f {
@@ -463,14 +462,24 @@ impl BodyController {
         };
 
         let fric_twist_local = Vector3f::new(
-            if linear_comp_on { tgt_twist_local.x } else { 0.0 },
-            if linear_comp_on { tgt_twist_local.y } else { 0.0 },
-            if angular_comp_on { tgt_twist_local.z } else { 0.0 },
+            if linear_comp_on {
+                tgt_twist_local.x
+            } else {
+                0.0
+            },
+            if linear_comp_on {
+                tgt_twist_local.y
+            } else {
+                0.0
+            },
+            if angular_comp_on {
+                tgt_twist_local.z
+            } else {
+                0.0
+            },
         );
 
-        let friction_force_local = self
-            .robot_model
-            .compute_friction_force(fric_twist_local);
+        let friction_force_local = self.robot_model.compute_friction_force(fric_twist_local);
         r_loc_to_glob * friction_force_local
     }
 
@@ -535,7 +544,10 @@ impl BodyController {
         let traj = match self.trajectory {
             Some(traj) if !cmd_changed => {
                 let traj_state_twist: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
-                let linear_twist_error = hypotf(traj_state_twist.x - twist_estimate.x, traj_state_twist.y - twist_estimate.y);
+                let linear_twist_error = hypotf(
+                    traj_state_twist.x - twist_estimate.x,
+                    traj_state_twist.y - twist_estimate.y,
+                );
                 let angular_twist_error = fabsf(traj_state_twist.z - twist_estimate.z);
                 if linear_twist_error > self.traj_recompute_error[(2, 0)]
                     || angular_twist_error > self.traj_recompute_error[(3, 0)]
@@ -623,9 +635,16 @@ impl BodyController {
             Some(traj) if !cmd_changed => {
                 let traj_state_pose: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
                 let traj_state_twist: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
-                let linear_pose_error = hypotf(traj_state_pose.x - pose_estimate.x, traj_state_pose.y - pose_estimate.y);
-                let angular_pose_error = fabsf(remainderf(traj_state_pose.z - pose_estimate.z, 2.0 * PI));
-                let linear_twist_error = hypotf(traj_state_twist.x - twist_estimate.x, traj_state_twist.y - twist_estimate.y);
+                let linear_pose_error = hypotf(
+                    traj_state_pose.x - pose_estimate.x,
+                    traj_state_pose.y - pose_estimate.y,
+                );
+                let angular_pose_error =
+                    fabsf(remainderf(traj_state_pose.z - pose_estimate.z, 2.0 * PI));
+                let linear_twist_error = hypotf(
+                    traj_state_twist.x - twist_estimate.x,
+                    traj_state_twist.y - twist_estimate.y,
+                );
                 let angular_twist_error = fabsf(traj_state_twist.z - twist_estimate.z);
                 if linear_pose_error > self.traj_recompute_error[(0, 0)]
                     || angular_pose_error > self.traj_recompute_error[(1, 0)]

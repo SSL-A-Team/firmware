@@ -90,7 +90,6 @@ pub const TRAJ_REPLAN_CMD_POS_DIST_M: f32 = 0.005;
 /// Minimum angular change (radians) in the target pose command to trigger a replan.
 pub const TRAJ_REPLAN_CMD_ANGLE_RAD: f32 = 0.015;
 
-
 /// Only applies friction compensation when the absolute value of the
 /// velocity/acceleration is above the corresponding threshold in
 /// FRICTION_COMP_GATING, to avoid unstable state at 0 velocity
