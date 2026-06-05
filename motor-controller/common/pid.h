@@ -13,6 +13,9 @@ typedef struct PidConstants {
 
     float kI_max;
     float kI_min;
+
+    // When > 0, output is scaled by |err|/thresh for |err| < thresh (0 disables)
+    float anti_jitter_thresh;
 } PidConstants_t;
 
 typedef struct Pid {
