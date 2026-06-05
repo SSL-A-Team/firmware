@@ -18,6 +18,7 @@ use ateam_controls::{
     z_rotation_mat, ControlsError, Vector2f, Vector3f, Vector4f, Vector6f, Vector8f,
 };
 use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
+use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
 use core::f32::consts::PI;
 use embassy_time::{Duration, Instant};
 use libm::{fabsf, remainderf, hypotf};
