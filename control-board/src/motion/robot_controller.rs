@@ -1,7 +1,7 @@
 use crate::motion::params::controller_params::{
-    EncLagMode, PoseAccelMode, PoseVelMode, ANGULAR_STATE_TWIST_DEADZONE, ENC_LAG_K, ENC_LAG_MODE,
-    ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE, LINEAR_STATE_TWIST_DEADZONE, POSE_ACCEL_MODE,
-    POSE_VEL_MODE, TRAJ_REPLAN_CMD_ANGLE_RAD, TRAJ_REPLAN_CMD_POS_DIST_M,
+    EncLagMode, PoseAccelMode, PoseVelMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON,
+    ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE, TRAJ_REPLAN_CMD_ANGLE_RAD,
+    TRAJ_REPLAN_CMD_POS_DIST_M,
 };
 use crate::motion::pid::PidController;
 use crate::parameter_interface::ParameterInterface;
@@ -20,7 +20,7 @@ use ateam_controls::{
 use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
 use core::f32::consts::PI;
 use embassy_time::{Duration, Instant};
-use libm::{fabsf, remainderf};
+use libm::{fabsf, hypotf, remainderf};
 use nalgebra::vector;
 use nalgebra::SVector;
 
@@ -32,15 +32,14 @@ const VISION_ACTIVE_TIMEOUT_S: f32 = 0.2;
 pub struct BodyController {
     pub robot_model: RobotModel,
     pub pose_pid_controller: PidController<3>,
-    pub twist_pid_controller: PidController<3>,
     /// Accel (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
     pub pose_accel_gain: Vector2f,
     /// Velocity setpoint path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
     pub pose_vel_gain: Vector2f,
     /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR] thresholds for when to recompute the trajectory
     pub traj_recompute_error: Vector4f,
-    /// Accel magnitude threshold for coulomb friction comp gating
-    pub coulomb_comp_accel_deadzone: f32,
+    /// [LINEAR_VEL_THRESHOLD, LINEAR_ACCEL_THRESHOLD, ANGULAR_VEL_THRESHOLD, ANGULAR_ACCEL_THRESHOLD]
+    pub friction_comp_gating: Vector4f,
     pub trajectory: Option<BangBangTraj3D>,
     pub trajectory_time: f32,
     pub trajectory_state: Vector6f,
@@ -56,11 +55,16 @@ pub struct BodyController {
     pub first_vision_received: bool,
     pub time_since_vision_update_s: f32,
     pub enc_lag: FirstOrderLag<2>,
+    pub wheels_disabled: bool,
 }
 
 fn pose_cmd_changed(prev: Vector3f, next: Vector3f) -> bool {
     Vector2f::new(next.x - prev.x, next.y - prev.y).norm() > TRAJ_REPLAN_CMD_POS_DIST_M
         || remainderf(next.z - prev.z, 2.0 * PI).abs() > TRAJ_REPLAN_CMD_ANGLE_RAD
+}
+
+fn twist_cmd_changed(prev: Vector3f, next: Vector3f) -> bool {
+    Vector2f::new(next.x - prev.x, next.y - prev.y).norm() > 0.01 || fabsf(next.z - prev.z) > 0.1
 }
 
 impl BodyController {
@@ -75,16 +79,14 @@ impl BodyController {
                 RobotPhysicalParams::default(),
             )
             .expect("Failed to create RobotModel, check that parameters are valid"),
-            pose_pid_controller: PidController::<3>::from_gains_matrix(
+            pose_pid_controller: PidController::<3>::from_gains_matrix_with_anti_jitter(
                 &controller_params::pose_pid_gains(),
-            ),
-            twist_pid_controller: PidController::<3>::from_gains_matrix(
-                &controller_params::twist_pid_gains(),
+                Some(controller_params::POSE_PID_ANTI_JITTER_THRESH),
             ),
             pose_accel_gain: controller_params::POSE_ACCEL_GAIN,
             pose_vel_gain: controller_params::POSE_VEL_GAIN,
             traj_recompute_error: controller_params::TRAJ_RECOMPUTE_ERROR,
-            coulomb_comp_accel_deadzone: controller_params::COULOMB_COMP_ACCEL_DEADZONE,
+            friction_comp_gating: controller_params::FRICTION_COMP_GATING,
             trajectory: None,
             trajectory_state: Vector6f::zeros(),
             trajectory_time: 0.0,
@@ -108,6 +110,7 @@ impl BodyController {
                 Duration::from_micros((dt * 1e6) as u64),
                 ENC_LAG_T_HORIZON,
             ),
+            wheels_disabled: true,
         };
 
         defmt::info!(
@@ -123,7 +126,6 @@ impl BodyController {
     pub fn reset(&mut self) {
         self.robot_model.reset();
         self.pose_pid_controller.reset();
-        self.twist_pid_controller.reset();
         self.trajectory = None;
         self.trajectory_state = Vector6f::default();
         self.trajectory_time = 0.0;
@@ -138,10 +140,15 @@ impl BodyController {
         self.first_vision_received = false;
         self.time_since_vision_update_s = VISION_ACTIVE_TIMEOUT_S + 1.0; // Set to higher than timeout
         self.enc_lag.reset();
+        self.wheels_disabled = true;
     }
 
     pub fn vision_active(&self) -> bool {
         self.first_vision_received && self.time_since_vision_update_s <= VISION_ACTIVE_TIMEOUT_S
+    }
+
+    pub fn wheels_disabled(&self) -> bool {
+        self.wheels_disabled
     }
 
     pub fn control_update(
@@ -157,12 +164,42 @@ impl BodyController {
     ) -> Result<(), ControlsError> {
         let t_start = Instant::now();
 
+        // Default to enabled; policies that need to lock out motors (e.g.,
+        // pose mode without vision) will set this back to true below.
+        self.wheels_disabled = false;
+
         // Working in global frame, unless variable is specified as local
 
         if vision_update {
             if !self.first_vision_received {
+                // First vision sample since controller init or reset. Snap
+                // the KF to it and force a replan on the next tracker call:
+                // any in-flight trajectory was built against a default-zero
+                // KF pose
                 self.robot_model.kf_set_pose(vision_pose_meas);
                 self.first_vision_received = true;
+                self.prev_body_cmd = None;
+                self.pose_pid_controller.reset();
+            } else if self.time_since_vision_update_s > VISION_ACTIVE_TIMEOUT_S {
+                // Vision returning after a dropout: if the integrated trajectory
+                // pose has drifted from the new vision pose beyond the replan
+                // thresholds, snap the KF to vision and force a replan on the
+                // next tracker call.
+                if self.trajectory.is_some() {
+                    let traj_state_pose: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
+                    let linear_drift = hypotf(
+                        traj_state_pose.x - vision_pose_meas.x,
+                        traj_state_pose.y - vision_pose_meas.y,
+                    );
+                    let angular_drift =
+                        fabsf(remainderf(traj_state_pose.z - vision_pose_meas.z, 2.0 * PI));
+                    if linear_drift > self.traj_recompute_error[0]
+                        || angular_drift > self.traj_recompute_error[1]
+                    {
+                        self.robot_model.kf_set_pose(vision_pose_meas);
+                        self.prev_body_cmd = None;
+                    }
+                }
             }
             self.time_since_vision_update_s = 0.0;
         } else {
@@ -208,18 +245,7 @@ impl BodyController {
 
         self.robot_model
             .kf_update(measurement, !vision_update, false, false)?;
-        let mut state_estimate = self.robot_model.get_state();
-
-        // Deadzone the velocity estimate
-        if fabsf(state_estimate[3]) < LINEAR_STATE_TWIST_DEADZONE {
-            state_estimate[3] = 0.0;
-        }
-        if fabsf(state_estimate[4]) < LINEAR_STATE_TWIST_DEADZONE {
-            state_estimate[4] = 0.0;
-        }
-        if fabsf(state_estimate[5]) < ANGULAR_STATE_TWIST_DEADZONE {
-            state_estimate[5] = 0.0;
-        }
+        let state_estimate = self.robot_model.get_state();
 
         let t_after_kf_update = Instant::now();
 
@@ -337,18 +363,9 @@ impl BodyController {
         self.body_twist_out = body_twist_out;
         self.body_accel_out = body_accel_out;
 
-        // Compensate for modeled friction forces
-        // Gate coulomb friction on accel command magnitude: when actively commanding motion,
-        // use target twist direction (overcomes static friction). When at rest, use deadzoned
-        // estimated twist (stable equilibrium).
-        let fric_twist: Vector3f =
-            if self.body_accel_out.magnitude() > self.coulomb_comp_accel_deadzone {
-                self.body_twist_out
-            } else {
-                state_estimate.fixed_rows::<3>(3).into()
-            };
-        self.body_accel_out_fric_comp = self.body_accel_out
-            - self.robot_model.i_inv * self.robot_model.compute_friction_force(fric_twist);
+        let friction_force_global = self.compute_friction(state_estimate);
+        self.body_accel_out_fric_comp =
+            self.body_accel_out - self.robot_model.i_inv * friction_force_global;
 
         // Calculate wheel commands from body commands.
         // When FeedforwardOnly or Full the XY body velocity is pre-compensated through
@@ -436,6 +453,68 @@ impl BodyController {
         self.debug_telemetry
     }
 
+    /// Returns the modeled friction force in the global frame
+    ///
+    /// Uses friction compensation gating to turn on/off linear and/or angular
+    /// friction compensation.
+    fn compute_friction(&self, state_estimate: Vector6f) -> Vector3f {
+        let theta = state_estimate.z;
+        let r_glob_to_loc = z_rotation_mat(-theta);
+        let r_loc_to_glob = z_rotation_mat(theta);
+
+        let est_twist_global: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+        let est_twist_local: Vector3f = r_glob_to_loc * est_twist_global;
+        let tgt_twist_local: Vector3f = r_glob_to_loc * self.body_twist_out;
+        let cmd_accel_local: Vector3f = r_glob_to_loc * self.body_accel_out;
+
+        let lin_vel_mag = hypotf(est_twist_local.x, est_twist_local.y);
+        let lin_accel_mag = hypotf(cmd_accel_local.x, cmd_accel_local.y);
+        let ang_vel_mag = fabsf(est_twist_local.z);
+        let ang_accel_mag = fabsf(cmd_accel_local.z);
+
+        let lin_vel_thresh = self.friction_comp_gating[0];
+        let lin_accel_thresh = self.friction_comp_gating[1];
+        let ang_vel_thresh = self.friction_comp_gating[2];
+        let ang_accel_thresh = self.friction_comp_gating[3];
+
+        // Gate priority: if the commanded acceleration is above the accel
+        // threshold, always compensate (the controller is actively pushing).
+        // Otherwise use the velocity threshold (if the robot is moving,
+        // compensate to overcome dynamic friction; if the robot is stationary,
+        // don't compensate to avoid oscillations from static friction).
+        let linear_comp_on = if lin_accel_mag >= lin_accel_thresh {
+            true
+        } else {
+            lin_vel_mag >= lin_vel_thresh
+        };
+        let angular_comp_on = if ang_accel_mag >= ang_accel_thresh {
+            true
+        } else {
+            ang_vel_mag >= ang_vel_thresh
+        };
+
+        let fric_twist_local = Vector3f::new(
+            if linear_comp_on {
+                tgt_twist_local.x
+            } else {
+                0.0
+            },
+            if linear_comp_on {
+                tgt_twist_local.y
+            } else {
+                0.0
+            },
+            if angular_comp_on {
+                tgt_twist_local.z
+            } else {
+                0.0
+            },
+        );
+
+        let friction_force_local = self.robot_model.compute_friction_force(fric_twist_local);
+        r_loc_to_glob * friction_force_local
+    }
+
     fn global_accel_control_policy(
         &mut self,
         state_estimate: Vector6f,
@@ -466,75 +545,69 @@ impl BodyController {
         self.global_twist_control_policy(state_estimate, target_twist, traj_params)
     }
 
+    fn plan_twist_trajectory(
+        &mut self,
+        state_estimate: Vector6f,
+        target_twist: Vector3f,
+        traj_params: TrajectoryParams,
+    ) -> Result<BangBangTraj3D, ControlsError> {
+        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+        self.trajectory_state = state_estimate;
+        self.trajectory_time = 0.0;
+        let traj = BangBangTraj3D::from_target_twist(twist_estimate, target_twist, traj_params)?;
+        self.trajectory = Some(traj);
+        Ok(traj)
+    }
+
     fn global_twist_control_policy(
         &mut self,
         state_estimate: Vector6f,
         target_twist: Vector3f,
         traj_params: TrajectoryParams,
     ) -> Result<(Vector3f, Vector3f), ControlsError> {
+        let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
 
-        // Compute trajectory to target twist if
-        //   1) we don't have a trajectory yet
-        //   2) the target twist has changed
-        //   3) the current twist has strayed too far from the currently tracked trajectory
-        if self.trajectory.is_none()
-            || self.prev_body_cmd.is_none()
-            || self.prev_body_cmd.unwrap() != target_twist
-            || (self.trajectory_state[(3, 0)] - twist_estimate.x).abs()
-                > self.traj_recompute_error[(2, 0)]
-            || (self.trajectory_state[(4, 0)] - twist_estimate.y).abs()
-                > self.traj_recompute_error[(2, 0)]
-            || (self.trajectory_state[(5, 0)] - twist_estimate.z).abs()
-                > self.traj_recompute_error[(3, 0)]
-        {
-            self.trajectory = Some(BangBangTraj3D::from_target_twist(
-                twist_estimate,
-                target_twist,
-                traj_params,
-            )?);
-            self.trajectory_state = state_estimate;
-            self.trajectory_time = 0.0;
+        let cmd_changed = self
+            .prev_body_cmd
+            .map_or(true, |cmd| twist_cmd_changed(cmd, target_twist));
+
+        // Replan trajectory if we don't have one, the command changed, or
+        // tracking errors (pose against integrated traj pose, plus twist)
+        // have grown too large.
+        let traj = match self.trajectory {
+            Some(traj) if !cmd_changed => {
+                if self.tracking_error_exceeded(pose_estimate, twist_estimate) {
+                    self.plan_twist_trajectory(state_estimate, target_twist, traj_params)?
+                } else {
+                    traj
+                }
+            }
+            _ => self.plan_twist_trajectory(state_estimate, target_twist, traj_params)?,
+        };
+
+        let result = self.track_trajectory(state_estimate, traj)?;
+
+        // Don't latch a new command if it doesn't meet the change threshold.
+        // Otherwise a small twist command ramp could never trigger a replan.
+        if cmd_changed {
+            self.prev_body_cmd = Some(target_twist);
         }
 
-        // Feedforward: acceleration from the tracked trajectory
-        let ff = self.trajectory
-            .as_ref()
-            .expect("Trajectory should always be Some at this point since we set it if it was None above")
-            .accel_at(self.trajectory_time)
-            .expect("Trajectory should always have valid accel at current time");
+        Ok(result)
+    }
 
-        // Feedback: PID on twist error between tracked trajectory twist and estimated twist
-        let target_traj_twist: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
-        let fb = self
-            .twist_pid_controller
-            .calculate(&target_traj_twist, &twist_estimate, self.dt);
-
-        // Weighted sum of feedforward and feedback
-        // TODO: turn into params
-        let twist_control_gain_ff = 1.0;
-        let twist_control_gain_fb = 1.0;
-        let accel_out = twist_control_gain_ff * ff + twist_control_gain_fb * fb;
-
-        let twist_out: Vector3f = (state_estimate.fixed_rows::<3>(3) + accel_out * self.dt).into();
-
-        // Step trajectory forward
-        let next_state = self
-            .trajectory
-            .expect("Trajectory should never be None at this point.")
-            .state_at(
-                self.trajectory_state,
-                self.trajectory_time,
-                self.trajectory_time + self.dt,
-            )
-            .expect("Trajectory should always have valid state at current time + dt");
-
-        self.trajectory_state = next_state;
-        self.trajectory_time += self.dt;
-
-        self.prev_body_cmd = Some(target_twist);
-
-        Ok((twist_out, accel_out))
+    fn plan_pose_trajectory(
+        &mut self,
+        state_estimate: Vector6f,
+        target_pose: Vector3f,
+        traj_params: TrajectoryParams,
+    ) -> Result<BangBangTraj3D, ControlsError> {
+        self.trajectory_state = state_estimate;
+        self.trajectory_time = 0.0;
+        let traj = BangBangTraj3D::from_target_pose(state_estimate, target_pose, traj_params)?;
+        self.trajectory = Some(traj);
+        Ok(traj)
     }
 
     fn global_pose_bangbang_pid_control_policy(
@@ -543,57 +616,88 @@ impl BodyController {
         target_pose: Vector3f,
         traj_params: TrajectoryParams,
     ) -> Result<(Vector3f, Vector3f), ControlsError> {
-        // Vision required for pose control
+        // Vision required for pose control. On the transition into the
+        // no-vision state, fully reset the controller so we start clean once
+        // vision returns. While in this state we signal `wheels_disabled`
         if !self.vision_active() {
-            self.trajectory = None;
-            self.trajectory_state = Vector6f::zeros();
-            self.trajectory_time = 0.0;
-            self.prev_body_cmd = None;
+            if self.first_vision_received {
+                // Transition: we had vision and now we don't. Wipe trajectory,
+                // PID, and KF state; `reset()` also clears `first_vision_received`
+                // so the next vision sample is treated as the first one.
+                self.reset();
+            }
+            self.wheels_disabled = true;
             return Ok((Vector3f::zeros(), Vector3f::zeros()));
         }
 
         let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
 
-        // Compute trajectory to target pose if
-        //   1) we don't have a trajectory yet
-        //   2) the target pose has changed
-        //   3) the current body configuration has strayed too far from the currently tracked trajectory
-        if self.trajectory.is_none()
-            || self
-                .prev_body_cmd
-                .map_or(true, |prev| pose_cmd_changed(prev, target_pose))
-            || (self.trajectory_state.x - pose_estimate.x).abs() > self.traj_recompute_error[(0, 0)]
-            || (self.trajectory_state.y - pose_estimate.y).abs() > self.traj_recompute_error[(0, 0)]
-            || remainderf(self.trajectory_state.z - pose_estimate.z, 2.0 * PI).abs()
-                > self.traj_recompute_error[(1, 0)]
-            || (self.trajectory_state[(3, 0)] - twist_estimate.x).abs()
-                > self.traj_recompute_error[(2, 0)]
-            || (self.trajectory_state[(4, 0)] - twist_estimate.y).abs()
-                > self.traj_recompute_error[(2, 0)]
-            || (self.trajectory_state[(5, 0)] - twist_estimate.z).abs()
-                > self.traj_recompute_error[(3, 0)]
-        {
-            self.trajectory = Some(BangBangTraj3D::from_target_pose(
-                state_estimate,
-                target_pose,
-                traj_params,
-            )?);
-            self.trajectory_state = state_estimate;
-            self.trajectory_time = 0.0;
+        let cmd_changed = self
+            .prev_body_cmd
+            .map_or(true, |cmd| pose_cmd_changed(cmd, target_pose));
+
+        // Replan trajectory if we don't have one, the command changed, or
+        // tracking errors have grown too large.
+        let traj = match self.trajectory {
+            Some(traj) if !cmd_changed => {
+                if self.tracking_error_exceeded(pose_estimate, twist_estimate) {
+                    self.plan_pose_trajectory(state_estimate, target_pose, traj_params)?
+                } else {
+                    traj
+                }
+            }
+            _ => self.plan_pose_trajectory(state_estimate, target_pose, traj_params)?,
+        };
+
+        let result = self.track_trajectory(state_estimate, traj)?;
+
+        // Don't latch a new command if it doesn't meet the change threshold.
+        // Otherwise a small pose command ramp could never trigger a replan.
+        if cmd_changed {
+            self.prev_body_cmd = Some(target_pose);
         }
+
+        Ok(result)
+    }
+
+    /// Returns true if the integrated trajectory state has drifted from the
+    /// state estimate beyond `traj_recompute_error` thresholds     
+    fn tracking_error_exceeded(&self, pose_estimate: Vector3f, twist_estimate: Vector3f) -> bool {
+        let traj_state_pose: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
+        let traj_state_twist: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
+        let linear_pose_error = hypotf(
+            traj_state_pose.x - pose_estimate.x,
+            traj_state_pose.y - pose_estimate.y,
+        );
+        let angular_pose_error = fabsf(remainderf(traj_state_pose.z - pose_estimate.z, 2.0 * PI));
+        let linear_twist_error = hypotf(
+            traj_state_twist.x - twist_estimate.x,
+            traj_state_twist.y - twist_estimate.y,
+        );
+        let angular_twist_error = fabsf(traj_state_twist.z - twist_estimate.z);
+        linear_pose_error > self.traj_recompute_error[0]
+            || angular_pose_error > self.traj_recompute_error[1]
+            || linear_twist_error > self.traj_recompute_error[2]
+            || angular_twist_error > self.traj_recompute_error[3]
+    }
+
+    /// Shared trajectory tracker used by both pose and twist control policies.
+    ///
+    /// Pre-conditions: `self.trajectory == Some(traj)`, and
+    /// `self.trajectory_state` / `self.trajectory_time` correspond to the
+    /// current point on `traj` that should be tracked this tick.
+    fn track_trajectory(
+        &mut self,
+        state_estimate: Vector6f,
+        traj: BangBangTraj3D,
+    ) -> Result<(Vector3f, Vector3f), ControlsError> {
+        let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
+        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
 
         // PID feedback — computed unconditionally to keep integrator state current.
         let mut traj_curstep_tgt_pos: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
-
         let traj_curstep_tgt_vel: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
-
-        let traj_curstep_tgt_accel = self.trajectory
-            .as_ref()
-            .expect("Trajectory should always be Some at this point since we set it if it was None above")
-            .accel_at(self.trajectory_time)
-            .expect("Trajectory should always have valid accel at current time");
-
         // Wrap target theta so that (target.z - pose_estimate.z) lies in [-π, π]
         traj_curstep_tgt_pos.z =
             pose_estimate.z + remainderf(traj_curstep_tgt_pos.z - pose_estimate.z, 2.0 * PI);
@@ -611,7 +715,7 @@ impl BodyController {
                 POSE_ACCEL_MODE,
                 PoseAccelMode::FeedforwardOnly | PoseAccelMode::Full
             ) {
-                self.pose_accel_gain[0] * traj_curstep_tgt_accel
+                self.pose_accel_gain[0] * traj.accel_at(self.trajectory_time)?
             } else {
                 Vector3f::zeros()
             };
@@ -652,20 +756,12 @@ impl BodyController {
         };
 
         // Step trajectory forward
-        let next_state = self
-            .trajectory
-            .expect("Trajectory should never be None at this point.")
-            .state_at(
-                self.trajectory_state,
-                self.trajectory_time,
-                self.trajectory_time + self.dt,
-            )
-            .expect("Trajectory should always have valid state at current time + dt");
-
-        self.trajectory_state = next_state;
+        self.trajectory_state = traj.state_at(
+            self.trajectory_state,
+            self.trajectory_time,
+            self.trajectory_time + self.dt,
+        )?;
         self.trajectory_time += self.dt;
-
-        self.prev_body_cmd = Some(target_pose);
 
         Ok((twist_out, accel_out))
     }
@@ -680,14 +776,12 @@ impl BodyController {
             ParameterName::PHYS_WHEEL => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::PHYS_INERTIA => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::PHYS_MOTOR_MODEL => Some(ParameterDataFormat::VEC2_F32),
-            ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => Some(ParameterDataFormat::F32),
+            ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC6_F32),
+            ParameterName::FRICTION_COMP_GATING => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::POSE_CONTROL_GAIN => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRAJ_RECOMPUTE_ERROR => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
             ParameterName::POSE_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
-            ParameterName::TWIST_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
-            ParameterName::TWIST_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
             _ => None,
         }
     }
@@ -730,15 +824,22 @@ impl BodyController {
                 reply.data.vec2_f32 = [phys.motor_torque_constant, phys.motor_efficiency_factor];
             }
             ParameterName::PHYS_FRICTION_MODEL => {
-                reply.data.vec4_f32 = [
-                    phys.coulomb_friction_coefficient_linear,
+                reply.data.vec6_f32 = [
+                    phys.coulomb_friction_coefficient_linear_x,
+                    phys.coulomb_friction_coefficient_linear_y,
                     phys.coulomb_friction_coefficient_angular,
-                    phys.viscous_friction_coefficient_linear,
+                    phys.viscous_friction_coefficient_linear_x,
+                    phys.viscous_friction_coefficient_linear_y,
                     phys.viscous_friction_coefficient_angular,
                 ];
             }
-            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => {
-                reply.data.f32_ = self.coulomb_comp_accel_deadzone;
+            ParameterName::FRICTION_COMP_GATING => {
+                reply.data.vec4_f32 = [
+                    self.friction_comp_gating[0],
+                    self.friction_comp_gating[1],
+                    self.friction_comp_gating[2],
+                    self.friction_comp_gating[3],
+                ];
             }
             ParameterName::POSE_CONTROL_GAIN => {
                 reply.data.vec2_f32 = [self.pose_accel_gain[0], self.pose_accel_gain[1]];
@@ -755,20 +856,6 @@ impl BodyController {
                 let gain = self.pose_pid_controller.get_gain();
                 let row = match name {
                     ParameterName::POSE_FB_PIDII_LINEAR => 0,
-                    _ => 2,
-                };
-                reply.data.vec5_f32 = [
-                    gain[(row, 0)],
-                    gain[(row, 1)],
-                    gain[(row, 2)],
-                    gain[(row, 3)],
-                    gain[(row, 4)],
-                ];
-            }
-            ParameterName::TWIST_FB_PIDII_LINEAR | ParameterName::TWIST_FB_PIDII_ANGULAR => {
-                let gain = self.twist_pid_controller.get_gain();
-                let row = match name {
-                    ParameterName::TWIST_FB_PIDII_LINEAR => 0,
                     _ => 2,
                 };
                 reply.data.vec5_f32 = [
@@ -836,17 +923,19 @@ impl BodyController {
                 let _ = self.robot_model.update_physical_params(p);
             }
             ParameterName::PHYS_FRICTION_MODEL => {
-                let v = unsafe { cmd.data.vec4_f32 };
+                let v = unsafe { cmd.data.vec6_f32 };
                 let mut p = self.robot_model.physical_params;
-                p.coulomb_friction_coefficient_linear = v[0];
-                p.coulomb_friction_coefficient_angular = v[1];
-                p.viscous_friction_coefficient_linear = v[2];
-                p.viscous_friction_coefficient_angular = v[3];
+                p.coulomb_friction_coefficient_linear_x = v[0];
+                p.coulomb_friction_coefficient_linear_y = v[1];
+                p.coulomb_friction_coefficient_angular = v[2];
+                p.viscous_friction_coefficient_linear_x = v[3];
+                p.viscous_friction_coefficient_linear_y = v[4];
+                p.viscous_friction_coefficient_angular = v[5];
                 let _ = self.robot_model.update_physical_params(p);
             }
-            ParameterName::COULOMB_COMP_ACCEL_DEADZONE => {
-                let v = unsafe { cmd.data.f32_ };
-                self.coulomb_comp_accel_deadzone = v;
+            ParameterName::FRICTION_COMP_GATING => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                self.friction_comp_gating = Vector4f::new(v[0], v[1], v[2], v[3]);
             }
             ParameterName::POSE_CONTROL_GAIN => {
                 let v = unsafe { cmd.data.vec2_f32 };
@@ -870,21 +959,6 @@ impl BodyController {
                     }
                 }
                 self.pose_pid_controller.set_gain(gain);
-            }
-            ParameterName::TWIST_FB_PIDII_LINEAR | ParameterName::TWIST_FB_PIDII_ANGULAR => {
-                let v = unsafe { cmd.data.vec5_f32 };
-                let mut gain = self.twist_pid_controller.get_gain();
-                if cmd.parameter_name == ParameterName::TWIST_FB_PIDII_LINEAR {
-                    for col in 0..5 {
-                        gain[(0, col)] = v[col];
-                        gain[(1, col)] = v[col];
-                    }
-                } else {
-                    for col in 0..5 {
-                        gain[(2, col)] = v[col];
-                    }
-                }
-                self.twist_pid_controller.set_gain(gain);
             }
             _ => unreachable!(),
         };

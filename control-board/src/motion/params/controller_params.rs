@@ -1,4 +1,4 @@
-use ateam_controls::{Vector2f, Vector4f, Vector5f};
+use ateam_controls::{Vector2f, Vector3f, Vector4f, Vector5f};
 use embassy_time::Duration;
 use nalgebra::Matrix3x5;
 
@@ -8,11 +8,8 @@ use nalgebra::Matrix3x5;
 //  current feedback gains  //
 //////////////////////////////
 
-const LINEAR_POSE_PID_GAINS: Vector5f = Vector5f::new(125.0, 0.5, 10.0, -1.0, 1.0);
-const ANGULAR_POSE_PID_GAINS: Vector5f = Vector5f::new(125.0, 0.5, 15.0, -1.0, 1.0);
-
-const LINEAR_TWIST_PID_GAINS: Vector5f = Vector5f::new(100.0, 0.0, 0.0, 0.0, 0.0);
-const ANGULAR_TWIST_PID_GAINS: Vector5f = Vector5f::new(20.0, 0.0, 0.0, 0.0, 0.0);
+const LINEAR_POSE_PID_GAINS: Vector5f = Vector5f::new(300.0, 0.0, 7.0, 0.0, 0.0);
+const ANGULAR_POSE_PID_GAINS: Vector5f = Vector5f::new(400.0, 0.0, 30.0, 0.0, 0.0);
 
 pub fn pose_pid_gains() -> Matrix3x5<f32> {
     Matrix3x5::from_rows(&[
@@ -22,13 +19,12 @@ pub fn pose_pid_gains() -> Matrix3x5<f32> {
     ])
 }
 
-pub fn twist_pid_gains() -> Matrix3x5<f32> {
-    Matrix3x5::from_rows(&[
-        LINEAR_TWIST_PID_GAINS.transpose(),
-        LINEAR_TWIST_PID_GAINS.transpose(),
-        ANGULAR_TWIST_PID_GAINS.transpose(),
-    ])
-}
+/// Per-axis anti-jitter thresholds for the body pose PID controller, in the
+/// same units as the pose error: [x (m), y (m), theta (rad)]. When the
+/// absolute pose error on an axis is below the threshold, the PID output for
+/// that axis is linearly scaled toward zero, matching the fixed-point PI
+/// anti-jitter behavior on the motor controllers.
+pub const POSE_PID_ANTI_JITTER_THRESH: Vector3f = Vector3f::new(0.01, 0.01, 0.02);
 
 /// Acceleration (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
 /// Scales traj accel and PID feedback respectively in the wheel torque feedforward.
@@ -71,7 +67,7 @@ pub enum PoseAccelMode {
     Full,
 }
 
-pub const POSE_ACCEL_MODE: PoseAccelMode = PoseAccelMode::Full;
+pub const POSE_ACCEL_MODE: PoseAccelMode = PoseAccelMode::FeedbackOnly;
 
 /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
 /// Thresholds for when to recompute the trajectory
@@ -83,14 +79,11 @@ pub const TRAJ_REPLAN_CMD_POS_DIST_M: f32 = 0.005;
 /// Minimum angular change (radians) in the target pose command to trigger a replan.
 pub const TRAJ_REPLAN_CMD_ANGLE_RAD: f32 = 0.015;
 
-/// Accel magnitude threshold for coulomb friction compensation gating.
-/// When body_accel_out magnitude is above this, coulomb comp uses target  twist direction
-/// (helps overcome static friction). Below this, uses deadzoned estimated twist (stable at rest).
-/// TODO: separate this to linear and angular
-pub const COULOMB_COMP_ACCEL_DEADZONE: f32 = 2.0;
-
-pub const LINEAR_STATE_TWIST_DEADZONE: f32 = 0.05;
-pub const ANGULAR_STATE_TWIST_DEADZONE: f32 = 0.3;
+/// Only applies friction compensation when the absolute value of the
+/// velocity/acceleration is above the corresponding threshold in
+/// FRICTION_COMP_GATING, to avoid unstable state at 0 velocity
+/// [LINEAR_VEL_THRESHOLD, LINEAR_ACCEL_THRESHOLD, ANGULAR_VEL_THRESHOLD, ANGULAR_ACCEL_THRESHOLD]
+pub const FRICTION_COMP_GATING: Vector4f = Vector4f::new(0.1, 0.5, 0.5, 1.0);
 
 /// Encoder lag compensation operating mode.
 ///
