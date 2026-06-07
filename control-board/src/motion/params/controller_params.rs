@@ -8,8 +8,8 @@ use nalgebra::Matrix3x5;
 //  current feedback gains  //
 //////////////////////////////
 
-const LINEAR_POSE_PID_GAINS: Vector5f = Vector5f::new(125.0, 0.5, 10.0, -1.0, 1.0);
-const ANGULAR_POSE_PID_GAINS: Vector5f = Vector5f::new(125.0, 0.5, 15.0, -1.0, 1.0);
+const LINEAR_POSE_PID_GAINS: Vector5f = Vector5f::new(300.0, 0.0, 7.0, 0.0, 0.0);
+const ANGULAR_POSE_PID_GAINS: Vector5f = Vector5f::new(400.0, 0.0, 30.0, 0.0, 0.0);
 
 pub fn pose_pid_gains() -> Matrix3x5<f32> {
     Matrix3x5::from_rows(&[
