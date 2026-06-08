@@ -29,6 +29,13 @@ use ateam_common_packets::bindings::ParameterCommand;
 /// Time (seconds) without a vision update after which vision is considered "inactive".
 const VISION_ACTIVE_TIMEOUT_S: f32 = 0.2;
 
+/// Frame in which a command was issued
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum CommandFrame {
+    Global,
+    Local,
+}
+
 pub struct BodyController {
     pub robot_model: RobotModel,
     pub pose_pid_controller: PidController<3>,
@@ -249,119 +256,125 @@ impl BodyController {
 
         let t_after_kf_update = Instant::now();
 
-        let body_twist_out;
-        let body_accel_out;
         let skill_telem;
-        match last_command.get_skill_command() {
-            SkillCommand::GlobalPosition(gpos_cmd) => {
-                let default_params = TrajectoryParams::default();
-                let traj_params = TrajectoryParams {
-                    max_vel_linear: if gpos_cmd.max_linear_vel != 0.0 {
-                        gpos_cmd.max_linear_vel
-                    } else {
-                        default_params.max_vel_linear
-                    },
-                    max_vel_angular: if gpos_cmd.max_angular_vel != 0.0 {
-                        gpos_cmd.max_angular_vel
-                    } else {
-                        default_params.max_vel_angular
-                    },
-                    max_accel_linear: if gpos_cmd.max_linear_acc != 0.0 {
-                        gpos_cmd.max_linear_acc
-                    } else {
-                        default_params.max_accel_linear
-                    },
-                    max_accel_angular: if gpos_cmd.max_angular_acc != 0.0 {
-                        gpos_cmd.max_angular_acc
-                    } else {
-                        default_params.max_accel_angular
-                    },
-                };
-                (body_twist_out, body_accel_out) = self.global_pose_bangbang_pid_control_policy(
-                    state_estimate,
-                    gpos_cmd.as_vec3f(),
-                    traj_params,
-                )?;
-                skill_telem =
-                    SkillExtendedTelemetry::GlobalPosition(ExtendedGlobalPositionTelemetry {
-                        cmd_echo: gpos_cmd,
-                    });
-            }
-            SkillCommand::GlobalVelocity(gvel_cmd) => {
-                let default_params = TrajectoryParams::default();
-                let traj_params = TrajectoryParams {
-                    max_vel_linear: default_params.max_vel_linear,
-                    max_vel_angular: default_params.max_vel_angular,
-                    max_accel_linear: if gvel_cmd.max_linear_acc != 0.0 {
-                        gvel_cmd.max_linear_acc
-                    } else {
-                        default_params.max_accel_linear
-                    },
-                    max_accel_angular: if gvel_cmd.max_angular_acc != 0.0 {
-                        gvel_cmd.max_angular_acc
-                    } else {
-                        default_params.max_accel_angular
-                    },
-                };
-                (body_twist_out, body_accel_out) = self.global_twist_control_policy(
-                    state_estimate,
-                    gvel_cmd.as_vec3f(),
-                    traj_params,
-                )?;
-                skill_telem =
-                    SkillExtendedTelemetry::GlobalVelocity(ExtendedGlobalVelocityTelemetry {
-                        cmd_echo: gvel_cmd,
-                    });
-            }
-            SkillCommand::LocalVelocity(lvel_cmd) => {
-                let default_params = TrajectoryParams::default();
-                let traj_params = TrajectoryParams {
-                    max_vel_linear: default_params.max_vel_linear,
-                    max_vel_angular: default_params.max_vel_angular,
-                    max_accel_linear: if lvel_cmd.max_linear_acc != 0.0 {
-                        lvel_cmd.max_linear_acc
-                    } else {
-                        default_params.max_accel_linear
-                    },
-                    max_accel_angular: if lvel_cmd.max_angular_acc != 0.0 {
-                        lvel_cmd.max_angular_acc
-                    } else {
-                        default_params.max_accel_angular
-                    },
-                };
-                (body_twist_out, body_accel_out) = self.local_twist_control_policy(
-                    state_estimate,
-                    lvel_cmd.as_vec3f(),
-                    traj_params,
-                )?;
-                skill_telem =
-                    SkillExtendedTelemetry::LocalVelocity(ExtendedLocalVelocityTelemetry {
-                        cmd_echo: lvel_cmd,
-                    });
-            }
-            SkillCommand::GlobalAcceleration(gacc_cmd) => {
-                (body_twist_out, body_accel_out) =
-                    self.global_accel_control_policy(state_estimate, gacc_cmd.as_vec3f());
-                skill_telem = SkillExtendedTelemetry::GlobalAcceleration(
-                    ExtendedGlobalAccelerationTelemetry { cmd_echo: gacc_cmd },
-                );
-            }
-            SkillCommand::LocalAcceleration(lacc_cmd) => {
-                (body_twist_out, body_accel_out) =
-                    self.local_accel_control_policy(state_estimate, lacc_cmd.as_vec3f());
-                skill_telem =
-                    SkillExtendedTelemetry::LocalAcceleration(ExtendedLocalAccelerationTelemetry {
-                        cmd_echo: lacc_cmd,
-                    });
-            }
-            _ => {
-                (body_twist_out, body_accel_out) = (Vector3f::zeros(), Vector3f::zeros());
-                skill_telem = SkillExtendedTelemetry::Off;
-            }
-        };
-
-        self.body_twist_out = body_twist_out;
-        self.body_accel_out = body_accel_out;
+        (self.body_twist_out, self.body_accel_out, skill_telem) =
+            match last_command.get_skill_command() {
+                SkillCommand::GlobalPosition(gpos_cmd) => {
+                    let default_params = TrajectoryParams::default();
+                    let traj_params = TrajectoryParams {
+                        max_vel_linear: if gpos_cmd.max_linear_vel != 0.0 {
+                            gpos_cmd.max_linear_vel
+                        } else {
+                            default_params.max_vel_linear
+                        },
+                        max_vel_angular: if gpos_cmd.max_angular_vel != 0.0 {
+                            gpos_cmd.max_angular_vel
+                        } else {
+                            default_params.max_vel_angular
+                        },
+                        max_accel_linear: if gpos_cmd.max_linear_acc != 0.0 {
+                            gpos_cmd.max_linear_acc
+                        } else {
+                            default_params.max_accel_linear
+                        },
+                        max_accel_angular: if gpos_cmd.max_angular_acc != 0.0 {
+                            gpos_cmd.max_angular_acc
+                        } else {
+                            default_params.max_accel_angular
+                        },
+                    };
+                    let (body_twist_out, body_accel_out) =
+                        self.pose_control_policy(state_estimate, gpos_cmd.as_vec3f(), traj_params)?;
+                    let skill_telem =
+                        SkillExtendedTelemetry::GlobalPosition(ExtendedGlobalPositionTelemetry {
+                            cmd_echo: gpos_cmd,
+                        });
+                    (body_twist_out, body_accel_out, skill_telem)
+                }
+                SkillCommand::GlobalVelocity(gvel_cmd) => {
+                    let default_params = TrajectoryParams::default();
+                    let traj_params = TrajectoryParams {
+                        max_vel_linear: default_params.max_vel_linear,
+                        max_vel_angular: default_params.max_vel_angular,
+                        max_accel_linear: if gvel_cmd.max_linear_acc != 0.0 {
+                            gvel_cmd.max_linear_acc
+                        } else {
+                            default_params.max_accel_linear
+                        },
+                        max_accel_angular: if gvel_cmd.max_angular_acc != 0.0 {
+                            gvel_cmd.max_angular_acc
+                        } else {
+                            default_params.max_accel_angular
+                        },
+                    };
+                    let (body_twist_out, body_accel_out) = self.twist_control_policy(
+                        state_estimate,
+                        gvel_cmd.as_vec3f(),
+                        CommandFrame::Global,
+                        traj_params,
+                    )?;
+                    let skill_telem =
+                        SkillExtendedTelemetry::GlobalVelocity(ExtendedGlobalVelocityTelemetry {
+                            cmd_echo: gvel_cmd,
+                        });
+                    (body_twist_out, body_accel_out, skill_telem)
+                }
+                SkillCommand::LocalVelocity(lvel_cmd) => {
+                    let default_params = TrajectoryParams::default();
+                    let traj_params = TrajectoryParams {
+                        max_vel_linear: default_params.max_vel_linear,
+                        max_vel_angular: default_params.max_vel_angular,
+                        max_accel_linear: if lvel_cmd.max_linear_acc != 0.0 {
+                            lvel_cmd.max_linear_acc
+                        } else {
+                            default_params.max_accel_linear
+                        },
+                        max_accel_angular: if lvel_cmd.max_angular_acc != 0.0 {
+                            lvel_cmd.max_angular_acc
+                        } else {
+                            default_params.max_accel_angular
+                        },
+                    };
+                    let (body_twist_out, body_accel_out) = self.twist_control_policy(
+                        state_estimate,
+                        lvel_cmd.as_vec3f(),
+                        CommandFrame::Local,
+                        traj_params,
+                    )?;
+                    let skill_telem =
+                        SkillExtendedTelemetry::LocalVelocity(ExtendedLocalVelocityTelemetry {
+                            cmd_echo: lvel_cmd,
+                        });
+                    (body_twist_out, body_accel_out, skill_telem)
+                }
+                SkillCommand::GlobalAcceleration(gacc_cmd) => {
+                    let (body_twist_out, body_accel_out) = self.accel_control_policy(
+                        state_estimate,
+                        gacc_cmd.as_vec3f(),
+                        CommandFrame::Global,
+                    );
+                    let skill_telem = SkillExtendedTelemetry::GlobalAcceleration(
+                        ExtendedGlobalAccelerationTelemetry { cmd_echo: gacc_cmd },
+                    );
+                    (body_twist_out, body_accel_out, skill_telem)
+                }
+                SkillCommand::LocalAcceleration(lacc_cmd) => {
+                    let (body_twist_out, body_accel_out) = self.accel_control_policy(
+                        state_estimate,
+                        lacc_cmd.as_vec3f(),
+                        CommandFrame::Local,
+                    );
+                    let skill_telem = SkillExtendedTelemetry::LocalAcceleration(
+                        ExtendedLocalAccelerationTelemetry { cmd_echo: lacc_cmd },
+                    );
+                    (body_twist_out, body_accel_out, skill_telem)
+                }
+                _ => {
+                    let (body_twist_out, body_accel_out) = (Vector3f::zeros(), Vector3f::zeros());
+                    let skill_telem = SkillExtendedTelemetry::Off;
+                    (body_twist_out, body_accel_out, skill_telem)
+                }
+            };
 
         let friction_force_global = self.compute_friction(state_estimate);
         self.body_accel_out_fric_comp =
@@ -515,75 +528,86 @@ impl BodyController {
         r_loc_to_glob * friction_force_local
     }
 
-    fn global_accel_control_policy(
+    fn accel_control_policy(
         &mut self,
         state_estimate: Vector6f,
         target_accel: Vector3f,
+        frame: CommandFrame,
     ) -> (Vector3f, Vector3f) {
+        let target_accel = match frame {
+            CommandFrame::Global => target_accel,
+            CommandFrame::Local => z_rotation_mat(state_estimate.z) * target_accel,
+        };
         let next_state = self.robot_model.a * state_estimate + self.robot_model.b * target_accel;
         let twist_out = next_state.fixed_rows::<3>(3).into();
         let accel_out = target_accel;
         (twist_out, accel_out)
     }
 
-    fn local_accel_control_policy(
-        &mut self,
-        state_estimate: Vector6f,
-        local_target_accel: Vector3f,
-    ) -> (Vector3f, Vector3f) {
-        let target_accel = z_rotation_mat(state_estimate.z) * local_target_accel;
-        self.global_accel_control_policy(state_estimate, target_accel)
-    }
-
-    fn local_twist_control_policy(
-        &mut self,
-        state_estimate: Vector6f,
-        local_target_twist: Vector3f,
-        traj_params: TrajectoryParams,
-    ) -> Result<(Vector3f, Vector3f), ControlsError> {
-        let target_twist = z_rotation_mat(state_estimate.z) * local_target_twist;
-        self.global_twist_control_policy(state_estimate, target_twist, traj_params)
-    }
-
     fn plan_twist_trajectory(
         &mut self,
-        state_estimate: Vector6f,
+        seed_state: Vector6f,
         target_twist: Vector3f,
         traj_params: TrajectoryParams,
     ) -> Result<BangBangTraj3D, ControlsError> {
-        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-        self.trajectory_state = state_estimate;
+        let seed_twist: Vector3f = seed_state.fixed_rows::<3>(3).into();
+        self.trajectory_state = seed_state;
         self.trajectory_time = 0.0;
-        let traj = BangBangTraj3D::from_target_twist(twist_estimate, target_twist, traj_params)?;
+        let traj = BangBangTraj3D::from_target_twist(seed_twist, target_twist, traj_params)?;
         self.trajectory = Some(traj);
         Ok(traj)
     }
 
-    fn global_twist_control_policy(
+    fn twist_control_policy(
         &mut self,
         state_estimate: Vector6f,
         target_twist: Vector3f,
+        frame: CommandFrame,
         traj_params: TrajectoryParams,
     ) -> Result<(Vector3f, Vector3f), ControlsError> {
         let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
 
+        // Run command-change detection in the caller's command frame so a
+        // constant Local command does not appear to change every tick as the
+        // robot's heading drifts (which would force a replan every step).
+        // Latch the same frame-of-issue value into `prev_body_cmd` so the
+        // next tick's comparison sees the same units.
         let cmd_changed = self
             .prev_body_cmd
             .map_or(true, |cmd| twist_cmd_changed(cmd, target_twist));
 
+        // Plan and track in the global frame; only rotate when the command
+        // arrived in the local body frame.
+        let global_target_twist = match frame {
+            CommandFrame::Global => target_twist,
+            CommandFrame::Local => z_rotation_mat(state_estimate.z) * target_twist,
+        };
+
         // Replan trajectory if we don't have one, the command changed, or
         // tracking errors (pose against integrated traj pose, plus twist)
-        // have grown too large.
+        // have grown too large. When replanning with healthy tracking and
+        // an existing trajectory, seed from the integrated trajectory state
+        // so the new bang-bang profile is continuous with what was being
+        // commanded last tick. Snap back to state_estimate only when
+        // tracking has drifted past the recompute thresholds.
         let traj = match self.trajectory {
             Some(traj) if !cmd_changed => {
                 if self.tracking_error_exceeded(pose_estimate, twist_estimate) {
-                    self.plan_twist_trajectory(state_estimate, target_twist, traj_params)?
+                    self.plan_twist_trajectory(state_estimate, global_target_twist, traj_params)?
                 } else {
                     traj
                 }
             }
-            _ => self.plan_twist_trajectory(state_estimate, target_twist, traj_params)?,
+            Some(_) => {
+                let seed_state = if self.tracking_error_exceeded(pose_estimate, twist_estimate) {
+                    state_estimate
+                } else {
+                    self.trajectory_state
+                };
+                self.plan_twist_trajectory(seed_state, global_target_twist, traj_params)?
+            }
+            None => self.plan_twist_trajectory(state_estimate, global_target_twist, traj_params)?,
         };
 
         let result = self.track_trajectory(state_estimate, traj)?;
@@ -599,18 +623,18 @@ impl BodyController {
 
     fn plan_pose_trajectory(
         &mut self,
-        state_estimate: Vector6f,
+        seed_state: Vector6f,
         target_pose: Vector3f,
         traj_params: TrajectoryParams,
     ) -> Result<BangBangTraj3D, ControlsError> {
-        self.trajectory_state = state_estimate;
+        self.trajectory_state = seed_state;
         self.trajectory_time = 0.0;
-        let traj = BangBangTraj3D::from_target_pose(state_estimate, target_pose, traj_params)?;
+        let traj = BangBangTraj3D::from_target_pose(seed_state, target_pose, traj_params)?;
         self.trajectory = Some(traj);
         Ok(traj)
     }
 
-    fn global_pose_bangbang_pid_control_policy(
+    fn pose_control_policy(
         &mut self,
         state_estimate: Vector6f,
         target_pose: Vector3f,
@@ -638,7 +662,11 @@ impl BodyController {
             .map_or(true, |cmd| pose_cmd_changed(cmd, target_pose));
 
         // Replan trajectory if we don't have one, the command changed, or
-        // tracking errors have grown too large.
+        // tracking errors have grown too large. When replanning with
+        // healthy tracking and an existing trajectory, seed from the
+        // integrated trajectory state for a continuous handoff; snap to
+        // state_estimate only when tracking has drifted past the
+        // recompute thresholds.
         let traj = match self.trajectory {
             Some(traj) if !cmd_changed => {
                 if self.tracking_error_exceeded(pose_estimate, twist_estimate) {
@@ -647,7 +675,15 @@ impl BodyController {
                     traj
                 }
             }
-            _ => self.plan_pose_trajectory(state_estimate, target_pose, traj_params)?,
+            Some(_) => {
+                let seed_state = if self.tracking_error_exceeded(pose_estimate, twist_estimate) {
+                    state_estimate
+                } else {
+                    self.trajectory_state
+                };
+                self.plan_pose_trajectory(seed_state, target_pose, traj_params)?
+            }
+            None => self.plan_pose_trajectory(state_estimate, target_pose, traj_params)?,
         };
 
         let result = self.track_trajectory(state_estimate, traj)?;
