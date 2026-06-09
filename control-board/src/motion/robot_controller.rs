@@ -1,7 +1,7 @@
 use crate::motion::params::controller_params::{
     EncLagMode, PoseAccelMode, PoseVelMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON,
-    ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE, TRAJ_REPLAN_CMD_ANGLE_RAD,
-    TRAJ_REPLAN_CMD_POS_DIST_M,
+    ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE, TRAJ_REPLAN_CMD_POS_ANGULAR_RAD,
+    TRAJ_REPLAN_CMD_POS_LINEAR_M, TRAJ_REPLAN_CMD_VEL_ANGULAR_RADS, TRAJ_REPLAN_CMD_VEL_LINEAR_MS,
 };
 use crate::motion::pid::PidController;
 use crate::parameter_interface::ParameterInterface;
@@ -66,12 +66,13 @@ pub struct BodyController {
 }
 
 fn pose_cmd_changed(prev: Vector3f, next: Vector3f) -> bool {
-    Vector2f::new(next.x - prev.x, next.y - prev.y).norm() > TRAJ_REPLAN_CMD_POS_DIST_M
-        || remainderf(next.z - prev.z, 2.0 * PI).abs() > TRAJ_REPLAN_CMD_ANGLE_RAD
+    Vector2f::new(next.x - prev.x, next.y - prev.y).norm() > TRAJ_REPLAN_CMD_POS_LINEAR_M
+        || remainderf(next.z - prev.z, 2.0 * PI).abs() > TRAJ_REPLAN_CMD_POS_ANGULAR_RAD
 }
 
 fn twist_cmd_changed(prev: Vector3f, next: Vector3f) -> bool {
-    Vector2f::new(next.x - prev.x, next.y - prev.y).norm() > 0.01 || fabsf(next.z - prev.z) > 0.1
+    Vector2f::new(next.x - prev.x, next.y - prev.y).norm() > TRAJ_REPLAN_CMD_VEL_LINEAR_MS
+        || fabsf(next.z - prev.z) > TRAJ_REPLAN_CMD_VEL_ANGULAR_RADS
 }
 
 impl BodyController {
