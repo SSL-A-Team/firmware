@@ -28,6 +28,7 @@ static volatile MotorControlMode motor_control_mode = DUTY;
 static volatile MotorDirection_t commanded_motor_direction = CLOCKWISE;
 static volatile uint16_t current_duty_cycle = 0;
 static volatile uint8_t hall_recorded_state_on_transition = 0;
+static volatile bool motor_output_enabled = false;
 
 /////////////////////
 //  hall velocity  //
@@ -625,7 +626,7 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     if (estop) {
         // use whatever error mode was selected for the tables
         commutation_values = cw_commutation_table[ESTOP_COMMUTATION_INDEX];
-    } else if (current_duty_cycle == 0) {
+    } else if (!motor_output_enabled) {
         commutation_values = cw_commutation_table[COAST_COMMUTATION_INDEX];
     } else {
         if (commanded_motor_direction == CLOCKWISE) {
@@ -717,6 +718,12 @@ void pwm6step_setup() {
 
     pwm6step_setup_commutation_timer();
     pwm6step_setup_hall_timer();
+
+    // Arm TIM2 UIE unconditionally at init so hall transitions drive commutation
+    // without any first-command special-case logic.
+    TIM2->DIER = TIM_DIER_UIE;
+    TIM2->EGR  = TIM_EGR_UG;
+    trigger_commutation();
 }
 
 /**
@@ -742,12 +749,6 @@ static void set_duty_cycle(uint16_t duty_cycle) {
     TIM1->CCR1 = current_duty_cycle;
     TIM1->CCR2 = current_duty_cycle;
     TIM1->CCR3 = current_duty_cycle;
-
-    if (TIM2->DIER == 0) {
-        // enable it and force an update
-        TIM2->DIER = TIM_DIER_UIE;
-        TIM2->EGR = TIM_EGR_UG;
-    }
 }
 
 /**
@@ -766,6 +767,7 @@ void pwm6step_set_duty_cycle(int16_t duty_cycle) {
     motor_control_mode = DUTY;
 
     uint16_t duty_cycle_abs = abs(duty_cycle);
+    motor_output_enabled = (duty_cycle_abs > 0);
     set_duty_cycle(duty_cycle_abs);
 }
 
@@ -807,13 +809,8 @@ void pwm6step_set_voltage(int16_t voltage_mv) {
     motor_control_mode = VOLTAGE;
 
     uint16_t abs_voltage_mv = (uint16_t) abs((int) voltage_mv);
+    motor_output_enabled = (abs_voltage_mv > 0);
     set_voltage(abs_voltage_mv);
-
-    if (TIM2->DIER == 0) {
-        // enable it and force an update
-        TIM2->DIER = TIM_DIER_UIE;
-        TIM2->EGR = TIM_EGR_UG;
-    }
 }
 
 static void set_current(uint16_t current_ma) {
@@ -822,7 +819,6 @@ static void set_current(uint16_t current_ma) {
     fxptpi_setpoint(&current_controller, (Int16FixedPoint_t) scaled_current);
 }
 
-static int16_t last_current = 0;
 void pwm6step_set_current(int16_t current_ma) {
     if (current_ma < 0) {
         pwm6step_set_direction(COUNTER_CLOCKWISE);
@@ -830,26 +826,11 @@ void pwm6step_set_current(int16_t current_ma) {
         pwm6step_set_direction(CLOCKWISE);
     }
 
-    bool starting_from_zero = false;
-    if (last_current == 0 && current_ma != 0) {
-        starting_from_zero = true;
-    }
-    last_current = current_ma;
-
     motor_control_mode = CURRENT;
 
     uint16_t abs_current_ma = (uint16_t) abs((int) current_ma);
+    motor_output_enabled = (abs_current_ma > 0);
     set_current(abs_current_ma);
-
-    if (TIM2->DIER == 0 || starting_from_zero) {
-        // enable it and force an update
-        TIM2->DIER = TIM_DIER_UIE;
-        TIM2->EGR = TIM_EGR_UG;
-    }
-
-    if (starting_from_zero) {
-        trigger_commutation();
-    }
 }
 
 bool pwm6step_1ms_flag() {
