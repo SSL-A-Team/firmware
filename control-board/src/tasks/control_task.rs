@@ -18,7 +18,7 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{
     include_external_cpp_bin,
-    motion::robot_controller::BodyController,
+    motion::body_controller::BodyController,
     motor::CurrentControlledMotor,
     parameter_interface::ParameterInterface,
     pins::*,
@@ -510,7 +510,7 @@ impl<
             }
 
             if ticks_since_trace_print >= TRACE_PRINT_INTERVAL_TICKS {
-                let state = robot_controller.robot_model.x;
+                let state = robot_controller.control_context.robot_model.x;
                 let wheel_torques = robot_controller.get_wheel_torques();
                 defmt::trace!(
                     "state position: {}, {}, {}",
