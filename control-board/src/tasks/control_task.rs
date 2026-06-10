@@ -606,7 +606,7 @@ impl<
 
             ////////// WARNING LOGGING //////////
             // threshold for logging a warning about control loop execution time
-            const LOOP_EXECUTION_TIME_THRESHOLD_US: u64 = 600;  // 60% of execution frame
+            const LOOP_EXECUTION_TIME_THRESHOLD_US: u64 = 600; // 60% of execution frame
             if loop_execution_time_us > LOOP_EXECUTION_TIME_THRESHOLD_US {
                 defmt::warn!(
                     "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
