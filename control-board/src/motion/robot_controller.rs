@@ -47,7 +47,6 @@ pub struct BodyController {
     /// [LINEAR_VEL_THRESHOLD, LINEAR_ACCEL_THRESHOLD, ANGULAR_VEL_THRESHOLD, ANGULAR_ACCEL_THRESHOLD]
     pub friction_comp_gating: Vector4f,
     pub trajectory: Option<BangBangTraj3D>,
-    pub trajectory_time: f32,
     pub trajectory_state: Vector6f,
     pub body_twist_out: Vector3f,
     pub body_accel_out: Vector3f,
@@ -84,7 +83,6 @@ impl BodyController {
             friction_comp_gating: controller_params::FRICTION_COMP_GATING,
             trajectory: None,
             trajectory_state: Vector6f::zeros(),
-            trajectory_time: 0.0,
             body_twist_out: Vector3f::default(),
             body_accel_out: Vector3f::default(),
             body_accel_out_fric_comp: Vector3f::default(),
@@ -121,7 +119,6 @@ impl BodyController {
         self.pose_pid_controller.reset();
         self.trajectory = None;
         self.trajectory_state = Vector6f::default();
-        self.trajectory_time = 0.0;
         self.body_twist_out = Vector3f::default();
         self.body_accel_out = Vector3f::default();
         self.body_accel_out_fric_comp = Vector3f::default();
@@ -516,7 +513,6 @@ impl BodyController {
     ) -> Result<BangBangTraj3D, ControlsError> {
         let seed_twist: Vector3f = seed_state.fixed_rows::<3>(3).into();
         self.trajectory_state = seed_state;
-        self.trajectory_time = 0.0;
         let traj = BangBangTraj3D::from_target_twist(seed_twist, target_twist, traj_params)?;
         self.trajectory = Some(traj);
         Ok(traj)
@@ -563,7 +559,6 @@ impl BodyController {
         traj_params: TrajectoryParams,
     ) -> Result<BangBangTraj3D, ControlsError> {
         self.trajectory_state = seed_state;
-        self.trajectory_time = 0.0;
         let traj = BangBangTraj3D::from_target_pose(seed_state, target_pose, traj_params)?;
         self.trajectory = Some(traj);
         Ok(traj)
@@ -623,9 +618,11 @@ impl BodyController {
 
     /// Shared trajectory tracker used by both pose and twist control policies.
     ///
-    /// Pre-conditions: `self.trajectory == Some(traj)`, and
-    /// `self.trajectory_state` / `self.trajectory_time` correspond to the
-    /// current point on `traj` that should be tracked this tick.
+    /// Pre-condition: `self.trajectory == Some(traj)`, and `self.trajectory_state`
+    /// is the trajectory's t=0 state (i.e. the seed it was just planned from).
+    /// The tracker evaluates the trajectory at t=0 (for the PID target and
+    /// accel feedforward) and steps `self.trajectory_state` forward to t=dt
+    /// for the next tick's tracking_error_exceeded check.
     fn track_trajectory(
         &mut self,
         state_estimate: Vector6f,
@@ -654,7 +651,7 @@ impl BodyController {
                 POSE_ACCEL_MODE,
                 PoseAccelMode::FeedforwardOnly | PoseAccelMode::Full
             ) {
-                self.pose_accel_gain[0] * traj.accel_at(self.trajectory_time)?
+                self.pose_accel_gain[0] * traj.accel_at(0.0)?
             } else {
                 Vector3f::zeros()
             };
@@ -694,13 +691,9 @@ impl BodyController {
             vel_ff_term + vel_fb_term
         };
 
-        // Step trajectory forward
-        self.trajectory_state = traj.state_at(
-            self.trajectory_state,
-            self.trajectory_time,
-            self.trajectory_time + self.dt,
-        )?;
-        self.trajectory_time += self.dt;
+        // Step trajectory forward to t=dt so next tick's tracking_error_exceeded
+        // compares against where the trajectory expected the robot to be.
+        self.trajectory_state = traj.state_at(self.trajectory_state, 0.0, self.dt)?;
 
         Ok((twist_out, accel_out))
     }
