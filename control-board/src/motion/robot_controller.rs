@@ -26,7 +26,7 @@ use nalgebra::SVector;
 use ateam_common_packets::bindings::ParameterCommand;
 
 /// Time (seconds) without a vision update after which vision is considered "inactive".
-const VISION_ACTIVE_TIMEOUT_S: f32 = 0.2;
+const VISION_ACTIVE_TIMEOUT_S: f32 = 0.5;
 
 /// Frame in which a command was issued
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

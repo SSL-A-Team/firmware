@@ -52,7 +52,7 @@ const CONTROL_FREQ: f32 = 1.0 / DEFAULT_CONTROL_DT; // Hz
 const BASIC_TELEM_FREQ: f32 = 100.0; // Hz, send basic telemetry at this frequency
 const EXTENDED_TELEM_FREQ: f32 = 100.0; // Hz, send extended telemetry at this frequency, or immediately when a vision update is received
 const TRACE_PRINT_FREQ: f32 = 10.0; // Hz, print trace info at this frequency
-const TIME_WITHOUT_PACKET_STOP: f32 = 0.2; // seconds, time without receiving a control packet before locking out motor commands
+const TIME_WITHOUT_PACKET_STOP: f32 = 0.5; // seconds, time without receiving a control packet before locking out motor commands
 
 const CONTROL_DT_US: u64 = (DEFAULT_CONTROL_DT * 1e6) as u64; // us
 const BASIC_TELEM_INTERVAL_TICKS: usize = (1.0 / BASIC_TELEM_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between basic telemetry sends
