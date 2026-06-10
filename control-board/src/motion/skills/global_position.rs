@@ -16,9 +16,7 @@ impl GlobalPositionSkill {
 impl MotionSkill for GlobalPositionSkill {
     type Command = GlobalPositionCommand;
 
-    fn entry(&mut self, _cmd: GlobalPositionCommand, _ctx: &mut ControlContext) {
-
-    }
+    fn entry(&mut self, _cmd: GlobalPositionCommand, _ctx: &mut ControlContext) {}
 
     fn update(
         &mut self,
@@ -56,10 +54,14 @@ impl MotionSkill for GlobalPositionSkill {
             cmd_echo: cmd,
         });
 
-        Ok((SkillSetpoints { body_twist, body_accel }, telem))
+        Ok((
+            SkillSetpoints {
+                body_twist,
+                body_accel,
+            },
+            telem,
+        ))
     }
 
-    fn reset(&mut self) {
-        
-    }
+    fn reset(&mut self) {}
 }

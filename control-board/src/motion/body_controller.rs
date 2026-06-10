@@ -1,5 +1,5 @@
-use crate::motion::params::controller_params::{EncLagMode, ENC_LAG_MODE};
 use crate::motion::control_context::ControlContext;
+use crate::motion::params::controller_params::{EncLagMode, ENC_LAG_MODE};
 use crate::motion::skills::SkillManager;
 use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::{
@@ -85,8 +85,9 @@ impl BodyController {
 
         let t_after_kf_update = Instant::now();
 
-        let (setpoints, skill_telem) =
-            self.skill_manager.tick(last_command, &mut self.control_context)?;
+        let (setpoints, skill_telem) = self
+            .skill_manager
+            .tick(last_command, &mut self.control_context)?;
 
         self.body_twist_out = setpoints.body_twist;
         self.body_accel_out = setpoints.body_accel;
@@ -94,27 +95,25 @@ impl BodyController {
         let friction_force_global = self
             .control_context
             .compute_friction(self.body_twist_out, self.body_accel_out);
-        self.body_accel_out_fric_comp = self.body_accel_out
-            - self.control_context.robot_model.i_inv * friction_force_global;
+        self.body_accel_out_fric_comp =
+            self.body_accel_out - self.control_context.robot_model.i_inv * friction_force_global;
 
         let body_xy = SVector::<f32, 2>::new(self.body_twist_out.x, self.body_twist_out.y);
-        self.wheel_vel_out = if matches!(
-            ENC_LAG_MODE,
-            EncLagMode::FeedforwardOnly | EncLagMode::Full
-        ) {
-            let compensated_xy = self.control_context.enc_lag.invert(&body_xy);
-            let compensated_twist =
-                Vector3f::new(compensated_xy.x, compensated_xy.y, self.body_twist_out.z);
-            self.control_context
-                .robot_model
-                .transform_twist2wheel(self.control_context.state_estimate.z)
-                * compensated_twist
-        } else {
-            self.control_context
-                .robot_model
-                .transform_twist2wheel(self.control_context.state_estimate.z)
-                * self.body_twist_out
-        };
+        self.wheel_vel_out =
+            if matches!(ENC_LAG_MODE, EncLagMode::FeedforwardOnly | EncLagMode::Full) {
+                let compensated_xy = self.control_context.enc_lag.invert(&body_xy);
+                let compensated_twist =
+                    Vector3f::new(compensated_xy.x, compensated_xy.y, self.body_twist_out.z);
+                self.control_context
+                    .robot_model
+                    .transform_twist2wheel(self.control_context.state_estimate.z)
+                    * compensated_twist
+            } else {
+                self.control_context
+                    .robot_model
+                    .transform_twist2wheel(self.control_context.state_estimate.z)
+                    * self.body_twist_out
+            };
 
         self.wheel_torque_out = self
             .control_context
@@ -138,8 +137,16 @@ impl BodyController {
             imu_gyro: [0.0, 0.0, imu_gyro_theta_meas],
             imu_accel: [imu_accel_x_meas, imu_accel_y_meas, 0.0],
             vision_pose: vision_pose_meas.into(),
-            body_traj_pos: self.control_context.trajectory_state.fixed_rows::<3>(0).into(),
-            body_traj_vel: self.control_context.trajectory_state.fixed_rows::<3>(3).into(),
+            body_traj_pos: self
+                .control_context
+                .trajectory_state
+                .fixed_rows::<3>(0)
+                .into(),
+            body_traj_vel: self
+                .control_context
+                .trajectory_state
+                .fixed_rows::<3>(3)
+                .into(),
             kf_body_pos_prediction: state_prediction.fixed_rows::<3>(0).into(),
             kf_body_vel_prediction: state_prediction.fixed_rows::<3>(3).into(),
             kf_body_pos_estimate: self
@@ -161,7 +168,9 @@ impl BodyController {
 
         let t_after_telem = Instant::now();
 
-        self.control_context.robot_model.kf_predict(self.body_accel_out);
+        self.control_context
+            .robot_model
+            .kf_predict(self.body_accel_out);
 
         let t_after_kf_predict = Instant::now();
         if trace {

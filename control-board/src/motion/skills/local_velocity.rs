@@ -16,9 +16,7 @@ impl LocalVelocitySkill {
 impl MotionSkill for LocalVelocitySkill {
     type Command = LocalVelocityCommand;
 
-    fn entry(&mut self, _cmd: LocalVelocityCommand, _ctx: &mut ControlContext) {
-
-    }
+    fn entry(&mut self, _cmd: LocalVelocityCommand, _ctx: &mut ControlContext) {}
 
     fn update(
         &mut self,
@@ -45,11 +43,16 @@ impl MotionSkill for LocalVelocitySkill {
         let (body_twist, body_accel) =
             ctx.twist_control_policy(cmd.as_vec3f(), CommandFrame::Local, traj_params)?;
 
-        let telem = SkillExtendedTelemetry::LocalVelocity(ExtendedLocalVelocityTelemetry {
-            cmd_echo: cmd,
-        });
-        
-        Ok((SkillSetpoints { body_twist, body_accel }, telem))
+        let telem =
+            SkillExtendedTelemetry::LocalVelocity(ExtendedLocalVelocityTelemetry { cmd_echo: cmd });
+
+        Ok((
+            SkillSetpoints {
+                body_twist,
+                body_accel,
+            },
+            telem,
+        ))
     }
 
     fn reset(&mut self) {}

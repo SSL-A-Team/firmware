@@ -1,14 +1,14 @@
 use crate::motion::params::controller_params::{
-    EncLagMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE,
-    PoseAccelMode, PoseVelMode, POSE_ACCEL_MODE, POSE_VEL_MODE,
+    EncLagMode, PoseAccelMode, PoseVelMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON,
+    ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE,
 };
 use crate::motion::pid::PidController;
-use ateam_common_packets::bindings::{
-    ParameterCommand, ParameterDataFormat, ParameterName,
-};
+use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
 use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
 use ateam_controls::robot_model::{KalmanFilterParams, RobotModel, RobotPhysicalParams};
-use ateam_controls::{z_rotation_mat, ControlsError, Vector2f, Vector3f, Vector4f, Vector6f, Vector8f};
+use ateam_controls::{
+    z_rotation_mat, ControlsError, Vector2f, Vector3f, Vector4f, Vector6f, Vector8f,
+};
 use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
 use core::f32::consts::PI;
 use embassy_time::Duration;
@@ -160,8 +160,7 @@ impl ControlContext {
         ) {
             let lag_state = self.enc_lag.state();
             let lag_body = Vector3f::new(lag_state.x, lag_state.y, imu_gyro_theta_meas);
-            let lag_wheel =
-                self.robot_model.transform_twist2wheel(state_prediction[2]) * lag_body;
+            let lag_wheel = self.robot_model.transform_twist2wheel(state_prediction[2]) * lag_body;
             nalgebra::vector![
                 vision_pose_meas.x,
                 vision_pose_meas.y,
@@ -185,7 +184,8 @@ impl ControlContext {
             ]
         };
 
-        self.robot_model.kf_update(measurement, !vision_update, false, false)?;
+        self.robot_model
+            .kf_update(measurement, !vision_update, false, false)?;
         self.state_estimate = self.robot_model.get_state();
 
         Ok(state_prediction)
@@ -214,9 +214,21 @@ impl ControlContext {
             || ang_vel_mag >= self.friction_comp_gating[2];
 
         let fric_twist_local = Vector3f::new(
-            if linear_comp_on { tgt_twist_local.x } else { 0.0 },
-            if linear_comp_on { tgt_twist_local.y } else { 0.0 },
-            if angular_comp_on { tgt_twist_local.z } else { 0.0 },
+            if linear_comp_on {
+                tgt_twist_local.x
+            } else {
+                0.0
+            },
+            if linear_comp_on {
+                tgt_twist_local.y
+            } else {
+                0.0
+            },
+            if angular_comp_on {
+                tgt_twist_local.z
+            } else {
+                0.0
+            },
         );
 
         let friction_force_local = self.robot_model.compute_friction_force(fric_twist_local);
@@ -527,19 +539,14 @@ impl ControlContext {
         Ok(traj)
     }
 
-    fn tracking_error_exceeded(
-        &self,
-        pose_estimate: Vector3f,
-        twist_estimate: Vector3f,
-    ) -> bool {
+    fn tracking_error_exceeded(&self, pose_estimate: Vector3f, twist_estimate: Vector3f) -> bool {
         let traj_state_pose: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
         let traj_state_twist: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
         let linear_pose_error = hypotf(
             traj_state_pose.x - pose_estimate.x,
             traj_state_pose.y - pose_estimate.y,
         );
-        let angular_pose_error =
-            fabsf(remainderf(traj_state_pose.z - pose_estimate.z, 2.0 * PI));
+        let angular_pose_error = fabsf(remainderf(traj_state_pose.z - pose_estimate.z, 2.0 * PI));
         let linear_twist_error = hypotf(
             traj_state_twist.x - twist_estimate.x,
             traj_state_twist.y - twist_estimate.y,

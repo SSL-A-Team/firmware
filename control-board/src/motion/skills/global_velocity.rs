@@ -16,9 +16,7 @@ impl GlobalVelocitySkill {
 impl MotionSkill for GlobalVelocitySkill {
     type Command = GlobalVelocityCommand;
 
-    fn entry(&mut self, _cmd: GlobalVelocityCommand, _ctx: &mut ControlContext) {
-        
-    }
+    fn entry(&mut self, _cmd: GlobalVelocityCommand, _ctx: &mut ControlContext) {}
 
     fn update(
         &mut self,
@@ -49,10 +47,14 @@ impl MotionSkill for GlobalVelocitySkill {
             cmd_echo: cmd,
         });
 
-        Ok((SkillSetpoints { body_twist, body_accel }, telem))
+        Ok((
+            SkillSetpoints {
+                body_twist,
+                body_accel,
+            },
+            telem,
+        ))
     }
 
-    fn reset(&mut self) {
-
-    }
+    fn reset(&mut self) {}
 }

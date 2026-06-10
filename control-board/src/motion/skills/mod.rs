@@ -4,8 +4,8 @@ pub mod global_velocity;
 pub mod local_acceleration;
 pub mod local_velocity;
 
-pub use crate::motion::control_context::SkillSetpoints;
 use crate::motion::control_context::ControlContext;
+pub use crate::motion::control_context::SkillSetpoints;
 use ateam_common_packets::bindings::{BasicControl, BodyControlMode};
 use ateam_common_packets::radio::{SkillCommand, SkillExtendedTelemetry};
 use ateam_controls::ControlsError;
@@ -21,7 +21,11 @@ pub trait MotionSkill {
 
     fn entry(&mut self, cmd: Self::Command, ctx: &mut ControlContext);
 
-    fn update(&mut self, cmd: Self::Command, ctx: &mut ControlContext) -> Result<(SkillSetpoints, SkillExtendedTelemetry), ControlsError>;
+    fn update(
+        &mut self,
+        cmd: Self::Command,
+        ctx: &mut ControlContext,
+    ) -> Result<(SkillSetpoints, SkillExtendedTelemetry), ControlsError>;
 
     fn reset(&mut self);
 }
@@ -41,8 +45,12 @@ impl ActiveSkill {
             SkillCommand::GlobalPosition(_) => Self::GlobalPosition(GlobalPositionSkill::new()),
             SkillCommand::GlobalVelocity(_) => Self::GlobalVelocity(GlobalVelocitySkill::new()),
             SkillCommand::LocalVelocity(_) => Self::LocalVelocity(LocalVelocitySkill::new()),
-            SkillCommand::GlobalAcceleration(_) => Self::GlobalAcceleration(GlobalAccelerationSkill::new()),
-            SkillCommand::LocalAcceleration(_) => Self::LocalAcceleration(LocalAccelerationSkill::new()),
+            SkillCommand::GlobalAcceleration(_) => {
+                Self::GlobalAcceleration(GlobalAccelerationSkill::new())
+            }
+            SkillCommand::LocalAcceleration(_) => {
+                Self::LocalAcceleration(LocalAccelerationSkill::new())
+            }
             SkillCommand::Off => Self::Off,
         }
     }
