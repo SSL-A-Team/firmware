@@ -1,7 +1,6 @@
 use crate::motion::params::controller_params::{
     EncLagMode, PoseAccelMode, PoseVelMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON,
-    ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE, TRAJ_REPLAN_CMD_POS_ANGULAR_RAD,
-    TRAJ_REPLAN_CMD_POS_LINEAR_M, TRAJ_REPLAN_CMD_VEL_ANGULAR_RADS, TRAJ_REPLAN_CMD_VEL_LINEAR_MS,
+    ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE,
 };
 use crate::motion::pid::PidController;
 use crate::parameter_interface::ParameterInterface;
@@ -50,7 +49,6 @@ pub struct BodyController {
     pub trajectory: Option<BangBangTraj3D>,
     pub trajectory_time: f32,
     pub trajectory_state: Vector6f,
-    pub prev_body_cmd: Option<Vector3f>,
     pub body_twist_out: Vector3f,
     pub body_accel_out: Vector3f,
     pub body_accel_out_fric_comp: Vector3f,
@@ -59,20 +57,9 @@ pub struct BodyController {
     pub telemetry: BodyControlTelemetry,
     pub debug_telemetry: BodyControlExtendedTelemetry,
     pub dt: f32,
-    pub first_vision_received: bool,
     pub time_since_vision_update_s: f32,
     pub enc_lag: FirstOrderLag<2>,
     pub wheels_disabled: bool,
-}
-
-fn pose_cmd_changed(prev: Vector3f, next: Vector3f) -> bool {
-    Vector2f::new(next.x - prev.x, next.y - prev.y).norm() > TRAJ_REPLAN_CMD_POS_LINEAR_M
-        || remainderf(next.z - prev.z, 2.0 * PI).abs() > TRAJ_REPLAN_CMD_POS_ANGULAR_RAD
-}
-
-fn twist_cmd_changed(prev: Vector3f, next: Vector3f) -> bool {
-    Vector2f::new(next.x - prev.x, next.y - prev.y).norm() > TRAJ_REPLAN_CMD_VEL_LINEAR_MS
-        || fabsf(next.z - prev.z) > TRAJ_REPLAN_CMD_VEL_ANGULAR_RADS
 }
 
 impl BodyController {
@@ -98,7 +85,6 @@ impl BodyController {
             trajectory: None,
             trajectory_state: Vector6f::zeros(),
             trajectory_time: 0.0,
-            prev_body_cmd: None,
             body_twist_out: Vector3f::default(),
             body_accel_out: Vector3f::default(),
             body_accel_out_fric_comp: Vector3f::default(),
@@ -107,7 +93,6 @@ impl BodyController {
             telemetry: Default::default(),
             debug_telemetry: Default::default(),
             dt,
-            first_vision_received: false,
             time_since_vision_update_s: VISION_ACTIVE_TIMEOUT_S + 1.0, // Set to higher than timeout
             enc_lag: FirstOrderLag::new_from_horizon(
                 FirstOrderLagParams {
@@ -137,7 +122,6 @@ impl BodyController {
         self.trajectory = None;
         self.trajectory_state = Vector6f::default();
         self.trajectory_time = 0.0;
-        self.prev_body_cmd = None;
         self.body_twist_out = Vector3f::default();
         self.body_accel_out = Vector3f::default();
         self.body_accel_out_fric_comp = Vector3f::default();
@@ -145,14 +129,13 @@ impl BodyController {
         self.wheel_torque_out = Vector4f::default();
         self.telemetry = Default::default();
         self.debug_telemetry = Default::default();
-        self.first_vision_received = false;
         self.time_since_vision_update_s = VISION_ACTIVE_TIMEOUT_S + 1.0; // Set to higher than timeout
         self.enc_lag.reset();
         self.wheels_disabled = true;
     }
 
     pub fn vision_active(&self) -> bool {
-        self.first_vision_received && self.time_since_vision_update_s <= VISION_ACTIVE_TIMEOUT_S
+        self.time_since_vision_update_s <= VISION_ACTIVE_TIMEOUT_S
     }
 
     pub fn wheels_disabled(&self) -> bool {
@@ -179,35 +162,15 @@ impl BodyController {
         // Working in global frame, unless variable is specified as local
 
         if vision_update {
-            if !self.first_vision_received {
-                // First vision sample since controller init or reset. Snap
-                // the KF to it and force a replan on the next tracker call:
-                // any in-flight trajectory was built against a default-zero
-                // KF pose
+            if !self.vision_active() {
+                // Vision transitioning inactive → active (first sample after
+                // init/reset, or vision returning after a >200 ms dropout).
+                // Snap the KF to vision, drop any in-flight trajectory, and
+                // reset the PID so the next tracker call replans cleanly
+                // from the freshly-snapped state estimate.
                 self.robot_model.kf_set_pose(vision_pose_meas);
-                self.first_vision_received = true;
-                self.prev_body_cmd = None;
+                self.trajectory = None;
                 self.pose_pid_controller.reset();
-            } else if self.time_since_vision_update_s > VISION_ACTIVE_TIMEOUT_S {
-                // Vision returning after a dropout: if the integrated trajectory
-                // pose has drifted from the new vision pose beyond the replan
-                // thresholds, snap the KF to vision and force a replan on the
-                // next tracker call.
-                if self.trajectory.is_some() {
-                    let traj_state_pose: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
-                    let linear_drift = hypotf(
-                        traj_state_pose.x - vision_pose_meas.x,
-                        traj_state_pose.y - vision_pose_meas.y,
-                    );
-                    let angular_drift =
-                        fabsf(remainderf(traj_state_pose.z - vision_pose_meas.z, 2.0 * PI));
-                    if linear_drift > self.traj_recompute_error[0]
-                        || angular_drift > self.traj_recompute_error[1]
-                    {
-                        self.robot_model.kf_set_pose(vision_pose_meas);
-                        self.prev_body_cmd = None;
-                    }
-                }
             }
             self.time_since_vision_update_s = 0.0;
         } else {
@@ -569,15 +532,6 @@ impl BodyController {
         let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
 
-        // Run command-change detection in the caller's command frame so a
-        // constant Local command does not appear to change every tick as the
-        // robot's heading drifts (which would force a replan every step).
-        // Latch the same frame-of-issue value into `prev_body_cmd` so the
-        // next tick's comparison sees the same units.
-        let cmd_changed = self
-            .prev_body_cmd
-            .map_or(true, |cmd| twist_cmd_changed(cmd, target_twist));
-
         // Plan and track in the global frame; only rotate when the command
         // arrived in the local body frame.
         let global_target_twist = match frame {
@@ -585,41 +539,21 @@ impl BodyController {
             CommandFrame::Local => z_rotation_mat(state_estimate.z) * target_twist,
         };
 
-        // Replan trajectory if we don't have one, the command changed, or
-        // tracking errors (pose against integrated traj pose, plus twist)
-        // have grown too large. When replanning with healthy tracking and
-        // an existing trajectory, seed from the integrated trajectory state
-        // so the new bang-bang profile is continuous with what was being
-        // commanded last tick. Snap back to state_estimate only when
-        // tracking has drifted past the recompute thresholds.
-        let traj = match self.trajectory {
-            Some(traj) if !cmd_changed => {
-                if self.tracking_error_exceeded(pose_estimate, twist_estimate) {
-                    self.plan_twist_trajectory(state_estimate, global_target_twist, traj_params)?
-                } else {
-                    traj
-                }
-            }
-            Some(_) => {
-                let seed_state = if self.tracking_error_exceeded(pose_estimate, twist_estimate) {
-                    state_estimate
-                } else {
-                    self.trajectory_state
-                };
-                self.plan_twist_trajectory(seed_state, global_target_twist, traj_params)?
-            }
-            None => self.plan_twist_trajectory(state_estimate, global_target_twist, traj_params)?,
+        // Replan the trajectory every tick. Seed from `state_estimate` only
+        // when there is no in-flight trajectory or the integrated trajectory
+        // state has drifted past `traj_recompute_error`; otherwise seed from
+        // the integrated `trajectory_state` so consecutive plans hand off
+        // continuously.
+        let seed_state = if self.trajectory.is_none()
+            || self.tracking_error_exceeded(pose_estimate, twist_estimate)
+        {
+            state_estimate
+        } else {
+            self.trajectory_state
         };
+        let traj = self.plan_twist_trajectory(seed_state, global_target_twist, traj_params)?;
 
-        let result = self.track_trajectory(state_estimate, traj)?;
-
-        // Don't latch a new command if it doesn't meet the change threshold.
-        // Otherwise a small twist command ramp could never trigger a replan.
-        if cmd_changed {
-            self.prev_body_cmd = Some(target_twist);
-        }
-
-        Ok(result)
+        self.track_trajectory(state_estimate, traj)
     }
 
     fn plan_pose_trajectory(
@@ -641,16 +575,8 @@ impl BodyController {
         target_pose: Vector3f,
         traj_params: TrajectoryParams,
     ) -> Result<(Vector3f, Vector3f), ControlsError> {
-        // Vision required for pose control. On the transition into the
-        // no-vision state, fully reset the controller so we start clean once
-        // vision returns. While in this state we signal `wheels_disabled`
+        // Vision required for pose control
         if !self.vision_active() {
-            if self.first_vision_received {
-                // Transition: we had vision and now we don't. Wipe trajectory,
-                // PID, and KF state; `reset()` also clears `first_vision_received`
-                // so the next vision sample is treated as the first one.
-                self.reset();
-            }
             self.wheels_disabled = true;
             return Ok((Vector3f::zeros(), Vector3f::zeros()));
         }
@@ -658,44 +584,20 @@ impl BodyController {
         let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
         let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
 
-        let cmd_changed = self
-            .prev_body_cmd
-            .map_or(true, |cmd| pose_cmd_changed(cmd, target_pose));
-
-        // Replan trajectory if we don't have one, the command changed, or
-        // tracking errors have grown too large. When replanning with
-        // healthy tracking and an existing trajectory, seed from the
-        // integrated trajectory state for a continuous handoff; snap to
-        // state_estimate only when tracking has drifted past the
-        // recompute thresholds.
-        let traj = match self.trajectory {
-            Some(traj) if !cmd_changed => {
-                if self.tracking_error_exceeded(pose_estimate, twist_estimate) {
-                    self.plan_pose_trajectory(state_estimate, target_pose, traj_params)?
-                } else {
-                    traj
-                }
-            }
-            Some(_) => {
-                let seed_state = if self.tracking_error_exceeded(pose_estimate, twist_estimate) {
-                    state_estimate
-                } else {
-                    self.trajectory_state
-                };
-                self.plan_pose_trajectory(seed_state, target_pose, traj_params)?
-            }
-            None => self.plan_pose_trajectory(state_estimate, target_pose, traj_params)?,
+        // Replan the trajectory every tick. Seed from `state_estimate` only
+        // when there is no in-flight trajectory or tracking has drifted past
+        // `traj_recompute_error`; otherwise seed from the integrated
+        // `trajectory_state` for a continuous handoff.
+        let seed_state = if self.trajectory.is_none()
+            || self.tracking_error_exceeded(pose_estimate, twist_estimate)
+        {
+            state_estimate
+        } else {
+            self.trajectory_state
         };
+        let traj = self.plan_pose_trajectory(seed_state, target_pose, traj_params)?;
 
-        let result = self.track_trajectory(state_estimate, traj)?;
-
-        // Don't latch a new command if it doesn't meet the change threshold.
-        // Otherwise a small pose command ramp could never trigger a replan.
-        if cmd_changed {
-            self.prev_body_cmd = Some(target_pose);
-        }
-
-        Ok(result)
+        self.track_trajectory(state_estimate, traj)
     }
 
     /// Returns true if the integrated trajectory state has drifted from the
