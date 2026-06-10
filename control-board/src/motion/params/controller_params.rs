@@ -73,18 +73,6 @@ pub const POSE_ACCEL_MODE: PoseAccelMode = PoseAccelMode::FeedbackOnly;
 /// Thresholds for when to recompute the trajectory
 pub const TRAJ_RECOMPUTE_ERROR: Vector4f = Vector4f::new(0.5, 1.0, 4.0, 8.0);
 
-/// Minimum XY Euclidean distance change (meters) in the target pose command to trigger a replan.
-pub const TRAJ_REPLAN_CMD_POS_LINEAR_M: f32 = 0.001;
-
-/// Minimum angular change (radians) in the target pose command to trigger a replan.
-pub const TRAJ_REPLAN_CMD_POS_ANGULAR_RAD: f32 = 0.015; // < 1 degrees
-
-/// Minimum XY Euclidean velocity change (meters/second) in the target twist command to trigger a replan.
-pub const TRAJ_REPLAN_CMD_VEL_LINEAR_MS: f32 = 0.001;
-
-/// Minimum angular change (radians/second) in the target twist command to trigger a replan.
-pub const TRAJ_REPLAN_CMD_VEL_ANGULAR_RADS: f32 = 0.015; // < 1 degrees/s
-
 /// Only applies friction compensation when the absolute value of the
 /// velocity/acceleration is above the corresponding threshold in
 /// FRICTION_COMP_GATING, to avoid unstable state at 0 velocity
