@@ -605,7 +605,9 @@ impl<
             /////////////////////////////////////
 
             ////////// WARNING LOGGING //////////
-            if loop_execution_time_us > 400 {
+            // threshold for logging a warning about control loop execution time
+            const LOOP_EXECUTION_TIME_THRESHOLD_US: u64 = 600;  // 60% of execution frame
+            if loop_execution_time_us > LOOP_EXECUTION_TIME_THRESHOLD_US {
                 defmt::warn!(
                     "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
                     motor_packet_process_time.as_micros(),
@@ -613,10 +615,10 @@ impl<
                     control_update_time.as_micros(),
                     channel_update_time.as_micros(),
                 );
-                defmt::warn!("control loop is taking >400us: {} us (it may be interrupted by higher priority tasks). This is >40% of an execution frame.", loop_execution_time_us);
+                defmt::warn!("control loop is taking >{}us: {} us (it may be interrupted by higher priority tasks)", LOOP_EXECUTION_TIME_THRESHOLD_US, loop_execution_time_us);
                 self.telemetry_publisher
                     .publish_immediate(TelemetryPacket::ErrorTelemetry(
-                        create_error_telemetry_from_string("control loop >400us execution time"),
+                        create_error_telemetry_from_string("control loop execution time too high!"),
                     ));
             }
             /////////////////////////////////////
