@@ -18,7 +18,7 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{
     include_external_cpp_bin,
-    motion::robot_controller::BodyController,
+    motion::body_controller::BodyController,
     motor::CurrentControlledMotor,
     parameter_interface::ParameterInterface,
     pins::*,
@@ -52,7 +52,7 @@ const CONTROL_FREQ: f32 = 1.0 / DEFAULT_CONTROL_DT; // Hz
 const BASIC_TELEM_FREQ: f32 = 100.0; // Hz, send basic telemetry at this frequency
 const EXTENDED_TELEM_FREQ: f32 = 100.0; // Hz, send extended telemetry at this frequency, or immediately when a vision update is received
 const TRACE_PRINT_FREQ: f32 = 10.0; // Hz, print trace info at this frequency
-const TIME_WITHOUT_PACKET_STOP: f32 = 0.2; // seconds, time without receiving a control packet before locking out motor commands
+const TIME_WITHOUT_PACKET_STOP: f32 = 0.5; // seconds, time without receiving a control packet before locking out motor commands
 
 const CONTROL_DT_US: u64 = (DEFAULT_CONTROL_DT * 1e6) as u64; // us
 const BASIC_TELEM_INTERVAL_TICKS: usize = (1.0 / BASIC_TELEM_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between basic telemetry sends
@@ -510,7 +510,7 @@ impl<
             }
 
             if ticks_since_trace_print >= TRACE_PRINT_INTERVAL_TICKS {
-                let state = robot_controller.robot_model.x;
+                let state = robot_controller.control_context.robot_model.x;
                 let wheel_torques = robot_controller.get_wheel_torques();
                 defmt::trace!(
                     "state position: {}, {}, {}",
@@ -605,7 +605,9 @@ impl<
             /////////////////////////////////////
 
             ////////// WARNING LOGGING //////////
-            if loop_execution_time_us > 400 {
+            // threshold for logging a warning about control loop execution time
+            const LOOP_EXECUTION_TIME_THRESHOLD_US: u64 = 600; // 60% of execution frame
+            if loop_execution_time_us > LOOP_EXECUTION_TIME_THRESHOLD_US {
                 defmt::warn!(
                     "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
                     motor_packet_process_time.as_micros(),
@@ -613,10 +615,10 @@ impl<
                     control_update_time.as_micros(),
                     channel_update_time.as_micros(),
                 );
-                defmt::warn!("control loop is taking >400us: {} us (it may be interrupted by higher priority tasks). This is >40% of an execution frame.", loop_execution_time_us);
+                defmt::warn!("control loop is taking >{}us: {} us (it may be interrupted by higher priority tasks)", LOOP_EXECUTION_TIME_THRESHOLD_US, loop_execution_time_us);
                 self.telemetry_publisher
                     .publish_immediate(TelemetryPacket::ErrorTelemetry(
-                        create_error_telemetry_from_string("control loop >400us execution time"),
+                        create_error_telemetry_from_string("control loop execution time too high!"),
                     ));
             }
             /////////////////////////////////////
