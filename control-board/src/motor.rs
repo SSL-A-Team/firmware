@@ -500,4 +500,12 @@ impl<
     pub fn read_vmotor_voltage_mv(&self) -> u16 {
         return self.current_state.current_telemetry.motor_voltage_cmd_mv;
     }
+
+    pub fn read_hall_vel_est_crads(&self) -> i16 {
+        return self.current_state.current_telemetry.hall_vel_est_crads;
+    }
+
+    pub fn read_hall_rads(&self) -> f32 {
+        return self.current_state.current_telemetry.hall_vel_est_crads as f32 / 100.0;
+    }
 }
