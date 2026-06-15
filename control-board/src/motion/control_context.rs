@@ -17,15 +17,15 @@ use nalgebra::SVector;
 
 pub(crate) const VISION_ACTIVE_TIMEOUT_S: f32 = 0.5;
 
-/// Body-frame setpoints produced by a maneuver each tick.
+/// Body-frame setpoints produced by a skill each tick.
 /// `body_controller` applies friction compensation and wheel transforms.
 #[derive(Copy, Clone, Default)]
-pub struct ManeuverSetpoints {
+pub struct SkillSetpoints {
     pub body_twist: Vector3f,
     pub body_accel: Vector3f,
 }
 
-impl ManeuverSetpoints {
+impl SkillSetpoints {
     pub fn zero() -> Self {
         Self {
             body_twist: Vector3f::zeros(),
@@ -41,10 +41,10 @@ pub enum CommandFrame {
     Local,
 }
 
-/// Controller infrastructure passed into each maneuver on every tick.
+/// Controller infrastructure passed into each skill on every tick.
 ///
 /// Owns the KF/robot-model, trajectory state, PID, and encoder-lag model.
-/// Maneuvers borrow this via `&mut ControlContext` to call planning and
+/// Skills borrow this via `&mut ControlContext` to call planning and
 /// tracking helpers.
 pub struct ControlContext {
     pub robot_model: RobotModel,
@@ -61,7 +61,7 @@ pub struct ControlContext {
     pub trajectory_state: Vector6f,
     pub enc_lag: FirstOrderLag<2>,
     pub dt: f32,
-    /// Cached KF state estimate — updated each tick before maneuver dispatch.
+    /// Cached KF state estimate — updated each tick before skill dispatch.
     pub state_estimate: Vector6f,
     pub time_since_vision_update_s: f32,
     pub wheels_disabled: bool,

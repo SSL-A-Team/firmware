@@ -1,20 +1,20 @@
-use crate::motion::control_context::{CommandFrame, ControlContext, ManeuverSetpoints};
-use crate::motion::maneuvers::MotionManeuver;
+use crate::motion::control_context::{CommandFrame, ControlContext, SkillSetpoints};
+use crate::motion::skills::MotionSkill;
 use ateam_common_packets::bindings::{
     ExtendedGlobalAccelerationTelemetry, GlobalAccelerationCommand,
 };
-use ateam_common_packets::radio::ManeuverExtendedTelemetry;
+use ateam_common_packets::radio::SkillExtendedTelemetry;
 use ateam_controls::ControlsError;
 
-pub struct GlobalAccelerationManeuver;
+pub struct GlobalAccelerationSkill;
 
-impl GlobalAccelerationManeuver {
+impl GlobalAccelerationSkill {
     pub fn new() -> Self {
         Self
     }
 }
 
-impl MotionManeuver for GlobalAccelerationManeuver {
+impl MotionSkill for GlobalAccelerationSkill {
     type Command = GlobalAccelerationCommand;
 
     fn entry(&mut self, _cmd: GlobalAccelerationCommand, _ctx: &mut ControlContext) {}
@@ -23,17 +23,17 @@ impl MotionManeuver for GlobalAccelerationManeuver {
         &mut self,
         cmd: GlobalAccelerationCommand,
         ctx: &mut ControlContext,
-    ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError> {
+    ) -> Result<(SkillSetpoints, SkillExtendedTelemetry), ControlsError> {
         let (body_twist, body_accel) =
             ctx.accel_control_policy(cmd.as_vec3f(), CommandFrame::Global);
 
         let telem =
-            ManeuverExtendedTelemetry::GlobalAcceleration(ExtendedGlobalAccelerationTelemetry {
+            SkillExtendedTelemetry::GlobalAcceleration(ExtendedGlobalAccelerationTelemetry {
                 cmd_echo: cmd,
             });
 
         Ok((
-            ManeuverSetpoints {
+            SkillSetpoints {
                 body_twist,
                 body_accel,
             },
