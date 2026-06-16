@@ -63,6 +63,7 @@ pub const RADIO_TX_BUF_DEPTH: usize = 6;
 pub const RADIO_MAX_RX_PACKET_SIZE: usize =
     ateam_common_packets::MAX_ROBOT_RX_PACKET_SIZE + EDM_PACKET_WIRE_OVERHEAD;
 pub const RADIO_RX_BUF_DEPTH: usize = 6;
+const RADIO_NON_ESSENTIAL_TELEM_CAP_PER_CYCLE: usize = RADIO_TX_BUF_DEPTH / 2;
 
 static_idle_buffered_uart!(RADIO, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, DEBUG_RADIO_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
@@ -578,7 +579,25 @@ impl<
             }
         }
 
+        // send basic telemetry at RADIO_BASIC_TELEM_INTERVAL_MS rate
+        // checked before draining queue so error/extended telem flood cannot starve keepalive
+        if Instant::now() - self.last_basic_telem_tx
+            >= Duration::from_millis(RADIO_BASIC_TELEM_INTERVAL_MS)
+        {
+            self.last_basic_telem_tx = Instant::now();
+            self.last_basic_telemetry.transmission_sequence_number = self.seq_number as u8;
+            self.seq_number = (self.seq_number + 1) & 0x00FF;
+
+            defmt::trace!("sending telem");
+            if let Err(e) = self.radio.send_telemetry(self.last_basic_telemetry) {
+                defmt::warn!("RadioTask - failed to send basic telem packet {:?}", e);
+            }
+        }
+
         // write outbound packets
+        // basic and parameter responses are essential — always drained
+        // extended and error are non-essential — capped at RADIO_NON_ESSENTIAL_TELEM_CAP_PER_CYCLE
+        let mut non_essential_sent = 0;
         loop {
             if let Some(telemetry) = self.telemetry_subscriber.try_next_message_pure() {
                 match telemetry {
@@ -586,14 +605,19 @@ impl<
                         self.last_basic_telemetry = basic;
                     }
                     TelemetryPacket::Extended(control) => {
-                        if self.shared_robot_state.get_radio_send_extended_telem() {
-                            defmt::trace!("RadioTask - sending extended telemetry");
-                            if let Err(e) = self.radio.send_control_debug_telemetry(control).await {
-                                defmt::warn!(
-                                    "RadioTask - failed to send control debug telemetry packet: {}",
-                                    e
-                                );
+                        if non_essential_sent < RADIO_NON_ESSENTIAL_TELEM_CAP_PER_CYCLE {
+                            if self.shared_robot_state.get_radio_send_extended_telem() {
+                                defmt::trace!("RadioTask - sending extended telemetry");
+                                if let Err(e) = self.radio.send_control_debug_telemetry(control).await {
+                                    defmt::warn!(
+                                        "RadioTask - failed to send control debug telemetry packet: {}",
+                                        e
+                                    );
+                                }
                             }
+                            non_essential_sent += 1;
+                        } else {
+                            defmt::warn!("RadioTask - dropping extended telemetry, non-essential cap reached");
                         }
                     }
                     TelemetryPacket::ParameterCommandResponse(pc_resp) => {
@@ -605,28 +629,19 @@ impl<
                         }
                     }
                     TelemetryPacket::ErrorTelemetry(error_packet) => {
-                        defmt::warn!("RadioTask - sending error telemetry packet");
-                        if let Err(e) = self.radio.send_error_telemetry(error_packet).await {
-                            defmt::warn!("RadioTask - failed to send error packet: {}", e);
+                        if non_essential_sent < RADIO_NON_ESSENTIAL_TELEM_CAP_PER_CYCLE {
+                            defmt::warn!("RadioTask - sending error telemetry packet");
+                            if let Err(e) = self.radio.send_error_telemetry(error_packet).await {
+                                defmt::warn!("RadioTask - failed to send error packet: {}", e);
+                            }
+                            non_essential_sent += 1;
+                        } else {
+                            defmt::warn!("RadioTask - dropping error telemetry, non-essential cap reached");
                         }
                     }
                 }
             } else {
                 break;
-            }
-        }
-
-        // send basic telemetry at RADIO_BASIC_TELEM_INTERVAL_MS rate
-        if Instant::now() - self.last_basic_telem_tx
-            >= Duration::from_millis(RADIO_BASIC_TELEM_INTERVAL_MS)
-        {
-            self.last_basic_telem_tx = Instant::now();
-            self.last_basic_telemetry.transmission_sequence_number = self.seq_number as u8;
-            self.seq_number = (self.seq_number + 1) & 0x00FF;
-
-            defmt::trace!("sending telem");
-            if let Err(e) = self.radio.send_telemetry(self.last_basic_telemetry) {
-                defmt::warn!("RadioTask - failed to send basic telem packet {:?}", e);
             }
         }
 
