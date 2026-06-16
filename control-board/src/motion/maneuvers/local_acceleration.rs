@@ -27,9 +27,10 @@ impl MotionManeuver for LocalAccelerationManeuver {
         let (body_twist, body_accel) =
             ctx.accel_control_policy(cmd.as_vec3f(), CommandFrame::Local);
 
-        let telem = ManeuverExtendedTelemetry::LocalAcceleration(ExtendedLocalAccelerationTelemetry {
-            cmd_echo: cmd,
-        });
+        let telem =
+            ManeuverExtendedTelemetry::LocalAcceleration(ExtendedLocalAccelerationTelemetry {
+                cmd_echo: cmd,
+            });
 
         Ok((
             ManeuverSetpoints {

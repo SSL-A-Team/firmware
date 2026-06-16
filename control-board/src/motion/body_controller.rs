@@ -1,6 +1,6 @@
 use crate::motion::control_context::ControlContext;
-use crate::motion::params::controller_params::{EncLagMode, ENC_LAG_MODE};
 use crate::motion::maneuvers::ManeuverManager;
+use crate::motion::params::controller_params::{EncLagMode, ENC_LAG_MODE};
 use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::{
     BasicControl, BodyControlExtendedTelemetry, BodyControlTelemetry, ParameterCommand,

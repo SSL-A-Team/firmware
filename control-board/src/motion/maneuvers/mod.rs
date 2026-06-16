@@ -42,8 +42,12 @@ enum ActiveManeuver {
 impl ActiveManeuver {
     fn from_maneuver_command(cmd: &ManeuverCommand) -> Self {
         match cmd {
-            ManeuverCommand::GlobalPosition(_) => Self::GlobalPosition(GlobalPositionManeuver::new()),
-            ManeuverCommand::GlobalVelocity(_) => Self::GlobalVelocity(GlobalVelocityManeuver::new()),
+            ManeuverCommand::GlobalPosition(_) => {
+                Self::GlobalPosition(GlobalPositionManeuver::new())
+            }
+            ManeuverCommand::GlobalVelocity(_) => {
+                Self::GlobalVelocity(GlobalVelocityManeuver::new())
+            }
             ManeuverCommand::LocalVelocity(_) => Self::LocalVelocity(LocalVelocityManeuver::new()),
             ManeuverCommand::GlobalAcceleration(_) => {
                 Self::GlobalAcceleration(GlobalAccelerationManeuver::new())
@@ -71,7 +75,9 @@ impl ActiveManeuver {
             (Self::GlobalPosition(s), ManeuverCommand::GlobalPosition(c)) => s.entry(*c, ctx),
             (Self::GlobalVelocity(s), ManeuverCommand::GlobalVelocity(c)) => s.entry(*c, ctx),
             (Self::LocalVelocity(s), ManeuverCommand::LocalVelocity(c)) => s.entry(*c, ctx),
-            (Self::GlobalAcceleration(s), ManeuverCommand::GlobalAcceleration(c)) => s.entry(*c, ctx),
+            (Self::GlobalAcceleration(s), ManeuverCommand::GlobalAcceleration(c)) => {
+                s.entry(*c, ctx)
+            }
             (Self::LocalAcceleration(s), ManeuverCommand::LocalAcceleration(c)) => s.entry(*c, ctx),
             _ => {}
         }
@@ -86,7 +92,9 @@ impl ActiveManeuver {
             (Self::GlobalPosition(s), ManeuverCommand::GlobalPosition(c)) => s.update(c, ctx),
             (Self::GlobalVelocity(s), ManeuverCommand::GlobalVelocity(c)) => s.update(c, ctx),
             (Self::LocalVelocity(s), ManeuverCommand::LocalVelocity(c)) => s.update(c, ctx),
-            (Self::GlobalAcceleration(s), ManeuverCommand::GlobalAcceleration(c)) => s.update(c, ctx),
+            (Self::GlobalAcceleration(s), ManeuverCommand::GlobalAcceleration(c)) => {
+                s.update(c, ctx)
+            }
             (Self::LocalAcceleration(s), ManeuverCommand::LocalAcceleration(c)) => s.update(c, ctx),
             _ => Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off)),
         }
