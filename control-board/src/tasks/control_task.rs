@@ -10,9 +10,7 @@ use ateam_controls::{Vector3f, Vector4f};
 
 use crate::create_error_telemetry_from_string;
 use ateam_lib_stm32::{
-    drivers::boot::stm32_interface,
-    idle_buffered_uart_spawn_tasks,
-    static_idle_buffered_uart,
+    drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
     util::RateLimiter,
 };
 use embassy_executor::{SendSpawner, Spawner};
@@ -189,10 +187,18 @@ impl<
             last_kicker_telemetry: Default::default(),
             ticks_since_basic_telem: 0,
             ticks_since_extended_telem: 0,
-            sched_lag_err_limiter: RateLimiter::new(Duration::from_millis(ERROR_TELEM_RATE_LIMIT_MS)),
-            control_update_err_limiter: RateLimiter::new(Duration::from_millis(ERROR_TELEM_RATE_LIMIT_MS)),
-            high_current_err_limiter: RateLimiter::new(Duration::from_millis(ERROR_TELEM_RATE_LIMIT_MS)),
-            loop_exec_err_limiter: RateLimiter::new(Duration::from_millis(ERROR_TELEM_RATE_LIMIT_MS)),
+            sched_lag_err_limiter: RateLimiter::new(Duration::from_millis(
+                ERROR_TELEM_RATE_LIMIT_MS,
+            )),
+            control_update_err_limiter: RateLimiter::new(Duration::from_millis(
+                ERROR_TELEM_RATE_LIMIT_MS,
+            )),
+            high_current_err_limiter: RateLimiter::new(Duration::from_millis(
+                ERROR_TELEM_RATE_LIMIT_MS,
+            )),
+            loop_exec_err_limiter: RateLimiter::new(Duration::from_millis(
+                ERROR_TELEM_RATE_LIMIT_MS,
+            )),
             motor_fl: motor_fl,
             motor_bl: motor_bl,
             motor_br: motor_br,
@@ -641,7 +647,9 @@ impl<
                     defmt::warn!("control loop is taking >{}us: {} us (it may be interrupted by higher priority tasks)", LOOP_EXECUTION_TIME_THRESHOLD_US, loop_execution_time_us);
                     self.telemetry_publisher
                         .publish_immediate(TelemetryPacket::ErrorTelemetry(
-                            create_error_telemetry_from_string("control loop execution time too high!"),
+                            create_error_telemetry_from_string(
+                                "control loop execution time too high!",
+                            ),
                         ));
                 }
             }

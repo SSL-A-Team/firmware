@@ -608,7 +608,9 @@ impl<
                         if non_essential_sent < RADIO_NON_ESSENTIAL_TELEM_CAP_PER_CYCLE {
                             if self.shared_robot_state.get_radio_send_extended_telem() {
                                 defmt::trace!("RadioTask - sending extended telemetry");
-                                if let Err(e) = self.radio.send_control_debug_telemetry(control).await {
+                                if let Err(e) =
+                                    self.radio.send_control_debug_telemetry(control).await
+                                {
                                     defmt::warn!(
                                         "RadioTask - failed to send control debug telemetry packet: {}",
                                         e
@@ -636,7 +638,9 @@ impl<
                             }
                             non_essential_sent += 1;
                         } else {
-                            defmt::warn!("RadioTask - dropping error telemetry, non-essential cap reached");
+                            defmt::warn!(
+                                "RadioTask - dropping error telemetry, non-essential cap reached"
+                            );
                         }
                     }
                 }
