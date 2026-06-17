@@ -322,6 +322,7 @@ int main() {
         response_packet.velocity_telemetry.vel_setpoint_rads = motor_command_packet.setpoint;
         response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
         response_packet.current_telemetry.motor_voltage_cmd_mv = pwm6step_get_voltage_command();
+        response_packet.current_telemetry.hall_vel_est_crads = pwm6step_hall_get_rps_estimate();
 
         memcpy(response_packet.current_telemetry.current_samples_ma, pwm6step_get_current_log(), 40);
 

@@ -27,6 +27,7 @@ pub mod power;
 pub mod time;
 pub mod uart;
 pub mod units;
+pub mod util;
 
 // required for exported uart queue macros
 pub extern crate paste;
