@@ -1,19 +1,19 @@
-use crate::motion::control_context::{ControlContext, SkillSetpoints};
-use crate::motion::skills::MotionSkill;
+use crate::motion::control_context::{ControlContext, ManeuverSetpoints};
+use crate::motion::maneuvers::MotionManeuver;
 use ateam_common_packets::bindings::{ExtendedGlobalPositionTelemetry, GlobalPositionCommand};
-use ateam_common_packets::radio::SkillExtendedTelemetry;
+use ateam_common_packets::radio::ManeuverExtendedTelemetry;
 use ateam_controls::bangbang_trajectory::TrajectoryParams;
 use ateam_controls::ControlsError;
 
-pub struct GlobalPositionSkill;
+pub struct GlobalPositionManeuver;
 
-impl GlobalPositionSkill {
+impl GlobalPositionManeuver {
     pub fn new() -> Self {
         Self
     }
 }
 
-impl MotionSkill for GlobalPositionSkill {
+impl MotionManeuver for GlobalPositionManeuver {
     type Command = GlobalPositionCommand;
 
     fn entry(&mut self, _cmd: GlobalPositionCommand, _ctx: &mut ControlContext) {}
@@ -22,7 +22,7 @@ impl MotionSkill for GlobalPositionSkill {
         &mut self,
         cmd: GlobalPositionCommand,
         ctx: &mut ControlContext,
-    ) -> Result<(SkillSetpoints, SkillExtendedTelemetry), ControlsError> {
+    ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError> {
         let default_params = TrajectoryParams::default();
 
         let traj_params = TrajectoryParams {
@@ -50,12 +50,12 @@ impl MotionSkill for GlobalPositionSkill {
 
         let (body_twist, body_accel) = ctx.pose_control_policy(cmd.as_vec3f(), traj_params)?;
 
-        let telem = SkillExtendedTelemetry::GlobalPosition(ExtendedGlobalPositionTelemetry {
+        let telem = ManeuverExtendedTelemetry::GlobalPosition(ExtendedGlobalPositionTelemetry {
             cmd_echo: cmd,
         });
 
         Ok((
-            SkillSetpoints {
+            ManeuverSetpoints {
                 body_twist,
                 body_accel,
             },

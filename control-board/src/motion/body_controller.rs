@@ -1,6 +1,6 @@
 use crate::motion::control_context::ControlContext;
+use crate::motion::maneuvers::ManeuverManager;
 use crate::motion::params::controller_params::{EncLagMode, ENC_LAG_MODE};
-use crate::motion::skills::SkillManager;
 use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::{
     BasicControl, BodyControlExtendedTelemetry, BodyControlTelemetry, ParameterCommand,
@@ -16,7 +16,7 @@ use nalgebra::SVector;
 
 pub struct BodyController {
     pub control_context: ControlContext,
-    pub skill_manager: SkillManager,
+    pub maneuver_manager: ManeuverManager,
     pub body_twist_out: Vector3f,
     pub body_accel_out: Vector3f,
     pub body_accel_out_fric_comp: Vector3f,
@@ -30,7 +30,7 @@ impl BodyController {
     pub fn new(dt: f32) -> BodyController {
         BodyController {
             control_context: ControlContext::new(dt),
-            skill_manager: SkillManager::new(),
+            maneuver_manager: ManeuverManager::new(),
             body_twist_out: Vector3f::default(),
             body_accel_out: Vector3f::default(),
             body_accel_out_fric_comp: Vector3f::default(),
@@ -43,7 +43,7 @@ impl BodyController {
 
     pub fn reset(&mut self) {
         self.control_context.reset();
-        self.skill_manager.reset();
+        self.maneuver_manager.reset();
         self.body_twist_out = Vector3f::default();
         self.body_accel_out = Vector3f::default();
         self.body_accel_out_fric_comp = Vector3f::default();
@@ -85,8 +85,8 @@ impl BodyController {
 
         let t_after_kf_update = Instant::now();
 
-        let (setpoints, skill_telem) = self
-            .skill_manager
+        let (setpoints, maneuver_telem) = self
+            .maneuver_manager
             .tick(last_command, &mut self.control_context)?;
 
         self.body_twist_out = setpoints.body_twist;
@@ -164,7 +164,7 @@ impl BodyController {
             body_accel_u_fric_comp: self.body_accel_out_fric_comp.into(),
             ..self.debug_telemetry
         };
-        self.debug_telemetry.set_skill_telemetry(skill_telem);
+        self.debug_telemetry.set_maneuver_telemetry(maneuver_telem);
 
         let t_after_telem = Instant::now();
 
