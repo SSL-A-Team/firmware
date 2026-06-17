@@ -1,28 +1,28 @@
-use crate::motion::control_context::{CommandFrame, ControlContext, SkillSetpoints};
-use crate::motion::skills::MotionSkill;
-use ateam_common_packets::bindings::{ExtendedLocalVelocityTelemetry, LocalVelocityCommand};
-use ateam_common_packets::radio::SkillExtendedTelemetry;
+use crate::motion::control_context::{CommandFrame, ControlContext, ManeuverSetpoints};
+use crate::motion::maneuvers::MotionManeuver;
+use ateam_common_packets::bindings::{ExtendedGlobalVelocityTelemetry, GlobalVelocityCommand};
+use ateam_common_packets::radio::ManeuverExtendedTelemetry;
 use ateam_controls::bangbang_trajectory::TrajectoryParams;
 use ateam_controls::ControlsError;
 
-pub struct LocalVelocitySkill;
+pub struct GlobalVelocityManeuver;
 
-impl LocalVelocitySkill {
+impl GlobalVelocityManeuver {
     pub fn new() -> Self {
         Self
     }
 }
 
-impl MotionSkill for LocalVelocitySkill {
-    type Command = LocalVelocityCommand;
+impl MotionManeuver for GlobalVelocityManeuver {
+    type Command = GlobalVelocityCommand;
 
-    fn entry(&mut self, _cmd: LocalVelocityCommand, _ctx: &mut ControlContext) {}
+    fn entry(&mut self, _cmd: GlobalVelocityCommand, _ctx: &mut ControlContext) {}
 
     fn update(
         &mut self,
-        cmd: LocalVelocityCommand,
+        cmd: GlobalVelocityCommand,
         ctx: &mut ControlContext,
-    ) -> Result<(SkillSetpoints, SkillExtendedTelemetry), ControlsError> {
+    ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError> {
         let default_params = TrajectoryParams::default();
 
         let traj_params = TrajectoryParams {
@@ -41,13 +41,14 @@ impl MotionSkill for LocalVelocitySkill {
         };
 
         let (body_twist, body_accel) =
-            ctx.twist_control_policy(cmd.as_vec3f(), CommandFrame::Local, traj_params)?;
+            ctx.twist_control_policy(cmd.as_vec3f(), CommandFrame::Global, traj_params)?;
 
-        let telem =
-            SkillExtendedTelemetry::LocalVelocity(ExtendedLocalVelocityTelemetry { cmd_echo: cmd });
+        let telem = ManeuverExtendedTelemetry::GlobalVelocity(ExtendedGlobalVelocityTelemetry {
+            cmd_echo: cmd,
+        });
 
         Ok((
-            SkillSetpoints {
+            ManeuverSetpoints {
                 body_twist,
                 body_accel,
             },
