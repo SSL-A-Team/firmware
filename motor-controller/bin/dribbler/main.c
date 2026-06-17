@@ -66,7 +66,19 @@ int main() {
     }
 
     // initialize motor driver
-    pwm6step_setup();
+    // ECU22048H24-S101: R_L-L = 0.94 ohm, L_L-L = 0.104 mH, 1 pole pair
+    // Base bandwidth 159 Hz (999 rad/s) scaled by 2 for ~318 Hz effective bandwidth
+    // .kP = 106,
+    // .kI = 192,
+    static const FixedPointS12F4_PiConstants_t motor_current_pi_constants = {
+        .kP = 106 * 2,      // S07F10, 999 * 0.000104 H = 0.10390 => 106
+        .kI = 192 * 2,      // S05F13, 999 * 0.94 ohm * (1 / 40000) = 0.023477 => 192
+        .kI_max = 4095,     // S12F0
+        .kI_min = -(4095),  // S12F0
+        .anti_jitter_thresh = 0,
+        .anti_jitter_thresh_inv = 0,
+    };
+    pwm6step_setup(&motor_current_pi_constants);
     pwm6step_set_duty_cycle_f(0.0f);
 
     // enable ADC hardware trigger (tied to 6step timer)

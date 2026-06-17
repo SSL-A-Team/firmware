@@ -56,23 +56,6 @@ static int hall_transition_error_count = 0;
 
 const Uint16FixedPoint_t S0F16_4096_OVER_9000 = 29826;
 
-static FixedPointS12F4_PiConstants_t current_controller_constants = {
-    // 1000 Hz bandwidth -> 6283 rads
-
-    // .kP = 2123,
-    // .kI = 910,
-
-    // KNOWN GOOD
-    .kP = 338 * 5,      // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
-    .kI = 145 * 5,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910 
-    .kI_max = 4095,  // S12F0
-    .kI_min = -(4095),  // S12F0
-    .anti_jitter_thresh = 0,
-    .anti_jitter_thresh_inv = 0,
-    // .anti_jitter_thresh = 30,  // S12F0
-    // .anti_jitter_thresh_inv = 135,  // S0F12
-};
-
 static FixedPointS12F4_PiController_t current_controller;
 
 static volatile uint16_t measured_current = 0;
@@ -726,9 +709,9 @@ void TIM1_CC_IRQHandler() {
  * @brief sets up the pins and timer peripherials associated with the pins 
  * 
  */
-void pwm6step_setup() {
+void pwm6step_setup(const FixedPointS12F4_PiConstants_t *current_pi_constants) {
     // setup current PI controller
-    fxptpi_initialize(&current_controller, &current_controller_constants);
+    fxptpi_initialize(&current_controller, (FixedPointS12F4_PiConstants_t *) current_pi_constants);
 
     pwm6step_setup_commutation_timer();
     pwm6step_setup_hall_timer();
