@@ -8,7 +8,11 @@ use ateam_common_packets::{
     radio::DataPacket,
 };
 use embassy_executor::InterruptExecutor;
-use embassy_stm32::{gpio::{Input, Pull}, interrupt, pac::Interrupt};
+use embassy_stm32::{
+    gpio::{Input, Pull},
+    interrupt,
+    pac::Interrupt,
+};
 use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _;
