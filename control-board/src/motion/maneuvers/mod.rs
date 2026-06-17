@@ -16,6 +16,7 @@ use crate::motion::maneuvers::global_position::GlobalPositionManeuver;
 use crate::motion::maneuvers::global_velocity::GlobalVelocityManeuver;
 use crate::motion::maneuvers::local_acceleration::LocalAccelerationManeuver;
 use crate::motion::maneuvers::local_velocity::LocalVelocityManeuver;
+use crate::motion::maneuvers::pivot::PivotManeuver;
 
 pub trait MotionManeuver {
     type Command: Copy;
@@ -38,6 +39,7 @@ enum ActiveManeuver {
     LocalVelocity(LocalVelocityManeuver),
     GlobalAcceleration(GlobalAccelerationManeuver),
     LocalAcceleration(LocalAccelerationManeuver),
+    Pivot(PivotManeuver),
 }
 
 impl ActiveManeuver {
@@ -52,6 +54,7 @@ impl ActiveManeuver {
             ManeuverCommand::LocalAcceleration(_) => {
                 Self::LocalAcceleration(LocalAccelerationManeuver::new())
             }
+            ManeuverCommand::Pivot(_) => Self::Pivot(PivotManeuver::new()),
             ManeuverCommand::Off => Self::Off,
         }
     }
@@ -64,6 +67,7 @@ impl ActiveManeuver {
             Self::LocalVelocity(s) => s.reset(),
             Self::GlobalAcceleration(s) => s.reset(),
             Self::LocalAcceleration(s) => s.reset(),
+            Self::Pivot(s) => s.reset(),
         }
     }
 
@@ -74,6 +78,7 @@ impl ActiveManeuver {
             (Self::LocalVelocity(s), ManeuverCommand::LocalVelocity(c)) => s.entry(*c, ctx),
             (Self::GlobalAcceleration(s), ManeuverCommand::GlobalAcceleration(c)) => s.entry(*c, ctx),
             (Self::LocalAcceleration(s), ManeuverCommand::LocalAcceleration(c)) => s.entry(*c, ctx),
+            (Self::Pivot(s), ManeuverCommand::Pivot(c)) => s.entry(*c, ctx),
             _ => {}
         }
     }
@@ -89,6 +94,7 @@ impl ActiveManeuver {
             (Self::LocalVelocity(s), ManeuverCommand::LocalVelocity(c)) => s.update(c, ctx),
             (Self::GlobalAcceleration(s), ManeuverCommand::GlobalAcceleration(c)) => s.update(c, ctx),
             (Self::LocalAcceleration(s), ManeuverCommand::LocalAcceleration(c)) => s.update(c, ctx),
+            (Self::Pivot(s), ManeuverCommand::Pivot(c)) => s.update(c, ctx),
             _ => Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off)),
         }
     }
