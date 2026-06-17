@@ -28,12 +28,15 @@ static volatile MotorControlMode motor_control_mode = DUTY;
 static volatile MotorDirection_t commanded_motor_direction = CLOCKWISE;
 static volatile uint16_t current_duty_cycle = 0;
 static volatile uint8_t hall_recorded_state_on_transition = 0;
+static volatile bool motor_output_enabled = false;
 
 /////////////////////
 //  hall velocity  //
 /////////////////////
 
 static bool hall_speed_estimate_valid = false;
+static volatile uint32_t hall_last_transition_ticks = 0;
+static volatile MotorDirection_t hall_detected_direction = CLOCKWISE;
 static uint8_t current_hall_value = 0;
 static uint8_t prev_hall_value = 0;
 
@@ -397,10 +400,15 @@ static void pwm6step_setup_commutation_timer() {
 
 void TIM2_IRQHandler()
 {
-	// hall commutation IRQ
-	TIM2->SR &= ~TIM_SR_UIF;
+    uint32_t sr = TIM2->SR;
+    TIM2->SR = ~(TIM_SR_UIF | TIM_SR_CC1IF);  // rc_w0: writing 0 clears, writing 1 no-ops
 
-    uint32_t hall_transition_elapsed_ticks = TIM2->CCR1;
+    // CC1IF set only on real IC1 capture (hall edge). UIF also fires on software UG
+    // and counter overflow — don't update speed estimate for those.
+    if (sr & TIM_SR_CC1IF) {
+        hall_last_transition_ticks = TIM2->CCR1;
+        hall_speed_estimate_valid = true;
+    }
 
     perform_commutation_cycle();
 }
@@ -547,8 +555,15 @@ static void perform_commutation_cycle() {
     uint8_t ccw_expected_transition = ccw_expected_hall_transition_table[prev_hall_value];
 
 
-    if (hall_recorded_state_on_transition != prev_hall_value 
-            && hall_recorded_state_on_transition != cw_expected_transition 
+    if (hall_recorded_state_on_transition == cw_expected_transition) {
+        hall_detected_direction = CLOCKWISE;
+    } else if (hall_recorded_state_on_transition == ccw_expected_transition) {
+        hall_detected_direction = COUNTER_CLOCKWISE;
+    }
+    // else: ambiguous (error state or no movement) — keep last known direction
+
+    if (hall_recorded_state_on_transition != prev_hall_value
+            && hall_recorded_state_on_transition != cw_expected_transition
             && hall_recorded_state_on_transition != ccw_expected_transition) {
         hall_transition_error_count++;
     } else if (motor_errors.invalid_transitions > 0) {
@@ -625,7 +640,7 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     if (estop) {
         // use whatever error mode was selected for the tables
         commutation_values = cw_commutation_table[ESTOP_COMMUTATION_INDEX];
-    } else if (current_duty_cycle == 0) {
+    } else if (!motor_output_enabled) {
         commutation_values = cw_commutation_table[COAST_COMMUTATION_INDEX];
     } else {
         if (commanded_motor_direction == CLOCKWISE) {
@@ -717,6 +732,12 @@ void pwm6step_setup() {
 
     pwm6step_setup_commutation_timer();
     pwm6step_setup_hall_timer();
+
+    // Arm TIM2 UIE unconditionally at init so hall transitions drive commutation
+    // without any first-command special-case logic.
+    TIM2->DIER = TIM_DIER_UIE;
+    TIM2->EGR  = TIM_EGR_UG;
+    trigger_commutation();
 }
 
 /**
@@ -742,12 +763,6 @@ static void set_duty_cycle(uint16_t duty_cycle) {
     TIM1->CCR1 = current_duty_cycle;
     TIM1->CCR2 = current_duty_cycle;
     TIM1->CCR3 = current_duty_cycle;
-
-    if (TIM2->DIER == 0) {
-        // enable it and force an update
-        TIM2->DIER = TIM_DIER_UIE;
-        TIM2->EGR = TIM_EGR_UG;
-    }
 }
 
 /**
@@ -766,7 +781,14 @@ void pwm6step_set_duty_cycle(int16_t duty_cycle) {
     motor_control_mode = DUTY;
 
     uint16_t duty_cycle_abs = abs(duty_cycle);
+    bool was_enabled = motor_output_enabled;
+    motor_output_enabled = (duty_cycle_abs > 0);
     set_duty_cycle(duty_cycle_abs);
+
+    if (!was_enabled && motor_output_enabled) {
+        perform_commutation_cycle();
+        trigger_commutation();
+    }
 }
 
 void pwm6step_set_duty_cycle_f(float duty_cycle_pct) {
@@ -807,12 +829,13 @@ void pwm6step_set_voltage(int16_t voltage_mv) {
     motor_control_mode = VOLTAGE;
 
     uint16_t abs_voltage_mv = (uint16_t) abs((int) voltage_mv);
+    bool was_enabled = motor_output_enabled;
+    motor_output_enabled = (abs_voltage_mv > 0);
     set_voltage(abs_voltage_mv);
 
-    if (TIM2->DIER == 0) {
-        // enable it and force an update
-        TIM2->DIER = TIM_DIER_UIE;
-        TIM2->EGR = TIM_EGR_UG;
+    if (!was_enabled && motor_output_enabled) {
+        perform_commutation_cycle();
+        trigger_commutation();
     }
 }
 
@@ -822,7 +845,6 @@ static void set_current(uint16_t current_ma) {
     fxptpi_setpoint(&current_controller, (Int16FixedPoint_t) scaled_current);
 }
 
-static int16_t last_current = 0;
 void pwm6step_set_current(int16_t current_ma) {
     if (current_ma < 0) {
         pwm6step_set_direction(COUNTER_CLOCKWISE);
@@ -830,24 +852,15 @@ void pwm6step_set_current(int16_t current_ma) {
         pwm6step_set_direction(CLOCKWISE);
     }
 
-    bool starting_from_zero = false;
-    if (last_current == 0 && current_ma != 0) {
-        starting_from_zero = true;
-    }
-    last_current = current_ma;
-
     motor_control_mode = CURRENT;
 
     uint16_t abs_current_ma = (uint16_t) abs((int) current_ma);
+    bool was_enabled = motor_output_enabled;
+    motor_output_enabled = (abs_current_ma > 0);
     set_current(abs_current_ma);
 
-    if (TIM2->DIER == 0 || starting_from_zero) {
-        // enable it and force an update
-        TIM2->DIER = TIM_DIER_UIE;
-        TIM2->EGR = TIM_EGR_UG;
-    }
-
-    if (starting_from_zero) {
+    if (!was_enabled && motor_output_enabled) {
+        perform_commutation_cycle();
         trigger_commutation();
     }
 }
@@ -863,11 +876,24 @@ bool pwm6step_1ms_flag() {
 
 
 bool pwm6step_hall_rps_estimate_valid() {
-    return hall_speed_estimate_valid;
+    if (!hall_speed_estimate_valid) return false;
+    if (motor_errors.hall_power || motor_errors.hall_disconnected) return false;
+    // Stale if TIM2->CNT has exceeded 100ms since last hall edge.
+    // TIM2->CNT resets to 0 on each transition (slave reset mode).
+    return TIM2->CNT < (F_SYS_CLK_HZ / 10);
 }
 
-int pwm6step_hall_get_rps_estimate() {
-    return 0;
+int16_t pwm6step_hall_get_rps_estimate() {
+    if (!pwm6step_hall_rps_estimate_valid()) return 0;
+    uint32_t ticks = hall_last_transition_ticks;
+    if (ticks == 0) return 0;
+    // 6 transitions/electrical rev, MOTOR_POLE_PAIRS elec-revs/mech-rev, 100*2pi crad/rev.
+    // 628 = floor(100 * 2 * pi); uint64 intermediate prevents overflow.
+    int32_t crads = (int32_t)((uint64_t)F_SYS_CLK_HZ * 628ULL / (6ULL * MOTOR_POLE_PAIRS * (uint64_t)ticks));
+    if (hall_detected_direction == CLOCKWISE) crads = -crads;
+    if (crads >  INT16_MAX) crads = INT16_MAX;
+    if (crads <  INT16_MIN) crads = INT16_MIN;
+    return (int16_t)crads;
 }
 
 const MotorErrors_t pwm6step_get_motor_errors() {
