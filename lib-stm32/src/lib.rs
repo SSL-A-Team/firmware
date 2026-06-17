@@ -22,12 +22,14 @@ pub mod audio;
 pub mod drivers;
 pub mod filter;
 pub mod math;
+pub mod model;
 pub mod power;
 pub mod time;
 pub mod uart;
 pub mod units;
+pub mod util;
 
-pub mod queue;
-
-// required for exported queue macros
+// required for exported uart queue macros
 pub extern crate paste;
+#[doc(hidden)]
+pub use ateam_lib_crossarch;

@@ -9,7 +9,7 @@ use defmt_rtt as _;
 
 use ateam_control_board::{
     create_audio_task, create_control_task, create_dotstar_task, create_imu_task, create_io_task,
-    create_kicker_task, create_power_task, create_radio_task, get_system_config,
+    create_kicker_task, create_power_task, create_radio_task, get_system_config, git_version as gv,
     pins::{
         AccelDataPubSub, CommandsPubSub, GyroDataPubSub, KickerTelemetryPubSub, LedCommandPubSub,
         PowerTelemetryPubSub, TelemetryPubSub,
@@ -70,6 +70,31 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     defmt::info!("embassy HAL configured.");
 
+    defmt::info!(
+        "firmware  hash={:02x}{:02x}{:02x}{:02x} dirty={}",
+        gv::FIRMWARE_HASH[0],
+        gv::FIRMWARE_HASH[1],
+        gv::FIRMWARE_HASH[2],
+        gv::FIRMWARE_HASH[3],
+        gv::FIRMWARE_DIRTY,
+    );
+    defmt::info!(
+        "controls  hash={:02x}{:02x}{:02x}{:02x} dirty={}",
+        gv::CONTROLS_HASH[0],
+        gv::CONTROLS_HASH[1],
+        gv::CONTROLS_HASH[2],
+        gv::CONTROLS_HASH[3],
+        gv::CONTROLS_DIRTY,
+    );
+    defmt::info!(
+        "coms      hash={:02x}{:02x}{:02x}{:02x} dirty={}",
+        gv::COMS_HASH[0],
+        gv::COMS_HASH[1],
+        gv::COMS_HASH[2],
+        gv::COMS_HASH[3],
+        gv::COMS_DIRTY,
+    );
+
     let robot_state = ROBOT_STATE.take();
 
     ////////////////////////
@@ -103,6 +128,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     // telemetry channel
     let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
+    let imu_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
     let radio_telemetry_subscriber = RADIO_TELEMETRY_CHANNEL.subscriber().unwrap();
     let radio_led_cmd_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
 
@@ -162,6 +188,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         imu_gyro_data_publisher,
         imu_accel_data_publisher,
         imu_led_cmd_publisher,
+        imu_telemetry_publisher,
         p
     );
 

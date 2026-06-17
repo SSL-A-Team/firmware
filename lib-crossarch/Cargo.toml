@@ -1,0 +1,24 @@
+[package]
+name = "ateam-lib-crossarch"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "A no_std library of cross-architecture utilities for ateam firmware"
+repository = "https://github.com/SSL-A-Team/firmware"
+
+[dependencies]
+critical-section = "1.1.1"
+defmt = { version = "1.0.1", optional = true }
+num-traits = { version = "0.2.19", default-features = false }
+smart-leds = { version = "0.4.0", optional = true }
+
+[features]
+default = []
+
+[dev-dependencies]
+# std-backed critical-section impl for host tests
+critical-section = { version = "1.1.1", features = ["std"] }
+
+[[test]]
+name = "queue"
+harness = true

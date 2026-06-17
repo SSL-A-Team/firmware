@@ -1,7 +1,13 @@
 #![no_std]
 #![no_main]
 
-use ateam_common_packets::{bindings::BasicControl, bindings::KickRequest, radio::DataPacket};
+use ateam_common_packets::{
+    bindings::{
+        BasicControl, BodyControlCommand, BodyControlMode, GlobalVelocityCommand, KickRequest,
+        LocalVelocityCommand,
+    },
+    radio::DataPacket,
+};
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{interrupt, pac::Interrupt};
 use embassy_sync::pubsub::PubSubChannel;
@@ -106,6 +112,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     // telemetry channel
     let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
+    let imu_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
     let radio_telemetry_subscriber = RADIO_TELEMETRY_CHANNEL.subscriber().unwrap();
     let radio_led_cmd_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
 
@@ -153,6 +160,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         imu_gyro_data_publisher,
         imu_accel_data_publisher,
         imu_led_cmd_publisher,
+        imu_telemetry_publisher,
         p
     );
 
@@ -186,12 +194,26 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         radio_command_publisher.publish_immediate(DataPacket::BasicControl(BasicControl {
             _bitfield_1: Default::default(),
             _bitfield_align_1: Default::default(),
-            vel_x_linear: 2.0,
-            vel_y_linear: 0.0,
-            vel_z_angular: 0.0,
-            kick_vel: 0.0,
-            dribbler_speed: -0.1,
+
+            vision_position_update: [0.0, 0.0, 0.0], // No vision updates
+
+            body_control_mode: BodyControlMode::BCM_LOCAL_VELOCITY,
             kick_request: KickRequest::KR_ARM,
+            play_song: 0,
+            reserved2: [0; 1],
+
+            kick_vel: 0.0,
+            dribbler_speed: -0.1, // Spin the dribbler
+
+            cmd: BodyControlCommand {
+                local_vel: LocalVelocityCommand {
+                    local_xd: 1.0, // Move forward at 1 m/s
+                    local_yd: 0.0,
+                    local_omega: 0.0,
+                    max_linear_acc: 0.0,  // Use default limits
+                    max_angular_acc: 0.0, // Use default limits
+                },
+            },
         }));
     }
 }

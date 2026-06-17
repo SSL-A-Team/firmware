@@ -7,6 +7,7 @@ description = "A common library for ateam stm32 targets"
 repository = "https://github.com/SSL-A-Team/firmware"
 
 [dependencies]
+ateam-lib-crossarch = { path = "../lib-crossarch", features = ["defmt", "smart-leds"] }
 embassy-stm32 = { version = "0.3.0", default-features = false, features = ["exti"]}
 embassy-executor = { version = "0.8.0", default-features = false }
 embassy-sync = { version = "0.7.1" }
@@ -20,6 +21,8 @@ critical-section = "1.1.1"
 
 heapless  = "0.9.1"
 
+libm = "0.2"
+nalgebra = { version = "0.34.0", default-features = false, features = ["libm", "macros"] }
 num-traits = { version = "0.2.19", default-features = false }
 smart-leds = "0.4.0"
 
@@ -45,4 +48,8 @@ harness = false
 
 [[test]]
 name = "linear-map"
+harness = false
+
+[[test]]
+name = "queue"
 harness = false

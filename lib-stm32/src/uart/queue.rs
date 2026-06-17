@@ -18,21 +18,21 @@ use embassy_sync::{
 };
 use embassy_time::Timer;
 
-use crate::queue::{self, DequeueRef, Error, Queue};
+use ateam_lib_crossarch::queue::{self, DequeueRef, Error, Queue};
 
 #[macro_export]
 macro_rules! static_idle_buffered_uart_nl {
     ($name:ident, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr, $debug:expr) => {
         $crate::paste::paste! {
-            static [<$name _RX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::queue::Buffer<$rx_buffer_size>>; $rx_buffer_depth] =
-                [const { core::cell::SyncUnsafeCell::new($crate::queue::Buffer::<$rx_buffer_size>::new()) }; $rx_buffer_depth];
-            static [<$name _TX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::queue::Buffer<$tx_buffer_size>>; $tx_buffer_depth] =
-                [const { core::cell::SyncUnsafeCell::new($crate::queue::Buffer::<$tx_buffer_size>::new()) }; $tx_buffer_depth];
+            static [<$name _RX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::ateam_lib_crossarch::queue::Buffer<$rx_buffer_size>>; $rx_buffer_depth] =
+                [const { core::cell::SyncUnsafeCell::new($crate::ateam_lib_crossarch::queue::Buffer::<$rx_buffer_size>::new()) }; $rx_buffer_depth];
+            static [<$name _TX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::ateam_lib_crossarch::queue::Buffer<$tx_buffer_size>>; $tx_buffer_depth] =
+                [const { core::cell::SyncUnsafeCell::new($crate::ateam_lib_crossarch::queue::Buffer::<$tx_buffer_size>::new()) }; $tx_buffer_depth];
 
             static [<$name:upper _IDLE_BUFFERED_UART>]: $crate::uart::queue::IdleBufferedUart<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth, $debug> =
                 $crate::uart::queue::IdleBufferedUart::new(
-                $crate::queue::Queue::new(&[<$name _RX_BUFFER>]),
-                $crate::queue::Queue::new(&[<$name _TX_BUFFER>])
+                $crate::ateam_lib_crossarch::queue::Queue::new(&[<$name _RX_BUFFER>]),
+                $crate::ateam_lib_crossarch::queue::Queue::new(&[<$name _TX_BUFFER>])
             );
 
             static [<$name:upper _READ_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
@@ -50,16 +50,16 @@ macro_rules! static_idle_buffered_uart {
     ($name:ident, $rx_buffer_size:expr, $rx_buffer_depth:expr, $tx_buffer_size:expr, $tx_buffer_depth:expr, $debug:expr, $(#[$m:meta])*) => {
         $crate::paste::paste! {
             $(#[$m])*
-            static [<$name _RX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::queue::Buffer<$rx_buffer_size>>; $rx_buffer_depth] =
-                [const { core::cell::SyncUnsafeCell::new($crate::queue::Buffer::<$rx_buffer_size>::new()) }; $rx_buffer_depth];
+            static [<$name _RX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::ateam_lib_crossarch::queue::Buffer<$rx_buffer_size>>; $rx_buffer_depth] =
+                [const { core::cell::SyncUnsafeCell::new($crate::ateam_lib_crossarch::queue::Buffer::<$rx_buffer_size>::new()) }; $rx_buffer_depth];
             $(#[$m])*
-            static [<$name _TX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::queue::Buffer<$tx_buffer_size>>; $tx_buffer_depth] =
-                [const { core::cell::SyncUnsafeCell::new($crate::queue::Buffer::<$tx_buffer_size>::new()) }; $tx_buffer_depth];
+            static [<$name _TX_BUFFER>]: [core::cell::SyncUnsafeCell<$crate::ateam_lib_crossarch::queue::Buffer<$tx_buffer_size>>; $tx_buffer_depth] =
+                [const { core::cell::SyncUnsafeCell::new($crate::ateam_lib_crossarch::queue::Buffer::<$tx_buffer_size>::new()) }; $tx_buffer_depth];
 
             static [<$name:upper _IDLE_BUFFERED_UART>]: $crate::uart::queue::IdleBufferedUart<$rx_buffer_size, $rx_buffer_depth, $tx_buffer_size, $tx_buffer_depth, $debug> =
                 $crate::uart::queue::IdleBufferedUart::new(
-                $crate::queue::Queue::new(&[<$name _RX_BUFFER>]),
-                $crate::queue::Queue::new(&[<$name _TX_BUFFER>])
+                $crate::ateam_lib_crossarch::queue::Queue::new(&[<$name _RX_BUFFER>]),
+                $crate::ateam_lib_crossarch::queue::Queue::new(&[<$name _TX_BUFFER>])
             );
 
             static [<$name:upper _READ_TASK_STORAGE>]: embassy_executor::raw::TaskStorage<
@@ -523,14 +523,15 @@ impl<const LENGTH: usize, const DEPTH: usize, const DEBUG: bool>
                     Either::First(len) => {
                         if let Ok(len) = len {
                             if len == 0 {
-                                // defmt::debug!("uart zero");
+                                //defmt::debug!("uart zero");
                                 buf.cancel();
                             } else {
+                                //defmt::debug!("uart rx {} bytes: {:x}", len, &buf.data()[..len]);
                                 *buf.len() = len;
                             }
                         } else {
                             // Framing and Parity Error occur here
-                            // defmt::warn!("{}", len);
+                            //defmt::warn!("uart rx error: {}", len);
                             buf.cancel();
                         }
                     }

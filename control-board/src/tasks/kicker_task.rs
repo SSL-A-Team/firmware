@@ -143,9 +143,7 @@ impl<
             } else if self.kicker_task_state >= KickerTaskState::ConnectUart {
                 // Check if connection timeout occurred
                 let time_elapsed =
-                    Instant::checked_duration_since(&Instant::now(), connection_timeout_start)
-                        .unwrap()
-                        .as_millis();
+                    Instant::duration_since(&Instant::now(), connection_timeout_start).as_millis();
                 if time_elapsed > TELEMETRY_TIMEOUT_MS {
                     defmt::error!("Kicker Interface - Kicker telemetry timed out, current state is '{}', rolling state back to 'Reset'", self.kicker_task_state);
                     self.kicker_task_state = KickerTaskState::Reset;
@@ -185,6 +183,8 @@ impl<
                     );
                     self.kicker_driver.reset().await;
                     self.kicker_task_state = KickerTaskState::InitFirmware;
+
+                    main_loop_ticker.reset();
                 }
                 KickerTaskState::InitFirmware => {
                     // Ensure firmware image is up to date
@@ -222,6 +222,8 @@ impl<
                     connection_timeout_start = Instant::now();
                     // Move on to ConnectUart state
                     self.kicker_task_state = KickerTaskState::Connected;
+
+                    main_loop_ticker.reset();
                 }
                 KickerTaskState::ConnectUart => {
                     if telemetry_received {
@@ -268,13 +270,13 @@ impl<
             // kicker and radio loop rates are both 100Hz, so 10ms packet interval
             // if we miss 10 in a row, something has gone quite wrong
             // override commands to safe ones
-            if Instant::now() - self.last_command_received_time.unwrap_or(Instant::now())
-                > Duration::from_millis(500)
-            {
+            let now = Instant::now();
+            if now - self.last_command_received_time.unwrap_or(now) > Duration::from_millis(500) {
                 // Avoid spamming logs while the system starts up
                 defmt::error!("Kicker Interface - Kicker task has stopped receiving commands from the radio task and will de-arm the kicker board");
                 self.kicker_driver.set_kick_strength(0.0);
-                self.kicker_driver.request_kick(KickRequest::KR_DISABLE);
+                self.kicker_driver
+                    .request_kick(KickRequest::KR_DISABLE as u32);
                 self.kicker_driver.set_drib_vel(0.0);
             }
 
@@ -301,7 +303,7 @@ impl<
     async fn connected_poll_loop(&mut self) {
         self.kicker_driver.set_telemetry_enabled(true);
 
-        if let Some(pkt) = self.commands_subscriber.try_next_message() {
+        while let Some(pkt) = self.commands_subscriber.try_next_message() {
             match pkt {
                 WaitResult::Lagged(amnt) => {
                     if amnt > 3 {
@@ -317,10 +319,8 @@ impl<
                             self.last_command_received_time = Some(Instant::now());
 
                             self.kicker_driver.set_kick_strength(bc_pkt.kick_vel);
-                            self.kicker_driver.request_kick(bc_pkt.kick_request);
+                            self.kicker_driver.request_kick(bc_pkt.kick_request as u32);
                             self.kicker_driver.set_drib_vel(bc_pkt.dribbler_speed);
-                            self.kicker_driver
-                                .set_drib_multiplier(bc_pkt.dribbler_multiplier());
                         }
                         DataPacket::ParameterCommand(_) => {
                             // we currently don't have any kicker parameters

@@ -52,6 +52,12 @@ impl<
         filter
     }
 
+    pub fn reset(&mut self) {
+        self.state_estimate = SMatrix::<f32, NUM_STATES, 1>::zeros();
+        self.pred_state_estimate = SMatrix::<f32, NUM_STATES, 1>::zeros();
+        self.measurement_residual = SMatrix::<f32, NUM_OBSERVATIONS, 1>::zeros();
+    }
+
     pub fn predict(&mut self, u: &SMatrix<f32, NUM_CONTROL_INPUTS, 1>) {
         self.pred_state_estimate =
             self.state_transition * self.state_estimate + self.control_input * u;

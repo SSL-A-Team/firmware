@@ -1,0 +1,511 @@
+use core::{f32::consts::PI, mem::MaybeUninit};
+
+use ateam_lib_stm32::{
+    drivers::boot::stm32_interface::Stm32Interface,
+    uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue},
+};
+use defmt::*;
+use embassy_stm32::{
+    gpio::{AnyPin, Pull},
+    usart::Parity,
+    Peri,
+};
+use embassy_time::{with_timeout, Duration, Timer};
+
+use crate::image_hash;
+use ateam_common_packets::bindings::{
+    CcmCommand,
+    CcmCommandType::{CCM_CMD_MOTION, CCM_CMD_PARAMS},
+    CcmMotionControlType, CcmParameter, CcmParameterDirection, CcmParameterOperation,
+    CcmParameterPacket, CcmResponse,
+    CcmResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM},
+    CcmTelemetry,
+    MotionCommandType::OPEN_LOOP,
+};
+
+pub struct CurrentControlledMotor<
+    'a,
+    const LEN_RX: usize,
+    const LEN_TX: usize,
+    const DEPTH_RX: usize,
+    const DEPTH_TX: usize,
+    const DEBUG_MOTOR_UART_QUEUES: bool,
+> {
+    stm32_uart_interface:
+        Stm32Interface<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES>,
+    firmware_image: &'a [u8],
+    current_timestamp_ms: u32,
+    current_state: CcmTelemetry,
+    current_params_state: CcmParameterPacket,
+    current_state_seq_num: u8,
+    #[allow(dead_code)]
+    torque_limit: f32,
+
+    setpoint: f32,
+    current_setpoint_ma: i16,
+    motion_type: CcmMotionControlType::Type,
+    reset_flagged: bool,
+    telemetry_enabled: bool,
+    motion_enabled: bool,
+}
+
+impl<
+        'a,
+        const LEN_RX: usize,
+        const LEN_TX: usize,
+        const DEPTH_RX: usize,
+        const DEPTH_TX: usize,
+        const DEBUG_MOTOR_UART_QUEUES: bool,
+    > CurrentControlledMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES>
+{
+    pub fn new(
+        stm32_interface: Stm32Interface<
+            'a,
+            LEN_RX,
+            LEN_TX,
+            DEPTH_RX,
+            DEPTH_TX,
+            DEBUG_MOTOR_UART_QUEUES,
+        >,
+        firmware_image: &'a [u8],
+    ) -> CurrentControlledMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES>
+    {
+        let start_state: CcmTelemetry = Default::default();
+
+        CurrentControlledMotor {
+            stm32_uart_interface: stm32_interface,
+            firmware_image,
+
+            current_timestamp_ms: 0,
+            current_state: start_state,
+            current_params_state: Default::default(),
+            current_state_seq_num: 0,
+            torque_limit: 0.0,
+
+            setpoint: 0.0,
+            current_setpoint_ma: 0,
+            motion_type: OPEN_LOOP,
+            reset_flagged: false,
+            telemetry_enabled: false,
+            motion_enabled: false,
+        }
+    }
+
+    pub fn new_from_pins(
+        uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES>,
+        read_queue: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_MOTOR_UART_QUEUES>,
+        write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES>,
+        boot0_pin: Peri<'static, AnyPin>,
+        reset_pin: Peri<'static, AnyPin>,
+        firmware_image: &'a [u8],
+    ) -> CurrentControlledMotor<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX, DEBUG_MOTOR_UART_QUEUES>
+    {
+        // Need a Pull None to allow for STSPIN watchdog usage.
+        let stm32_interface = Stm32Interface::new_from_pins(
+            uart,
+            read_queue,
+            write_queue,
+            boot0_pin,
+            reset_pin,
+            Pull::None,
+            true,
+        );
+
+        let start_state: CcmTelemetry = Default::default();
+
+        CurrentControlledMotor {
+            stm32_uart_interface: stm32_interface,
+            firmware_image,
+
+            current_timestamp_ms: 0,
+            current_state: start_state,
+            current_params_state: Default::default(),
+            current_state_seq_num: 0,
+            torque_limit: 0.0,
+
+            setpoint: 0.0,
+            current_setpoint_ma: 0,
+            motion_type: OPEN_LOOP,
+            reset_flagged: false,
+            telemetry_enabled: false,
+            motion_enabled: false,
+        }
+    }
+
+    pub async fn reset(&mut self) {
+        self.stm32_uart_interface.hard_reset().await;
+    }
+
+    pub async fn enter_reset(&mut self) {
+        self.stm32_uart_interface.enter_reset().await;
+    }
+
+    pub async fn leave_reset(&mut self) {
+        self.stm32_uart_interface.leave_reset().await;
+    }
+
+    pub fn get_latest_default_img_hash(&mut self) -> [u8; 16] {
+        image_hash::get_wheel_img_hash()
+    }
+
+    /// Get the first 4 bytes of the currently loaded image hash on the device, Run with timeout!
+    pub async fn get_current_device_img_hash(&mut self) -> [u8; 4] {
+        loop {
+            self.send_params_command();
+
+            Timer::after(Duration::from_millis(5)).await;
+
+            // Parse incoming packets
+            self.process_packets();
+
+            // Check if current_params_state has updated with a firmware image hash reply
+            if self.current_params_state.parameter == CcmParameter::CCM_PARAM_FIRMWARE_IMAGE_HASH
+                && self.current_params_state.parameter_direction
+                    == CcmParameterDirection::CCM_PARAMDIR_REPLY
+            {
+                let current_img_hash = unsafe { self.current_params_state.value.val_u8x4 };
+                defmt::debug!("Wheel Interface - Received parameter response");
+                defmt::trace!(
+                    "Wheel Interface - Current device image hash {:x}",
+                    current_img_hash
+                );
+                return current_img_hash;
+            }
+
+            Timer::after(Duration::from_millis(5)).await;
+        }
+    }
+
+    pub async fn check_device_has_latest_default_image(&mut self) -> Result<bool, ()> {
+        let latest_img_hash = self.get_latest_default_img_hash();
+        defmt::debug!(
+            "Wheel Interface - Latest default image hash - {:x}",
+            latest_img_hash
+        );
+
+        defmt::trace!("Wheel Interface - Update UART config 2 MHz");
+        self.stm32_uart_interface
+            .update_uart_config(2_000_000, Parity::ParityEven)
+            .await;
+        Timer::after(Duration::from_millis(1)).await;
+
+        let res;
+        let timeout = Duration::from_millis(100);
+        defmt::trace!("Wheel Interface - Waiting for device response");
+        match with_timeout(timeout, self.get_current_device_img_hash()).await {
+            Ok(current_img_hash) => {
+                if current_img_hash == latest_img_hash[..4] {
+                    defmt::trace!("Wheel Interface - Device has the latest default image");
+                    res = Ok(true);
+                } else {
+                    defmt::trace!(
+                        "Wheel Interface - Device does not have the latest default image"
+                    );
+                    res = Ok(false);
+                }
+            }
+            Err(_) => {
+                defmt::debug!("Wheel Interface - No device response, image hash unknown");
+                res = Err(());
+            }
+        }
+
+        // Make sure that the uart queue is empty of any possible parameter
+        // response packets, which may cause side effects for the flashing
+        // process
+        self.process_packets();
+        return res;
+    }
+
+    pub async fn init_firmware_image(
+        &mut self,
+        flash: bool,
+        fw_image_bytes: &[u8],
+    ) -> Result<(), ()> {
+        if flash {
+            defmt::info!("Wheel Interface - Flashing firmware image");
+            self.stm32_uart_interface
+                .load_firmware_image(fw_image_bytes, true)
+                .await?;
+
+            // Flashing used the bootloader UART config; switch back to application speed
+            // while the motor is still held in reset (DMA is idle, safe to reconfigure).
+            self.stm32_uart_interface
+                .update_uart_config(2_000_000, Parity::ParityEven)
+                .await;
+
+            Timer::after(Duration::from_millis(1)).await;
+
+            // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
+            self.stm32_uart_interface.leave_reset().await;
+        } else {
+            defmt::info!("Wheel Interface - Skipping firmware flash");
+            // UART is already at 2MHz from check_device_has_latest_default_image;
+            // calling update_uart_config here while the motor is running and streaming
+            // telemetry can corrupt the DMA state and break the TX queue.
+            self.stm32_uart_interface.leave_reset().await;
+        }
+
+        return Ok(());
+    }
+
+    pub async fn init_default_firmware_image(&mut self, force_flash: bool) -> Result<(), ()> {
+        let flash;
+        if force_flash {
+            defmt::info!("Wheel Interface - Force flash enabled");
+            flash = true
+        } else {
+            defmt::debug!("Wheel Interface - Resetting motor controller");
+            self.reset().await;
+            let res = self.check_device_has_latest_default_image().await;
+            match res {
+                Ok(has_latest) => {
+                    if has_latest {
+                        flash = false;
+                    } else {
+                        flash = true;
+                    }
+                }
+                Err(_) => {
+                    flash = true;
+                }
+            }
+        }
+        return self.init_firmware_image(flash, self.firmware_image).await;
+    }
+
+    pub async fn save_motor_current_constants(&mut self, current_constant: f32) -> Result<(), ()> {
+        defmt::debug!(
+            "Drive Motor - Saving motor current constant: {:?}",
+            current_constant
+        );
+        self.stm32_uart_interface
+            .write_current_calibration_constants(current_constant)
+            .await
+    }
+
+    pub fn process_packets(&mut self) {
+        while let Ok(res) = self.stm32_uart_interface.try_read_data() {
+            let buf = res.data();
+
+            if buf.len() != core::mem::size_of::<CcmResponse>() {
+                defmt::warn!(
+                    "Drive Motor - Got invalid packet of len {:?} (expected {:?}) data: {:?}",
+                    buf.len(),
+                    core::mem::size_of::<CcmResponse>(),
+                    buf
+                );
+                continue;
+            }
+
+            // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
+            unsafe {
+                // zero initialize a local response packet
+                let mut mrp: CcmResponse = Default::default();
+
+                // copy receieved uart bytes into packet
+                let state = &mut mrp as *mut _ as *mut u8;
+                for i in 0..core::mem::size_of::<CcmResponse>() {
+                    *state.offset(i as isize) = buf[i];
+                }
+
+                // TODO probably do some checksum stuff eventually
+
+                // decode union type, and reinterpret subtype
+                if mrp.type_ == CCM_RESP_TELEM {
+                    self.current_state = mrp.data.motion;
+                    self.current_state_seq_num = mrp.seq_num;
+
+                    // defmt::info!("got a telem packet!");
+
+                    // // // info!("{:?}", defmt::Debug2Format(&mrp.data.motion));
+                    // // info!("\n");
+                    // // // info!("vel set {:?}", mrp.data.motion.vel_setpoint + 0.);
+                    // info!("vel enc {:?}", mrp.data.motion.vel_enc_estimate + 0.);
+                    // // // info!("vel hall {:?}", mrp.data.motion.vel_hall_estimate + 0.);
+                    if mrp.data.motion.master_error() != 0 {
+                        // error!(
+                        //     "Drive Motor - Error: {:?}",
+                        //     &mrp.data.motion._bitfield_1.get(0, 16)
+                        // );
+                    }
+                    // info!("hall_power_error {:?}", mrp.data.motion.hall_power_error());
+                    // info!("hall_disconnected_error {:?}", mrp.data.motion.hall_disconnected_error());
+                    // info!("bldc_transition_error {:?}", mrp.data.motion.bldc_transition_error());
+                    // info!("bldc_commutation_watchdog_error {:?}", mrp.data.motion.bldc_commutation_watchdog_error());
+                    // info!("enc_disconnected_error {:?}", mrp.data.motion.enc_disconnected_error());
+                    // info!("enc_decoding_error {:?}", mrp.data.motion.enc_decoding_error());
+                    // info!("hall_enc_vel_disagreement_error {:?}", mrp.data.motion.hall_enc_vel_disagreement_error());
+                    // info!("overcurrent_error {:?}", mrp.data.motion.overcurrent_error());
+                    // info!("undervoltage_error {:?}", mrp.data.motion.undervoltage_error());
+                    // info!("overvoltage_error {:?}", mrp.data.motion.overvoltage_error());
+                    // info!("torque_limited {:?}", mrp.data.motion.torque_limited());
+                    // info!("control_loop_time_error {:?}", mrp.data.motion.control_loop_time_error());
+                    // info!("reset_watchdog_independent {:?}", mrp.data.motion.reset_watchdog_independent());
+                    // info!("reset_watchdog_window {:?}", mrp.data.motion.reset_watchdog_window());
+                    // info!("reset_low_power {:?}", mrp.data.motion.reset_low_power());
+                    // info!("reset_software {:?}", mrp.data.motion.reset_software());
+                } else if mrp.type_ == CCM_RESP_PARAMS {
+                    trace!("Received parameter response packet");
+                    debug!("Parameter response data: {:?}", buf);
+                    self.current_params_state = mrp.data.params;
+                }
+            }
+        }
+    }
+
+    pub fn log_reset(&self, motor_id: &str) {
+        if self.current_state.reset_watchdog_independent() != 0 {
+            defmt::warn!("Drive Motor {} Reset: Watchdog Independent", motor_id);
+        }
+        if self.current_state.reset_watchdog_window() != 0 {
+            defmt::warn!("Drive Motor {} Reset: Watchdog Window", motor_id);
+        }
+        if self.current_state.reset_low_power() != 0 {
+            defmt::warn!("Drive Motor {} Reset: Low Power", motor_id);
+        }
+        if self.current_state.reset_software() != 0 {
+            defmt::warn!("Drive Motor {} Reset: Software", motor_id);
+        }
+        if self.current_state.reset_pin() != 0 {
+            defmt::warn!("Drive Motor {} Reset: Pin", motor_id);
+        }
+    }
+
+    pub fn send_params_command(&mut self) {
+        unsafe {
+            let mut cmd: CcmCommand = { MaybeUninit::zeroed().assume_init() };
+
+            cmd.type_ = CCM_CMD_PARAMS;
+            cmd.crc32 = 0;
+            cmd.data.param.parameter = CcmParameter::CCM_PARAM_FIRMWARE_IMAGE_HASH;
+            cmd.data.param.parameter_operation = CcmParameterOperation::CCM_PARAMOP_READ;
+            cmd.data.param.parameter_direction = CcmParameterDirection::CCM_PARAMDIR_COMMAND;
+
+            let struct_bytes = core::slice::from_raw_parts(
+                (&cmd as *const CcmCommand) as *const u8,
+                core::mem::size_of::<CcmCommand>(),
+            );
+
+            self.stm32_uart_interface.send_or_discard_data(struct_bytes);
+        }
+    }
+
+    pub fn send_motion_command(&mut self) {
+        unsafe {
+            let mut cmd: CcmCommand = { MaybeUninit::zeroed().assume_init() };
+
+            cmd.type_ = CCM_CMD_MOTION;
+            cmd.crc32 = 0;
+            cmd.data.motion.set_reset(self.reset_flagged as u32);
+            cmd.data
+                .motion
+                .set_enable_telemetry(self.telemetry_enabled as u32);
+            cmd.data.motion.motion_control_type = self.motion_type;
+            cmd.data.motion.setpoint = self.setpoint;
+
+            cmd.data.motion.current_setpoint_ma = self.current_setpoint_ma;
+            // info!("setpoint: {:?}", cmd.data.motion.setpoint);
+
+            let struct_bytes = core::slice::from_raw_parts(
+                (&cmd as *const CcmCommand) as *const u8,
+                core::mem::size_of::<CcmCommand>(),
+            );
+
+            self.stm32_uart_interface.send_or_discard_data(struct_bytes);
+        }
+
+        self.reset_flagged = false;
+    }
+
+    pub fn get_latest_state(&self) -> CcmTelemetry {
+        self.current_state
+    }
+
+    pub fn get_latest_state_seqnum(&self) -> u8 {
+        self.current_state_seq_num
+    }
+
+    pub fn set_motion_type(&mut self, motion_type: CcmMotionControlType::Type) {
+        self.motion_type = motion_type;
+    }
+
+    pub fn set_setpoint(&mut self, setpoint: f32) {
+        self.setpoint = setpoint;
+    }
+
+    pub fn set_current_setpoint(&mut self, setpoint_ma: i16) {
+        self.current_setpoint_ma = setpoint_ma;
+    }
+
+    pub fn flag_reset(&mut self) {
+        self.reset_flagged = true;
+    }
+
+    pub fn set_telemetry_enabled(&mut self, telemetry_enabled: bool) {
+        self.telemetry_enabled = telemetry_enabled;
+    }
+
+    pub fn set_motion_enabled(&mut self, enabled: bool) {
+        self.motion_enabled = enabled;
+    }
+
+    pub fn read_current_timestamp_ms(&self) -> u32 {
+        return self.current_timestamp_ms;
+    }
+
+    pub fn read_is_error(&self) -> bool {
+        return self.current_state.master_error() != 0;
+    }
+
+    pub fn check_hall_error(&self) -> bool {
+        return self.current_state.hall_power_error() != 0
+            || self.current_state.hall_disconnected_error() != 0;
+    }
+
+    pub fn read_rads(&self) -> f32 {
+        return self.current_state.velocity_telemetry.wheel_vel_rads;
+    }
+
+    pub fn read_rpm(&self) -> f32 {
+        return self.current_state.velocity_telemetry.wheel_vel_rads * 60.0 / (2.0 * PI);
+    }
+
+    pub fn read_vel_setpoint(&self) -> f32 {
+        return self.current_state.velocity_telemetry.vel_setpoint_rads;
+    }
+
+    pub fn read_current_estimate_ma(&self) -> u16 {
+        let mut acc: u32 = 0;
+        for sample in self.current_state.current_telemetry.current_samples_ma {
+            acc += sample as u32;
+        }
+
+        return (acc
+            / self
+                .current_state
+                .current_telemetry
+                .current_samples_ma
+                .len() as u32) as u16;
+    }
+
+    pub fn read_current_setpoint_ma(&self) -> i16 {
+        return self.current_state.current_telemetry.current_setpoint_ma;
+    }
+
+    pub fn read_vbus_voltage(&self) -> f32 {
+        return self.current_state.current_telemetry.bus_voltage_mv as f32 / 1000.0;
+    }
+
+    pub fn read_vmotor_voltage_mv(&self) -> u16 {
+        return self.current_state.current_telemetry.motor_voltage_cmd_mv;
+    }
+
+    pub fn read_hall_vel_est_crads(&self) -> i16 {
+        return self.current_state.current_telemetry.hall_vel_est_crads;
+    }
+
+    pub fn read_hall_rads(&self) -> f32 {
+        return self.current_state.current_telemetry.hall_vel_est_crads as f32 / 100.0;
+    }
+}

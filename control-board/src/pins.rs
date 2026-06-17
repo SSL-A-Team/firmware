@@ -16,8 +16,8 @@ use crate::tasks::dotstar_task::ControlBoardLedCommand;
 //  Pub Sub Types  //
 /////////////////////
 
-const COMMANDS_PUBSUB_DEPTH: usize = 4;
-const TELEMETRY_PUBSUB_DEPTH: usize = 4;
+const COMMANDS_PUBSUB_DEPTH: usize = 6;
+const TELEMETRY_PUBSUB_DEPTH: usize = 10;
 const GYRO_DATA_PUBSUB_DEPTH: usize = 1;
 const ACCEL_DATA_PUBSUB_DEPTH: usize = 1;
 const POWER_TELEMETRY_PUBSUB_DEPTH: usize = 1;
@@ -33,11 +33,11 @@ pub type CommandsSubscriber =
     Subscriber<'static, PubSubMutexType, DataPacket, COMMANDS_PUBSUB_DEPTH, 2, 1>;
 
 pub type TelemetryPubSub =
-    PubSubChannel<PubSubMutexType, TelemetryPacket, TELEMETRY_PUBSUB_DEPTH, 1, 1>;
+    PubSubChannel<PubSubMutexType, TelemetryPacket, TELEMETRY_PUBSUB_DEPTH, 1, 2>;
 pub type TelemetryPublisher =
-    Publisher<'static, PubSubMutexType, TelemetryPacket, COMMANDS_PUBSUB_DEPTH, 1, 1>;
+    Publisher<'static, PubSubMutexType, TelemetryPacket, TELEMETRY_PUBSUB_DEPTH, 1, 2>;
 pub type TelemetrySubcriber =
-    Subscriber<'static, PubSubMutexType, TelemetryPacket, TELEMETRY_PUBSUB_DEPTH, 1, 1>;
+    Subscriber<'static, PubSubMutexType, TelemetryPacket, TELEMETRY_PUBSUB_DEPTH, 1, 2>;
 
 pub type GyroDataPubSub =
     PubSubChannel<PubSubMutexType, nalgebra::Vector3<f32>, GYRO_DATA_PUBSUB_DEPTH, 1, 1>;

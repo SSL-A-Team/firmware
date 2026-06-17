@@ -3,8 +3,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(sync_unsafe_cell)]
 
+use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering::Relaxed;
-use core::sync::atomic::{AtomicBool, AtomicU32};
 
 use ateam_kicker_board::{
     drivers::{breakbeam::Breakbeam, DribblerMotor},
@@ -95,7 +95,6 @@ static_idle_buffered_uart_nl!(
 );
 
 static DRIB_VEL_PUBSUB: PubSubChannel<CriticalSectionRawMutex, f32, 1, 1, 1> = PubSubChannel::new();
-static DRIB_MULT: AtomicU32 = AtomicU32::new(100);
 static BALL_DETECT: AtomicBool = AtomicBool::new(false);
 static DRIB_TELEM_PUBSUB: PubSubChannel<CriticalSectionRawMutex, MotorTelemetry, 1, 1, 1> =
     PubSubChannel::new();
@@ -130,13 +129,14 @@ async fn high_pri_kick_task(
     let mut status_led = Output::new(grn_led_pin, Level::Low, Speed::Low);
     let mut err_led = Output::new(err_led_pin, Level::Low, Speed::Low);
     let mut ball_detected_led1 = Output::new(ball_detected_led1_pin, Level::Low, Speed::Low);
+    let mut green_led_ctr: u16 = 0;
 
     // TODO dotstars
 
     let mut breakbeam = Breakbeam::new(breakbeam_tx.into(), breakbeam_rx.into());
 
     // coms buffers
-    let mut telemetry_enabled: bool; //  = false;
+    let mut telemetry_enabled: bool;
     let mut kicker_control_packet: KickerControl = Default::default();
     let mut kicker_telemetry_packet: KickerTelemetry = Default::default();
     let mut dribbler_motor_telemetry: MotorTelemetry = Default::default();
@@ -211,7 +211,6 @@ async fn high_pri_kick_task(
             }
 
             drib_vel_pub.publish_immediate(kicker_control_packet.drib_speed);
-            DRIB_MULT.store(kicker_control_packet.dribbler_mult(), Relaxed);
 
             last_packet_received_time = Instant::now();
         }
@@ -238,10 +237,16 @@ async fn high_pri_kick_task(
 
         // update telemetry requests
         telemetry_enabled = kicker_control_packet.telemetry_enabled() != 0;
-        if telemetry_enabled {
+        if !telemetry_enabled {
             status_led.set_high();
         } else {
-            status_led.set_low();
+            if green_led_ctr > 200 {
+                green_led_ctr = 0;
+            } else if green_led_ctr > 100 {
+                status_led.set_low();
+            } else {
+                status_led.set_high();
+            }
         }
 
         // for now shutdown requests will be latched and a reboot is required to re-power
@@ -396,47 +401,41 @@ async fn high_pri_kick_task(
         }
 
         // send telemetry packet
-        if telemetry_enabled {
-            let cur_time = Instant::now();
-            if Instant::checked_duration_since(&cur_time, last_packet_sent_time)
-                .unwrap()
-                .as_millis()
-                > 20
-            {
-                kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(
-                    res.is_err() as u16,
-                    dribbler_motor_telemetry.master_error() as u16,
-                    shutdown_requested as u16,
-                    shutdown_completed as u16,
-                    ball_detected as u16,
-                    (rail_voltage_ave > CHARGED_THRESH_VOLTAGE) as u16,
-                    Default::default(),
+        let cur_time = Instant::now();
+        if Instant::duration_since(&cur_time, last_packet_sent_time).as_millis() > 20 {
+            kicker_telemetry_packet._bitfield_1 = KickerTelemetry::new_bitfield_1(
+                res.is_err() as u16,
+                dribbler_motor_telemetry.master_error() as u16,
+                shutdown_requested as u16,
+                shutdown_completed as u16,
+                ball_detected as u16,
+                (rail_voltage_ave > CHARGED_THRESH_VOLTAGE) as u16,
+                Default::default(),
+            );
+
+            let charge_pct = rail_voltage_ave / CHARGE_TARGET_VOLTAGE;
+            kicker_telemetry_packet.charge_pct = (charge_pct * 100.0) as u16;
+            kicker_telemetry_packet.rail_voltage = rail_voltage_ave;
+            kicker_telemetry_packet.battery_voltage = battery_voltage;
+
+            kicker_telemetry_packet.dribbler_motor = dribbler_motor_telemetry;
+            kicker_telemetry_packet
+                .kicker_image_hash
+                .copy_from_slice(&kicker_img_hash_kicker[0..4]);
+
+            // raw interpretaion of a struct for wire transmission is unsafe
+            unsafe {
+                // get a slice to packet for transmission
+                let struct_bytes = core::slice::from_raw_parts(
+                    (&kicker_telemetry_packet as *const KickerTelemetry) as *const u8,
+                    core::mem::size_of::<KickerTelemetry>(),
                 );
 
-                let charge_pct = rail_voltage_ave / CHARGE_TARGET_VOLTAGE;
-                kicker_telemetry_packet.charge_pct = (charge_pct * 100.0) as u16;
-                kicker_telemetry_packet.rail_voltage = rail_voltage_ave;
-                kicker_telemetry_packet.battery_voltage = battery_voltage;
-
-                kicker_telemetry_packet.dribbler_motor = dribbler_motor_telemetry;
-                kicker_telemetry_packet
-                    .kicker_image_hash
-                    .copy_from_slice(&kicker_img_hash_kicker[0..4]);
-
-                // raw interpretaion of a struct for wire transmission is unsafe
-                unsafe {
-                    // get a slice to packet for transmission
-                    let struct_bytes = core::slice::from_raw_parts(
-                        (&kicker_telemetry_packet as *const KickerTelemetry) as *const u8,
-                        core::mem::size_of::<KickerTelemetry>(),
-                    );
-
-                    // send the packet
-                    let _res = coms_writer.enqueue_copy(struct_bytes);
-                }
-
-                last_packet_sent_time = cur_time;
+                // send the packet
+                let _res = coms_writer.enqueue_copy(struct_bytes);
             }
+
+            last_packet_sent_time = cur_time;
         }
 
         // LEDs
@@ -495,16 +494,7 @@ async fn low_pri_dribble_task(
         }
         drib_motor.process_packets();
 
-        let mut drib_mult = DRIB_MULT.load(Relaxed);
-        if drib_mult == 0 || drib_mult > 100 {
-            drib_mult = 100;
-        }
-        let drib_mult_float = (drib_mult as f32) / 100.0f32;
-
-        let mut drib_sp = -1.0 * lastest_drib_vel / 1000.0;
-        if !BALL_DETECT.load(Relaxed) {
-            drib_sp *= drib_mult_float;
-        }
+        let drib_sp = -1.0 * lastest_drib_vel / 1000.0;
         drib_motor.set_setpoint(drib_sp);
 
         drib_motor.send_motion_command();

@@ -1,8 +1,15 @@
-
 #include "iir.h"
+#include "math_util.h"
 
-float iir_filter_alpha_from_Tf(float Tf, float Ts) {
-    return (Tf / (Tf + Ts));
+float iir_filter_alpha_from_cutoff_rads(const float Fcutoff_rads, const float Ts) {
+    float sample_rate = 1.0f / Ts;
+    float alpha = approx3_expf(-1.0f * (Fcutoff_rads / sample_rate));
+
+    return alpha;
+}
+
+float iir_filter_alpha_from_cutoff_hz(const float bw_hz, const float Ts) {
+    return iir_filter_alpha_from_cutoff_rads(bw_hz * 2.0f * F_PI, Ts);
 }
 
 void iir_filter_init(IIRFilter_t *iir_filter, float alpha) {

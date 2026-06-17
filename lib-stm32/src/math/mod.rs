@@ -1,19 +1,7 @@
-use num_traits::{FromPrimitive, Num, ToPrimitive};
+pub use ateam_lib_crossarch::math::linear_map;
+pub use ateam_lib_crossarch::math::range;
+pub use ateam_lib_crossarch::math::Number;
 
+// lerp is a local module: re-exports the portable crossarch lerp items and
+// adds the embassy_time-dependent TimeLerp and the smart_leds RGB8 impl.
 pub mod lerp;
-pub mod linear_map;
-pub mod range;
-
-// we define numbers as ring including the additive and multiplicative inverses
-// comutation on multiplication is implied (monoid). This means matrices are not
-// allowed, which is enforced by FromPrimitive and ToPrimitive. This is a lose
-// definition, lets see if it bites us in the rear end
-pub trait Number:
-    Copy + Num + PartialOrd + PartialEq + FromPrimitive + ToPrimitive + defmt::Format
-{
-}
-
-impl<T> Number for T where
-    T: Copy + Num + PartialOrd + PartialEq + FromPrimitive + ToPrimitive + defmt::Format
-{
-}
