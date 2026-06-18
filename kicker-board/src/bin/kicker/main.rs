@@ -103,8 +103,8 @@ static_idle_buffered_uart_nl!(
 type DribblerSetpoint = (DribblerCommand::Type, f32);
 static DRIB_CMD_PUBSUB: PubSubChannel<CriticalSectionRawMutex, DribblerSetpoint, 1, 1, 1> = PubSubChannel::new();
 static BALL_DETECT: AtomicBool = AtomicBool::new(false);
-static DRIB_FW_LOADED: AtomicBool = AtomicBool::new(false);
 // 0=pending, 1=ok_hash_match, 2=ok_flashed, 3=err_flash_fail, 4=err_hash_timeout_flash_fail
+// Non-zero means firmware load attempted; used as both "done" signal (Acquire/Release) and result code.
 static DRIB_FLASH_RESULT: AtomicU8 = AtomicU8::new(0);
 static DRIB_TELEM_PUBSUB: PubSubChannel<CriticalSectionRawMutex, CcmTelemetry, 1, 1, 1> =
     PubSubChannel::new();
@@ -161,7 +161,7 @@ async fn high_pri_kick_task(
     let mut shutdown_requested: bool = false;
     let mut shutdown_completed: bool = false;
 
-    // track DRIB_FW_LOADED transition so we send ErrorTelemetry exactly once
+    // track flash result transition so we send ErrorTelemetry exactly once
     let mut drib_fw_loaded_prev: bool = false;
 
     let mut rail_voltage_buffer: [f32; RAIL_BUFFER_SIZE] = [0.0; RAIL_BUFFER_SIZE];
@@ -418,11 +418,11 @@ async fn high_pri_kick_task(
         }
 
         // send ErrorTelemetry once on dribbler firmware load failure
-        let drib_fw_loaded_now = DRIB_FW_LOADED.load(Ordering::Acquire);
+        let flash_result = DRIB_FLASH_RESULT.load(Ordering::Acquire);
+        let drib_fw_loaded_now = flash_result != 0;
         if drib_fw_loaded_now && !drib_fw_loaded_prev {
             drib_fw_loaded_prev = true;
-            let result = DRIB_FLASH_RESULT.load(Relaxed);
-            let msg: Option<&[u8]> = match result {
+            let msg: Option<&[u8]> = match flash_result {
                 3 => Some(b"DRIB_FAIL_FLASH_ERR"),
                 4 => Some(b"DRIB_FAIL_HASH_TIMEOUT"),
                 _ => None,
@@ -451,7 +451,7 @@ async fn high_pri_kick_task(
                 shutdown_completed as u16,
                 ball_detected as u16,
                 (rail_voltage_ave > CHARGED_THRESH_VOLTAGE) as u16,
-                DRIB_FW_LOADED.load(Relaxed) as u16,
+                drib_fw_loaded_now as u16,
                 Default::default(),
             );
 
@@ -527,8 +527,7 @@ async fn low_pri_dribble_task(
         DribFlashOutcome::ErrFlashFail             => { defmt::error!("dribbler fw fail: flash error");        3 }
         DribFlashOutcome::ErrHashTimeoutFlashFail  => { defmt::error!("dribbler fw fail: hash timeout + flash error"); 4 }
     };
-    DRIB_FLASH_RESULT.store(result_code, Relaxed);
-    DRIB_FW_LOADED.store(true, Ordering::Release);
+    DRIB_FLASH_RESULT.store(result_code, Ordering::Release);
 
     drib_motor.reset().await;
     Timer::after_millis(100).await;

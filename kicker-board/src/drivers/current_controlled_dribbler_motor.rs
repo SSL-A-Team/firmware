@@ -380,16 +380,14 @@ impl<
             return DribFlashOutcome::OkHashMatch;
         }
 
-        // hash check path may leave stale CCM bytes in RX queue; drain before bootloader comms
-        // also reset UART baud (hash check switches to 2MHz)
-        if !force_flash {
-            defmt::debug!("CurrentControlledDribblerMotor - draining rx queue and resetting uart before flash");
-            while self.stm32_uart_interface.try_read_data().is_ok() {}
-            let bl_cfg = get_bootloader_uart_config();
-            self.stm32_uart_interface
-                .update_uart_config(bl_cfg.baudrate, bl_cfg.parity)
-                .await;
-        }
+        // always drain stale RX bytes and reset UART to bootloader baud before flashing;
+        // hash check path leaves 2MHz baud and queued CCM bytes that corrupt bootloader comms
+        defmt::debug!("CurrentControlledDribblerMotor - draining rx queue and resetting uart before flash");
+        while self.stm32_uart_interface.try_read_data().is_ok() {}
+        let bl_cfg = get_bootloader_uart_config();
+        self.stm32_uart_interface
+            .update_uart_config(bl_cfg.baudrate, bl_cfg.parity)
+            .await;
 
         match self.init_firmware_image(true, self.firmware_image).await {
             Ok(()) => DribFlashOutcome::OkFlashed,

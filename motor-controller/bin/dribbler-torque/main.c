@@ -38,6 +38,8 @@ static uart_logging_status_tx_t uart_logging_status_send;
 static bool params_return_packet_requested = false;
 
 static bool current_limited = false;
+static uint8_t params_seq_ctr = 0;
+static uint8_t seq_ctr = 0;
 
 // joint velocity + current controller
 // kP in mA/(rad/s); tuned experimentally for ECU22048H24-S101
@@ -226,7 +228,8 @@ int main() {
                 do_vel_cur_control();
 
                 // add the feedforward current to the velocity PID output
-                int16_t joint_motor_current = motor_command_packet.current_setpoint_ma + (int16_t) vel_cur_component;
+                float vel_component_clamped = fmaxf((float)INT16_MIN, fminf((float)INT16_MAX, vel_cur_component));
+                int16_t joint_motor_current = motor_command_packet.current_setpoint_ma + (int16_t)vel_component_clamped;
                 joint_motor_current = apply_current_limits(joint_motor_current);
 
                 response_packet.current_telemetry.current_setpoint_ma = joint_motor_current;
@@ -380,8 +383,6 @@ static void read_packets() {
     }
 }
 
-static uint8_t params_seq_ctr = 0;
-static uint8_t seq_ctr = 0;
 static void send_packets() {
     CcmResponse response_pkt;
 

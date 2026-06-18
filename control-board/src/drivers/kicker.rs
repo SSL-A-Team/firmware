@@ -17,6 +17,31 @@ use ateam_common_packets::bindings::{
 
 use crate::{image_hash, DEBUG_KICKER_UART_QUEUES};
 
+// Packet dispatch uses length to distinguish types — assert sizes differ so a future
+// struct change doesn't silently break the dispatch.
+const _: () = assert!(
+    core::mem::size_of::<KickerTelemetry>() != core::mem::size_of::<ErrorTelemetry>(),
+    "KickerTelemetry and ErrorTelemetry must have different sizes for length-based dispatch"
+);
+
+#[derive(defmt::Format)]
+pub enum KickerFlashStatus {
+    OkHashMatch,
+    OkFlashed,
+    ErrFlashFail,
+    ErrHashTimeoutFlashFail,
+}
+
+impl KickerFlashStatus {
+    pub fn is_ok(&self) -> bool {
+        matches!(self, Self::OkHashMatch | Self::OkFlashed)
+    }
+
+    pub fn is_err(&self) -> bool {
+        !self.is_ok()
+    }
+}
+
 pub struct Kicker<
     'a,
     const LEN_RX: usize,
@@ -244,7 +269,7 @@ impl<
         }
     }
 
-    pub async fn check_device_has_latest_default_image(&mut self) -> Result<bool, ()> {
+    async fn check_device_has_latest_default_image(&mut self) -> Result<bool, ()> {
         let latest_img_hash = self.get_latest_default_img_hash();
         defmt::debug!(
             "Kicker Interface - Latest default image hash - {:x}",
@@ -277,11 +302,9 @@ impl<
                 res = Err(());
             }
         }
-        // Make sure that the uart queue is empty of any possible parameter
-        // response packets, which may cause side effects for the flashing
-        // process
+        // drain any parameter response packets before flashing
         self.process_telemetry();
-        return res;
+        res
     }
 
     pub async fn init_firmware_image(
@@ -304,34 +327,36 @@ impl<
 
         Timer::after(Duration::from_millis(1)).await;
 
-        // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
         self.stm32_uart_interface.leave_reset().await;
 
-        return Ok(());
+        Ok(())
     }
 
-    pub async fn init_default_firmware_image(&mut self, force_flash: bool) -> Result<(), ()> {
-        let flash;
-        if force_flash {
+    pub async fn init_default_firmware_image(&mut self, force_flash: bool) -> KickerFlashStatus {
+        let (flash, hash_timed_out) = if force_flash {
             defmt::info!("Kicker Interface - Force flash enabled");
-            flash = true
+            (true, false)
         } else {
             defmt::debug!("Kicker Interface - Resetting kicker");
             self.reset().await;
-            let res = self.check_device_has_latest_default_image().await;
-            match res {
-                Ok(has_latest) => {
-                    if has_latest {
-                        flash = false;
-                    } else {
-                        flash = true;
-                    }
-                }
-                Err(_) => {
-                    flash = true;
-                }
+            match self.check_device_has_latest_default_image().await {
+                Ok(has_latest) => (!has_latest, false),
+                Err(_) => (true, true),
             }
+        };
+
+        if !flash {
+            let _ = self.init_firmware_image(false, self.firmware_image).await;
+            return KickerFlashStatus::OkHashMatch;
         }
-        return self.init_firmware_image(flash, self.firmware_image).await;
+
+        match self.init_firmware_image(true, self.firmware_image).await {
+            Ok(()) => KickerFlashStatus::OkFlashed,
+            Err(()) => if hash_timed_out {
+                KickerFlashStatus::ErrHashTimeoutFlashFail
+            } else {
+                KickerFlashStatus::ErrFlashFail
+            },
+        }
     }
 }
