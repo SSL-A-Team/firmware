@@ -102,10 +102,10 @@ const ORBIT_RADIUS_STEP: f32 = 0.005;
 const ORBIT_RADIUS_MIN: f32 = 0.001;
 const ORBIT_RADIUS_MAX: f32 = 0.5;
 
-/// Dribbler speed adjustment per button press (rpm).
-const DRIBBLER_SPEED_STEP: f32 = 10.0;
-const DRIBBLER_SPEED_MIN: f32 = 0.0;
-const DRIBBLER_SPEED_MAX: f32 = 500.0;
+/// Heading lag adjustment per button press (radians).
+const HEADING_LAG_STEP: f32 = 0.05;
+const HEADING_LAG_MIN: f32 = 0.0;
+const HEADING_LAG_MAX: f32 = core::f32::consts::PI;
 
 // ============================================================================
 // Phase state machine
@@ -254,11 +254,11 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     // ── tunable parameters (adjusted via buttons) ────────────────────────────
 
     let mut orbit_radius: f32 = PivotParams::default().orbit_radius;
-    let mut dribbler_speed: f32 = 300.0;
+    let mut heading_lag: f32 = PivotParams::default().heading_lag;
 
     defmt::info!(
-        "hwtest-pivot: orbit_radius = {} m, dribbler_speed = {} rpm",
-        orbit_radius, dribbler_speed,
+        "hwtest-pivot: orbit_radius = {} m, heading_lag = {} rad",
+        orbit_radius, heading_lag,
     );
 
     // ── wait for the control task to finish motor firmware flashing ──────────
@@ -298,12 +298,12 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             defmt::info!("hwtest-pivot: orbit_radius → {} m", orbit_radius);
         }
         if prev_right && !cur_right {
-            dribbler_speed = (dribbler_speed + DRIBBLER_SPEED_STEP).min(DRIBBLER_SPEED_MAX);
-            defmt::info!("hwtest-pivot: dribbler_speed → {} rpm", dribbler_speed);
+            heading_lag = (heading_lag + HEADING_LAG_STEP).min(HEADING_LAG_MAX);
+            defmt::info!("hwtest-pivot: heading_lag → {} rad", heading_lag);
         }
         if prev_left && !cur_left {
-            dribbler_speed = (dribbler_speed - DRIBBLER_SPEED_STEP).max(DRIBBLER_SPEED_MIN);
-            defmt::info!("hwtest-pivot: dribbler_speed → {} rpm", dribbler_speed);
+            heading_lag = (heading_lag - HEADING_LAG_STEP).max(HEADING_LAG_MIN);
+            defmt::info!("hwtest-pivot: heading_lag → {} rad", heading_lag);
         }
 
         prev_up    = cur_up;
@@ -345,17 +345,17 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             reserved2: [0; 1],
 
             kick_vel: 0.0,
-            dribbler_speed,
+            dribbler_speed: 200.0,
 
             cmd: BodyControlCommand {
                 pivot: PivotCommand {
                     global_x_center: BALL_X,
                     global_y_center: BALL_Y,
                     global_theta: target_theta,
-                    max_angular_vel: 0.0,  // zero → PivotParams::default()
+                    max_angular_vel: 0.0,
                     max_angular_acc: 0.0,
                     orbit_radius,
-                    heading_lag: 1.0,
+                    heading_lag: heading_lag,
                 },
             },
         }));
