@@ -79,6 +79,17 @@ pub const TRAJ_RECOMPUTE_ERROR: Vector4f = Vector4f::new(0.5, 1.0, 4.0, 8.0);
 /// [LINEAR_VEL_THRESHOLD, LINEAR_ACCEL_THRESHOLD, ANGULAR_VEL_THRESHOLD, ANGULAR_ACCEL_THRESHOLD]
 pub const FRICTION_COMP_GATING: Vector4f = Vector4f::new(0.1, 0.5, 0.5, 1.0);
 
+/// Maximum magnitude of the body-level acceleration output [linear (m/s²), angular (rad/s²)].
+/// The friction-compensated acceleration is clamped to these limits before conversion
+/// to wheel torques. Prevents runaway current commands from large PID errors.
+pub const BODY_ACCEL_CLAMP_LINEAR: f32 = 20.0;   // m/s²
+pub const BODY_ACCEL_CLAMP_ANGULAR: f32 = 100.0; // rad/s²
+
+/// Maximum magnitude of the body-level velocity output [linear (m/s), angular (rad/s)].
+/// Clamped before conversion to wheel velocity setpoints.
+pub const BODY_VEL_CLAMP_LINEAR: f32 = 10.0;  // m/s
+pub const BODY_VEL_CLAMP_ANGULAR: f32 = 50.0; // rad/s
+
 /// Encoder lag compensation operating mode.
 ///
 /// Intended progression: `Disabled` → `FeedforwardOnly` (validate model params)
