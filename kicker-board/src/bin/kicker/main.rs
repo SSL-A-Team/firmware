@@ -3,7 +3,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(sync_unsafe_cell)]
 
-use core::sync::atomic::{AtomicBool, AtomicU8};
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use core::sync::atomic::Ordering::Relaxed;
 
 use ateam_kicker_board::{
@@ -418,7 +418,7 @@ async fn high_pri_kick_task(
         }
 
         // send ErrorTelemetry once when dribbler firmware load completes
-        let drib_fw_loaded_now = DRIB_FW_LOADED.load(Relaxed);
+        let drib_fw_loaded_now = DRIB_FW_LOADED.load(Ordering::Acquire);
         if drib_fw_loaded_now && !drib_fw_loaded_prev {
             drib_fw_loaded_prev = true;
             let msg: &[u8] = match DRIB_FLASH_RESULT.load(Relaxed) {
@@ -527,7 +527,7 @@ async fn low_pri_dribble_task(
         DribFlashOutcome::ErrHashTimeoutFlashFail  => { defmt::error!("dribbler fw fail: hash timeout + flash error"); 4 }
     };
     DRIB_FLASH_RESULT.store(result_code, Relaxed);
-    DRIB_FW_LOADED.store(true, Relaxed);
+    DRIB_FW_LOADED.store(true, Ordering::Release);
 
     drib_motor.reset().await;
     Timer::after_millis(100).await;

@@ -238,7 +238,7 @@ int main() {
         response_packet.current_telemetry.motor_voltage_cmd_mv = pwm6step_get_voltage_command();
         response_packet.current_telemetry.hall_vel_est_crads = pwm6step_hall_get_rps_estimate();
 
-        memcpy(response_packet.current_telemetry.current_samples_ma, pwm6step_get_current_log(), 40);
+        memcpy(response_packet.current_telemetry.current_samples_ma, pwm6step_get_current_log(), sizeof(response_packet.current_telemetry.current_samples_ma));
 
         // load errors into packets and set LEDs
         update_errors();
@@ -277,7 +277,7 @@ static int16_t apply_current_limits(int16_t desired_current) {
         current_limited = true;
     }
 
-    current_limited = false;
+    current_limited = (applied_current != desired_current);
 
     return applied_current;
 }
@@ -316,14 +316,13 @@ static void update_errors() {
     response_packet.overvoltage_error = false;
 
     // torque limiting
-    response_packet.torque_limited = false;
+    response_packet.torque_limited = current_limited;
 
     // loop time
     response_packet.control_loop_time_error = slipped_control_frame_count > 10;
 
     // master error
     response_packet.master_error = response_packet.hall_power_error
-            || response_packet.hall_power_error
             || response_packet.hall_disconnected_error
             || response_packet.bldc_transition_error
             || response_packet.bldc_commutation_watchdog_error
@@ -369,12 +368,12 @@ static void read_packets() {
             // We got a motion packet!
             ticks_since_last_command_packet = 0;
 
+            motor_command_packet = command_packet.data.motion;
+
             if (motor_command_packet.reset) {
                 // Does a software reset.
                 NVIC_SystemReset();
             }
-
-            motor_command_packet = command_packet.data.motion;
         } else if (command_packet.type == CCM_CMD_PARAMS) {
             // just sends the firmware hash back by default for now
             params_return_packet_requested = true;

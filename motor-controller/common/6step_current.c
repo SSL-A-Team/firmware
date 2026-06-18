@@ -874,6 +874,7 @@ int16_t pwm6step_hall_get_rps_estimate() {
     // 628 = floor(100 * 2 * pi); uint64 intermediate prevents overflow.
     int32_t crads = (int32_t)((uint64_t)F_SYS_CLK_HZ * 628ULL / (6ULL * MOTOR_POLE_PAIRS * (uint64_t)ticks));
     if (hall_detected_direction == CLOCKWISE) crads = -crads;
+    if (INVERT_MOTOR_DIRECTION) crads = -crads;
     if (crads >  INT16_MAX) crads = INT16_MAX;
     if (crads <  INT16_MIN) crads = INT16_MIN;
     return (int16_t)crads;
