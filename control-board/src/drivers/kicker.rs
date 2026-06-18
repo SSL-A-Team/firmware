@@ -96,18 +96,20 @@ impl<
             if buf.len() == core::mem::size_of::<KickerTelemetry>() {
                 received_packet = true;
                 unsafe {
-                    let state = &mut self.telemetry_state as *mut _ as *mut u8;
-                    for i in 0..core::mem::size_of::<KickerTelemetry>() {
-                        *state.offset(i as isize) = buf[i];
-                    }
+                    core::ptr::copy_nonoverlapping(
+                        buf.as_ptr(),
+                        &mut self.telemetry_state as *mut _ as *mut u8,
+                        core::mem::size_of::<KickerTelemetry>(),
+                    );
                 }
             } else if buf.len() == core::mem::size_of::<ErrorTelemetry>() {
                 unsafe {
                     let mut err_telem: ErrorTelemetry = MaybeUninit::zeroed().assume_init();
-                    let dst = &mut err_telem as *mut _ as *mut u8;
-                    for i in 0..core::mem::size_of::<ErrorTelemetry>() {
-                        *dst.add(i) = buf[i];
-                    }
+                    core::ptr::copy_nonoverlapping(
+                        buf.as_ptr(),
+                        &mut err_telem as *mut _ as *mut u8,
+                        core::mem::size_of::<ErrorTelemetry>(),
+                    );
                     let msg_len = err_telem.error_message.iter().position(|&b| b == 0).unwrap_or(60);
                     defmt::error!(
                         "kicker ErrorTelemetry [ts={}]: {=[u8]:a}",
@@ -124,7 +126,7 @@ impl<
             }
         }
 
-        return received_packet;
+        received_packet
     }
 
     pub fn send_command(&mut self) {

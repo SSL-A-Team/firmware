@@ -328,40 +328,39 @@ impl<
 
     async fn init_firmware_image(&mut self, flash: bool, fw_image: &[u8]) -> Result<(), ()> {
         if flash {
-            defmt::info!("CurrentControlledDribblerMotor - calling load_firmware_image");
+            defmt::debug!("CurrentControlledDribblerMotor - calling load_firmware_image");
             self.stm32_uart_interface
                 .load_firmware_image(fw_image, true)
                 .await?;
-            defmt::info!("CurrentControlledDribblerMotor - load_firmware_image returned ok");
+            defmt::debug!("CurrentControlledDribblerMotor - load_firmware_image returned ok");
         } else {
-            defmt::info!("CurrentControlledDribblerMotor - skipping flash (image up to date)");
+            defmt::debug!("CurrentControlledDribblerMotor - skipping flash (image up to date)");
         }
 
-        defmt::info!("CurrentControlledDribblerMotor - updating uart config 2MHz");
+        defmt::debug!("CurrentControlledDribblerMotor - updating uart config 2MHz");
         self.stm32_uart_interface
             .update_uart_config(2_000_000, Parity::ParityEven)
             .await;
 
         Timer::after(Duration::from_millis(1)).await;
 
-        defmt::info!("CurrentControlledDribblerMotor - leaving reset");
+        defmt::debug!("CurrentControlledDribblerMotor - leaving reset");
         self.stm32_uart_interface.leave_reset().await;
-        defmt::info!("CurrentControlledDribblerMotor - init_firmware_image done");
 
         Ok(())
     }
 
     pub async fn init_default_firmware_image(&mut self, force_flash: bool) -> DribFlashOutcome {
         let (flash, hash_timed_out) = if force_flash {
-            defmt::info!("CurrentControlledDribblerMotor - force flash enabled");
+            defmt::debug!("CurrentControlledDribblerMotor - force flash enabled");
             (true, false)
         } else {
-            defmt::info!("CurrentControlledDribblerMotor - resetting device");
+            defmt::debug!("CurrentControlledDribblerMotor - resetting device");
             self.reset().await;
-            defmt::info!("CurrentControlledDribblerMotor - reset done, checking image hash");
+            defmt::debug!("CurrentControlledDribblerMotor - reset done, checking image hash");
             match self.check_device_has_latest_default_image().await {
                 Ok(has_latest) => {
-                    defmt::info!("CurrentControlledDribblerMotor - has_latest={}", has_latest);
+                    defmt::debug!("CurrentControlledDribblerMotor - has_latest={}", has_latest);
                     (!has_latest, false)
                 }
                 Err(_) => {
@@ -371,8 +370,8 @@ impl<
             }
         };
 
-        defmt::info!(
-            "CurrentControlledDribblerMotor - flash={}, hash_timed_out={}, entering init_firmware_image",
+        defmt::debug!(
+            "CurrentControlledDribblerMotor - flash={}, hash_timed_out={}",
             flash, hash_timed_out
         );
 
@@ -384,7 +383,7 @@ impl<
         // hash check path may leave stale CCM bytes in RX queue; drain before bootloader comms
         // also reset UART baud (hash check switches to 2MHz)
         if !force_flash {
-            defmt::info!("CurrentControlledDribblerMotor - draining rx queue and resetting uart before flash");
+            defmt::debug!("CurrentControlledDribblerMotor - draining rx queue and resetting uart before flash");
             while self.stm32_uart_interface.try_read_data().is_ok() {}
             let bl_cfg = get_bootloader_uart_config();
             self.stm32_uart_interface

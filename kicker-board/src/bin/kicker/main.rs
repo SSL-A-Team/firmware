@@ -417,26 +417,27 @@ async fn high_pri_kick_task(
             error_latched = true;
         }
 
-        // send ErrorTelemetry once when dribbler firmware load completes
+        // send ErrorTelemetry once on dribbler firmware load failure
         let drib_fw_loaded_now = DRIB_FW_LOADED.load(Ordering::Acquire);
         if drib_fw_loaded_now && !drib_fw_loaded_prev {
             drib_fw_loaded_prev = true;
-            let msg: &[u8] = match DRIB_FLASH_RESULT.load(Relaxed) {
-                1 => b"DRIB_OK_HASH_MATCH",
-                2 => b"DRIB_OK_FLASHED",
-                3 => b"DRIB_FAIL_FLASH_ERR",
-                4 => b"DRIB_FAIL_HASH_TIMEOUT",
-                _ => b"DRIB_UNKNOWN",
+            let result = DRIB_FLASH_RESULT.load(Relaxed);
+            let msg: Option<&[u8]> = match result {
+                3 => Some(b"DRIB_FAIL_FLASH_ERR"),
+                4 => Some(b"DRIB_FAIL_HASH_TIMEOUT"),
+                _ => None,
             };
-            unsafe {
-                let mut err_telem: ErrorTelemetry = MaybeUninit::zeroed().assume_init();
-                err_telem.timestamp = Instant::now().as_ticks() as u32;
-                err_telem.error_message[..msg.len()].copy_from_slice(msg);
-                let struct_bytes = core::slice::from_raw_parts(
-                    (&err_telem as *const ErrorTelemetry) as *const u8,
-                    core::mem::size_of::<ErrorTelemetry>(),
-                );
-                let _res = coms_writer.enqueue_copy(struct_bytes);
+            if let Some(msg) = msg {
+                unsafe {
+                    let mut err_telem: ErrorTelemetry = MaybeUninit::zeroed().assume_init();
+                    err_telem.timestamp = Instant::now().as_ticks() as u32;
+                    err_telem.error_message[..msg.len()].copy_from_slice(msg);
+                    let struct_bytes = core::slice::from_raw_parts(
+                        (&err_telem as *const ErrorTelemetry) as *const u8,
+                        core::mem::size_of::<ErrorTelemetry>(),
+                    );
+                    let _ = coms_writer.enqueue_copy(struct_bytes);
+                }
             }
         }
 

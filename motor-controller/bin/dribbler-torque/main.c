@@ -270,12 +270,10 @@ static int16_t apply_current_limits(int16_t desired_current) {
 
     if (desired_current > limit) {
         applied_current = limit;
-        current_limited = true;
     }
 
     if (desired_current < -limit) {
         applied_current = -limit;
-        current_limited = true;
     }
 
     current_limited = (applied_current != desired_current);
