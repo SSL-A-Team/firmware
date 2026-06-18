@@ -16,11 +16,11 @@ use crate::image_hash;
 use ateam_common_packets::bindings::{
     CcmCommand,
     CcmCommandType::{CCM_CMD_MOTION, CCM_CMD_PARAMS},
-    CcmMotionControlType, CcmParameter, CcmParameterDirection, CcmParameterOperation,
-    CcmParameterPacket, CcmResponse,
+    CcmMotionControlType,
+    CcmMotionControlType::CCM_MCT_MOTOR_OFF,
+    CcmParameter, CcmParameterDirection, CcmParameterOperation, CcmParameterPacket, CcmResponse,
     CcmResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM},
     CcmTelemetry,
-    CcmMotionControlType::CCM_MCT_MOTOR_OFF,
 };
 
 pub struct CurrentControlledMotor<

@@ -5,19 +5,26 @@
 #![feature(generic_const_exprs)]
 
 use ateam_common_packets::bindings::{
-    DribblerCommand::{self, DC_CURRENT, DC_DISABLE, DC_DRIBBLE, DC_HARD_RECEIVE, DC_SOFT_RECEIVE, DC_VELOCITY},
+    DribblerCommand::{
+        self, DC_CURRENT, DC_DISABLE, DC_DRIBBLE, DC_HARD_RECEIVE, DC_SOFT_RECEIVE, DC_VELOCITY,
+    },
     KickerTelemetry,
 };
 use ateam_control_board::{
-    drivers::kicker::Kicker, get_system_config, include_kicker_bin, DEBUG_KICKER_UART_QUEUES,
-    SystemIrqs,
+    drivers::kicker::Kicker, get_system_config, include_kicker_bin, SystemIrqs,
+    DEBUG_KICKER_UART_QUEUES,
 };
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface::{self, Stm32Interface},
     idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
 };
 use embassy_executor::InterruptExecutor;
-use embassy_stm32::{gpio::{Input, Pull}, interrupt, pac::Interrupt, usart::Uart};
+use embassy_stm32::{
+    gpio::{Input, Pull},
+    interrupt,
+    pac::Interrupt,
+    usart::Uart,
+};
 use embassy_time::{Duration, Ticker, Timer};
 use {defmt_rtt as _, panic_probe as _};
 
@@ -40,16 +47,24 @@ unsafe fn CEC() {
 // Mode table. DC_DISABLE is not cycled — reached via the back action (DOWN at setpoint=0).
 const MODE_COUNT: usize = 5;
 const MODES: [DribblerCommand::Type; MODE_COUNT] = [
-    DC_HARD_RECEIVE, DC_SOFT_RECEIVE, DC_DRIBBLE, DC_VELOCITY, DC_CURRENT,
+    DC_HARD_RECEIVE,
+    DC_SOFT_RECEIVE,
+    DC_DRIBBLE,
+    DC_VELOCITY,
+    DC_CURRENT,
 ];
 const MODE_NAMES: [&str; MODE_COUNT] = [
-    "HARD_RECEIVE", "SOFT_RECEIVE", "DRIBBLE", "VELOCITY", "CURRENT",
+    "HARD_RECEIVE",
+    "SOFT_RECEIVE",
+    "DRIBBLE",
+    "VELOCITY",
+    "CURRENT",
 ];
 // HARD_RECEIVE / SOFT_RECEIVE / DRIBBLE: dimensionless 0.0-1.0, step 0.1
 // VELOCITY: rad/s — max and step TBD experimentally, initial values used
 // CURRENT: mA     — max and step TBD experimentally, initial values used
-const MODE_MAX:  [f32; MODE_COUNT] = [1.0, 1.0, 1.0, 500.0, 1500.0];
-const MODE_STEP: [f32; MODE_COUNT] = [0.1, 0.1, 0.1,   5.0,   50.0];
+const MODE_MAX: [f32; MODE_COUNT] = [1.0, 1.0, 1.0, 500.0, 1500.0];
+const MODE_STEP: [f32; MODE_COUNT] = [0.1, 0.1, 0.1, 5.0, 50.0];
 
 // Print telemetry every 200 ms (400 ticks at 500 µs/tick)
 const TELEM_PRINT_TICKS: u32 = 400;
@@ -71,12 +86,12 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // PE10=back(toggle telemetry print)
     // PE11=center(toggle), PE12=left(prev mode), PE13=right(next mode)
     // PE14=up(+setpoint),  PE15=down(-setpoint; at 0 while disabled = back/reset)
-    let btn_back   = Input::new(p.PE10, Pull::Up);
+    let btn_back = Input::new(p.PE10, Pull::Up);
     let btn_center = Input::new(p.PE11, Pull::Up);
-    let btn_left   = Input::new(p.PE12, Pull::Up);
-    let btn_right  = Input::new(p.PE13, Pull::Up);
-    let btn_up     = Input::new(p.PE14, Pull::Up);
-    let btn_down   = Input::new(p.PE15, Pull::Up);
+    let btn_left = Input::new(p.PE12, Pull::Up);
+    let btn_right = Input::new(p.PE13, Pull::Up);
+    let btn_up = Input::new(p.PE14, Pull::Up);
+    let btn_down = Input::new(p.PE15, Pull::Up);
 
     let kicker_usart = Uart::new(
         p.UART8,
@@ -139,25 +154,27 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // Button edge detection + debounce (500 µs tick, 200 ticks = 100 ms cooldown)
     const BTN_COOLDOWN: u32 = 200;
-    let mut prev_back   = false;
+    let mut prev_back = false;
     let mut prev_center = false;
-    let mut prev_left   = false;
-    let mut prev_right  = false;
-    let mut prev_up     = false;
-    let mut prev_down   = false;
-    let mut cd_back:   u32 = 0;
+    let mut prev_left = false;
+    let mut prev_right = false;
+    let mut prev_up = false;
+    let mut prev_down = false;
+    let mut cd_back: u32 = 0;
     let mut cd_center: u32 = 0;
-    let mut cd_left:   u32 = 0;
-    let mut cd_right:  u32 = 0;
-    let mut cd_up:     u32 = 0;
-    let mut cd_down:   u32 = 0;
+    let mut cd_left: u32 = 0;
+    let mut cd_right: u32 = 0;
+    let mut cd_up: u32 = 0;
+    let mut cd_down: u32 = 0;
 
     defmt::info!(
         "Ready. BACK=toggle telem, CENTER=toggle, LEFT/RIGHT=mode, UP/DOWN=setpoint, DOWN@0=back/reset"
     );
     defmt::info!(
         "Mode: {}, Setpoint: {}, Enabled: {}",
-        MODE_NAMES[mode_idx], setpoints[mode_idx], enabled
+        MODE_NAMES[mode_idx],
+        setpoints[mode_idx],
+        enabled
     );
 
     let mut ticker = Ticker::every(Duration::from_micros(500));
@@ -165,19 +182,31 @@ async fn main(_spawner: embassy_executor::Spawner) {
         kicker.process_telemetry();
 
         // Debounce cooldown
-        if cd_back   > 0 { cd_back   -= 1; }
-        if cd_center > 0 { cd_center -= 1; }
-        if cd_left   > 0 { cd_left   -= 1; }
-        if cd_right  > 0 { cd_right  -= 1; }
-        if cd_up     > 0 { cd_up     -= 1; }
-        if cd_down   > 0 { cd_down   -= 1; }
+        if cd_back > 0 {
+            cd_back -= 1;
+        }
+        if cd_center > 0 {
+            cd_center -= 1;
+        }
+        if cd_left > 0 {
+            cd_left -= 1;
+        }
+        if cd_right > 0 {
+            cd_right -= 1;
+        }
+        if cd_up > 0 {
+            cd_up -= 1;
+        }
+        if cd_down > 0 {
+            cd_down -= 1;
+        }
 
-        let now_back   = btn_back.is_low();
+        let now_back = btn_back.is_low();
         let now_center = btn_center.is_low();
-        let now_left   = btn_left.is_low();
-        let now_right  = btn_right.is_low();
-        let now_up     = btn_up.is_low();
-        let now_down   = btn_down.is_low();
+        let now_left = btn_left.is_low();
+        let now_right = btn_right.is_low();
+        let now_up = btn_up.is_low();
+        let now_down = btn_down.is_low();
 
         // BACK: toggle telemetry printing
         if now_back && !prev_back && cd_back == 0 {
@@ -202,10 +231,15 @@ async fn main(_spawner: embassy_executor::Spawner) {
         // LEFT: previous mode (wraps)
         if now_left && !prev_left && cd_left == 0 {
             cd_left = BTN_COOLDOWN;
-            mode_idx = if mode_idx == 0 { MODE_COUNT - 1 } else { mode_idx - 1 };
+            mode_idx = if mode_idx == 0 {
+                MODE_COUNT - 1
+            } else {
+                mode_idx - 1
+            };
             defmt::info!(
                 "Mode -> {} | setpoint={}",
-                MODE_NAMES[mode_idx], setpoints[mode_idx]
+                MODE_NAMES[mode_idx],
+                setpoints[mode_idx]
             );
         }
 
@@ -215,7 +249,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
             mode_idx = (mode_idx + 1) % MODE_COUNT;
             defmt::info!(
                 "Mode -> {} | setpoint={}",
-                MODE_NAMES[mode_idx], setpoints[mode_idx]
+                MODE_NAMES[mode_idx],
+                setpoints[mode_idx]
             );
         }
 
@@ -223,10 +258,15 @@ async fn main(_spawner: embassy_executor::Spawner) {
         if now_up && !prev_up && cd_up == 0 {
             cd_up = BTN_COOLDOWN;
             let new_sp = setpoints[mode_idx] + MODE_STEP[mode_idx];
-            setpoints[mode_idx] = if new_sp > MODE_MAX[mode_idx] { MODE_MAX[mode_idx] } else { new_sp };
+            setpoints[mode_idx] = if new_sp > MODE_MAX[mode_idx] {
+                MODE_MAX[mode_idx]
+            } else {
+                new_sp
+            };
             defmt::info!(
                 "Setpoint UP -> {} (mode={})",
-                setpoints[mode_idx], MODE_NAMES[mode_idx]
+                setpoints[mode_idx],
+                MODE_NAMES[mode_idx]
             );
         }
 
@@ -237,7 +277,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
                 setpoints[mode_idx] -= MODE_STEP[mode_idx];
                 defmt::info!(
                     "Setpoint DOWN -> {} (mode={})",
-                    setpoints[mode_idx], MODE_NAMES[mode_idx]
+                    setpoints[mode_idx],
+                    MODE_NAMES[mode_idx]
                 );
             } else if setpoints[mode_idx] > 0.0 {
                 setpoints[mode_idx] = 0.0;
@@ -251,12 +292,12 @@ async fn main(_spawner: embassy_executor::Spawner) {
             }
         }
 
-        prev_back   = now_back;
+        prev_back = now_back;
         prev_center = now_center;
-        prev_left   = now_left;
-        prev_right  = now_right;
-        prev_up     = now_up;
-        prev_down   = now_down;
+        prev_left = now_left;
+        prev_right = now_right;
+        prev_up = now_up;
+        prev_down = now_down;
 
         // Periodic telemetry print
         if telem_print {
@@ -273,7 +314,10 @@ async fn main(_spawner: embassy_executor::Spawner) {
                 let ball = telem.ball_detected() != 0;
                 defmt::info!(
                     "TELEM | vel={} rad/s ({} RPM) | curr_avg={} mA | ball={}",
-                    vel_rads, vel_rpm, avg_ma, ball
+                    vel_rads,
+                    vel_rpm,
+                    avg_ma,
+                    ball
                 );
             }
         } else {

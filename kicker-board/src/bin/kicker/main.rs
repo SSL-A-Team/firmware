@@ -3,11 +3,14 @@
 #![feature(type_alias_impl_trait)]
 #![feature(sync_unsafe_cell)]
 
-use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use core::sync::atomic::Ordering::Relaxed;
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use ateam_kicker_board::{
-    drivers::{breakbeam::Breakbeam, current_controlled_dribbler_motor::{CurrentControlledDribblerMotor, DribFlashOutcome}},
+    drivers::{
+        breakbeam::Breakbeam,
+        current_controlled_dribbler_motor::{CurrentControlledDribblerMotor, DribFlashOutcome},
+    },
     include_external_cpp_bin,
     pins::{BreakbeamLeftAgpioPin, BreakbeamRightAgpioPin, GreenStatusLedPin},
     tasks::{get_system_config, ClkSource},
@@ -52,8 +55,7 @@ use ateam_lib_stm32::{
 use ateam_kicker_board::image_hash::get_kicker_img_hash;
 
 use ateam_common_packets::bindings::{
-    CcmCommand, CcmResponse, CcmTelemetry,
-    DribblerCommand, ErrorTelemetry,
+    CcmCommand, CcmResponse, CcmTelemetry, DribblerCommand, ErrorTelemetry,
     KickRequest::{self, KR_ARM, KR_DISABLE},
     KickerControl, KickerTelemetry,
 };
@@ -101,7 +103,8 @@ static_idle_buffered_uart_nl!(
 );
 
 type DribblerSetpoint = (DribblerCommand::Type, f32);
-static DRIB_CMD_PUBSUB: PubSubChannel<CriticalSectionRawMutex, DribblerSetpoint, 1, 1, 1> = PubSubChannel::new();
+static DRIB_CMD_PUBSUB: PubSubChannel<CriticalSectionRawMutex, DribblerSetpoint, 1, 1, 1> =
+    PubSubChannel::new();
 static BALL_DETECT: AtomicBool = AtomicBool::new(false);
 // 0=pending, 1=ok_hash_match, 2=ok_flashed, 3=err_flash_fail, 4=err_hash_timeout_flash_fail
 // Non-zero means firmware load attempted; used as both "done" signal (Acquire/Release) and result code.
@@ -522,10 +525,22 @@ async fn low_pri_dribble_task(
     let force_flash = false;
     let outcome = drib_motor.init_default_firmware_image(force_flash).await;
     let result_code: u8 = match outcome {
-        DribFlashOutcome::OkHashMatch              => { defmt::info!("dribbler fw ok: hash match, no flash"); 1 }
-        DribFlashOutcome::OkFlashed                => { defmt::info!("dribbler fw ok: flashed");               2 }
-        DribFlashOutcome::ErrFlashFail             => { defmt::error!("dribbler fw fail: flash error");        3 }
-        DribFlashOutcome::ErrHashTimeoutFlashFail  => { defmt::error!("dribbler fw fail: hash timeout + flash error"); 4 }
+        DribFlashOutcome::OkHashMatch => {
+            defmt::info!("dribbler fw ok: hash match, no flash");
+            1
+        }
+        DribFlashOutcome::OkFlashed => {
+            defmt::info!("dribbler fw ok: flashed");
+            2
+        }
+        DribFlashOutcome::ErrFlashFail => {
+            defmt::error!("dribbler fw fail: flash error");
+            3
+        }
+        DribFlashOutcome::ErrHashTimeoutFlashFail => {
+            defmt::error!("dribbler fw fail: hash timeout + flash error");
+            4
+        }
     };
     DRIB_FLASH_RESULT.store(result_code, Ordering::Release);
 

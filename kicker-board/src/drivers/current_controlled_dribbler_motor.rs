@@ -10,7 +10,9 @@ use ateam_common_packets::bindings::{
     CcmResponse,
     CcmResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM},
     CcmTelemetry,
-    DribblerCommand::{self, DC_CURRENT, DC_DISABLE, DC_DRIBBLE, DC_HARD_RECEIVE, DC_SOFT_RECEIVE, DC_VELOCITY},
+    DribblerCommand::{
+        self, DC_CURRENT, DC_DISABLE, DC_DRIBBLE, DC_HARD_RECEIVE, DC_SOFT_RECEIVE, DC_VELOCITY,
+    },
 };
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface::{get_bootloader_uart_config, Stm32Interface},
@@ -216,7 +218,9 @@ impl<
 
             cmd.type_ = CCM_CMD_MOTION;
             cmd.data.motion.set_reset(self.reset_flagged as u32);
-            cmd.data.motion.set_enable_telemetry(self.telemetry_enabled as u32);
+            cmd.data
+                .motion
+                .set_enable_telemetry(self.telemetry_enabled as u32);
             cmd.data.motion.motion_control_type = self.motion_control_type;
             cmd.data.motion.setpoint = self.setpoint;
             cmd.data.motion.current_setpoint_ma = self.current_setpoint_ma;
@@ -311,7 +315,12 @@ impl<
             .await;
         Timer::after(Duration::from_millis(1)).await;
 
-        match with_timeout(Duration::from_millis(100), self.get_current_device_img_hash()).await {
+        match with_timeout(
+            Duration::from_millis(100),
+            self.get_current_device_img_hash(),
+        )
+        .await
+        {
             Ok(current) => {
                 if current == latest[..4] {
                     Ok(true)
@@ -364,7 +373,9 @@ impl<
                     (!has_latest, false)
                 }
                 Err(_) => {
-                    defmt::info!("CurrentControlledDribblerMotor - hash check timed out, will flash");
+                    defmt::info!(
+                        "CurrentControlledDribblerMotor - hash check timed out, will flash"
+                    );
                     (true, true)
                 }
             }
@@ -372,7 +383,8 @@ impl<
 
         defmt::debug!(
             "CurrentControlledDribblerMotor - flash={}, hash_timed_out={}",
-            flash, hash_timed_out
+            flash,
+            hash_timed_out
         );
 
         if !flash {
@@ -382,7 +394,9 @@ impl<
 
         // always drain stale RX bytes and reset UART to bootloader baud before flashing;
         // hash check path leaves 2MHz baud and queued CCM bytes that corrupt bootloader comms
-        defmt::debug!("CurrentControlledDribblerMotor - draining rx queue and resetting uart before flash");
+        defmt::debug!(
+            "CurrentControlledDribblerMotor - draining rx queue and resetting uart before flash"
+        );
         while self.stm32_uart_interface.try_read_data().is_ok() {}
         let bl_cfg = get_bootloader_uart_config();
         self.stm32_uart_interface
@@ -391,11 +405,13 @@ impl<
 
         match self.init_firmware_image(true, self.firmware_image).await {
             Ok(()) => DribFlashOutcome::OkFlashed,
-            Err(()) => if hash_timed_out {
-                DribFlashOutcome::ErrHashTimeoutFlashFail
-            } else {
-                DribFlashOutcome::ErrFlashFail
-            },
+            Err(()) => {
+                if hash_timed_out {
+                    DribFlashOutcome::ErrHashTimeoutFlashFail
+                } else {
+                    DribFlashOutcome::ErrFlashFail
+                }
+            }
         }
     }
 }

@@ -135,7 +135,11 @@ impl<
                         &mut err_telem as *mut _ as *mut u8,
                         core::mem::size_of::<ErrorTelemetry>(),
                     );
-                    let msg_len = err_telem.error_message.iter().position(|&b| b == 0).unwrap_or(60);
+                    let msg_len = err_telem
+                        .error_message
+                        .iter()
+                        .position(|&b| b == 0)
+                        .unwrap_or(60);
                     defmt::error!(
                         "kicker ErrorTelemetry [ts={}]: {=[u8]:a}",
                         err_telem.timestamp,
@@ -352,11 +356,13 @@ impl<
 
         match self.init_firmware_image(true, self.firmware_image).await {
             Ok(()) => KickerFlashStatus::OkFlashed,
-            Err(()) => if hash_timed_out {
-                KickerFlashStatus::ErrHashTimeoutFlashFail
-            } else {
-                KickerFlashStatus::ErrFlashFail
-            },
+            Err(()) => {
+                if hash_timed_out {
+                    KickerFlashStatus::ErrHashTimeoutFlashFail
+                } else {
+                    KickerFlashStatus::ErrFlashFail
+                }
+            }
         }
     }
 }
