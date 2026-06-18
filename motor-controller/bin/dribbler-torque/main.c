@@ -41,6 +41,9 @@ static bool current_limited = false;
 static uint8_t params_seq_ctr = 0;
 static uint8_t seq_ctr = 0;
 
+static int16_t prev_current_cmd = 0;
+static float prev_vel_setpoint = 0.0f;
+
 // joint velocity + current controller
 // kP in mA/(rad/s); tuned experimentally for ECU22048H24-S101
 PidConstants_t vel_velcur_controller_constants = {
@@ -65,8 +68,10 @@ static IIRFilter_t hall_vel_filter;
 
 static bool allow_motor_to_run();
 static int16_t apply_current_limits(int16_t);
+static int16_t apply_current_slew_rate(int16_t);
+static float apply_vel_setpoint_slew_rate(float);
 static void update_dribbler_vel_est();
-static void do_vel_cur_control();
+static void do_vel_cur_control(float);
 
 static void update_errors();
 static void read_packets();
@@ -204,6 +209,8 @@ int main() {
 
         switch (motor_command_packet.motion_control_type) {
             case CCM_MCT_MOTOR_OFF:
+                prev_current_cmd = 0;
+                prev_vel_setpoint = 0.0f;
                 pwm6step_set_duty_cycle(0);
                 break;
             case CCM_MCT_DUTY_OPENLOOP:
@@ -212,33 +219,35 @@ int main() {
             case CCM_MCT_VOLTAGE_OPENLOOP:
                 pwm6step_set_voltage((int16_t) motor_command_packet.setpoint);
                 break;
-            case CCM_MCT_CURRENT:
+            case CCM_MCT_CURRENT: {
                 int16_t motor_current = motor_command_packet.current_setpoint_ma;
                 motor_current = apply_current_limits(motor_current);
+                motor_current = apply_current_slew_rate(motor_current);
 
                 response_packet.current_telemetry.current_setpoint_ma = motor_current;
                 pwm6step_set_current(motor_current);
-
                 break;
+            }
             case CCM_MCT_VELOCITY:
                 // hall-only velocity control not implemented; motor off
                 pwm6step_set_duty_cycle(0);
                 break;
-            case CCM_MCT_VELOCITY_CURRENT:
-                do_vel_cur_control();
+            case CCM_MCT_VELOCITY_CURRENT: {
+                float effective_setpoint = apply_vel_setpoint_slew_rate(motor_command_packet.setpoint);
+                do_vel_cur_control(effective_setpoint);
 
-                // add the feedforward current to the velocity PID output
                 float vel_component_clamped = fmaxf((float)INT16_MIN, fminf((float)INT16_MAX, vel_cur_component));
                 int16_t joint_motor_current = motor_command_packet.current_setpoint_ma + (int16_t)vel_component_clamped;
                 joint_motor_current = apply_current_limits(joint_motor_current);
+                joint_motor_current = apply_current_slew_rate(joint_motor_current);
 
                 response_packet.current_telemetry.current_setpoint_ma = joint_motor_current;
                 pwm6step_set_current(joint_motor_current);
-
                 break;
+            }
         }
 
-        response_packet.velocity_telemetry.vel_setpoint_rads = motor_command_packet.setpoint;
+        response_packet.velocity_telemetry.vel_setpoint_rads = prev_vel_setpoint;
         response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
         response_packet.current_telemetry.motor_voltage_cmd_mv = pwm6step_get_voltage_command();
 
@@ -291,12 +300,28 @@ static void update_dribbler_vel_est() {
     response_packet.velocity_telemetry.wheel_vel_rads = hall_vel_rads;
 }
 
-static void do_vel_cur_control() {
+static void do_vel_cur_control(float effective_setpoint) {
     vel_cur_component = pid_calculate_err_resp_only(
         &vel_velcur_controller,
-        motor_command_packet.setpoint,
+        effective_setpoint,
         hall_vel_rads,
         VELOCITY_LOOP_RATE_S);
+}
+
+static int16_t apply_current_slew_rate(int16_t target) {
+    int16_t delta = target - prev_current_cmd;
+    if (delta >  MAX_CURR_SLEW_RATE_MA_PER_MS) delta =  MAX_CURR_SLEW_RATE_MA_PER_MS;
+    if (delta < -MAX_CURR_SLEW_RATE_MA_PER_MS) delta = -MAX_CURR_SLEW_RATE_MA_PER_MS;
+    prev_current_cmd += delta;
+    return prev_current_cmd;
+}
+
+static float apply_vel_setpoint_slew_rate(float target) {
+    float delta = target - prev_vel_setpoint;
+    if (delta >  MAX_VEL_SETPOINT_SLEW_RATE_RADS_PER_MS) delta =  MAX_VEL_SETPOINT_SLEW_RATE_RADS_PER_MS;
+    if (delta < -MAX_VEL_SETPOINT_SLEW_RATE_RADS_PER_MS) delta = -MAX_VEL_SETPOINT_SLEW_RATE_RADS_PER_MS;
+    prev_vel_setpoint += delta;
+    return prev_vel_setpoint;
 }
 
 static void update_errors() {

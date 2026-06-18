@@ -31,6 +31,11 @@
 // hall velocity IIR low-pass cutoff
 #define HALL_VEL_FILTER_CUTOFF_HZ 20.0f
 
+// current slew rate limit - max mA change per 1ms control tick
+#define MAX_CURR_SLEW_RATE_MA_PER_MS       50
+// velocity setpoint slew rate - max rad/s change per 1ms control tick
+#define MAX_VEL_SETPOINT_SLEW_RATE_RADS_PER_MS  2.5f
+
 // ECU22048H24-S101: rated 1.67A (1670mA), peak 2.94A (2940mA)
 // threshold in decirads/s above which peak current is allowed
 #define DRIBBLER_TURNING_VEL_THRESH_DRADS 3
