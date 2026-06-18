@@ -13,15 +13,20 @@
 //!   3. pivot 180° → 0°  (3 s)   — robot pivots CW back
 //!   4. hold  at 0°      (1 s)   — robot stationary, held at start
 //!
-//! The ball is placed at the field origin (0, 0).  The orbit radius and
-//! angular velocity/acceleration limits default to `PivotParams::default()`.
+//! Button controls (take effect on the next command tick):
+//!   Down  — increase orbit radius (+1 cm)
+//!   Up    — decrease orbit radius (-1 cm)
+//!   Right — increase dribbler speed (+10 rpm)
+//!   Left  — decrease dribbler speed (-10 rpm)
+//!
+//! The ball is placed at the field origin (0, 0).
 
 use ateam_common_packets::{
     bindings::{BasicControl, BodyControlCommand, BodyControlMode, KickRequest, PivotCommand},
     radio::DataPacket,
 };
 use embassy_executor::InterruptExecutor;
-use embassy_stm32::{interrupt, pac::Interrupt};
+use embassy_stm32::{gpio::{Input, Pull}, interrupt, pac::Interrupt};
 use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _;
@@ -35,6 +40,7 @@ use ateam_control_board::{
     },
     robot_state::SharedRobotState,
 };
+use ateam_controls::pivot_trajectory::PivotParams;
 
 use embassy_time::Timer;
 use panic_probe as _;
@@ -90,6 +96,16 @@ const HOLD_TICKS: u32 = 100;
 /// Ball centre in field coordinates (meters).
 const BALL_X: f32 = 0.0;
 const BALL_Y: f32 = 0.0;
+
+/// Orbit radius adjustment per button press (meters).
+const ORBIT_RADIUS_STEP: f32 = 0.005;
+const ORBIT_RADIUS_MIN: f32 = 0.001;
+const ORBIT_RADIUS_MAX: f32 = 0.5;
+
+/// Dribbler speed adjustment per button press (rpm).
+const DRIBBLER_SPEED_STEP: f32 = 10.0;
+const DRIBBLER_SPEED_MIN: f32 = 0.0;
+const DRIBBLER_SPEED_MAX: f32 = 500.0;
 
 // ============================================================================
 // Phase state machine
@@ -165,6 +181,13 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     );
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(Interrupt::CEC);
 
+    // ── buttons (active-low, polled at loop rate) ────────────────────────────
+
+    let btn_up    = Input::new(p.PE14, Pull::Up);
+    let btn_down  = Input::new(p.PE15, Pull::Up);
+    let btn_left  = Input::new(p.PE12, Pull::Up);
+    let btn_right = Input::new(p.PE13, Pull::Up);
+
     // ── inter-task channels ──────────────────────────────────────────────────
 
     let led_command_subscriber = LED_COMMAND_PUBSUB.subscriber().unwrap();
@@ -228,6 +251,16 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     let _ = radio_uart_queue_spawner; // radio task not needed; suppress unused warning
 
+    // ── tunable parameters (adjusted via buttons) ────────────────────────────
+
+    let mut orbit_radius: f32 = PivotParams::default().orbit_radius;
+    let mut dribbler_speed: f32 = 300.0;
+
+    defmt::info!(
+        "hwtest-pivot: orbit_radius = {} m, dribbler_speed = {} rpm",
+        orbit_radius, dribbler_speed,
+    );
+
     // ── wait for the control task to finish motor firmware flashing ──────────
 
     Timer::after_millis(3000).await;
@@ -237,13 +270,49 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut phase = Phase::PivotToPI;
     let mut phase_tick: u32 = 0;
 
+    // Previous button states for falling-edge detection (true = not pressed).
+    let mut prev_up    = true;
+    let mut prev_down  = true;
+    let mut prev_left  = true;
+    let mut prev_right = true;
+
     defmt::info!("hwtest-pivot: starting — {}", phase.label());
 
     loop {
         Timer::after_millis(LOOP_INTERVAL_MS).await;
         phase_tick += 1;
 
-        // Advance phase when the current duration expires.
+        // ── button edge detection (falling edge = press) ─────────────────────
+
+        let cur_up    = btn_up.is_high();
+        let cur_down  = btn_down.is_high();
+        let cur_left  = btn_left.is_high();
+        let cur_right = btn_right.is_high();
+
+        if prev_down && !cur_down {
+            orbit_radius = (orbit_radius + ORBIT_RADIUS_STEP).min(ORBIT_RADIUS_MAX);
+            defmt::info!("hwtest-pivot: orbit_radius → {} m", orbit_radius);
+        }
+        if prev_up && !cur_up {
+            orbit_radius = (orbit_radius - ORBIT_RADIUS_STEP).max(ORBIT_RADIUS_MIN);
+            defmt::info!("hwtest-pivot: orbit_radius → {} m", orbit_radius);
+        }
+        if prev_right && !cur_right {
+            dribbler_speed = (dribbler_speed + DRIBBLER_SPEED_STEP).min(DRIBBLER_SPEED_MAX);
+            defmt::info!("hwtest-pivot: dribbler_speed → {} rpm", dribbler_speed);
+        }
+        if prev_left && !cur_left {
+            dribbler_speed = (dribbler_speed - DRIBBLER_SPEED_STEP).max(DRIBBLER_SPEED_MIN);
+            defmt::info!("hwtest-pivot: dribbler_speed → {} rpm", dribbler_speed);
+        }
+
+        prev_up    = cur_up;
+        prev_down  = cur_down;
+        prev_left  = cur_left;
+        prev_right = cur_right;
+
+        // ── phase advance ────────────────────────────────────────────────────
+
         if phase_tick >= phase.duration_ticks() {
             phase = phase.next();
             phase_tick = 0;
@@ -251,6 +320,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         }
 
         let target_theta = phase.target_theta();
+
+        // ── publish command ──────────────────────────────────────────────────
 
         command_publisher.publish_immediate(DataPacket::BasicControl(BasicControl {
             _bitfield_1: BasicControl::new_bitfield_1(
@@ -274,19 +345,19 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             reserved2: [0; 1],
 
             kick_vel: 0.0,
-            dribbler_speed: 400.0,
+            dribbler_speed,
 
             cmd: BodyControlCommand {
                 pivot: PivotCommand {
                     global_x_center: BALL_X,
                     global_y_center: BALL_Y,
                     global_theta: target_theta,
-                    // Zero → ManeuverManager uses PivotParams::default()
-                    max_angular_vel: 0.0,
+                    max_angular_vel: 0.0,  // zero → PivotParams::default()
                     max_angular_acc: 0.0,
-                    orbit_radius: 0.0,
+                    orbit_radius,
                 },
             },
         }));
     }
 }
+
