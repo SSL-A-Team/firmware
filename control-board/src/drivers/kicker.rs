@@ -9,7 +9,11 @@ use embassy_stm32::{
 };
 use embassy_time::{with_timeout, Duration, Timer};
 
-use ateam_common_packets::bindings::{KickRequest::KR_DISABLE, KickerControl, KickerTelemetry};
+use core::mem::MaybeUninit;
+
+use ateam_common_packets::bindings::{
+    DribblerCommand, ErrorTelemetry, KickRequest::KR_DISABLE, KickerControl, KickerTelemetry,
+};
 
 use crate::{image_hash, DEBUG_KICKER_UART_QUEUES};
 
@@ -89,24 +93,34 @@ impl<
         while let Ok(res) = self.stm32_uart_interface.try_read_data() {
             let buf = res.data();
 
-            if buf.len() != core::mem::size_of::<KickerTelemetry>() {
+            if buf.len() == core::mem::size_of::<KickerTelemetry>() {
+                received_packet = true;
+                unsafe {
+                    let state = &mut self.telemetry_state as *mut _ as *mut u8;
+                    for i in 0..core::mem::size_of::<KickerTelemetry>() {
+                        *state.offset(i as isize) = buf[i];
+                    }
+                }
+            } else if buf.len() == core::mem::size_of::<ErrorTelemetry>() {
+                unsafe {
+                    let mut err_telem: ErrorTelemetry = MaybeUninit::zeroed().assume_init();
+                    let dst = &mut err_telem as *mut _ as *mut u8;
+                    for i in 0..core::mem::size_of::<ErrorTelemetry>() {
+                        *dst.add(i) = buf[i];
+                    }
+                    let msg_len = err_telem.error_message.iter().position(|&b| b == 0).unwrap_or(60);
+                    defmt::error!(
+                        "kicker ErrorTelemetry [ts={}]: {=[u8]:a}",
+                        err_telem.timestamp,
+                        &err_telem.error_message[..msg_len]
+                    );
+                }
+            } else {
                 defmt::warn!(
                     "kicker interface - invalid packet of len {:?} data: {:?}",
                     buf.len(),
                     buf
                 );
-                continue;
-            }
-
-            received_packet = true;
-
-            // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
-            unsafe {
-                // copy receieved uart bytes into packet
-                let state = &mut self.telemetry_state as *mut _ as *mut u8;
-                for i in 0..core::mem::size_of::<KickerTelemetry>() {
-                    *state.offset(i as isize) = buf[i];
-                }
             }
         }
 
@@ -142,8 +156,9 @@ impl<
         self.command_state.kick_speed = kick_str;
     }
 
-    pub fn set_drib_vel(&mut self, drib_vel: f32) {
-        self.command_state.drib_speed = drib_vel;
+    pub fn set_drib_command(&mut self, mode: DribblerCommand::Type, setpoint: f32) {
+        self.command_state.dribbler_mode = mode;
+        self.command_state.drib_setpoint = setpoint;
     }
 
     pub fn ball_detected(&self) -> bool {

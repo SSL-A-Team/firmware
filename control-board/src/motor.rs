@@ -20,7 +20,7 @@ use ateam_common_packets::bindings::{
     CcmParameterPacket, CcmResponse,
     CcmResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM},
     CcmTelemetry,
-    MotionCommandType::OPEN_LOOP,
+    CcmMotionControlType::CCM_MCT_MOTOR_OFF,
 };
 
 pub struct CurrentControlledMotor<
@@ -84,7 +84,7 @@ impl<
 
             setpoint: 0.0,
             current_setpoint_ma: 0,
-            motion_type: OPEN_LOOP,
+            motion_type: CCM_MCT_MOTOR_OFF,
             reset_flagged: false,
             telemetry_enabled: false,
             motion_enabled: false,
@@ -125,7 +125,7 @@ impl<
 
             setpoint: 0.0,
             current_setpoint_ma: 0,
-            motion_type: OPEN_LOOP,
+            motion_type: CCM_MCT_MOTOR_OFF,
             reset_flagged: false,
             telemetry_enabled: false,
             motion_enabled: false,
