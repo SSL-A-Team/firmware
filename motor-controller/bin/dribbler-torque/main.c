@@ -42,11 +42,11 @@ static bool current_limited = false;
 // joint velocity + current controller
 // kP in mA/(rad/s); tuned experimentally for ECU22048H24-S101
 PidConstants_t vel_velcur_controller_constants = {
-    .kP = 5.0f,
-    .kI = 0.0f,
+    .kP = 0.1f,
+    .kI = 2.0f,
     .kD = 0.0f,
-    .kI_max = 100.0f,
-    .kI_min = -100.0f,
+    .kI_max = 500.0f,
+    .kI_min = -500.0f,
     .anti_jitter_thresh = (float) M_PI / 2.0f,
 };
 
@@ -55,6 +55,7 @@ static float vel_cur_component = 0.0;
 
 // hall-based velocity estimate in rad/s
 static float hall_vel_rads = 0.0f;
+static IIRFilter_t hall_vel_filter;
 
 ////////////////////////////
 //  Function Definitions  //
@@ -163,6 +164,7 @@ int main() {
     }
 
     pid_initialize(&vel_velcur_controller, &vel_velcur_controller_constants);
+    iir_filter_init(&hall_vel_filter, iir_filter_alpha_from_cutoff_hz(HALL_VEL_FILTER_CUTOFF_HZ, VELOCITY_LOOP_RATE_S));
 
     // Turn off Red/Yellow LED after booting.
     turn_off_red_led();
@@ -236,7 +238,6 @@ int main() {
         response_packet.velocity_telemetry.vel_setpoint_rads = motor_command_packet.setpoint;
         response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
         response_packet.current_telemetry.motor_voltage_cmd_mv = pwm6step_get_voltage_command();
-        response_packet.current_telemetry.hall_vel_est_crads = pwm6step_hall_get_rps_estimate();
 
         memcpy(response_packet.current_telemetry.current_samples_ma, pwm6step_get_current_log(), sizeof(response_packet.current_telemetry.current_samples_ma));
 
@@ -264,7 +265,7 @@ static bool allow_motor_to_run() {
 static int16_t apply_current_limits(int16_t desired_current) {
     int16_t applied_current = desired_current;
 
-    bool motor_turning = abs(response_packet.current_telemetry.hall_vel_est_crads) > DRIBBLER_TURNING_VEL_THRESH_CRADS;
+    bool motor_turning = abs(response_packet.current_telemetry.hall_vel_est_drads) > DRIBBLER_TURNING_VEL_THRESH_DRADS;
     int16_t limit = motor_turning ? MAX_CURR_DRIBBLER_TURNING : MAX_CURR_DRIBBLER_NOT_TURNING;
 
     if (desired_current > limit) {
@@ -283,9 +284,9 @@ static int16_t apply_current_limits(int16_t desired_current) {
 }
 
 static void update_dribbler_vel_est() {
-    int16_t hall_crads = pwm6step_hall_get_rps_estimate();
-    hall_vel_rads = hall_crads / 100.0f;
-    // mirror into velocity_telemetry for velocity PID and host visibility
+    int16_t hall_drads = pwm6step_hall_get_rps_estimate();
+    response_packet.current_telemetry.hall_vel_est_drads = hall_drads;
+    hall_vel_rads = iir_filter_update(&hall_vel_filter, hall_drads / 10.0f);
     response_packet.velocity_telemetry.wheel_vel_rads = hall_vel_rads;
 }
 

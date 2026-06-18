@@ -870,14 +870,14 @@ int16_t pwm6step_hall_get_rps_estimate() {
     if (!pwm6step_hall_rps_estimate_valid()) return 0;
     uint32_t ticks = hall_last_transition_ticks;
     if (ticks == 0) return 0;
-    // 6 transitions/electrical rev, MOTOR_POLE_PAIRS elec-revs/mech-rev, 100*2pi crad/rev.
-    // 628 = floor(100 * 2 * pi); uint64 intermediate prevents overflow.
-    int32_t crads = (int32_t)((uint64_t)F_SYS_CLK_HZ * 628ULL / (6ULL * MOTOR_POLE_PAIRS * (uint64_t)ticks));
-    if (hall_detected_direction == CLOCKWISE) crads = -crads;
-    if (INVERT_MOTOR_DIRECTION) crads = -crads;
-    if (crads >  INT16_MAX) crads = INT16_MAX;
-    if (crads <  INT16_MIN) crads = INT16_MIN;
-    return (int16_t)crads;
+    // 6 transitions/electrical rev, MOTOR_POLE_PAIRS elec-revs/mech-rev, 10*2pi drad/rev.
+    // 63 = round(10 * 2 * pi); uint64 intermediate prevents overflow.
+    int32_t drads = (int32_t)((uint64_t)F_SYS_CLK_HZ * 63ULL / (6ULL * MOTOR_POLE_PAIRS * (uint64_t)ticks));
+    if (hall_detected_direction == CLOCKWISE) drads = -drads;
+    if (INVERT_MOTOR_DIRECTION) drads = -drads;
+    if (drads >  INT16_MAX) drads = INT16_MAX;
+    if (drads <  INT16_MIN) drads = INT16_MIN;
+    return (int16_t)drads;
 }
 
 const MotorErrors_t pwm6step_get_motor_errors() {

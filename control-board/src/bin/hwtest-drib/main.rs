@@ -265,7 +265,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
                 telem_tick = 0;
                 let telem = kicker.get_lastest_state();
                 let ct = &telem.dribbler_motor.current_telemetry;
-                let vel_rads = (ct.hall_vel_est_crads as f32) / 100.0;
+                let vel_rads = (ct.hall_vel_est_drads as f32) / 10.0;
                 let vel_rpm = vel_rads * 60.0 / (2.0 * core::f32::consts::PI);
                 let samples = &ct.current_samples_ma;
                 let sum: u32 = samples[..20].iter().map(|&s| s as u32).sum();

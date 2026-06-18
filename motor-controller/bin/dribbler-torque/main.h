@@ -28,9 +28,12 @@
 //  FILTERING/TUNING  //
 ////////////////////////
 
+// hall velocity IIR low-pass cutoff
+#define HALL_VEL_FILTER_CUTOFF_HZ 20.0f
+
 // ECU22048H24-S101: rated 1.67A (1670mA), peak 2.94A (2940mA)
-// threshold in centirads/s above which peak current is allowed
-#define DRIBBLER_TURNING_VEL_THRESH_CRADS 30
+// threshold in decirads/s above which peak current is allowed
+#define DRIBBLER_TURNING_VEL_THRESH_DRADS 3
 // 90% of rated continuous current in mA
 #define MAX_CURR_DRIBBLER_NOT_TURNING 1503
 // 90% of peak current in mA
