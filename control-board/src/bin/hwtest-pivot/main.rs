@@ -263,7 +263,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     // ── wait for the control task to finish motor firmware flashing ──────────
 
-    Timer::after_millis(3000).await;
+    Timer::after_millis(5000).await;
 
     // ── pivot sequencer loop ─────────────────────────────────────────────────
 
@@ -355,6 +355,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                     max_angular_vel: 0.0,  // zero → PivotParams::default()
                     max_angular_acc: 0.0,
                     orbit_radius,
+                    heading_lag: 1.0,
                 },
             },
         }));
