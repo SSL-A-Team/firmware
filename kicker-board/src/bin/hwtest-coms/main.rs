@@ -154,6 +154,7 @@ async fn high_pri_kick_task(
                 0,
                 ball_detected as u16,
                 0,
+                0,
                 Default::default(),
             );
             kicker_telemetry_packet.rail_voltage = rail_voltage;
