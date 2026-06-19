@@ -69,7 +69,8 @@ const MIN_KICK_DURATION_US: f32 = 1400.0;
 const MAX_KICK_DURATION_US: f32 = 5500.0;
 const MAX_CHIP_DURATION_US: f32 = 10000.0;
 
-const SHUTDOWN_MIN_KICK_DURATION_US: f32 = MIN_KICK_DURATION_US;
+const SHUTDOWN_MIN_KICK_DURATION_US: f32 = 750.0;
+const SHUTDOWN_MAX_KICK_DURATION_US: f32 = 4000.0;
 const SHUTDOWN_DISCHARGE_START_VOLTAGE: f32 = 180.0;
 
 pub const CHARGE_TARGET_VOLTAGE: f32 = 182.0;
@@ -379,7 +380,7 @@ async fn high_pri_kick_task(
             // Increase pulse width as voltage drops to maintain discharge rate.
             // High voltage → short pulse, low voltage → long pulse.
             let v_range = Range::new(CHARGE_SAFE_VOLTAGE, SHUTDOWN_DISCHARGE_START_VOLTAGE);
-            let dur_range = Range::new(MAX_KICK_DURATION_US, SHUTDOWN_MIN_KICK_DURATION_US);
+            let dur_range = Range::new(SHUTDOWN_MAX_KICK_DURATION_US, SHUTDOWN_MIN_KICK_DURATION_US);
             v_range.map_value_to_range(
                 rail_voltage_ave.clamp(CHARGE_SAFE_VOLTAGE, SHUTDOWN_DISCHARGE_START_VOLTAGE),
                 &dur_range,
@@ -402,6 +403,10 @@ async fn high_pri_kick_task(
         // wants a new unique event
         if kick_command != KickType::None {
             kick_command_cleared = false;
+            // Reset latch so stale KR_KICK_NOW packets queued during KICK_COOLDOWN cannot
+            // re-fire. latched_command stays KR_KICK_NOW otherwise, and kick_command_cleared=false
+            // prevents updating it, so the kick fires again on every subsequent drain cycle.
+            latched_command = KR_ARM;
         }
 
         // perform charge/kick actions. this function handles elec/mechanical safety
