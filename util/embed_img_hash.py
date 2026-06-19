@@ -13,8 +13,7 @@ hash values are injected into the binary, so the stored hash value is zeroed
 out for the computation.
 """
 import os
-import subprocess
-import binascii
+import hashlib
 from pathlib import Path
 from argparse import ArgumentParser
 
@@ -22,34 +21,54 @@ from argparse import ArgumentParser
 firmware_dir_path = (Path(__file__) / ".." / "..").resolve()
 kicker_bin_path = firmware_dir_path / "kicker-board" / "target" / "thumbv7em-none-eabihf" / "release" / "kicker.bin"
 wheel_bin_path = firmware_dir_path / "motor-controller" / "build" / "bin" / "wheel-torque.bin"
-dribbler_bin_path = firmware_dir_path / "motor-controller" / "build" / "bin" / "dribbler.bin"
+dribbler_bin_path = firmware_dir_path / "motor-controller" / "build" / "bin" / "dribbler-torque.bin"
 wheel_img_hash_magic_ctrl = b'WheelImgHashCtrl'
 wheel_img_hash_magic_weel = b'WheelImgHashWeel'
 kicker_img_hash_magic_ctrl = b'KickrImgHashCtrl'
 kicker_img_hash_magic_kick = b'KickrImgHashKick'
 dribbler_img_hash_magic_kick = b'DrblrImgHashKick'
-dribbler_img_hash_magic_drbl = b'DrblrImgHashDrbl'
+dribbler_img_hash_magic_drbl = b'DrbTrqImgHashDrb'
 assert len(wheel_img_hash_magic_ctrl) == len(wheel_img_hash_magic_weel) == len(kicker_img_hash_magic_ctrl) == len(kicker_img_hash_magic_kick) == len(dribbler_img_hash_magic_kick) == len(dribbler_img_hash_magic_drbl)
-img_hash_offset = len(wheel_img_hash_magic_ctrl)  # Bytes into WheelImgHash struct for the hash value
+img_hash_offset = len(wheel_img_hash_magic_ctrl)  # Bytes into ImgHash struct for the hash value
 img_hash_length = 16  # Number of bytes for the hash value
 
+# Self-referential magics: the hash of binary X is stored inside binary X itself.
+# When computing the hash of X, zero these fields first so the result is stable
+# across builds regardless of what was previously embedded.
+self_ref_magics = {
+    kicker_bin_path:   [kicker_img_hash_magic_kick],
+    dribbler_bin_path: [dribbler_img_hash_magic_drbl],
+    wheel_bin_path:    [wheel_img_hash_magic_weel],
+}
 
-def get_img_hash(fpath):
-    p = subprocess.run(["md5sum", fpath], text=True, stdout=subprocess.PIPE)
-    if p.returncode != 0:
-        raise Exception(f"Unable to get hash, command failed: md5sum {fpath}")
-    hash_string = p.stdout.split(" ")[0]
-    return binascii.unhexlify(hash_string)  # turn into bytes object
+
+def get_img_hash_stable(fpath):
+    """
+    Compute md5 of a firmware image with any self-referential hash fields zeroed,
+    so the result is stable regardless of what was previously embedded.
+    """
+    with open(fpath, "rb") as f:
+        image = bytearray(f.read())
+
+    for magic in self_ref_magics.get(fpath, []):
+        idx = 0
+        while True:
+            found = image.find(magic, idx)
+            if found == -1:
+                break
+            image[found + img_hash_offset : found + img_hash_offset + img_hash_length] = b'\x00' * img_hash_length
+            idx = found + 1
+
+    return hashlib.md5(bytes(image)).digest()
 
 def embed_img_hash(fpath, img_hash_magic, img_hash):
     with open(fpath, "rb") as f:
         image = f.read()
 
     # Find the firmware hash struct in the image
-    struct_start_idx = image.find(img_hash_magic)  # It'll be backwards because of little endian byte
+    struct_start_idx = image.find(img_hash_magic)
     if struct_start_idx == -1:
         raise Exception(f"Unable to find firmware hash magic bytes in {fpath}")
-    # is it possible this sequence happens to occur more than once?
     if image.find(img_hash_magic[:], struct_start_idx+1) != -1:
         raise Exception("Unable to determine firmware hash structure location, magic bytes occur more than once")
 
@@ -61,18 +80,16 @@ def embed_img_hash(fpath, img_hash_magic, img_hash):
     with open(fpath, "wb") as f:
         f.write(new_image)
 
-def try_embed_img_hash(embed_img_path, img_path, img_hash_magic):
+def try_embed_img_hash(embed_img_path, img_path, img_hash_magic, img_hash):
     """
     embed_img_path: path to firmware image that gets the hash injected into
-    img_path: path to firmware image to compute hash from
-    img_hash_magic: magic bytes that are present in the image at 'embed_img_path' to find hash struct
+    img_path: path to firmware image the hash was computed from (for reporting)
+    img_hash_magic: magic bytes present in embed_img_path to find hash struct
+    img_hash: precomputed stable hash bytes to embed
     """
     try:
         if not os.path.exists(embed_img_path):
             raise Exception(f"embed_img_path - path not found '{embed_img_path}'")
-        if not os.path.exists(img_path):
-            raise Exception(f"img_path - path not found '{img_path}'")
-        img_hash = get_img_hash(img_path)
         embed_img_hash(embed_img_path, img_hash_magic, img_hash)
     except Exception:
         return False
@@ -87,6 +104,13 @@ if __name__ == "__main__":
     if not target_bin.exists():
         print(f"embed_git_status.py - ERROR - Could not find target binary at path '{target_bin}'")
         exit(1)
+
+    # Precompute stable hashes (self-referential fields zeroed before hashing)
+    hashes = {}
+    for bin_path in [wheel_bin_path, kicker_bin_path, dribbler_bin_path]:
+        if os.path.exists(bin_path):
+            hashes[bin_path] = get_img_hash_stable(bin_path)
+
     success_files = set()
     failure_files = set()
     for source_bin, magic_bytes in [
@@ -97,7 +121,10 @@ if __name__ == "__main__":
         (dribbler_bin_path, dribbler_img_hash_magic_kick),
         (dribbler_bin_path, dribbler_img_hash_magic_drbl),
     ]:
-        result = try_embed_img_hash(target_bin, source_bin, magic_bytes)
+        if source_bin not in hashes:
+            failure_files.add(source_bin)
+            continue
+        result = try_embed_img_hash(target_bin, source_bin, magic_bytes, hashes[source_bin])
         if result:
             success_files.add(source_bin)
         else:
