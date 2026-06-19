@@ -24,7 +24,7 @@ pub fn pose_pid_gains() -> Matrix3x5<f32> {
 /// absolute pose error on an axis is below the threshold, the PID output for
 /// that axis is linearly scaled toward zero, matching the fixed-point PI
 /// anti-jitter behavior on the motor controllers.
-pub const POSE_PID_ANTI_JITTER_THRESH: Vector3f = Vector3f::new(0.01, 0.01, 0.02);
+pub const POSE_PID_ANTI_JITTER_THRESH: Vector3f = Vector3f::new(0.001, 0.001, 0.01);
 
 /// Acceleration (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
 /// Scales traj accel and PID feedback respectively in the wheel torque feedforward.
