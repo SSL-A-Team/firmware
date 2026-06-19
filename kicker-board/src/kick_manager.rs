@@ -22,13 +22,8 @@
  *   is in an active state.
  */
 
-use ateam_lib_stm32::math::range::Range;
 use embassy_stm32::gpio::Output;
 use embassy_time::{Duration, Timer};
-
-const MIN_KICK_DURATION_US: f32 = 1400.0;
-const MAX_KICK_DURATION_US: f32 = 5500.0; // 10ms (10k us) max power kick
-const MAX_CHIP_DURATION_US: f32 = 10000.0; // 10ms (10k us) max power kick
 
 const CHARGE_COOLDOWN: Duration = Duration::from_micros(50); // 50 micros (5 switching cycles) to confirm switching regulator is off
 const KICK_COOLDOWN: Duration = Duration::from_millis(100); // TODO: get estiamted mechanical return time from Matt and pad it
@@ -75,7 +70,7 @@ impl<'a> KickManager<'a> {
         rail_voltage: f32,
         charge: bool,
         kick_type: KickType,
-        kick_speed: f32,
+        kick_duration_us: u64,
     ) -> Result<(), ()> {
         // latch an error for invalid battery voltage
         if !(VBATT_UNDERVOLTAGE_LOCKOUT..=VBATT_OVERVOLTAGE_LOCKOUT).contains(&battery_voltage) {
@@ -96,12 +91,6 @@ impl<'a> KickManager<'a> {
             return Err(());
         }
 
-        // set charge duration via mapping from kick speed
-        let kick_speed_map = Range::new(0f32, 5.3f32);
-        let kick_duration_map = Range::new(MIN_KICK_DURATION_US, MAX_KICK_DURATION_US);
-        let charge_duration_us: f32 =
-            kick_speed_map.map_value_to_range(kick_speed, &kick_duration_map);
-
         // handle charge, kick, and chip
         match kick_type {
             KickType::Kick => {
@@ -113,9 +102,9 @@ impl<'a> KickManager<'a> {
                 self.charge_pin.set_low();
                 Timer::after(CHARGE_COOLDOWN).await;
 
-                // beign kick, wait time to determine power
+                // begin kick, hold for caller-computed duration
                 self.kick_pin.set_high();
-                Timer::after(Duration::from_micros(charge_duration_us as u64)).await;
+                Timer::after(Duration::from_micros(kick_duration_us)).await;
 
                 // end kick
                 self.kick_pin.set_low();
@@ -138,12 +127,9 @@ impl<'a> KickManager<'a> {
                 self.charge_pin.set_low();
                 Timer::after(CHARGE_COOLDOWN).await;
 
-                // begin chip, wait time to determine power
+                // begin chip, hold for caller-computed duration
                 self.chip_pin.set_high();
-                Timer::after(Duration::from_micros(
-                    (MAX_CHIP_DURATION_US * kick_speed) as u64,
-                ))
-                .await;
+                Timer::after(Duration::from_micros(kick_duration_us)).await;
 
                 // end chip
                 self.chip_pin.set_low();

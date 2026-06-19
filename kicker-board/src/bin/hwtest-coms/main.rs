@@ -141,7 +141,7 @@ async fn high_pri_kick_task(
 
         // no charge/kick in coms test
         let res = kick_manager
-            .command(22.5, rail_voltage, false, KickType::None, 0.0)
+            .command(22.5, rail_voltage, false, KickType::None, 0u64)
             .await;
 
         // send telemetry packet

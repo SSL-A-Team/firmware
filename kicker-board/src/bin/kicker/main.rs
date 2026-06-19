@@ -46,6 +46,7 @@ use ateam_kicker_board::{
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface::{get_bootloader_uart_config, Stm32Interface},
     idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl,
+    math::range::Range,
     uart::queue::{UartReadQueue, UartWriteQueue},
 };
 
@@ -57,7 +58,13 @@ use ateam_common_packets::bindings::{
 };
 
 const MAX_KICK_SPEED: f32 = 6.5;
-const SHUTDOWN_KICK_SPEED: f32 = 0.20;
+
+const MIN_KICK_DURATION_US: f32 = 1400.0;
+const MAX_KICK_DURATION_US: f32 = 5500.0;
+const MAX_CHIP_DURATION_US: f32 = 10000.0;
+
+const SHUTDOWN_MIN_KICK_DURATION_US: f32 = MIN_KICK_DURATION_US;
+const SHUTDOWN_DISCHARGE_START_VOLTAGE: f32 = 180.0;
 
 pub const CHARGE_TARGET_VOLTAGE: f32 = 182.0;
 pub const CHARGE_OVERVOLT_THRESH_VOLTAGE: f32 = 195.0;
@@ -280,16 +287,6 @@ async fn high_pri_kick_task(
             }
         };
 
-        // scale kick strength from m/s to duty for the critical section
-        // if shutdown is requested and not complete, set kick discharge kick strength to 5%
-        let kick_speed = if shutdown_completed {
-            0.0
-        } else if shutdown_requested {
-            SHUTDOWN_KICK_SPEED
-        } else {
-            fmaxf(0.0, fminf(MAX_KICK_SPEED, kicker_control_packet.kick_speed))
-        };
-
         // if control requests only an ARM or DISABLE, clear the active command
         // software/joystick is not asserting a kick event, so any future kick event is a unique request
         if kicker_control_packet.kick_request == KR_ARM
@@ -355,6 +352,31 @@ async fn high_pri_kick_task(
             }
         };
 
+        // compute kick duration from command context
+        let kick_duration_us: u64 = if shutdown_completed {
+            0
+        } else if shutdown_requested {
+            // Increase pulse width as voltage drops to maintain discharge rate.
+            // High voltage → short pulse, low voltage → long pulse.
+            let v_range = Range::new(CHARGE_SAFE_VOLTAGE, SHUTDOWN_DISCHARGE_START_VOLTAGE);
+            let dur_range = Range::new(MAX_KICK_DURATION_US, SHUTDOWN_MIN_KICK_DURATION_US);
+            v_range.map_value_to_range(
+                rail_voltage_ave.clamp(CHARGE_SAFE_VOLTAGE, SHUTDOWN_DISCHARGE_START_VOLTAGE),
+                &dur_range,
+            ) as u64
+        } else {
+            let speed = fmaxf(0.0, fminf(MAX_KICK_SPEED, kicker_control_packet.kick_speed));
+            match kick_command {
+                KickType::Kick => {
+                    let speed_range = Range::new(0f32, MAX_KICK_SPEED);
+                    let dur_range = Range::new(MIN_KICK_DURATION_US, MAX_KICK_DURATION_US);
+                    speed_range.map_value_to_range(speed, &dur_range) as u64
+                }
+                KickType::Chip => (MAX_CHIP_DURATION_US * speed) as u64,
+                KickType::None => 0,
+            }
+        };
+
         // the latched command is actionable, and the critical section will be instructed to carry it out in the next segment
         // set clear the command cleared flag, indicating the control board will need to deassert any kick command showing it
         // wants a new unique event
@@ -371,7 +393,7 @@ async fn high_pri_kick_task(
                     rail_voltage_ave,
                     false,
                     KickType::None,
-                    0.0,
+                    0u64,
                 )
                 .await
         } else {
@@ -388,7 +410,7 @@ async fn high_pri_kick_task(
                     rail_voltage_ave,
                     charge_hv_rail,
                     kick_command,
-                    kick_speed,
+                    kick_duration_us,
                 )
                 .await
         };
