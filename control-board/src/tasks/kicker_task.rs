@@ -324,13 +324,8 @@ impl<
 
                             self.kicker_driver.set_kick_strength(bc_pkt.kick_vel);
                             self.kicker_driver.request_kick(bc_pkt.kick_request as u32);
-                            let drib_mode = if bc_pkt.dribbler_speed == 0.0 {
-                                DribblerCommand::DC_DISABLE
-                            } else {
-                                DribblerCommand::DC_VELOCITY
-                            };
                             self.kicker_driver
-                                .set_drib_command(drib_mode, bc_pkt.dribbler_speed);
+                                .set_drib_command(bc_pkt.dribbler_mode, bc_pkt.dribbler_setpoint);
                         }
                         DataPacket::ParameterCommand(_) => {
                             // we currently don't have any kicker parameters

@@ -31,6 +31,12 @@ use crate::DEBUG_DRIB_UART_QUEUES;
 /// Number of current samples to average for ball detection.
 const BALL_DETECT_SAMPLE_COUNT: usize = 20;
 
+/// 0.0-1.0 setpoint scaling limits.
+/// Matches MAX_CURR_DRIBBLER_TURNING (90% peak) in dribbler-torque/main.h.
+/// Motor controller still clamps to 1503 mA when not turning.
+const MAX_VELOCITY_SETPOINT_RADS: f32 = 500.0;
+const MAX_CURRENT_SETPOINT_MA: f32 = 2646.0;
+
 #[derive(defmt::Format)]
 pub enum DribFlashOutcome {
     OkHashMatch,
@@ -150,6 +156,7 @@ impl<
     /// Smart modes (HARD_RECEIVE, SOFT_RECEIVE, DRIBBLE) are stubbed as 0 mA current
     /// until full implementation on the kicker board side.
     pub fn set_drib_command(&mut self, mode: DribblerCommand::Type, setpoint: f32) {
+        let setpoint = setpoint.clamp(0.0, 1.0);
         match mode {
             DC_DISABLE => {
                 self.motion_control_type = CCM_MCT_MOTOR_OFF;
@@ -158,13 +165,13 @@ impl<
             }
             DC_VELOCITY => {
                 self.motion_control_type = CCM_MCT_VELOCITY_CURRENT;
-                self.setpoint = setpoint;
+                self.setpoint = setpoint * MAX_VELOCITY_SETPOINT_RADS;
                 self.current_setpoint_ma = 0;
             }
             DC_CURRENT => {
                 self.motion_control_type = CCM_MCT_CURRENT;
                 self.setpoint = 0.0;
-                self.current_setpoint_ma = setpoint as i16;
+                self.current_setpoint_ma = (setpoint * MAX_CURRENT_SETPOINT_MA) as i16;
             }
             // smart modes: stubbed as 0 mA current
             DC_HARD_RECEIVE | DC_SOFT_RECEIVE | DC_DRIBBLE => {
