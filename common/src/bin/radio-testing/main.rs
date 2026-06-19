@@ -6,8 +6,8 @@ use std::{
 };
 
 use ateam_common_packets::bindings::{
-    BasicControl, BodyControlCommand, BodyControlMode, CommandCode, HelloRequest, HelloResponse,
-    KickRequest, LocalVelocityCommand, RadioData, RadioHeader, RadioPacket,
+    BasicControl, BodyControlCommand, BodyControlMode, CommandCode, DribblerCommand, HelloRequest,
+    HelloResponse, KickRequest, LocalVelocityCommand, RadioData, RadioHeader, RadioPacket,
 };
 use local_ip_address::local_ip;
 
@@ -77,10 +77,10 @@ fn main() -> std::io::Result<()> {
                 body_control_mode: BodyControlMode::BCM_LOCAL_VELOCITY,
                 kick_request: KickRequest::KR_ARM,
                 play_song: 0,
-                reserved2: [0; 1],
+                dribbler_mode: DribblerCommand::DC_DISABLE,
 
                 kick_vel: 0.,
-                dribbler_speed: 0.,
+                dribbler_setpoint: 0.,
 
                 cmd: BodyControlCommand {
                     local_vel: LocalVelocityCommand {

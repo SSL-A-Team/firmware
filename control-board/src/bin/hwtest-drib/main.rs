@@ -60,11 +60,9 @@ const MODE_NAMES: [&str; MODE_COUNT] = [
     "VELOCITY",
     "CURRENT",
 ];
-// HARD_RECEIVE / SOFT_RECEIVE / DRIBBLE: dimensionless 0.0-1.0, step 0.1
-// VELOCITY: rad/s — max and step TBD experimentally, initial values used
-// CURRENT: mA     — max and step TBD experimentally, initial values used
-const MODE_MAX: [f32; MODE_COUNT] = [1.0, 1.0, 1.0, 500.0, 1500.0];
-const MODE_STEP: [f32; MODE_COUNT] = [0.1, 0.1, 0.1, 5.0, 50.0];
+// All modes: dimensionless 0.0-1.0. CCM driver maps to raw units.
+const MODE_MAX: [f32; MODE_COUNT] = [1.0, 1.0, 1.0, 1.0, 1.0];
+const MODE_STEP: [f32; MODE_COUNT] = [0.1, 0.1, 0.1, 0.01, 0.01];
 
 // Print telemetry every 200 ms (400 ticks at 500 µs/tick)
 const TELEM_PRINT_TICKS: u32 = 400;
