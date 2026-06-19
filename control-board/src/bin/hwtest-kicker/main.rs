@@ -12,12 +12,8 @@ use ateam_common_packets::bindings::{
     KickerTelemetry, PowerCommand, PowerTelemetry,
 };
 use ateam_control_board::{
-    drivers::kicker::Kicker,
-    get_system_config,
-    include_kicker_bin,
-    SystemIrqs,
-    DEBUG_KICKER_UART_QUEUES,
-    DEBUG_POWER_UART_QUEUES,
+    drivers::kicker::Kicker, get_system_config, include_kicker_bin, SystemIrqs,
+    DEBUG_KICKER_UART_QUEUES, DEBUG_POWER_UART_QUEUES,
 };
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface::{self, Stm32Interface},
@@ -82,12 +78,12 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // Buttons: active-low, internal pull-up
     // PE10=back(toggle telem), PE11=center(kick), PE12=left(drib-), PE13=right(drib+)
     // PE14=up(kick speed+),    PE15=down(kick speed-)
-    let btn_back   = Input::new(p.PE10, Pull::Up);
+    let btn_back = Input::new(p.PE10, Pull::Up);
     let btn_center = Input::new(p.PE11, Pull::Up);
-    let btn_left   = Input::new(p.PE12, Pull::Up);
-    let btn_right  = Input::new(p.PE13, Pull::Up);
-    let btn_up     = Input::new(p.PE14, Pull::Up);
-    let btn_down   = Input::new(p.PE15, Pull::Up);
+    let btn_left = Input::new(p.PE12, Pull::Up);
+    let btn_right = Input::new(p.PE13, Pull::Up);
+    let btn_up = Input::new(p.PE14, Pull::Up);
+    let btn_down = Input::new(p.PE15, Pull::Up);
 
     // Kicker UART (UART8, PE0=rx, PE1=tx)
     let kicker_usart = Uart::new(
@@ -172,20 +168,20 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // Button edge detection + debounce (500 µs tick)
     // Center gets extra margin over kicker KICK_COOLDOWN (100ms) to prevent double-fire
-    const BTN_COOLDOWN: u32 = 200;       // 100ms — general buttons
-    const BTN_KICK_COOLDOWN: u32 = 600;  // 300ms — center/kick button
-    let mut prev_back   = false;
+    const BTN_COOLDOWN: u32 = 200; // 100ms — general buttons
+    const BTN_KICK_COOLDOWN: u32 = 600; // 300ms — center/kick button
+    let mut prev_back = false;
     let mut prev_center = false;
-    let mut prev_left   = false;
-    let mut prev_right  = false;
-    let mut prev_up     = false;
-    let mut prev_down   = false;
-    let mut cd_back:   u32 = 0;
+    let mut prev_left = false;
+    let mut prev_right = false;
+    let mut prev_up = false;
+    let mut prev_down = false;
+    let mut cd_back: u32 = 0;
     let mut cd_center: u32 = 0;
-    let mut cd_left:   u32 = 0;
-    let mut cd_right:  u32 = 0;
-    let mut cd_up:     u32 = 0;
-    let mut cd_down:   u32 = 0;
+    let mut cd_left: u32 = 0;
+    let mut cd_right: u32 = 0;
+    let mut cd_up: u32 = 0;
+    let mut cd_down: u32 = 0;
 
     defmt::info!(
         "Ready. BACK=toggle telem, CENTER=kick, UP/DOWN=kick speed, LEFT/RIGHT=drib current"
@@ -245,19 +241,31 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
         // Button handling suppressed during shutdown
         if !power_shutdown_requested {
-            if cd_back   > 0 { cd_back   -= 1; }
-            if cd_center > 0 { cd_center -= 1; }
-            if cd_left   > 0 { cd_left   -= 1; }
-            if cd_right  > 0 { cd_right  -= 1; }
-            if cd_up     > 0 { cd_up     -= 1; }
-            if cd_down   > 0 { cd_down   -= 1; }
+            if cd_back > 0 {
+                cd_back -= 1;
+            }
+            if cd_center > 0 {
+                cd_center -= 1;
+            }
+            if cd_left > 0 {
+                cd_left -= 1;
+            }
+            if cd_right > 0 {
+                cd_right -= 1;
+            }
+            if cd_up > 0 {
+                cd_up -= 1;
+            }
+            if cd_down > 0 {
+                cd_down -= 1;
+            }
 
-            let now_back   = btn_back.is_low();
+            let now_back = btn_back.is_low();
             let now_center = btn_center.is_low();
-            let now_left   = btn_left.is_low();
-            let now_right  = btn_right.is_low();
-            let now_up     = btn_up.is_low();
-            let now_down   = btn_down.is_low();
+            let now_left = btn_left.is_low();
+            let now_right = btn_right.is_low();
+            let now_up = btn_up.is_low();
+            let now_down = btn_down.is_low();
 
             // BACK: toggle telemetry printing
             if now_back && !prev_back && cd_back == 0 {
@@ -316,12 +324,12 @@ async fn main(_spawner: embassy_executor::Spawner) {
                 defmt::info!("kick_speed={} m/s", kick_speed);
             }
 
-            prev_back   = now_back;
+            prev_back = now_back;
             prev_center = now_center;
-            prev_left   = now_left;
-            prev_right  = now_right;
-            prev_up     = now_up;
-            prev_down   = now_down;
+            prev_left = now_left;
+            prev_right = now_right;
+            prev_up = now_up;
+            prev_down = now_down;
         }
 
         if telem_print {

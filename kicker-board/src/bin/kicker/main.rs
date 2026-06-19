@@ -48,8 +48,9 @@ use ateam_kicker_board::{
 
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface::{get_bootloader_uart_config, Stm32Interface},
-    idle_buffered_uart_spawn_tasks, static_idle_buffered_uart_nl,
+    idle_buffered_uart_spawn_tasks,
     math::range::Range,
+    static_idle_buffered_uart_nl,
     uart::queue::{UartReadQueue, UartWriteQueue},
 };
 
@@ -380,7 +381,8 @@ async fn high_pri_kick_task(
             // Increase pulse width as voltage drops to maintain discharge rate.
             // High voltage → short pulse, low voltage → long pulse.
             let v_range = Range::new(CHARGE_SAFE_VOLTAGE, SHUTDOWN_DISCHARGE_START_VOLTAGE);
-            let dur_range = Range::new(SHUTDOWN_MAX_KICK_DURATION_US, SHUTDOWN_MIN_KICK_DURATION_US);
+            let dur_range =
+                Range::new(SHUTDOWN_MAX_KICK_DURATION_US, SHUTDOWN_MIN_KICK_DURATION_US);
             v_range.map_value_to_range(
                 rail_voltage_ave.clamp(CHARGE_SAFE_VOLTAGE, SHUTDOWN_DISCHARGE_START_VOLTAGE),
                 &dur_range,
