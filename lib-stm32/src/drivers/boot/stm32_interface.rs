@@ -212,6 +212,8 @@ impl<
     }
 
     pub async fn reset_into_program(&mut self, stay_in_reset: bool) {
+        self.in_bootloader = false;
+
         // set the boot0 line low to disable startup bootloader
         self.boot0_pin.set_low();
         Timer::after(Duration::from_millis(5)).await;

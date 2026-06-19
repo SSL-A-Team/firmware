@@ -114,11 +114,15 @@ kicker_openocd_cfg_file := board/st_nucleo_f0.cfg
 
 define create-kicker-board-rust-targets
 .PHONY: .$1-$2-cargo-build
-.$1-$2-cargo-build: motor-controller--dribbler motor-controller--wheel
+.$1-$2-cargo-build: motor-controller--dribbler-torque motor-controller--wheel
 	cd $1/ && \
 	cargo build --target thumbv7em-none-eabihf --release --bin $2
 
-$1/target/thumbv7em-none-eabihf/release/$2.bin: .$1-$2-cargo-build
+.PHONY: .$1-$2-embed-hash
+.$1-$2-embed-hash: .$1-$2-cargo-build
+	python util/embed_img_hash.py --bin $1/target/thumbv7em-none-eabihf/release/$2
+
+$1/target/thumbv7em-none-eabihf/release/$2.bin: .$1-$2-embed-hash
 	echo; \
 	echo "Updating $1--$2 flat binary output:"; \
 	elf_path="$1/target/thumbv7em-none-eabihf/release/$2"; \
