@@ -29,7 +29,7 @@ The primary command `make control-board--control--run` will build all robot firm
 | software\-communication | packet defintitions used for communication with software and between hardware modules |
 | motor-controller        | firmware binaries for stspin32 motor controllers (wheels, dribbler, tests)            |
 | kicker-board            | fimrware binaries for the kicker board                                                |
-| control-board           | firwmare binaries for the control board                                               |
+| [control-board](control-board/README.md) | firwmare binaries for the control board                                               |
 
 ### List of Binaries
 

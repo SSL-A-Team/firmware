@@ -55,8 +55,8 @@ unsafe fn CEC() {
 
 const KICK_SPEED_STEP: f32 = 0.5;
 const KICK_SPEED_MAX: f32 = 6.5;
-const DRIB_CURRENT_STEP: f32 = 50.0;
-const DRIB_CURRENT_MAX: f32 = 1500.0;
+const DRIB_CURRENT_STEP: f32 = 0.01;
+const DRIB_CURRENT_MAX: f32 = 1.0;
 
 const TELEM_PRINT_TICKS: u32 = 400;
 // Power board runs at 10ms; main loop is 500µs, so send every 20 ticks.
@@ -154,7 +154,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     defmt::info!("dribbler fw loaded, starting test");
 
     let mut kick_speed: f32 = 0.5;
-    let mut drib_current_ma: f32 = 0.0;
+    let mut drib_current: f32 = 0.0;
     // Two-phase kick: send KR_KICK_NOW briefly, then KR_DISABLE to flush the kicker board's
     // RX queue before returning to KR_ARM. Prevents re-fires from queued KR_KICK_NOW packets.
     let mut kick_now_remaining: u32 = 0;
@@ -189,7 +189,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     defmt::info!(
         "kick_speed={} m/s, drib_current={} mA",
         kick_speed,
-        drib_current_ma
+        drib_current
     );
 
     let mut ticker = Ticker::every(Duration::from_micros(500));
@@ -287,21 +287,21 @@ async fn main(_spawner: embassy_executor::Spawner) {
             // LEFT: decrease dribbler current
             if now_left && !prev_left && cd_left == 0 {
                 cd_left = BTN_COOLDOWN;
-                drib_current_ma -= DRIB_CURRENT_STEP;
-                if drib_current_ma < 0.0 {
-                    drib_current_ma = 0.0;
+                drib_current -= DRIB_CURRENT_STEP;
+                if drib_current < 0.0 {
+                    drib_current = 0.0;
                 }
-                defmt::info!("drib_current={} mA", drib_current_ma);
+                defmt::info!("drib_current={}", drib_current);
             }
 
             // RIGHT: increase dribbler current
             if now_right && !prev_right && cd_right == 0 {
                 cd_right = BTN_COOLDOWN;
-                drib_current_ma += DRIB_CURRENT_STEP;
-                if drib_current_ma > DRIB_CURRENT_MAX {
-                    drib_current_ma = DRIB_CURRENT_MAX;
+                drib_current += DRIB_CURRENT_STEP;
+                if drib_current > DRIB_CURRENT_MAX {
+                    drib_current = DRIB_CURRENT_MAX;
                 }
-                defmt::info!("drib_current={} mA", drib_current_ma);
+                defmt::info!("drib_current={}", drib_current);
             }
 
             // UP: increase kick speed
@@ -353,7 +353,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         // Kicker command: during shutdown, request_shutdown drives kicker discharge.
         // Buttons suppressed during shutdown; kick_now_remaining won't be set.
         kicker.set_kick_strength(kick_speed);
-        kicker.set_drib_command(DC_CURRENT, drib_current_ma);
+        kicker.set_drib_command(DC_CURRENT, drib_current);
         if power_shutdown_requested {
             kicker.request_shutdown();
             kicker.request_kick(KR_ARM as u32);
