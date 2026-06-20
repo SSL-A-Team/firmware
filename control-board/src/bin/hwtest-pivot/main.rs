@@ -41,6 +41,7 @@ use ateam_control_board::{
     robot_state::SharedRobotState,
 };
 use ateam_controls::pivot_trajectory::PivotParams;
+use libm::roundf;
 
 use embassy_time::Timer;
 use panic_probe as _;
@@ -84,6 +85,18 @@ unsafe fn CORDIC() {
 // Pivot sequencer constants
 // ============================================================================
 
+/// Pivot interval range mapped from the robot ID dial (0–15).
+/// Dial = 0  → MIN_PIVOT_DEG, Dial = 15 → MAX_PIVOT_DEG, linearly interpolated.
+const MIN_PIVOT_DEG: f32 = 5.0;
+const MAX_PIVOT_DEG: f32 = 180.0;
+const ROTARY_MAX: f32 = 15.0;
+
+fn pivot_angle_from_robot_id(robot_id: u8) -> f32 {
+    let t = (robot_id as f32).clamp(0.0, ROTARY_MAX) / ROTARY_MAX;
+    let deg = MIN_PIVOT_DEG + t * (MAX_PIVOT_DEG - MIN_PIVOT_DEG);
+    deg * core::f32::consts::PI / 180.0
+}
+
 /// Main loop interval in milliseconds (100 Hz command rate).
 const LOOP_INTERVAL_MS: u64 = 10;
 
@@ -125,24 +138,17 @@ const SEQUENCE_MODE: SequenceMode = SequenceMode::FullCircle;
 
 #[derive(Clone, Copy, PartialEq)]
 enum SequenceMode {
-    /// Alternates 0° → 180° → 0° repeatedly.
+    /// Alternates +interval → 0 → +interval repeatedly.
     HalfCircle,
-    /// Sweeps CCW through 0° → 90° → 180° → 270° → 0° repeatedly.
+    /// Sweeps CCW in `interval` steps until a full circle, then repeats.
     FullCircle,
 }
 
 impl SequenceMode {
     fn label(self) -> &'static str {
         match self {
-            SequenceMode::HalfCircle => "half-circle (0° ↔ 180°)",
-            SequenceMode::FullCircle => "full-circle (0° → 90° → 180° → 270° → 0°)",
-        }
-    }
-
-    fn toggle(self) -> Self {
-        match self {
-            SequenceMode::HalfCircle => SequenceMode::FullCircle,
-            SequenceMode::FullCircle => SequenceMode::HalfCircle,
+            SequenceMode::HalfCircle => "half-circle",
+            SequenceMode::FullCircle => "full-circle",
         }
     }
 }
@@ -151,60 +157,40 @@ impl SequenceMode {
 // Phase state machine
 // ============================================================================
 
-/// Target heading (rad) for each phase index.
-/// Half-circle: [180°, 0°]  — phase index 0..4 (pivot, hold, pivot, hold)
-/// Full-circle: [90°, 180°, 270°(-90°), 0°] — phase index 0..8
-fn phase_target(phase_idx: u32, mode: SequenceMode) -> f32 {
+/// Number of pivot legs to complete one full circle at the given step angle.
+fn num_full_circle_legs(pivot_angle: f32) -> u32 {
     use core::f32::consts::PI;
-    let step = match mode {
-        SequenceMode::HalfCircle => PI,
-        SequenceMode::FullCircle => PI / 2.0,
-    };
-    let num_targets = match mode {
+    (roundf(2.0 * PI / pivot_angle) as u32).max(1)
+}
+
+/// Number of phase steps (pivot + hold pairs × 2) for the current mode and dial angle.
+fn phase_num_steps(mode: SequenceMode, pivot_angle: f32) -> u32 {
+    let legs = match mode {
         SequenceMode::HalfCircle => 2,
-        SequenceMode::FullCircle => 4,
+        SequenceMode::FullCircle => num_full_circle_legs(pivot_angle),
     };
-    // phase_idx counts pivot+hold pairs: even = pivot, odd = hold
-    // target index = (phase_idx / 2) % num_targets
-    let target_idx = (phase_idx / 2) % num_targets;
-    // Accumulate CCW from 0: target = step * (idx + 1), wrapped
-    let raw = step * (target_idx as f32 + 1.0);
-    // Normalise to (-π, π] via simple wrap
-    let pi2 = 2.0 * PI;
-    let mut a = raw % pi2;
-    if a > PI { a -= pi2; }
-    else if a <= -PI { a += pi2; }
-    a
+    legs * 2
 }
 
 fn phase_duration_ticks(phase_idx: u32) -> u32 {
     if phase_idx % 2 == 0 { EXEC_TICKS } else { HOLD_TICKS }
 }
 
-fn phase_num_steps(mode: SequenceMode) -> u32 {
-    match mode {
-        SequenceMode::HalfCircle => 4,  // 2 pivots + 2 holds
-        SequenceMode::FullCircle => 8,  // 4 pivots + 4 holds
-    }
-}
-
-fn phase_label(phase_idx: u32, mode: SequenceMode) -> &'static str {
-    if phase_idx % 2 == 0 {
-        match mode {
-            SequenceMode::HalfCircle => match phase_idx {
-                0 => "pivot  0° → 180°",
-                _ => "pivot 180° →   0°",
-            },
-            SequenceMode::FullCircle => match phase_idx {
-                0 => "pivot   0° →  90°",
-                2 => "pivot  90° → 180°",
-                4 => "pivot 180° → 270°",
-                _ => "pivot 270° →   0°",
-            },
-        }
-    } else {
-        "hold"
-    }
+/// Target heading for the given phase, in radians.
+fn phase_target(phase_idx: u32, mode: SequenceMode, pivot_angle: f32) -> f32 {
+    use core::f32::consts::PI;
+    let num_legs = match mode {
+        SequenceMode::HalfCircle => 2,
+        SequenceMode::FullCircle => num_full_circle_legs(pivot_angle),
+    };
+    let target_idx = (phase_idx / 2) % num_legs;
+    let raw = pivot_angle * (target_idx as f32 + 1.0);
+    // wrap to (-π, π]
+    let pi2 = 2.0 * PI;
+    let mut a = raw % pi2;
+    if a > PI { a -= pi2; }
+    else if a <= -PI { a += pi2; }
+    a
 }
 
 // ============================================================================
@@ -383,13 +369,19 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
         // ── phase advance ────────────────────────────────────────────────────
 
+        let pivot_angle = pivot_angle_from_robot_id(robot_state.get_hw_robot_id());
+
         if phase_tick >= phase_duration_ticks(phase_idx) {
-            phase_idx = (phase_idx + 1) % phase_num_steps(SEQUENCE_MODE);
+            phase_idx = (phase_idx + 1) % phase_num_steps(SEQUENCE_MODE, pivot_angle);
             phase_tick = 0;
-            defmt::info!("hwtest-pivot: phase → {}", phase_label(phase_idx, SEQUENCE_MODE));
+            defmt::info!(
+                "hwtest-pivot: phase {} → pivot_angle {} deg",
+                phase_idx,
+                pivot_angle * 180.0 / core::f32::consts::PI,
+            );
         }
 
-        let target_theta = phase_target(phase_idx, SEQUENCE_MODE);
+        let target_theta = phase_target(phase_idx, SEQUENCE_MODE, pivot_angle);
 
         // ── publish command ──────────────────────────────────────────────────
 
