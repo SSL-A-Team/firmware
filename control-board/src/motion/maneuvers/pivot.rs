@@ -2,7 +2,7 @@ use crate::motion::control_context::{ControlContext, ManeuverSetpoints};
 use crate::motion::maneuvers::MotionManeuver;
 use ateam_common_packets::bindings::{ExtendedPivotTelemetry, PivotCommand};
 use ateam_common_packets::radio::ManeuverExtendedTelemetry;
-use ateam_controls::bangbang_trajectory::TrajectoryParams;
+use ateam_controls::pivot_trajectory::PivotParams;
 use ateam_controls::ControlsError;
 
 pub struct PivotManeuver;
@@ -23,32 +23,27 @@ impl MotionManeuver for PivotManeuver {
         cmd: PivotCommand,
         ctx: &mut ControlContext,
     ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError> {
-        let default_params = TrajectoryParams::default();
+        let default_params = PivotParams::default();
 
-        let traj_params = TrajectoryParams {
-            max_vel_linear: if cmd.max_linear_vel != 0.0 {
-                cmd.max_linear_vel
-            } else {
-                default_params.max_vel_linear
-            },
+        let traj_params = PivotParams {
             max_vel_angular: if cmd.max_angular_vel != 0.0 {
                 cmd.max_angular_vel
             } else {
                 default_params.max_vel_angular
-            },
-            max_accel_linear: if cmd.max_linear_acc != 0.0 {
-                cmd.max_linear_acc
-            } else {
-                default_params.max_accel_linear
             },
             max_accel_angular: if cmd.max_angular_acc != 0.0 {
                 cmd.max_angular_acc
             } else {
                 default_params.max_accel_angular
             },
+            orbit_radius: if cmd.orbit_radius != 0.0 {
+                cmd.orbit_radius
+            } else {
+                default_params.orbit_radius
+            },
         };
 
-        let (body_twist, body_accel) = ctx.pose_control_policy(cmd.as_vec3f(), traj_params)?;
+        let (body_twist, body_accel) = ctx.pivot_control_policy(cmd.center(), cmd.global_theta, traj_params)?;
 
         let telem = ManeuverExtendedTelemetry::Pivot(ExtendedPivotTelemetry {
             cmd_echo: cmd,

@@ -5,6 +5,7 @@ use crate::motion::params::controller_params::{
 use crate::motion::pid::PidController;
 use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
 use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
+use ateam_controls::pivot_trajectory::{PivotParams, PivotTrajectory};
 use ateam_controls::robot_model::{KalmanFilterParams, RobotModel, RobotPhysicalParams};
 use ateam_controls::{
     z_rotation_mat, ControlsError, Vector2f, Vector3f, Vector4f, Vector6f, Vector8f,
@@ -58,6 +59,7 @@ pub struct ControlContext {
     /// [LINEAR_VEL_THRESHOLD, LINEAR_ACCEL_THRESHOLD, ANGULAR_VEL_THRESHOLD, ANGULAR_ACCEL_THRESHOLD]
     pub friction_comp_gating: Vector4f,
     pub trajectory: Option<BangBangTraj3D>,
+    pub trajectory_pivot: Option<PivotTrajectory>,
     pub trajectory_state: Vector6f,
     pub enc_lag: FirstOrderLag<2>,
     pub dt: f32,
@@ -104,6 +106,7 @@ impl ControlContext {
             traj_recompute_error: controller_params::TRAJ_RECOMPUTE_ERROR,
             friction_comp_gating: controller_params::FRICTION_COMP_GATING,
             trajectory: None,
+            trajectory_pivot: None,
             trajectory_state: Vector6f::zeros(),
             enc_lag,
             dt,
@@ -121,6 +124,7 @@ impl ControlContext {
         self.robot_model.reset();
         self.pose_pid_controller.reset();
         self.trajectory = None;
+        self.trajectory_pivot = None;
         self.trajectory_state = Vector6f::default();
         self.time_since_vision_update_s = VISION_ACTIVE_TIMEOUT_S + 1.0;
         self.enc_lag.reset();
@@ -145,6 +149,7 @@ impl ControlContext {
                 // from the freshly-snapped state estimate.
                 self.robot_model.kf_set_pose(vision_pose_meas);
                 self.trajectory = None;
+                self.trajectory_pivot = None;
                 self.pose_pid_controller.reset();
             }
             self.time_since_vision_update_s = 0.0;
@@ -514,6 +519,32 @@ impl ControlContext {
         (twist_out, target_accel)
     }
 
+    pub fn pivot_control_policy(
+        &mut self,
+        center_xy: Vector2f,
+        target_theta: f32,
+        traj_params: PivotParams,
+    ) -> Result<(Vector3f, Vector3f), ControlsError> {
+        let state_estimate = self.state_estimate;
+        let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
+        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+
+        // Replan the trajectory every tick. Seed from `state_estimate` only
+        // when there is no in-flight trajectory or tracking has drifted past
+        // `traj_recompute_error`; otherwise seed from the integrated
+        // `trajectory_state` for a continuous handoff.
+        let seed_state = if self.trajectory_pivot.is_none()
+            || self.tracking_error_exceeded(pose_estimate, twist_estimate)
+        {
+            state_estimate
+        } else {
+            self.trajectory_state
+        };
+        let traj = self.plan_pivot_trajectory(seed_state, center_xy, target_theta, traj_params)?;
+
+        self.track_trajectory_pivot(state_estimate, traj)
+    }
+
     fn plan_twist_trajectory(
         &mut self,
         seed_state: Vector6f,
@@ -536,6 +567,20 @@ impl ControlContext {
         self.trajectory_state = seed_state;
         let traj = BangBangTraj3D::from_target_pose(seed_state, target_pose, traj_params)?;
         self.trajectory = Some(traj);
+        Ok(traj)
+    }
+
+    fn plan_pivot_trajectory(
+        &mut self,
+        seed_state: Vector6f,
+        center_xy: Vector2f,
+        target_theta: f32,
+        traj_params: PivotParams,
+    ) -> Result<PivotTrajectory, ControlsError> {
+        self.trajectory_state = seed_state;
+        self.trajectory = None;
+        let traj = PivotTrajectory::new(seed_state, center_xy, target_theta, traj_params)?;
+        self.trajectory_pivot = Some(traj);
         Ok(traj)
     }
 
@@ -591,6 +636,75 @@ impl ControlContext {
                 PoseAccelMode::FeedforwardOnly | PoseAccelMode::Full
             ) {
                 self.pose_accel_gain[0] * traj.accel_at(0.0)?
+            } else {
+                Vector3f::zeros()
+            };
+
+            let accel_fb_term = if matches!(
+                POSE_ACCEL_MODE,
+                PoseAccelMode::FeedbackOnly | PoseAccelMode::Full
+            ) {
+                self.pose_accel_gain[1] * pos_pid_feedback
+            } else {
+                Vector3f::zeros()
+            };
+
+            accel_ff_term + accel_fb_term
+        };
+
+        let twist_out: Vector3f = {
+            let vel_ff_term: Vector3f = if matches!(
+                POSE_VEL_MODE,
+                PoseVelMode::FeedforwardOnly | PoseVelMode::Full
+            ) {
+                self.pose_vel_gain[0] * traj_curstep_tgt_vel
+            } else {
+                (state_estimate.fixed_rows::<3>(3) + accel_out * self.dt).into()
+            };
+
+            let vel_fb_term =
+                if matches!(POSE_VEL_MODE, PoseVelMode::FeedbackOnly | PoseVelMode::Full) {
+                    self.pose_vel_gain[1] * pos_pid_feedback * self.dt
+                } else {
+                    Vector3f::zeros()
+                };
+
+            vel_ff_term + vel_fb_term
+        };
+
+        // Step trajectory forward to t=dt so next tick's tracking_error_exceeded
+        // compares against where the trajectory expected the robot to be.
+        self.trajectory_state = traj.state_at(self.trajectory_state, 0.0, self.dt)?;
+
+        Ok((twist_out, accel_out))
+    }
+
+    fn track_trajectory_pivot(
+        &mut self,
+        state_estimate: Vector6f,
+        traj: PivotTrajectory,
+    ) -> Result<(Vector3f, Vector3f), ControlsError> {
+        let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
+        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+
+        let mut traj_curstep_tgt_pos: Vector3f = self.trajectory_state.fixed_rows::<3>(0).into();
+        let traj_curstep_tgt_vel: Vector3f = self.trajectory_state.fixed_rows::<3>(3).into();
+        traj_curstep_tgt_pos.z =
+            pose_estimate.z + remainderf(traj_curstep_tgt_pos.z - pose_estimate.z, 2.0 * PI);
+        let twist_error = traj_curstep_tgt_vel - twist_estimate;
+        let pos_pid_feedback = self.pose_pid_controller.calculate_with_derivative(
+            &traj_curstep_tgt_pos,
+            &pose_estimate,
+            &twist_error,
+            self.dt,
+        );
+
+        let accel_out: Vector3f = {
+            let accel_ff_term = if matches!(
+                POSE_ACCEL_MODE,
+                PoseAccelMode::FeedforwardOnly | PoseAccelMode::Full
+            ) {
+                self.pose_accel_gain[0] * traj.accel_at(self.trajectory_state, 0.0, 0.0)?
             } else {
                 Vector3f::zeros()
             };
