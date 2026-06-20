@@ -64,7 +64,7 @@ static FixedPointS12F4_PiConstants_t current_controller_constants = {
 
     // KNOWN GOOD
     .kP = 338 * 5,      // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
-    .kI = 145 * 5,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910 
+    .kI = 145 * 5,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910
     .kI_max = 4095,  // S12F0
     .kI_min = -(4095),  // S12F0
     .anti_jitter_thresh = 0,
@@ -106,7 +106,7 @@ static volatile int32_t dvdt_limited_voltage_command_mv = 0;
 #endif
 
 #ifdef BRAKE_ON_HALL_ERROR
-    #define HALL_ERROR_COMMUTATION BRAKE_COMMUTATION 
+    #define HALL_ERROR_COMMUTATION BRAKE_COMMUTATION
 #else
     #define HALL_ERROR_COMMUTATION COAST_COMMUTATION
 #endif
@@ -117,21 +117,21 @@ static const int COAST_COMMUTATION_INDEX = 9;
 
 /**
  * @brief clockwise transition table
- * 
+ *
  * Hall sensors should produce a gray-coded 3-bit value, meaning
  * 0 (0'b000) and 7 (0'b111) are invalid. The signal wires have
  * pull up resistors so 7 probably means one or more wires is unplugged,
  * and 0 probably means there's a power issue.
- * 
+ *
  * Clockwise (human readable order)
- * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H 
+ * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H
  * 1  0  0  1     V  H  G      0   1   0   0   1   0
  * 3  0  1  1     H  V  G      0   0   0   1   1   0
  * 2  0  1  0     G  V  H      1   0   0   1   0   0
  * 6  1  1  0     G  H  V      1   0   0   0   0   1
  * 4  1  0  0     H  G  V      0   0   1   0   0   1
  * 5  1  0  1     V  G  H      0   1   1   0   0   0
- * 
+ *
  * Clockwise (direct hall index order)
  * 1  0  0  1     V  H  G      0   1   0   0   1   0
  * 2  0  1  0     G  V  H      1   0   0   1   0   0
@@ -139,10 +139,10 @@ static const int COAST_COMMUTATION_INDEX = 9;
  * 4  1  0  0     H  G  V      0   0   1   0   0   1
  * 5  1  0  1     V  G  H      0   1   1   0   0   0
  * 6  1  1  0     G  H  V      1   0   0   0   0   1
- * 
+ *
  */
 static bool cw_commutation_table[10][6] = {
-    HALL_ERROR_COMMUTATION,    
+    HALL_ERROR_COMMUTATION,
     {false, true,  false, false, true,  false},
     {true,  false, false, true,  false, false},
     {false, false, false, true,  true,  false},
@@ -167,12 +167,12 @@ static uint8_t cw_expected_hall_transition_table[8] = {
 
 /**
  * @brief counter clockwise transition table
- * 
+ *
  * Hall sensors should produce a gray-coded 3-bit value, meaning
  * 0 (0'b000) and 7 (0'b111) are invalid. The signal wires have
  * pull up resistors so 7 probably means one or more wires is unplugged,
  * and 0 probably means there's a power issue.
- * 
+ *
  * Counter Clockwise (human readable order)
  * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H
  * 1   0  0  1    V  H  G      1   0   0   0   0   1
@@ -181,7 +181,7 @@ static uint8_t cw_expected_hall_transition_table[8] = {
  * 6   1  1  0    G  H  V      0   1   0   0   1   0
  * 2   0  1  0    G  V  H      0   1   1   0   0   0
  * 3   0  1  1    H  V  G      0   0   1   0   0   1
- * 
+ *
  * Counter Clockwise (direct hall index order)
  * 1   0  0  1    V  H  G      1   0   0   0   0   1
  * 2   0  1  0    G  V  H      0   1   1   0   0   0
@@ -237,7 +237,7 @@ static void set_current(uint16_t current_ma);
 
 /**
  * @brief sets up the hall sensor timer
- * 
+ *
  * The hall sensor timer is TIM2. The hall timer can be used to
  * trigger a TIM1 COM event which will call back it's interrupt handler
  */
@@ -325,9 +325,9 @@ static void pwm6step_setup_hall_timer() {
 #define CCER_TIM4_ADC_TRIG (TIM_CCER_CC4E)
 
 /**
- * @brief 
- * 
- * @param pwm_freq_hz 
+ * @brief
+ *
+ * @param pwm_freq_hz
  */
 static void pwm6step_setup_commutation_timer() {
     ////////////////////////////
@@ -496,7 +496,7 @@ void DMA1_Channel1_IRQHandler() {
     // as a the actual max the PWM is commanding, to the DC
     // as we've observed, the RPM/power output is quite different from
     // max battery to minimum and certainly if the voltage further dips under load
-    // we want to correct for this 
+    // we want to correct for this
 
     // scale from 4096 -> battery voltage
     uint16_t voltage_sp_mv = ((uint32_t) voltage_sp * BATTERY_VOLTAGE_MV) >> 12;
@@ -504,7 +504,7 @@ void DMA1_Channel1_IRQHandler() {
     // if we're not in CURRENT mode, then the user has directly set the voltage/dc via the public function
     // in that case, this callback is collecting logging data and averaging/update bus voltage for VOLTAGE mode
     if (motor_control_mode == CURRENT) {
-        set_voltage(voltage_sp_mv);    
+        set_voltage(voltage_sp_mv);
     }
 
     if (motor_control_mode == VOLTAGE || motor_control_mode == CURRENT) {
@@ -545,8 +545,8 @@ void DMA1_Channel1_IRQHandler() {
 }
 
 /**
- * @brief 
- * 
+ * @brief
+ *
  */
 static void perform_commutation_cycle() {
     hall_recorded_state_on_transition = read_hall();
@@ -582,19 +582,19 @@ static void perform_commutation_cycle() {
     if (motor_errors.hall_power || motor_errors.hall_disconnected) { // || motor_errors.invalid_transitions) {
         set_commutation_estop();
         return;
-    } 
-    
+    }
+
     set_commutation_for_hall(hall_recorded_state_on_transition, false);
 }
 
 /**
  * @brief reads the hall value from the pins
- * 
- * @return uint8_t 
+ *
+ * @return uint8_t
  */
 static uint8_t read_hall() {
     uint8_t hall_value = (GPIOA->IDR & (GPIO_IDR_2 | GPIO_IDR_1 | GPIO_IDR_0));
-    
+
     // check if hall sensor is floating/disconnected, all lines will be 1, 3b'111 = 7
     if (hall_value == 0x7) {
         hall_disconnect_error_count += HALL_DISCONNECT_ERROR_INCREMENT;
@@ -624,7 +624,7 @@ static uint8_t read_hall() {
 
 /**
  * @brief stages com values for estop
- * 
+ *
  */
 static void set_commutation_estop() {
     set_commutation_for_hall(0, true);
@@ -632,8 +632,8 @@ static void set_commutation_estop() {
 
 /**
  * @brief sets channel duty cycles, and stages enables for COM event
- * 
- * @param hall_state 
+ *
+ * @param hall_state
  */
 static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     bool *commutation_values;
@@ -703,7 +703,7 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
 
 /**
  * @brief trigger a hardware commutation in TIM1
- * 
+ *
  */
 static void trigger_commutation() {
     TIM1->EGR |= TIM_EGR_COMG;
@@ -723,8 +723,8 @@ void TIM1_CC_IRQHandler() {
 ////////////////////////
 
 /**
- * @brief sets up the pins and timer peripherials associated with the pins 
- * 
+ * @brief sets up the pins and timer peripherials associated with the pins
+ *
  */
 void pwm6step_setup() {
     // setup current PI controller
@@ -741,7 +741,7 @@ void pwm6step_setup() {
 }
 
 /**
- * 
+ *
  */
 void pwm6step_set_direction(MotorDirection_t motor_direction) {
     if (INVERT_MOTOR_DIRECTION) {
@@ -766,9 +766,9 @@ static void set_duty_cycle(uint16_t duty_cycle) {
 }
 
 /**
- * @brief 
- * 
- * @param duty_cycle_arr 
+ * @brief
+ *
+ * @param duty_cycle_arr
  */
 void pwm6step_set_duty_cycle(int16_t duty_cycle) {
     if (duty_cycle < 0) {
@@ -898,7 +898,7 @@ int16_t pwm6step_hall_get_rps_estimate() {
 
 const MotorErrors_t pwm6step_get_motor_errors() {
     return motor_errors;
-} 
+}
 
 const uint16_t pwm6step_get_current_measurement() {
     return measured_current;
@@ -911,9 +911,8 @@ const uint16_t* pwm6step_get_current_log() {
 
 const uint16_t pwm6step_get_vbus_voltage() {
     return measured_vbus_voltage;
-}  
+}
 
 const uint16_t pwm6step_get_voltage_command() {
     return last_voltage_command_mv;
 }
-
