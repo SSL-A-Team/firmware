@@ -1,3 +1,4 @@
+use core::cell::Cell;
 use core::fmt::Write;
 use defmt::Format;
 use embassy_futures::select::select;
@@ -58,6 +59,13 @@ pub struct SocketConnection {
     pub socket_id: u8,
 }
 
+#[derive(Copy, Clone, PartialEq, Debug, Format)]
+#[repr(u8)]
+pub enum DataMode {
+    BufferedMode = 0,
+    DirectBinaryMode = 2,
+}
+
 pub struct NoraW36x<
     'a,
     const LEN_TX: usize,
@@ -69,6 +77,7 @@ pub struct NoraW36x<
     reader: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
     writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
     uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
+    data_mode: Cell<DataMode>,
 }
 
 impl<
@@ -89,6 +98,7 @@ impl<
             reader,
             writer,
             uart,
+            data_mode: Cell::new(DataMode::BufferedMode),
         }
     }
 
@@ -155,12 +165,18 @@ impl<
     /// Uses AT+USORM=<receive_mode>
     ///   - 0: Buffered mode (default) — +UESODA event, then AT+USORB to read
     ///   - 2: Direct binary mode — +UESODB/+UESODBF events with inline data
-    pub async fn set_socket_receive_mode(&self, mode: u8) -> Result<(), NoraRadioError> {
+    pub async fn set_socket_receive_mode(&self, mode: DataMode) -> Result<(), NoraRadioError> {
+        let mode_num = mode as u8;
         let mut str: String<12> = String::new();
-        write!(&mut str, "AT+USORM={mode}").or(Err(NoraRadioError::CommandConstructionFailed))?;
+        write!(&mut str, "AT+USORM={mode_num}").or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
+        self.data_mode.set(mode);
         Ok(())
+    }
+
+    pub fn data_mode(&self) -> DataMode {
+        self.data_mode.get()
     }
 
     /// Set the host name on the NORA-W36 module.

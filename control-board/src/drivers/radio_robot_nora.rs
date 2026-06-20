@@ -4,7 +4,7 @@ use ateam_common_packets::bindings::{
 };
 use ateam_common_packets::radio::DataPacket;
 use ateam_lib_stm32::drivers::radio::nora_w36x::{
-    NoraRadioError, NoraW36x, SocketConnection, WifiAuth,
+    NoraRadioError, NoraW36x, SocketConnection, WifiAuth, DataMode,
 };
 use ateam_lib_stm32::drivers::radio::w36x::at_protocol::SocketProtocol;
 use ateam_lib_stm32::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
@@ -216,7 +216,7 @@ impl<
         // NORA-W36x does not use EDM mode - it stays in AT command mode.
         // Enable direct binary mode for inline data delivery in +UESODB/+UESODBF events
         // (replaces the 2-step buffered approach of +UESODA then AT+USORB).
-        if self.nora_driver.set_socket_receive_mode(2).await.is_err() {
+        if self.nora_driver.set_socket_receive_mode(DataMode::DirectBinaryMode).await.is_err() {
             defmt::debug!("error setting direct binary receive mode");
             return Err(RobotRadioNoraError::ConnectUartBadRadioConfigUpdate);
         }
