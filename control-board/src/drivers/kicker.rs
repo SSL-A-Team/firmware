@@ -9,7 +9,7 @@ use embassy_stm32::{
 };
 use embassy_time::{with_timeout, Duration, Timer};
 
-use ateam_common_packets::bindings::{KickerControl, KickerTelemetry};
+use ateam_common_packets::bindings::{KickRequest::KR_DISABLE, KickerControl, KickerTelemetry};
 
 use crate::{image_hash, DEBUG_KICKER_UART_QUEUES};
 
@@ -49,11 +49,14 @@ impl<
         >,
         firmware_image: &'a [u8],
     ) -> Kicker<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
+        let mut command_state: KickerControl = Default::default();
+        command_state.kick_request = KR_DISABLE;
+
         Self {
             stm32_uart_interface: stm32_interface,
             firmware_image,
 
-            command_state: Default::default(),
+            command_state: command_state,
             telemetry_state: Default::default(),
 
             telemetry_enabled: false,

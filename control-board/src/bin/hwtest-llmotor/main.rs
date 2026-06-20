@@ -21,7 +21,7 @@ use ateam_control_board::{
     robot_state::SharedRobotState, SystemIrqs,
 };
 
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Duration, Instant, Ticker, Timer};
 // provide embedded panic probe
 use panic_probe as _;
 use static_cell::ConstStaticCell;
@@ -45,10 +45,7 @@ const TX_BUF_DEPTH: usize = 5;
 const MAX_RX_PACKET_SIZE: usize = 80;
 const RX_BUF_DEPTH: usize = 5;
 
-static_idle_buffered_uart!(CCM_FL_UART, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, false, #[link_section = ".axisram.buffers"]);
-static_idle_buffered_uart!(CCM_BL_UART, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, false, #[link_section = ".axisram.buffers"]);
-static_idle_buffered_uart!(CCM_BR_UART, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, false, #[link_section = ".axisram.buffers"]);
-static_idle_buffered_uart!(CCM_FR_UART, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, false, #[link_section = ".axisram.buffers"]);
+static_idle_buffered_uart!(CCM_UART, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, false, #[link_section = ".axisram.buffers"]);
 
 // Create embassy-usb DeviceBuilder using the driver and config.
 // It needs some buffers for building the descriptors.
@@ -116,81 +113,41 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     )
     .unwrap();
 
-    let back_left_uart = Uart::new(
-        p.USART10,
-        p.PE2,
-        p.PE3,
-        SystemIrqs,
-        p.DMA1_CH2,
-        p.DMA1_CH3,
-        initial_motor_controller_uart_conifg,
-    )
-    .unwrap();
+    // let back_right_uart = Uart::new(
+    //     p.USART6,
+    //     p.PC7,
+    //     p.PC6,
+    //     SystemIrqs,
+    //     p.DMA1_CH0,
+    //     p.DMA1_CH1,
+    //     initial_motor_controller_uart_conifg,
+    // )
+    // .unwrap();
 
-    let back_right_uart = Uart::new(
-        p.USART6,
-        p.PC7,
-        p.PC6,
-        SystemIrqs,
-        p.DMA1_CH4,
-        p.DMA1_CH5,
-        initial_motor_controller_uart_conifg,
-    )
-    .unwrap();
+    // let front_right_uart = Uart::new(
+    //     p.USART3,
+    //     p.PD9,
+    //     p.PD8,
+    //     SystemIrqs,
+    //     p.DMA1_CH0,
+    //     p.DMA1_CH1,
+    //     initial_motor_controller_uart_conifg,
+    // ).unwrap();
 
-    let front_right_uart = Uart::new(
-        p.USART3,
-        p.PD9,
-        p.PD8,
-        SystemIrqs,
-        p.DMA1_CH6,
-        p.DMA1_CH7,
-        initial_motor_controller_uart_conifg,
-    )
-    .unwrap();
+    CCM_UART_IDLE_BUFFERED_UART.init();
 
-    CCM_FL_UART_IDLE_BUFFERED_UART.init();
-    CCM_BL_UART_IDLE_BUFFERED_UART.init();
-    CCM_BR_UART_IDLE_BUFFERED_UART.init();
-    CCM_FR_UART_IDLE_BUFFERED_UART.init();
+    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, CCM_UART, front_left_uart);
 
-    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, CCM_FL_UART, front_left_uart);
-    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, CCM_BL_UART, back_left_uart);
-    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, CCM_BR_UART, back_right_uart);
-    idle_buffered_uart_spawn_tasks!(uart_queue_spawner, CCM_FR_UART, front_right_uart);
-
-    let mut fl_ccm = CurrentControlledMotor::new_from_pins(
-        &CCM_FL_UART_IDLE_BUFFERED_UART,
-        CCM_FL_UART_IDLE_BUFFERED_UART.get_uart_read_queue(),
-        CCM_FL_UART_IDLE_BUFFERED_UART.get_uart_write_queue(),
+    let mut ccm = CurrentControlledMotor::new_from_pins(
+        &CCM_UART_IDLE_BUFFERED_UART,
+        CCM_UART_IDLE_BUFFERED_UART.get_uart_read_queue(),
+        CCM_UART_IDLE_BUFFERED_UART.get_uart_write_queue(),
         p.PF5.into(),
         p.PF4.into(),
         CURRENT_CONTROLLED_WHEEL_IMAGE,
     );
-    let mut bl_ccm = CurrentControlledMotor::new_from_pins(
-        &CCM_BL_UART_IDLE_BUFFERED_UART,
-        CCM_BL_UART_IDLE_BUFFERED_UART.get_uart_read_queue(),
-        CCM_BL_UART_IDLE_BUFFERED_UART.get_uart_write_queue(),
-        p.PE5.into(),
-        p.PE4.into(),
-        CURRENT_CONTROLLED_WHEEL_IMAGE,
-    );
-    let mut br_ccm = CurrentControlledMotor::new_from_pins(
-        &CCM_BR_UART_IDLE_BUFFERED_UART,
-        CCM_BR_UART_IDLE_BUFFERED_UART.get_uart_read_queue(),
-        CCM_BR_UART_IDLE_BUFFERED_UART.get_uart_write_queue(),
-        p.PG7.into(),
-        p.PG8.into(),
-        CURRENT_CONTROLLED_WHEEL_IMAGE,
-    );
-    let mut fr_ccm = CurrentControlledMotor::new_from_pins(
-        &CCM_FR_UART_IDLE_BUFFERED_UART,
-        CCM_FR_UART_IDLE_BUFFERED_UART.get_uart_read_queue(),
-        CCM_FR_UART_IDLE_BUFFERED_UART.get_uart_write_queue(),
-        p.PB12.into(),
-        p.PB13.into(),
-        CURRENT_CONTROLLED_WHEEL_IMAGE,
-    );
+
+    // let mut ccm = CurrentControlledMotor::new_from_pins(&CCM_UART_IDLE_BUFFERED_UART, CCM_UART_IDLE_BUFFERED_UART.get_uart_read_queue(), CCM_UART_IDLE_BUFFERED_UART.get_uart_write_queue(), p.PB12.into(), p.PB13.into(), CURRENT_CONTROLLED_WHEEL_IMAGE);
 
     //////////////////////////////
     //  setup pub sub channels  //
@@ -264,137 +221,133 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     defmt::info!("flasing motor...");
 
-    let force_flash = true;
-    let res1 = fl_ccm.init_default_firmware_image(force_flash).await;
-    let res2 = bl_ccm.init_default_firmware_image(force_flash).await;
-    let res3 = br_ccm.init_default_firmware_image(force_flash).await;
-    let res4 = fr_ccm.init_default_firmware_image(force_flash).await;
+    let res = ccm.init_default_firmware_image(true).await;
 
-    if res1.is_ok() {
-        defmt::info!("fl motor flashed.");
+    if res.is_ok() {
+        defmt::info!("motor flashed.");
     } else {
-        defmt::error!("fl motor failed to flash!");
+        defmt::error!("motor failed to flash!");
     }
 
-    if res2.is_ok() {
-        defmt::info!("bl motor flashed.");
-    } else {
-        defmt::error!("bl motor failed to flash!");
-    }
-
-    if res3.is_ok() {
-        defmt::info!("br motor flashed.");
-    } else {
-        defmt::error!("br motor failed to flash!");
-    }
-
-    if res4.is_ok() {
-        defmt::info!("fr motor flashed.");
-    } else {
-        defmt::error!("fr motor failed to flash!");
-    }
-
+    // ccm.set_motion_type(CcmMotionControlType::CCM_MCT_DUTY_OPENLOOP);
     // ccm.set_motion_type(CcmMotionControlType::CCM_MCT_VOLTAGE_OPENLOOP);
     // ccm.set_setpoint(2500.0);
-    fl_ccm.set_motion_type(CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT);
-    fl_ccm.set_current_setpoint(0);
-    bl_ccm.set_motion_type(CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT);
-    bl_ccm.set_current_setpoint(0);
-    br_ccm.set_motion_type(CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT);
-    br_ccm.set_current_setpoint(0);
-    fr_ccm.set_motion_type(CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT);
-    fr_ccm.set_current_setpoint(0);
+    ccm.set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+    ccm.set_current_setpoint(0);
 
-    fl_ccm.set_telemetry_enabled(true);
-    fl_ccm.set_motion_enabled(true);
-    bl_ccm.set_telemetry_enabled(true);
-    bl_ccm.set_motion_enabled(true);
-    br_ccm.set_telemetry_enabled(true);
-    br_ccm.set_motion_enabled(true);
-    fr_ccm.set_telemetry_enabled(true);
-    fr_ccm.set_motion_enabled(true);
+    ccm.set_telemetry_enabled(true);
+    ccm.set_motion_enabled(true);
 
-    embassy_futures::join::join4(
-        fl_ccm.reset(),
-        bl_ccm.reset(),
-        br_ccm.reset(),
-        fr_ccm.reset(),
-    )
-    .await;
-    Timer::after(Duration::from_millis(50)).await;
+    ccm.reset().await;
+    Timer::after_millis(100).await;
 
     let mut last_seq_num = 0;
 
     let mut mv_cmd_counting_up = true;
     let mut mv_cmd = 0.0;
 
+    let mut curr_setpoint: i16 = 0;
+    let mut robot_moved_vel: f32 = f32::MAX;
+    let mut robot_moved_curr: i16 = 0;
+    let mut robot_moved_yet = false;
+
+    let start_time = Instant::now();
+    Timer::after_millis(1).await;
+
     let mut curr_ctr = 0;
 
     let mut ctr = 0;
     let mut ticker = Ticker::every(Duration::from_micros(500));
     loop {
-        fl_ccm.process_packets();
-        bl_ccm.process_packets();
-        br_ccm.process_packets();
-        fr_ccm.process_packets();
+        ccm.process_packets();
 
-        let v = fl_ccm.read_vbus_voltage();
-        let i_sp = fl_ccm.read_current_setpoint_ma();
-        let i_ref = fl_ccm.read_current_estimate_ma();
-        let w = fl_ccm.read_rads();
-        let Vm = fl_ccm.read_vmotor_voltage_mv();
+        let v = ccm.read_vbus_voltage();
+        let i_sp = ccm.read_current_setpoint_ma();
+        let i_ref = ccm.read_current_estimate_ma();
+        let w = ccm.read_rads();
+        let Vm = ccm.read_vmotor_voltage_mv();
 
-        let cur_seq_num = fl_ccm.get_latest_state_seqnum();
+        let Vsp = ccm.read_vel_setpoint();
+
+        let w_hall = ccm.read_hall_rads();
+
+        if ctr % 20 == 0 {
+            defmt::info!("enc rads: {}, hall rads: {}", w, w_hall);
+        }
+
+        ctr = (ctr + 1) & 0xFF;
+
+        let cur_seq_num = ccm.get_latest_state_seqnum();
         if cur_seq_num != last_seq_num {
-            torque_data_pub.publish_immediate(fl_ccm.get_latest_state());
+            torque_data_pub.publish_immediate(ccm.get_latest_state());
             // defmt::info!("got a unique state update, sending to usb task");
 
             last_seq_num = cur_seq_num;
         }
 
-        if ctr > 19 {
-            defmt::info!(
-                "motion control type: {}",
-                fl_ccm.get_latest_state().motion_control_type
-            );
-            defmt::info!(
-                "vrail: {}, Isp: {}, Iref: {}, vel: {}, Vmv: {}",
-                v,
-                i_sp,
-                i_ref,
-                w,
-                Vm
-            );
-            ctr = 0;
-        } else {
-            ctr += 1;
-        }
+        // if ctr > 19 {
+        //     defmt::info!(
+        //         "motion control type: {}",
+        //         ccm.get_latest_state().motion_control_type
+        //     );
+        //     defmt::info!(
+        //         "vrail: {}, Isp: {}, Iref: {}, vel: {}, Vmv: {}",
+        //         v,
+        //         i_sp,
+        //         i_ref,
+        //         w,
+        //         Vm
+        //     );
+        //     // defmt::info!("Vsp: {}, Vref: {}", Vsp, w);
+        //     ctr = 0;
+        // } else {
+        //     ctr += 1;
+        // }
 
-        if curr_ctr > 10000 {
-            curr_ctr = 0
-        } else if curr_ctr > 5000 {
-            fl_ccm.set_current_setpoint(50);
-            bl_ccm.set_current_setpoint(50);
-            br_ccm.set_current_setpoint(50);
-            fr_ccm.set_current_setpoint(50);
+        ccm.set_current_setpoint(-50);
 
-            fl_ccm.set_setpoint(160.0);
-            bl_ccm.set_setpoint(160.0);
-            br_ccm.set_setpoint(160.0);
-            fr_ccm.set_setpoint(160.0);
-        } else {
-            fl_ccm.set_current_setpoint(-50);
-            bl_ccm.set_current_setpoint(-50);
-            br_ccm.set_current_setpoint(-50);
-            fr_ccm.set_current_setpoint(-50);
+        // let elapsed_time = Instant::now() - start_time;
+        // let elapsed_time_ms = elapsed_time.as_millis();
 
-            fl_ccm.set_setpoint(-120.0);
-            bl_ccm.set_setpoint(-160.0);
-            br_ccm.set_setpoint(-160.0);
-            fr_ccm.set_setpoint(-160.0);
-        }
+        // if !robot_moved_yet {
+        //     let prev_curr_setpoint = curr_setpoint;
+        //     curr_setpoint = (elapsed_time_ms / 250) as i16;
+        //     if prev_curr_setpoint != curr_setpoint {
+        //         defmt::info!("curr setpoint now: {}", curr_setpoint);
+        //     }
+        // }
 
-        // curr_ctr += 1;
+        // if curr_setpoint > 500 {
+        //     curr_setpoint = 500;
+        // }
+
+        // if curr_setpoint < -500 {
+        //     curr_setpoint = -500;
+        // }
+
+        // ccm.set_current_setpoint(curr_setpoint);
+
+        // let wheel_vel = ccm.read_rads();
+        // if !robot_moved_yet && wheel_vel > 3.14 * 4.0 {
+        //     robot_moved_yet = true;
+        //     robot_moved_vel = wheel_vel;
+        //     robot_moved_curr = curr_setpoint;
+        //     defmt::info!("wheel first moved at {} mA", robot_moved_curr);
+        //     curr_setpoint = 0;
+        // }
+
+        // if curr_ctr > 10000 {
+        //     curr_ctr = 0
+        // } else if curr_ctr > 5000 {
+        //     ccm.set_current_setpoint(-10);
+        //     // ccm.set_setpoint(-2500.0);
+        //     // ccm.set_setpoint(-0.1);
+        // } else {
+        //     ccm.set_current_setpoint(0);
+        //     // ccm.set_setpoint(0.0);
+        // }
+
+        curr_ctr += 1;
 
         // if mv_cmd_counting_up {
         //     mv_cmd += 0.1;
@@ -412,10 +365,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
         // ccm.set_setpoint(mv_cmd);
 
-        fl_ccm.send_motion_command();
-        bl_ccm.send_motion_command();
-        br_ccm.send_motion_command();
-        fr_ccm.send_motion_command();
+        if ctr % 2 == 0 {
+            ccm.send_motion_command();
+        }
 
         ticker.next().await;
     }

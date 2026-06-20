@@ -64,6 +64,7 @@ const PidConstants_t vel_gains[3] = {
         .kD = 0.4f,
         .kI_max = 20.0f,
         .kI_min = -20.0f,
+        .anti_jitter_thresh = 0.0f,
     },
     {
         .kP = 7.0f,
@@ -71,6 +72,7 @@ const PidConstants_t vel_gains[3] = {
         .kD = 0.5f,
         .kI_max = 0.0f,
         .kI_min = 0.0f,
+        .anti_jitter_thresh = 0.0f,
     },
     {
         .kP = 2.0f,
@@ -78,6 +80,7 @@ const PidConstants_t vel_gains[3] = {
         .kD = 0.1f,
         .kI_max = 0.0f,
         .kI_min = 0.0f,
+        .anti_jitter_thresh = 0.0f,
     }
 };
 const float vel_gain_schedule[3] = {
@@ -221,7 +224,7 @@ int main() {
 
     while (true) {
         IWDG->KR = 0x0000AAAA; // feed the watchdog
-        
+
         // increment the soft watchdog
         ticks_since_last_command_packet++;
 #ifdef COMP_MODE
@@ -290,8 +293,8 @@ int main() {
 }
 
 static bool allow_motor_to_run() {
-    return motor_command_packet.enable_telemetry 
-        && ticks_since_last_command_packet <= COMMAND_PACKET_TIMEOUT_TICKS 
+    return motor_command_packet.enable_telemetry
+        && ticks_since_last_command_packet <= COMMAND_PACKET_TIMEOUT_TICKS
         && !response_packet.master_error
         && uart_logging_status_receive == UART_LOGGING_OK
         && uart_logging_status_send == UART_LOGGING_OK;

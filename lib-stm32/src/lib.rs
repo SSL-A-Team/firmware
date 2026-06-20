@@ -22,10 +22,12 @@ pub mod audio;
 pub mod drivers;
 pub mod filter;
 pub mod math;
+pub mod model;
 pub mod power;
 pub mod time;
 pub mod uart;
 pub mod units;
+pub mod util;
 
 // required for exported uart queue macros
 pub extern crate paste;

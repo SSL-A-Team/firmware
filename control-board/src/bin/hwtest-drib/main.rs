@@ -8,7 +8,11 @@ use ateam_common_packets::{
     radio::DataPacket,
 };
 use embassy_executor::InterruptExecutor;
-use embassy_stm32::{interrupt, pac::Interrupt};
+use embassy_stm32::{
+    gpio::{Input, Pull},
+    interrupt,
+    pac::Interrupt,
+};
 use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _;
@@ -79,6 +83,11 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     //  start tasks  //
     ///////////////////
 
+    // let pg10_read = Input::new(p.PG10, Pull::Up);
+    // let pg11_read = Input::new(p.PG11, Pull::Up);
+    // let pd0_read = Input::new(p.PD0, Pull::Up);
+    // let pd1_read = Input::new(p.PD1, Pull::Up);
+
     create_io_task!(main_spawner, robot_state, p);
 
     create_kicker_task!(
@@ -91,7 +100,34 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     );
 
     loop {
-        Timer::after_millis(100).await;
+        Timer::after_millis(10).await;
+
+        if robot_state.hw_init_state_valid() {
+            break;
+        }
+
+        defmt::info!("waiting for hw init state to be valid");
+    }
+
+    loop {
+        Timer::after_millis(10).await;
+
+        if robot_state.get_hw_robot_id() == 0 {
+            break;
+        }
+
+        defmt::info!("wait for user to select robot id 0");
+    }
+
+    loop {
+        Timer::after_millis(10).await;
+
+        let mut motor_speed_ind = robot_state.get_hw_robot_id();
+        if motor_speed_ind > 8 {
+            motor_speed_ind = 16 - motor_speed_ind;
+        }
+
+        let drib_speed = motor_speed_ind as f32 * 75.0;
 
         test_command_publisher.publish_immediate(DataPacket::BasicControl(BasicControl {
             _bitfield_1: Default::default(),
@@ -105,7 +141,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             reserved2: [0; 1],
 
             kick_vel: 0.0,
-            dribbler_speed: 50.0,
+            dribbler_speed: drib_speed,
 
             cmd: BodyControlCommand {
                 global_vel: GlobalVelocityCommand {

@@ -28,12 +28,15 @@ static volatile MotorControlMode motor_control_mode = DUTY;
 static volatile MotorDirection_t commanded_motor_direction = CLOCKWISE;
 static volatile uint16_t current_duty_cycle = 0;
 static volatile uint8_t hall_recorded_state_on_transition = 0;
+static volatile bool motor_output_enabled = false;
 
 /////////////////////
 //  hall velocity  //
 /////////////////////
 
 static bool hall_speed_estimate_valid = false;
+static volatile uint32_t hall_last_transition_ticks = 0;
+static volatile MotorDirection_t hall_detected_direction = CLOCKWISE;
 static uint8_t current_hall_value = 0;
 static uint8_t prev_hall_value = 0;
 
@@ -61,7 +64,7 @@ static FixedPointS12F4_PiConstants_t current_controller_constants = {
 
     // KNOWN GOOD
     .kP = 338 * 5,      // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
-    .kI = 145 * 5,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910 
+    .kI = 145 * 5,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910
     .kI_max = 4095,  // S12F0
     .kI_min = -(4095),  // S12F0
     .anti_jitter_thresh = 0,
@@ -103,7 +106,7 @@ static volatile int32_t dvdt_limited_voltage_command_mv = 0;
 #endif
 
 #ifdef BRAKE_ON_HALL_ERROR
-    #define HALL_ERROR_COMMUTATION BRAKE_COMMUTATION 
+    #define HALL_ERROR_COMMUTATION BRAKE_COMMUTATION
 #else
     #define HALL_ERROR_COMMUTATION COAST_COMMUTATION
 #endif
@@ -114,21 +117,21 @@ static const int COAST_COMMUTATION_INDEX = 9;
 
 /**
  * @brief clockwise transition table
- * 
+ *
  * Hall sensors should produce a gray-coded 3-bit value, meaning
  * 0 (0'b000) and 7 (0'b111) are invalid. The signal wires have
  * pull up resistors so 7 probably means one or more wires is unplugged,
  * and 0 probably means there's a power issue.
- * 
+ *
  * Clockwise (human readable order)
- * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H 
+ * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H
  * 1  0  0  1     V  H  G      0   1   0   0   1   0
  * 3  0  1  1     H  V  G      0   0   0   1   1   0
  * 2  0  1  0     G  V  H      1   0   0   1   0   0
  * 6  1  1  0     G  H  V      1   0   0   0   0   1
  * 4  1  0  0     H  G  V      0   0   1   0   0   1
  * 5  1  0  1     V  G  H      0   1   1   0   0   0
- * 
+ *
  * Clockwise (direct hall index order)
  * 1  0  0  1     V  H  G      0   1   0   0   1   0
  * 2  0  1  0     G  V  H      1   0   0   1   0   0
@@ -136,10 +139,10 @@ static const int COAST_COMMUTATION_INDEX = 9;
  * 4  1  0  0     H  G  V      0   0   1   0   0   1
  * 5  1  0  1     V  G  H      0   1   1   0   0   0
  * 6  1  1  0     G  H  V      1   0   0   0   0   1
- * 
+ *
  */
 static bool cw_commutation_table[10][6] = {
-    HALL_ERROR_COMMUTATION,    
+    HALL_ERROR_COMMUTATION,
     {false, true,  false, false, true,  false},
     {true,  false, false, true,  false, false},
     {false, false, false, true,  true,  false},
@@ -164,12 +167,12 @@ static uint8_t cw_expected_hall_transition_table[8] = {
 
 /**
  * @brief counter clockwise transition table
- * 
+ *
  * Hall sensors should produce a gray-coded 3-bit value, meaning
  * 0 (0'b000) and 7 (0'b111) are invalid. The signal wires have
  * pull up resistors so 7 probably means one or more wires is unplugged,
  * and 0 probably means there's a power issue.
- * 
+ *
  * Counter Clockwise (human readable order)
  * D  H3 H2 H1 -> P1 P2 P3 -> W1L W1H W2L W2H W3L W3H
  * 1   0  0  1    V  H  G      1   0   0   0   0   1
@@ -178,7 +181,7 @@ static uint8_t cw_expected_hall_transition_table[8] = {
  * 6   1  1  0    G  H  V      0   1   0   0   1   0
  * 2   0  1  0    G  V  H      0   1   1   0   0   0
  * 3   0  1  1    H  V  G      0   0   1   0   0   1
- * 
+ *
  * Counter Clockwise (direct hall index order)
  * 1   0  0  1    V  H  G      1   0   0   0   0   1
  * 2   0  1  0    G  V  H      0   1   1   0   0   0
@@ -234,7 +237,7 @@ static void set_current(uint16_t current_ma);
 
 /**
  * @brief sets up the hall sensor timer
- * 
+ *
  * The hall sensor timer is TIM2. The hall timer can be used to
  * trigger a TIM1 COM event which will call back it's interrupt handler
  */
@@ -322,9 +325,9 @@ static void pwm6step_setup_hall_timer() {
 #define CCER_TIM4_ADC_TRIG (TIM_CCER_CC4E)
 
 /**
- * @brief 
- * 
- * @param pwm_freq_hz 
+ * @brief
+ *
+ * @param pwm_freq_hz
  */
 static void pwm6step_setup_commutation_timer() {
     ////////////////////////////
@@ -397,10 +400,15 @@ static void pwm6step_setup_commutation_timer() {
 
 void TIM2_IRQHandler()
 {
-	// hall commutation IRQ
-	TIM2->SR &= ~TIM_SR_UIF;
+    uint32_t sr = TIM2->SR;
+    TIM2->SR = ~(TIM_SR_UIF | TIM_SR_CC1IF);  // rc_w0: writing 0 clears, writing 1 no-ops
 
-    uint32_t hall_transition_elapsed_ticks = TIM2->CCR1;
+    // CC1IF set only on real IC1 capture (hall edge). UIF also fires on software UG
+    // and counter overflow — don't update speed estimate for those.
+    if (sr & TIM_SR_CC1IF) {
+        hall_last_transition_ticks = TIM2->CCR1;
+        hall_speed_estimate_valid = true;
+    }
 
     perform_commutation_cycle();
 }
@@ -488,7 +496,7 @@ void DMA1_Channel1_IRQHandler() {
     // as a the actual max the PWM is commanding, to the DC
     // as we've observed, the RPM/power output is quite different from
     // max battery to minimum and certainly if the voltage further dips under load
-    // we want to correct for this 
+    // we want to correct for this
 
     // scale from 4096 -> battery voltage
     uint16_t voltage_sp_mv = ((uint32_t) voltage_sp * BATTERY_VOLTAGE_MV) >> 12;
@@ -496,7 +504,7 @@ void DMA1_Channel1_IRQHandler() {
     // if we're not in CURRENT mode, then the user has directly set the voltage/dc via the public function
     // in that case, this callback is collecting logging data and averaging/update bus voltage for VOLTAGE mode
     if (motor_control_mode == CURRENT) {
-        set_voltage(voltage_sp_mv);    
+        set_voltage(voltage_sp_mv);
     }
 
     if (motor_control_mode == VOLTAGE || motor_control_mode == CURRENT) {
@@ -537,8 +545,8 @@ void DMA1_Channel1_IRQHandler() {
 }
 
 /**
- * @brief 
- * 
+ * @brief
+ *
  */
 static void perform_commutation_cycle() {
     hall_recorded_state_on_transition = read_hall();
@@ -547,8 +555,15 @@ static void perform_commutation_cycle() {
     uint8_t ccw_expected_transition = ccw_expected_hall_transition_table[prev_hall_value];
 
 
-    if (hall_recorded_state_on_transition != prev_hall_value 
-            && hall_recorded_state_on_transition != cw_expected_transition 
+    if (hall_recorded_state_on_transition == cw_expected_transition) {
+        hall_detected_direction = CLOCKWISE;
+    } else if (hall_recorded_state_on_transition == ccw_expected_transition) {
+        hall_detected_direction = COUNTER_CLOCKWISE;
+    }
+    // else: ambiguous (error state or no movement) — keep last known direction
+
+    if (hall_recorded_state_on_transition != prev_hall_value
+            && hall_recorded_state_on_transition != cw_expected_transition
             && hall_recorded_state_on_transition != ccw_expected_transition) {
         hall_transition_error_count++;
     } else if (motor_errors.invalid_transitions > 0) {
@@ -567,19 +582,19 @@ static void perform_commutation_cycle() {
     if (motor_errors.hall_power || motor_errors.hall_disconnected) { // || motor_errors.invalid_transitions) {
         set_commutation_estop();
         return;
-    } 
-    
+    }
+
     set_commutation_for_hall(hall_recorded_state_on_transition, false);
 }
 
 /**
  * @brief reads the hall value from the pins
- * 
- * @return uint8_t 
+ *
+ * @return uint8_t
  */
 static uint8_t read_hall() {
     uint8_t hall_value = (GPIOA->IDR & (GPIO_IDR_2 | GPIO_IDR_1 | GPIO_IDR_0));
-    
+
     // check if hall sensor is floating/disconnected, all lines will be 1, 3b'111 = 7
     if (hall_value == 0x7) {
         hall_disconnect_error_count += HALL_DISCONNECT_ERROR_INCREMENT;
@@ -609,7 +624,7 @@ static uint8_t read_hall() {
 
 /**
  * @brief stages com values for estop
- * 
+ *
  */
 static void set_commutation_estop() {
     set_commutation_for_hall(0, true);
@@ -617,15 +632,15 @@ static void set_commutation_estop() {
 
 /**
  * @brief sets channel duty cycles, and stages enables for COM event
- * 
- * @param hall_state 
+ *
+ * @param hall_state
  */
 static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
     bool *commutation_values;
     if (estop) {
         // use whatever error mode was selected for the tables
         commutation_values = cw_commutation_table[ESTOP_COMMUTATION_INDEX];
-    } else if (current_duty_cycle == 0) {
+    } else if (!motor_output_enabled) {
         commutation_values = cw_commutation_table[COAST_COMMUTATION_INDEX];
     } else {
         if (commanded_motor_direction == CLOCKWISE) {
@@ -688,7 +703,7 @@ static void set_commutation_for_hall(uint8_t hall_state, bool estop) {
 
 /**
  * @brief trigger a hardware commutation in TIM1
- * 
+ *
  */
 static void trigger_commutation() {
     TIM1->EGR |= TIM_EGR_COMG;
@@ -708,8 +723,8 @@ void TIM1_CC_IRQHandler() {
 ////////////////////////
 
 /**
- * @brief sets up the pins and timer peripherials associated with the pins 
- * 
+ * @brief sets up the pins and timer peripherials associated with the pins
+ *
  */
 void pwm6step_setup() {
     // setup current PI controller
@@ -717,10 +732,16 @@ void pwm6step_setup() {
 
     pwm6step_setup_commutation_timer();
     pwm6step_setup_hall_timer();
+
+    // Arm TIM2 UIE unconditionally at init so hall transitions drive commutation
+    // without any first-command special-case logic.
+    TIM2->DIER = TIM_DIER_UIE;
+    TIM2->EGR  = TIM_EGR_UG;
+    trigger_commutation();
 }
 
 /**
- * 
+ *
  */
 void pwm6step_set_direction(MotorDirection_t motor_direction) {
     if (INVERT_MOTOR_DIRECTION) {
@@ -742,18 +763,12 @@ static void set_duty_cycle(uint16_t duty_cycle) {
     TIM1->CCR1 = current_duty_cycle;
     TIM1->CCR2 = current_duty_cycle;
     TIM1->CCR3 = current_duty_cycle;
-
-    if (TIM2->DIER == 0) {
-        // enable it and force an update
-        TIM2->DIER = TIM_DIER_UIE;
-        TIM2->EGR = TIM_EGR_UG;
-    }
 }
 
 /**
- * @brief 
- * 
- * @param duty_cycle_arr 
+ * @brief
+ *
+ * @param duty_cycle_arr
  */
 void pwm6step_set_duty_cycle(int16_t duty_cycle) {
     if (duty_cycle < 0) {
@@ -766,7 +781,14 @@ void pwm6step_set_duty_cycle(int16_t duty_cycle) {
     motor_control_mode = DUTY;
 
     uint16_t duty_cycle_abs = abs(duty_cycle);
+    bool was_enabled = motor_output_enabled;
+    motor_output_enabled = (duty_cycle_abs > 0);
     set_duty_cycle(duty_cycle_abs);
+
+    if (!was_enabled && motor_output_enabled) {
+        perform_commutation_cycle();
+        trigger_commutation();
+    }
 }
 
 void pwm6step_set_duty_cycle_f(float duty_cycle_pct) {
@@ -807,12 +829,13 @@ void pwm6step_set_voltage(int16_t voltage_mv) {
     motor_control_mode = VOLTAGE;
 
     uint16_t abs_voltage_mv = (uint16_t) abs((int) voltage_mv);
+    bool was_enabled = motor_output_enabled;
+    motor_output_enabled = (abs_voltage_mv > 0);
     set_voltage(abs_voltage_mv);
 
-    if (TIM2->DIER == 0) {
-        // enable it and force an update
-        TIM2->DIER = TIM_DIER_UIE;
-        TIM2->EGR = TIM_EGR_UG;
+    if (!was_enabled && motor_output_enabled) {
+        perform_commutation_cycle();
+        trigger_commutation();
     }
 }
 
@@ -825,19 +848,20 @@ static void set_current(uint16_t current_ma) {
 void pwm6step_set_current(int16_t current_ma) {
     if (current_ma < 0) {
         pwm6step_set_direction(COUNTER_CLOCKWISE);
-    } else {
+    } else if (current_ma > 0) {
         pwm6step_set_direction(CLOCKWISE);
     }
 
     motor_control_mode = CURRENT;
 
     uint16_t abs_current_ma = (uint16_t) abs((int) current_ma);
+    bool was_enabled = motor_output_enabled;
+    motor_output_enabled = (abs_current_ma > 0);
     set_current(abs_current_ma);
 
-    if (TIM2->DIER == 0) {
-        // enable it and force an update
-        TIM2->DIER = TIM_DIER_UIE;
-        TIM2->EGR = TIM_EGR_UG;
+    if (!was_enabled && motor_output_enabled) {
+        perform_commutation_cycle();
+        trigger_commutation();
     }
 }
 
@@ -852,16 +876,29 @@ bool pwm6step_1ms_flag() {
 
 
 bool pwm6step_hall_rps_estimate_valid() {
-    return hall_speed_estimate_valid;
+    if (!hall_speed_estimate_valid) return false;
+    if (motor_errors.hall_power || motor_errors.hall_disconnected) return false;
+    // Stale if TIM2->CNT has exceeded 100ms since last hall edge.
+    // TIM2->CNT resets to 0 on each transition (slave reset mode).
+    return TIM2->CNT < (F_SYS_CLK_HZ / 10);
 }
 
-int pwm6step_hall_get_rps_estimate() {
-    return 0;
+int16_t pwm6step_hall_get_rps_estimate() {
+    if (!pwm6step_hall_rps_estimate_valid()) return 0;
+    uint32_t ticks = hall_last_transition_ticks;
+    if (ticks == 0) return 0;
+    // 6 transitions/electrical rev, MOTOR_POLE_PAIRS elec-revs/mech-rev, 100*2pi crad/rev.
+    // 628 = floor(100 * 2 * pi); uint64 intermediate prevents overflow.
+    int32_t crads = (int32_t)((uint64_t)F_SYS_CLK_HZ * 628ULL / (6ULL * MOTOR_POLE_PAIRS * (uint64_t)ticks));
+    if (hall_detected_direction == CLOCKWISE) crads = -crads;
+    if (crads >  INT16_MAX) crads = INT16_MAX;
+    if (crads <  INT16_MIN) crads = INT16_MIN;
+    return (int16_t)crads;
 }
 
 const MotorErrors_t pwm6step_get_motor_errors() {
     return motor_errors;
-} 
+}
 
 const uint16_t pwm6step_get_current_measurement() {
     return measured_current;
@@ -874,9 +911,8 @@ const uint16_t* pwm6step_get_current_log() {
 
 const uint16_t pwm6step_get_vbus_voltage() {
     return measured_vbus_voltage;
-}  
+}
 
 const uint16_t pwm6step_get_voltage_command() {
     return last_voltage_command_mv;
 }
-

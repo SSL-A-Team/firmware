@@ -11,6 +11,7 @@ use ateam_controls::{Vector3f, Vector4f};
 use crate::create_error_telemetry_from_string;
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
+    util::RateLimiter,
 };
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::{usart::Uart, Peri};
@@ -18,7 +19,7 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{
     include_external_cpp_bin,
-    motion::robot_controller::BodyController,
+    motion::body_controller::BodyController,
     motor::CurrentControlledMotor,
     parameter_interface::ParameterInterface,
     pins::*,
@@ -28,7 +29,7 @@ use crate::{
 
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel-torque.bin"}
 
-const MAX_CURRENT_MA: f32 = 1500.0; // mA
+const MAX_CURRENT_MA: f32 = 2500.0; // mA
 
 const MAX_TX_PACKET_SIZE: usize = 80;
 const TX_BUF_DEPTH: usize = 3;
@@ -52,9 +53,13 @@ const CONTROL_FREQ: f32 = 1.0 / DEFAULT_CONTROL_DT; // Hz
 const BASIC_TELEM_FREQ: f32 = 100.0; // Hz, send basic telemetry at this frequency
 const EXTENDED_TELEM_FREQ: f32 = 100.0; // Hz, send extended telemetry at this frequency, or immediately when a vision update is received
 const TRACE_PRINT_FREQ: f32 = 10.0; // Hz, print trace info at this frequency
-const TIME_WITHOUT_PACKET_STOP: f32 = 0.2; // seconds, time without receiving a control packet before locking out motor commands
+const TIME_WITHOUT_PACKET_STOP: f32 = 0.5; // seconds, time without receiving a control packet before locking out motor commands
 
 const CONTROL_DT_US: u64 = (DEFAULT_CONTROL_DT * 1e6) as u64; // us
+
+// rate limit for error telemetry — prevents 1kHz error flood from starving radio
+// value is a diagnostic choice: UART at 5.25 Mbaud has negligible bandwidth constraint
+const ERROR_TELEM_RATE_LIMIT_MS: u64 = 50;
 const BASIC_TELEM_INTERVAL_TICKS: usize = (1.0 / BASIC_TELEM_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between basic telemetry sends
 const EXTENDED_TELEM_INTERVAL_TICKS: usize = (1.0 / EXTENDED_TELEM_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between extended telemetry sends
 const TRACE_PRINT_INTERVAL_TICKS: usize = (1.0 / TRACE_PRINT_FREQ * CONTROL_FREQ) as usize; // number of control loop ticks between trace prints
@@ -135,6 +140,11 @@ pub struct ControlTask<
     ticks_since_basic_telem: usize,
     ticks_since_extended_telem: usize,
 
+    sched_lag_err_limiter: RateLimiter,
+    control_update_err_limiter: RateLimiter,
+    high_current_err_limiter: RateLimiter,
+    loop_exec_err_limiter: RateLimiter,
+
     motor_fl: ControlWheelMotor,
     motor_bl: ControlWheelMotor,
     motor_br: ControlWheelMotor,
@@ -177,6 +187,18 @@ impl<
             last_kicker_telemetry: Default::default(),
             ticks_since_basic_telem: 0,
             ticks_since_extended_telem: 0,
+            sched_lag_err_limiter: RateLimiter::new(Duration::from_millis(
+                ERROR_TELEM_RATE_LIMIT_MS,
+            )),
+            control_update_err_limiter: RateLimiter::new(Duration::from_millis(
+                ERROR_TELEM_RATE_LIMIT_MS,
+            )),
+            high_current_err_limiter: RateLimiter::new(Duration::from_millis(
+                ERROR_TELEM_RATE_LIMIT_MS,
+            )),
+            loop_exec_err_limiter: RateLimiter::new(Duration::from_millis(
+                ERROR_TELEM_RATE_LIMIT_MS,
+            )),
             motor_fl: motor_fl,
             motor_bl: motor_bl,
             motor_br: motor_br,
@@ -329,11 +351,13 @@ impl<
             let t_loop_start = Instant::now();
             let loop_invocation_dead_time = t_loop_start - last_loop_term_time;
             if loop_invocation_dead_time > Duration::from_micros(CONTROL_DT_US) {
-                defmt::warn!("control loop scheuling lagged. Expected <{:?}us between loop invocations, but got {:?}us", CONTROL_DT_US, loop_invocation_dead_time.as_micros());
-                self.telemetry_publisher
-                    .publish_immediate(TelemetryPacket::ErrorTelemetry(
-                        create_error_telemetry_from_string("control loop scheduling lagged"),
-                    ));
+                if self.sched_lag_err_limiter.is_allowed() {
+                    defmt::warn!("control loop scheuling lagged. Expected <{:?}us between loop invocations, but got {:?}us", CONTROL_DT_US, loop_invocation_dead_time.as_micros());
+                    self.telemetry_publisher
+                        .publish_immediate(TelemetryPacket::ErrorTelemetry(
+                            create_error_telemetry_from_string("control loop scheduling lagged"),
+                        ));
+                }
             }
 
             self.motor_fl.process_packets();
@@ -459,13 +483,32 @@ impl<
                 self.last_imu_accel_y,
                 ticks_since_trace_print >= TRACE_PRINT_INTERVAL_TICKS,
             ) {
-                Ok(_) => {}
+                Ok((vel_clamped, accel_clamped)) => {
+                    if vel_clamped {
+                        defmt::warn!("body velocity clamped");
+                        self.telemetry_publisher.publish_immediate(
+                            TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string(
+                                "body velocity clamped",
+                            )),
+                        );
+                    }
+                    if accel_clamped {
+                        defmt::warn!("body acceleration clamped");
+                        self.telemetry_publisher.publish_immediate(
+                            TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string(
+                                "body acceleration clamped",
+                            )),
+                        );
+                    }
+                }
                 Err(e) => {
-                    defmt::error!("control update error: {}", e);
                     self.shared_robot_state.set_controls_err(true);
-                    let err_telem = create_error_telemetry_from_string(e.as_str());
-                    self.telemetry_publisher
-                        .publish_immediate(TelemetryPacket::ErrorTelemetry(err_telem));
+                    if self.control_update_err_limiter.is_allowed() {
+                        defmt::error!("control update error: {}", e);
+                        let err_telem = create_error_telemetry_from_string(e.as_str());
+                        self.telemetry_publisher
+                            .publish_immediate(TelemetryPacket::ErrorTelemetry(err_telem));
+                    }
                 }
             }
             vision_update = false; // reset vision update flag after use
@@ -473,6 +516,7 @@ impl<
             let (wheel_current_cmd, wheel_vel_cmd) = if self.stop_wheels()
                 || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP
                 || _cmd_mode == BodyControlMode::BCM_OFF
+                || robot_controller.wheels_disabled()
             {
                 if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS {
                     defmt::warn!("control task - motor commands locked out");
@@ -494,22 +538,24 @@ impl<
                 || wheel_ma.z.abs() > MAX_CURRENT_MA
                 || wheel_ma.w.abs() > MAX_CURRENT_MA
             {
-                defmt::warn!(
-                    "high wheel current command detected: {} {} {} {}",
-                    wheel_ma.x as i16,
-                    wheel_ma.y as i16,
-                    wheel_ma.z as i16,
-                    wheel_ma.w as i16
-                );
-                self.telemetry_publisher
-                    .publish_immediate(TelemetryPacket::ErrorTelemetry(
-                        create_error_telemetry_from_string("high wheel current rejected"),
-                    ));
+                if self.high_current_err_limiter.is_allowed() {
+                    defmt::warn!(
+                        "high wheel current command detected: {} {} {} {}",
+                        wheel_ma.x as i16,
+                        wheel_ma.y as i16,
+                        wheel_ma.z as i16,
+                        wheel_ma.w as i16
+                    );
+                    self.telemetry_publisher
+                        .publish_immediate(TelemetryPacket::ErrorTelemetry(
+                            create_error_telemetry_from_string("high wheel current rejected"),
+                        ));
+                }
                 wheel_ma = Vector4f::default();
             }
 
             if ticks_since_trace_print >= TRACE_PRINT_INTERVAL_TICKS {
-                let state = robot_controller.robot_model.x;
+                let state = robot_controller.control_context.robot_model.x;
                 let wheel_torques = robot_controller.get_wheel_torques();
                 defmt::trace!(
                     "state position: {}, {}, {}",
@@ -604,19 +650,25 @@ impl<
             /////////////////////////////////////
 
             ////////// WARNING LOGGING //////////
-            if loop_execution_time_us > 400 {
-                defmt::warn!(
-                    "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
-                    motor_packet_process_time.as_micros(),
-                    command_packet_process_time.as_micros(),
-                    control_update_time.as_micros(),
-                    channel_update_time.as_micros(),
-                );
-                defmt::warn!("control loop is taking >400us: {} us (it may be interrupted by higher priority tasks). This is >40% of an execution frame.", loop_execution_time_us);
-                self.telemetry_publisher
-                    .publish_immediate(TelemetryPacket::ErrorTelemetry(
-                        create_error_telemetry_from_string("control loop >400us execution time"),
-                    ));
+            // threshold for logging a warning about control loop execution time
+            const LOOP_EXECUTION_TIME_THRESHOLD_US: u64 = 600; // 60% of execution frame
+            if loop_execution_time_us > LOOP_EXECUTION_TIME_THRESHOLD_US {
+                if self.loop_exec_err_limiter.is_allowed() {
+                    defmt::warn!(
+                        "control loop trace: motor_pkt_proc: {} us, cmd_pkt_proc: {} us, control_update: {} us, publish: {} us",
+                        motor_packet_process_time.as_micros(),
+                        command_packet_process_time.as_micros(),
+                        control_update_time.as_micros(),
+                        channel_update_time.as_micros(),
+                    );
+                    defmt::warn!("control loop is taking >{}us: {} us (it may be interrupted by higher priority tasks)", LOOP_EXECUTION_TIME_THRESHOLD_US, loop_execution_time_us);
+                    self.telemetry_publisher
+                        .publish_immediate(TelemetryPacket::ErrorTelemetry(
+                            create_error_telemetry_from_string(
+                                "control loop execution time too high!",
+                            ),
+                        ));
+                }
             }
             /////////////////////////////////////
 

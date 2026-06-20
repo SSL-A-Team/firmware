@@ -65,7 +65,7 @@ static bool current_limited = false;
 
 //     // KNOWN GOOD
 //     .kP = 338 * 3,      // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
-//     .kI = 145 * 3,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910 
+//     .kI = 145 * 3,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910
 //     .kI_max = 4095,  // S12F0
 //     .kI_min = -(4095),  // S12F0
 //     .anti_jitter_thresh = 0,
@@ -74,12 +74,15 @@ static bool current_limited = false;
 
 // static FixedPointS12F4_PiController_t vel_curvel_controller;
 
+// kP saturation point: MAX_CURR_WHEEL_TURNING / (v_body_m_s / WHEEL_RADIUS_M)
+//   = 6300 mA / (1.0 m/s / 0.030 m) = 6300 / 33.33 = 189.0 mA/(rad/s) saturates at 1.0 m/s body error
 const PidConstants_t vel_velcur_controller_constants = {
-    .kP = 1.0f,
-    .kI = 10.0f,
+    .kP = 5.0f,
+    .kI = 0.0f,
     .kD = 0.0f,
     .kI_max = 100.0f,
     .kI_min = -100.0f,
+    .anti_jitter_thresh = (float) M_PI / 2.0f,
 };
 
 static Pid_t vel_velcur_controller;
@@ -94,6 +97,7 @@ const PidConstants_t vel_gains[3] = {
         .kD = 0.4f,
         .kI_max = 20.0f,
         .kI_min = -20.0f,
+        .anti_jitter_thresh = 0.0f,
     },
     {
         .kP = 7.0f,
@@ -101,6 +105,7 @@ const PidConstants_t vel_gains[3] = {
         .kD = 0.5f,
         .kI_max = 0.0f,
         .kI_min = 0.0f,
+        .anti_jitter_thresh = 0.0f,
     },
     {
         .kP = 2.0f,
@@ -108,6 +113,7 @@ const PidConstants_t vel_gains[3] = {
         .kD = 0.1f,
         .kI_max = 0.0f,
         .kI_min = 0.0f,
+        .anti_jitter_thresh = 0.0f,
     }
 };
 const float vel_gain_schedule[3] = {
@@ -254,7 +260,7 @@ int main() {
 
     while (true) {
         IWDG->KR = 0x0000AAAA; // feed the watchdog
-        
+
         // increment the soft watchdog
         ticks_since_last_command_packet++;
 #ifdef COMP_MODE
@@ -316,6 +322,7 @@ int main() {
         response_packet.velocity_telemetry.vel_setpoint_rads = motor_command_packet.setpoint;
         response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
         response_packet.current_telemetry.motor_voltage_cmd_mv = pwm6step_get_voltage_command();
+        response_packet.current_telemetry.hall_vel_est_crads = pwm6step_hall_get_rps_estimate();
 
         memcpy(response_packet.current_telemetry.current_samples_ma, pwm6step_get_current_log(), 40);
 
@@ -333,8 +340,8 @@ int main() {
 }
 
 static bool allow_motor_to_run() {
-    return motor_command_packet.enable_telemetry 
-        && ticks_since_last_command_packet <= COMMAND_PACKET_TIMEOUT_TICKS 
+    return motor_command_packet.enable_telemetry
+        && ticks_since_last_command_packet <= COMMAND_PACKET_TIMEOUT_TICKS
         && !response_packet.master_error
         && uart_logging_status_receive == UART_LOGGING_OK
         && uart_logging_status_send == UART_LOGGING_OK;
