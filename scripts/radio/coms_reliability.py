@@ -307,6 +307,7 @@ def discover_robot(
     color: TeamColor,
     timeout: float = 1.0,
     max_retries: Optional[int] = None,
+    iface_ip: Optional[str] = None,
 ) -> Optional[Tuple[str, int]]:
     """
     Listen for CC_HELLO_REQ via multicast and respond with CC_HELLO_RESP.
@@ -314,14 +315,26 @@ def discover_robot(
     Joins the multicast group and waits for a robot to broadcast CC_HELLO_REQ,
     then replies unicast with CC_HELLO_RESP containing the local IP and port.
     Returns the robot's (ip, port) address, or None if all attempts exhausted.
+
+    If iface_ip is given, the multicast membership (and outgoing multicast
+    traffic) is bound to the local interface with that IPv4 address. This is
+    required on multi-homed hosts where the robot's network is not reachable via
+    the default route; otherwise the kernel joins the group on the wrong NIC and
+    never delivers the robot's CC_HELLO_REQ.
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.settimeout(timeout)
     sock.bind(("", MULTICAST_PORT))
 
-    # Join the multicast group to receive robot broadcasts
-    mreq = struct.pack("4sL", socket.inet_aton(MULTICAST_IP), socket.INADDR_ANY)
+    # Join the multicast group to receive robot broadcasts. Bind the membership
+    # to a specific interface when provided, else let the kernel choose.
+    if iface_ip:
+        iface_addr = socket.inet_aton(iface_ip)
+        mreq = struct.pack("4s4s", socket.inet_aton(MULTICAST_IP), iface_addr)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, iface_addr)
+    else:
+        mreq = struct.pack("4sL", socket.inet_aton(MULTICAST_IP), socket.INADDR_ANY)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
     infinite = max_retries is None or max_retries <= 0
@@ -564,6 +577,10 @@ def _build_parser() -> argparse.ArgumentParser:
                       help="Skip discovery and connect directly to this IP")
     disc.add_argument("--robot-port", type=int, default=MULTICAST_PORT, metavar="PORT",
                       help=f"Robot unicast port when using --robot-ip (default: {MULTICAST_PORT})")
+    disc.add_argument("--iface-ip", type=str, default=None, metavar="IP",
+                      help="Local IPv4 address of the interface on the robot's network "
+                           "Required on multi-homed hosts so the multicast "
+                           "group is joined on the correct NIC.")
 
     send = p.add_argument_group("Sending")
     send.add_argument("--count", type=int, default=None, metavar="N",
@@ -648,6 +665,7 @@ def main() -> None:
             color=color,
             timeout=args.discovery_timeout,
             max_retries=args.discovery_retries,
+            iface_ip=args.iface_ip,
         )
         if result is None:
             print("[error] Discovery failed — no CC_HELLO_RESP received. "

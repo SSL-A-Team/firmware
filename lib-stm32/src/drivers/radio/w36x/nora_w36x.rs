@@ -385,15 +385,15 @@ impl<
     }
 
     /// Create a TCP or UDP socket.
-    /// AT+USOCR=<protocol>[,<local_port>]
+    /// AT+USOCR=<protocol>[,<pref_ip_ver>]
     /// - <protocol>: 6 for TCP, 17 for UDP
-    /// - <local_port> is optional; omit to let the module assign an ephemeral port.
+    /// - <pref_ip_ver> is optional, 0 for IPv4 (default) or 1 for IPv6.
     ///
     /// Returns the socket ID assigned by the module.
     pub async fn create_socket(&self, protocol: SocketProtocol) -> Result<u8, NoraRadioError> {
         let mut str: String<16> = String::new();
         let proto_num = protocol as u8;
-        write!(str, "AT+USOCR={proto_num}").or(Err(NoraRadioError::CommandConstructionFailed))?;
+        write!(str, "AT+USOCR={proto_num},0").or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
         defmt::debug!("create_socket: command sent ({})", str.as_str());
 
