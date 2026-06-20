@@ -428,51 +428,6 @@ impl<
         Ok(socket_handle)
     }
 
-    /// Create a TCP or UDP socket bound to a specific local port.
-    /// AT+USOCR=<protocol>,<local_port>
-    /// Useful for UDP sockets that need a predictable source port.
-    pub async fn create_socket_on_port(
-        &self,
-        protocol: SocketProtocol,
-        local_port: u16,
-    ) -> Result<u8, NoraRadioError> {
-        let mut str: String<24> = String::new();
-        let proto_num = protocol as u8;
-        write!(str, "AT+USOCR={proto_num},{local_port}")
-            .or(Err(NoraRadioError::CommandConstructionFailed))?;
-        self.send_command(str.as_str()).await?;
-        defmt::debug!("create_socket_on_port: command sent ({})", str.as_str());
-
-        let socket_handle = self
-            .read_response_raw::<64, _, _>(|accum| {
-                if accum.windows(5).any(|w| w == b"ERROR") {
-                    return Some(Err(NoraRadioError::SocketCreationFailed));
-                }
-                if let Some(start) = accum.windows(7).position(|w| w == b"+USOCR:") {
-                    let after = &accum[start + 7..];
-                    let end = after
-                        .iter()
-                        .position(|&b| b == b'\r' || b == b'\n')
-                        .unwrap_or(after.len());
-                    if end > 0 {
-                        if let Ok(s) = core::str::from_utf8(&after[..end]) {
-                            if let Ok(id) = s.trim().parse::<u8>() {
-                                if !accum.windows(4).any(|w| w == b"OK\r\n") {
-                                    return None;
-                                }
-                                return Some(Ok(id));
-                            }
-                        }
-                    }
-                }
-                None
-            })
-            .await?;
-
-        defmt::debug!("create_socket_on_port: socket handle {}", socket_handle);
-        Ok(socket_handle)
-    }
-
     /// Connect a socket to a remote address and port.
     /// Uses AT+USOC=<socket_handle>,"<host_address>",<remote_port>
     /// - <socket_handle> is assigned by the module when the socket is created.
@@ -651,6 +606,81 @@ impl<
                                 if written != data.len() {
                                     defmt::warn!(
                                         "AT+USOWB: written {} != intended {}",
+                                        written,
+                                        data.len()
+                                    );
+                                }
+                                return Some(Ok(()));
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        })
+        .await?;
+
+        Ok(())
+    }
+
+    /// Write binary data to an explicit destination without connecting the socket.
+    /// AT+USOWB=<socket_handle>,"<remote_addr>",<remote_port> + SOH binary header + data
+    /// Allows sending to a specific address (e.g. multicast) while keeping the socket
+    /// unconnected so it receives from any source.
+    pub async fn send_data_to(
+        &self,
+        socket_handle: u8,
+        addr: &str,
+        port: u16,
+        data: &[u8],
+    ) -> Result<(), NoraRadioError> {
+        let data_len = data.len() as u16;
+
+        if data_len == 0 || data_len > 1460 {
+            return Err(NoraRadioError::CommandConstructionFailed);
+        }
+
+        let mut cmd: String<64> = String::new();
+        write!(cmd, "AT+USOWB={socket_handle},\"{addr}\",{port}")
+            .or(Err(NoraRadioError::CommandConstructionFailed))?;
+
+        let res = self.writer.enqueue(|buf| {
+            let cmd_bytes = cmd.as_bytes();
+            let cmd_len = cmd_bytes.len();
+            buf[..cmd_len].copy_from_slice(cmd_bytes);
+            buf[cmd_len] = 0x01;
+            buf[cmd_len + 1] = (data_len >> 8) as u8;
+            buf[cmd_len + 2] = (data_len & 0xFF) as u8;
+            buf[cmd_len + 3..cmd_len + 3 + data.len()].copy_from_slice(data);
+            defmt::trace!("send_data_to buffer: {:?}", &buf[..cmd_len + 3 + data.len()]);
+            cmd_len + 3 + data.len()
+        });
+
+        if res.is_err() {
+            return Err(NoraRadioError::SendCommandLowLevelBufferFull);
+        }
+
+        self.read_response_raw::<64, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                return Some(Err(NoraRadioError::SocketWriteFailed));
+            }
+            if let Some(start) = accum.windows(7).position(|w| w == b"+USOWB:") {
+                let after = &accum[start + 7..];
+                if let Some(comma) = after.iter().position(|&b| b == b',') {
+                    let len_bytes = &after[comma + 1..];
+                    let end = len_bytes
+                        .iter()
+                        .position(|&b| b == b'\r' || b == b'\n')
+                        .unwrap_or(len_bytes.len());
+                    if end > 0 {
+                        if let Ok(s) = core::str::from_utf8(&len_bytes[..end]) {
+                            if let Ok(written) = s.trim().parse::<usize>() {
+                                if !accum.windows(4).any(|w| w == b"OK\r\n") {
+                                    return None;
+                                }
+                                if written != data.len() {
+                                    defmt::warn!(
+                                        "AT+USOWB (to): written {} != intended {}",
                                         written,
                                         data.len()
                                     );

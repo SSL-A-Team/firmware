@@ -24,7 +24,6 @@ use super::radio_robot::TeamColor;
 
 const MULTICAST_IP: &str = "224.4.20.69";
 const MULTICAST_PORT: u16 = 42069;
-const LOCAL_PORT: u16 = 42069;
 
 #[derive(Clone, Copy, PartialEq, Debug, Format)]
 pub enum RobotRadioNoraError {
@@ -308,37 +307,17 @@ impl<
     }
 
     pub async fn open_multicast(&mut self) -> Result<(), RobotRadioNoraError> {
-        // Bind to LOCAL_PORT so the source port is predictable. After send_hello,
-        // call reopen_multicast_rx_only to drop the connected filter and receive
-        // HelloResponse from the software's unicast address on the same local port.
+        // Create an unconnected UDP socket. Connecting to the multicast peer would
+        // cause the module to filter incoming packets to that peer only, dropping
+        // HelloResponse from the software's unicast address. Instead, send_hello uses
+        // send_data_to with an explicit multicast destination so the socket stays
+        // unconnected and receives from any source.
         let socket_id = self
             .nora_driver
-            .create_socket_on_port(SocketProtocol::UDP, LOCAL_PORT)
+            .create_socket(SocketProtocol::UDP)
             .await
             .map_err(|_| RobotRadioNoraError::OpenSocketError)?;
 
-        let socket = self
-            .nora_driver
-            .connect_socket(socket_id, MULTICAST_IP, MULTICAST_PORT, SocketProtocol::UDP)
-            .await
-            .map_err(|_| RobotRadioNoraError::OpenMulticastError)?;
-
-        self.socket = Some(socket);
-        Ok(())
-    }
-
-    /// Close the connected multicast TX socket and open a new unconnected socket on
-    /// LOCAL_PORT. Call this after send_hello so the module accepts HelloResponse from
-    /// any source (connected sockets filter to the connected peer only).
-    pub async fn reopen_multicast_rx_only(&mut self) -> Result<(), RobotRadioNoraError> {
-        if let Some(socket) = self.socket.take() {
-            self.nora_driver.close_socket(socket.socket_id).await?;
-        }
-        let socket_id = self
-            .nora_driver
-            .create_socket_on_port(SocketProtocol::UDP, LOCAL_PORT)
-            .await
-            .map_err(|_| RobotRadioNoraError::OpenSocketError)?;
         self.socket = Some(SocketConnection { socket_id });
         Ok(())
     }
@@ -378,8 +357,23 @@ impl<
 
     pub async fn send_data(&self, data: &[u8]) -> Result<(), RobotRadioNoraError> {
         if let Some(socket) = &self.socket {
-            // NORA send_data is async and takes socket_id
             self.nora_driver.send_data(socket.socket_id, data).await?;
+            Ok(())
+        } else {
+            Err(RobotRadioNoraError::SocketMissing)
+        }
+    }
+
+    async fn send_data_to(
+        &self,
+        addr: &str,
+        port: u16,
+        data: &[u8],
+    ) -> Result<(), RobotRadioNoraError> {
+        if let Some(socket) = &self.socket {
+            self.nora_driver
+                .send_data_to(socket.socket_id, addr, port, data)
+                .await?;
             Ok(())
         } else {
             Err(RobotRadioNoraError::SocketMissing)
@@ -516,7 +510,7 @@ impl<
                 size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloRequest>(),
             )
         };
-        self.send_data(packet_bytes).await?;
+        self.send_data_to(MULTICAST_IP, MULTICAST_PORT, packet_bytes).await?;
 
         Ok(())
     }
