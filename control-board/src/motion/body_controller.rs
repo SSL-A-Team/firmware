@@ -1,6 +1,9 @@
 use crate::motion::control_context::ControlContext;
 use crate::motion::maneuvers::ManeuverManager;
-use crate::motion::params::controller_params::{EncLagMode, ENC_LAG_MODE};
+use crate::motion::params::controller_params::{
+    EncLagMode, BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_LINEAR, BODY_VEL_CLAMP_ANGULAR,
+    BODY_VEL_CLAMP_LINEAR, ENC_LAG_MODE,
+};
 use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::{
     BasicControl, BodyControlExtendedTelemetry, BodyControlTelemetry, ParameterCommand,
@@ -71,7 +74,7 @@ impl BodyController {
         imu_accel_x_meas: f32,
         imu_accel_y_meas: f32,
         trace: bool,
-    ) -> Result<(), ControlsError> {
+    ) -> Result<(bool, bool), ControlsError> {
         let t_start = Instant::now();
 
         self.control_context.wheels_disabled = false;
@@ -92,12 +95,44 @@ impl BodyController {
         self.body_twist_out = setpoints.body_twist;
         self.body_accel_out = setpoints.body_accel;
 
+        // Clamp body-level velocity before converting to wheel velocity setpoints.
+        let twist_clamped_x = self
+            .body_twist_out
+            .x
+            .clamp(-BODY_VEL_CLAMP_LINEAR, BODY_VEL_CLAMP_LINEAR);
+        let twist_clamped_y = self
+            .body_twist_out
+            .y
+            .clamp(-BODY_VEL_CLAMP_LINEAR, BODY_VEL_CLAMP_LINEAR);
+        let twist_clamped_z = self
+            .body_twist_out
+            .z
+            .clamp(-BODY_VEL_CLAMP_ANGULAR, BODY_VEL_CLAMP_ANGULAR);
+        let vel_clamped = twist_clamped_x != self.body_twist_out.x
+            || twist_clamped_y != self.body_twist_out.y
+            || twist_clamped_z != self.body_twist_out.z;
+        self.body_twist_out = Vector3f::new(twist_clamped_x, twist_clamped_y, twist_clamped_z);
+
         let friction_force_global = self
             .control_context
             .compute_friction(self.body_twist_out, self.body_accel_out);
-        self.body_accel_out_fric_comp =
+        let body_accel_fric_comp =
             self.body_accel_out - self.control_context.robot_model.i_inv * friction_force_global;
 
+        // Clamp body-level acceleration before converting to wheel torques.
+        let clamped_x = body_accel_fric_comp
+            .x
+            .clamp(-BODY_ACCEL_CLAMP_LINEAR, BODY_ACCEL_CLAMP_LINEAR);
+        let clamped_y = body_accel_fric_comp
+            .y
+            .clamp(-BODY_ACCEL_CLAMP_LINEAR, BODY_ACCEL_CLAMP_LINEAR);
+        let clamped_z = body_accel_fric_comp
+            .z
+            .clamp(-BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_ANGULAR);
+        let accel_clamped = clamped_x != body_accel_fric_comp.x
+            || clamped_y != body_accel_fric_comp.y
+            || clamped_z != body_accel_fric_comp.z;
+        self.body_accel_out_fric_comp = Vector3f::new(clamped_x, clamped_y, clamped_z);
         let body_xy = SVector::<f32, 2>::new(self.body_twist_out.x, self.body_twist_out.y);
         self.wheel_vel_out =
             if matches!(ENC_LAG_MODE, EncLagMode::FeedforwardOnly | EncLagMode::Full) {
@@ -183,7 +218,7 @@ impl BodyController {
             );
         }
 
-        Ok(())
+        Ok((vel_clamped, accel_clamped))
     }
 
     pub fn get_wheel_velocities(&self) -> Vector4f {

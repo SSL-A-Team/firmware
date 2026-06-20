@@ -483,7 +483,24 @@ impl<
                 self.last_imu_accel_y,
                 ticks_since_trace_print >= TRACE_PRINT_INTERVAL_TICKS,
             ) {
-                Ok(_) => {}
+                Ok((vel_clamped, accel_clamped)) => {
+                    if vel_clamped {
+                        defmt::warn!("body velocity clamped");
+                        self.telemetry_publisher.publish_immediate(
+                            TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string(
+                                "body velocity clamped",
+                            )),
+                        );
+                    }
+                    if accel_clamped {
+                        defmt::warn!("body acceleration clamped");
+                        self.telemetry_publisher.publish_immediate(
+                            TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string(
+                                "body acceleration clamped",
+                            )),
+                        );
+                    }
+                }
                 Err(e) => {
                     self.shared_robot_state.set_controls_err(true);
                     if self.control_update_err_limiter.is_allowed() {
