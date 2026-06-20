@@ -5,11 +5,13 @@ use ateam_common_packets::radio::ManeuverExtendedTelemetry;
 use ateam_controls::pivot_trajectory::PivotParams;
 use ateam_controls::ControlsError;
 
-pub struct PivotManeuver;
+pub struct PivotManeuver {
+    prev_cmd: Option<PivotCommand>,
+}
 
 impl PivotManeuver {
     pub fn new() -> Self {
-        Self
+        Self { prev_cmd: None }
     }
 }
 
@@ -44,7 +46,27 @@ impl MotionManeuver for PivotManeuver {
             heading_lag: cmd.heading_lag,
         };
 
-        let (body_twist, body_accel) = ctx.pivot_control_policy(cmd.center(), cmd.global_theta, traj_params)?;
+        // Only force a replan when the command values actually change.
+        let force_replan = match &self.prev_cmd {
+            None => true,
+            Some(prev) => {
+                prev.global_x_center != cmd.global_x_center
+                    || prev.global_y_center != cmd.global_y_center
+                    || prev.global_theta != cmd.global_theta
+                    || prev.max_angular_vel != cmd.max_angular_vel
+                    || prev.max_angular_acc != cmd.max_angular_acc
+                    || prev.orbit_radius != cmd.orbit_radius
+                    || prev.heading_lag != cmd.heading_lag
+            }
+        };
+        self.prev_cmd = Some(cmd);
+
+        let (body_twist, body_accel) = ctx.pivot_control_policy(
+            cmd.center(),
+            cmd.global_theta,
+            traj_params,
+            force_replan,
+        )?;
 
         let telem = ManeuverExtendedTelemetry::Pivot(ExtendedPivotTelemetry {
             cmd_echo: cmd,
@@ -59,6 +81,8 @@ impl MotionManeuver for PivotManeuver {
         ))
     }
 
-    fn reset(&mut self) {}
+    fn reset(&mut self) {
+        self.prev_cmd = None;
+    }
 }
 
