@@ -223,7 +223,6 @@ impl<
 
             // Keep a local flag of radio issues.
             let mut radio_inop_flag_local = false;
-            let mut radio_network_fail_local = false;
             // check for hardware config changes that affect radio connection
 
             let cur_robot_state = self.shared_robot_state.get_state();
@@ -326,7 +325,7 @@ impl<
                         .is_err()
                     {
                         // If network connection failed, go back up to verify UART.
-                        radio_network_fail_local = true;
+
                         self.connection_state = RadioConnectionState::ConnectedPhys;
                         self.led_command_pub
                             .publish(ControlBoardLedCommand::Radio(
@@ -363,7 +362,7 @@ impl<
                                 .await;
                         } else {
                             // Software didn't respond to our hello, it may not be started yet.
-                            radio_network_fail_local = true;
+    
                             self.connection_state = RadioConnectionState::ConnectedNetwork;
                             self.led_command_pub
                                 .publish(ControlBoardLedCommand::Radio(
@@ -372,7 +371,7 @@ impl<
                                 .await;
                         }
                     } else {
-                        radio_network_fail_local = true;
+
                         // If network connection failed, go back up to verify UART.
                         self.connection_state = RadioConnectionState::ConnectedPhys;
                         self.led_command_pub
@@ -414,9 +413,6 @@ impl<
             if radio_inop_flag_local {
                 // If hardware problems is present, adds a delay.
                 Timer::after_millis(Self::RETRY_DELAY_MS).await;
-            } else if radio_network_fail_local {
-                // If network problems is present, adds a delay.
-                Timer::after_millis(Self::RESPONSE_FROM_PC_TIMEOUT_MS).await;
             }
 
             last_robot_state = cur_robot_state;
@@ -624,7 +620,8 @@ impl<
 
 pub fn startup_uart_config() -> usart::Config {
     let mut radio_uart_config = usart::Config::default();
-    radio_uart_config.baudrate = 115_200;
+    // radio_uart_config.baudrate = 115_200;
+    radio_uart_config.baudrate = 3_000_000;
     radio_uart_config.data_bits = DataBits::DataBits8;
     radio_uart_config.stop_bits = StopBits::STOP1;
     radio_uart_config.parity = Parity::ParityNone;

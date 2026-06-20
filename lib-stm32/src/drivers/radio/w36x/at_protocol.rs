@@ -22,6 +22,10 @@ pub enum SocketProtocol {
 #[allow(dead_code)]
 #[derive(defmt::Format)]
 pub enum ATEvent<'a> {
+    // Framing / system events
+    Empty,   // standalone \r\n — UART idle artifact, not a real URC
+    Startup, // +STARTUP — module boot, no leading \r\n prefix
+
     // Socket events (Section 10.2)
     SocketConnected {
         socket_id: u8,
@@ -102,9 +106,21 @@ impl ATEvent<'_> {
     const ACCESS_POINT_NETWORK_UP: &'static str = "+UEWAPNU";
     const ACCESS_POINT_NETWORK_DOWN: &'static str = "+UEWAPND";
 
+    // System URCs
+    const STARTUP: &'static str = "+STARTUP";
+
     pub fn new(buf: &[u8]) -> Result<ATEvent<'_>, AtPacketError> {
         let s = core::str::from_utf8(buf).or(Err(AtPacketError::Utf8DecodeFailed))?;
-        let s = &s[Self::CR_LF.len()..];
+
+        // Strip optional leading \r\n. Most URCs are framed as \r\n<URC>\r\n, but
+        // +STARTUP is sent bare on boot with no prefix.
+        let s = s.strip_prefix(Self::CR_LF).unwrap_or(s);
+
+        // Standalone \r\n (now empty after strip) or empty buffer: UART idle artifact.
+        if s.is_empty() || s == Self::CR_LF {
+            return Ok(ATEvent::Empty);
+        }
+
         if !s.ends_with(Self::CR_LF) {
             return Err(AtPacketError::FramingDecodeFailed);
         }
@@ -123,6 +139,7 @@ impl ATEvent<'_> {
         let event = &s[..d];
 
         match event {
+            Self::STARTUP => Ok(ATEvent::Startup),
             Self::SOCKET_CONNECTED => {
                 let mut params = s[d + 1..].split(',');
                 let socket_id = params
@@ -330,14 +347,41 @@ impl ATResponse<'_> {
     const RESP_ERROR: &'static str = "ERROR";
 
     pub fn new(buf: &[u8]) -> Result<ATResponse<'_>, AtPacketError> {
-        // TODO: error handling in this function is bad
         let s = core::str::from_utf8(buf).or(Err(AtPacketError::Utf8DecodeFailed))?;
 
+        // Fast path: bare OK/ERROR with optional leading \r\n.
+        // Handles "OK\r\n", "\r\nOK\r\n" etc. that arrive when echo is off or the
+        // UART idle timer splits the echo from the response into separate buffers.
+        let bare = s.strip_prefix(Self::CR_LF).unwrap_or(s);
+        let bare = bare.strip_suffix(Self::CR_LF).unwrap_or(bare);
+        if bare == Self::RESP_OK {
+            return Ok(ATResponse::Ok(""));
+        }
+        if bare == Self::RESP_ERROR {
+            return Ok(ATResponse::Error);
+        }
+
+        // Full response with echo or standalone URC body: <echo>\r\n[<body>\r\n]<OK|ERROR>\r\n
         let i_echo = s
             .find(Self::CR_LF)
             .ok_or(AtPacketError::FramingDecodeFailed)?;
 
-        let s = &s[i_echo + Self::CR_LF.len()..];
+        let after = &s[i_echo + Self::CR_LF.len()..];
+
+        // Standalone URC with no following content (e.g. "+USOCR:0\r\n" split from its OK).
+        // The body is everything before the \r\n terminator.
+        if after.is_empty() {
+            let body = &s[..i_echo];
+            return if body == Self::RESP_OK {
+                Ok(ATResponse::Ok(""))
+            } else if body == Self::RESP_ERROR {
+                Ok(ATResponse::Error)
+            } else {
+                Ok(ATResponse::Other(body))
+            };
+        }
+
+        let s = after;
         if !s.ends_with(Self::CR_LF) {
             return Err(AtPacketError::FramingDecodeFailed);
         }

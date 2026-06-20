@@ -4,7 +4,7 @@ use ateam_common_packets::bindings::{
 };
 use ateam_common_packets::radio::DataPacket;
 use ateam_lib_stm32::drivers::radio::nora_w36x::{
-    NoraRadioError, NoraW36x, SocketConnection, WifiAuth,
+    NoraRadioError, NoraW36x, SocketConnection, WifiAuth, DataMode,
 };
 use ateam_lib_stm32::drivers::radio::w36x::at_protocol::SocketProtocol;
 use ateam_lib_stm32::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
@@ -118,7 +118,7 @@ impl<
 
     pub fn get_startup_uart_config(&self) -> usart::Config {
         let mut startup_radio_uart_config = usart::Config::default();
-        startup_radio_uart_config.baudrate = 115_200;
+        startup_radio_uart_config.baudrate = 3_000_000;
         startup_radio_uart_config.data_bits = DataBits::DataBits8;
         startup_radio_uart_config.stop_bits = StopBits::STOP1;
         startup_radio_uart_config.parity = Parity::ParityNone;
@@ -128,7 +128,7 @@ impl<
 
     pub fn get_highspeed_uart_config(&self) -> usart::Config {
         let mut highspeed_radio_uart_config = usart::Config::default();
-        highspeed_radio_uart_config.baudrate = 921_600;
+        highspeed_radio_uart_config.baudrate = 3_000_000;
         highspeed_radio_uart_config.stop_bits = StopBits::STOP1;
         highspeed_radio_uart_config.data_bits = DataBits::DataBits8;
         // NORA-W36 AT+USYUS only configures baudrate and flow control;
@@ -140,14 +140,14 @@ impl<
 
     pub async fn connect_uart(&mut self) -> Result<(), RobotRadioNoraError> {
         // reset host uart config to match the startup config before resetting the radio
-        if self
-            .nora_driver
-            .update_host_uart_config(self.get_startup_uart_config())
-            .await
-            .is_err()
-        {
-            defmt::debug!("failed to reset host uart to startup config.");
-        }
+        // if self
+        //     .nora_driver
+        //     .update_host_uart_config(self.get_startup_uart_config())
+        //     .await
+        //     .is_err()
+        // {
+        //     defmt::debug!("failed to reset host uart to startup config.");
+        // }
 
         defmt::trace!("Will reset the radio for baseline.");
         // reset the radio so we can listen for the startup event
@@ -167,7 +167,7 @@ impl<
         defmt::trace!("Waiting for radio startup with timeout.");
         match select(
             self.nora_driver.wait_startup(),
-            Timer::after(Duration::from_millis(2500)),
+            Timer::after(Duration::from_millis(5000)),
         )
         .await
         {
@@ -216,7 +216,7 @@ impl<
         // NORA-W36x does not use EDM mode - it stays in AT command mode.
         // Enable direct binary mode for inline data delivery in +UESODB/+UESODBF events
         // (replaces the 2-step buffered approach of +UESODA then AT+USORB).
-        if self.nora_driver.set_socket_receive_mode(2).await.is_err() {
+        if self.nora_driver.set_socket_receive_mode(DataMode::DirectBinaryMode).await.is_err() {
             defmt::debug!("error setting direct binary receive mode");
             return Err(RobotRadioNoraError::ConnectUartBadRadioConfigUpdate);
         }
@@ -463,7 +463,9 @@ impl<
     }
 
     pub async fn send_hello(&self, id: u8, team: TeamColor) -> Result<(), RobotRadioNoraError> {
-        use crate::git_version;
+        let coms_repo_dirty = false;
+        let controls_repo_dirty = false;
+        let firmware_repo_dirty = false;
 
         let packet = RadioPacket {
             header: RadioHeader {
@@ -480,16 +482,16 @@ impl<
                         TeamColor::Blue => bindings::TeamColor::TC_BLUE,
                     },
                     _bitfield_1: HelloRequest::new_bitfield_1(
-                        git_version::COMS_DIRTY.into(),
-                        git_version::CONTROLS_DIRTY.into(),
-                        git_version::FIRMWARE_DIRTY.into(),
+                        coms_repo_dirty.into(),
+                        controls_repo_dirty.into(),
+                        firmware_repo_dirty.into(),
                         0,
                     ),
                     _bitfield_align_1: Default::default(),
                     reserved: Default::default(),
-                    coms_hash: git_version::COMS_HASH,
-                    controls_hash: git_version::CONTROLS_HASH,
-                    firmware_hash: git_version::FIRMWARE_HASH,
+                    coms_hash: [0; 4],
+                    controls_hash: [0; 4],
+                    firmware_hash: [0; 4],
                 },
             },
         };
