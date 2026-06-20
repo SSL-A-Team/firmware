@@ -495,6 +495,13 @@ impl<
             return Err(());
         }
 
+        // Remove the connected peer filter so the socket receives from any source.
+        // HelloResponse comes from software's unicast address, not the multicast group.
+        if self.radio.unconnect_peer().await.is_err() {
+            defmt::error!("failed to unconnect multicast peer.");
+            return Err(());
+        }
+
         let hello = self
             .radio
             .wait_hello(Duration::from_millis(Self::RESPONSE_FROM_PC_TIMEOUT_MS))
