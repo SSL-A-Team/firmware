@@ -39,7 +39,7 @@ import time
 import zlib
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +302,24 @@ def _get_local_ip(target_ip: str) -> str:
             return "127.0.0.1"
 
 
+def _list_ipv4_interfaces() -> List[str]:
+    """
+    Best-effort list of the host's non-loopback IPv4 addresses (stdlib only).
+
+    Used only as a heuristic to warn about multi-homed hosts; an empty or
+    partial result simply suppresses the warning.
+    """
+    addrs = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if not ip.startswith("127."):
+                addrs.add(ip)
+    except OSError:
+        pass
+    return sorted(addrs)
+
+
 def discover_robot(
     robot_id: int,
     color: TeamColor,
@@ -334,6 +352,13 @@ def discover_robot(
         mreq = struct.pack("4s4s", socket.inet_aton(MULTICAST_IP), iface_addr)
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, iface_addr)
     else:
+        ifaces = _list_ipv4_interfaces()
+        if len(ifaces) > 1:
+            print(f"[discovery] WARNING: multiple network interfaces detected "
+                  f"({', '.join(ifaces)}) but --iface-ip was not set. The multicast "
+                  f"group may be joined on the wrong interface and the robot's "
+                  f"CC_HELLO_REQ may never be received. If discovery times out, "
+                  f"re-run with --iface-ip <the IP on the robot's network>.")
         mreq = struct.pack("4sL", socket.inet_aton(MULTICAST_IP), socket.INADDR_ANY)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
