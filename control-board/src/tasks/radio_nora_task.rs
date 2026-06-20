@@ -495,6 +495,14 @@ impl<
             return Err(());
         }
 
+        // Switch from connected multicast TX socket to unconnected RX socket on the
+        // same local port. Connected sockets filter incoming packets to the connected
+        // peer only; HelloResponse arrives from a unicast address and would be dropped.
+        if self.radio.reopen_multicast_rx_only().await.is_err() {
+            defmt::error!("failed to reopen multicast socket for rx.");
+            return Err(());
+        }
+
         let hello = self
             .radio
             .wait_hello(Duration::from_millis(Self::RESPONSE_FROM_PC_TIMEOUT_MS))

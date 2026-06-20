@@ -24,7 +24,6 @@ use super::radio_robot::TeamColor;
 
 const MULTICAST_IP: &str = "224.4.20.69";
 const MULTICAST_PORT: u16 = 42069;
-#[allow(dead_code)]
 const LOCAL_PORT: u16 = 42069;
 
 #[derive(Clone, Copy, PartialEq, Debug, Format)]
@@ -309,10 +308,12 @@ impl<
     }
 
     pub async fn open_multicast(&mut self) -> Result<(), RobotRadioNoraError> {
-        // NORA uses socket-based connections: create a UDP socket, then connect to multicast
+        // Bind to LOCAL_PORT so the source port is predictable. After send_hello,
+        // call reopen_multicast_rx_only to drop the connected filter and receive
+        // HelloResponse from the software's unicast address on the same local port.
         let socket_id = self
             .nora_driver
-            .create_socket(SocketProtocol::UDP)
+            .create_socket_on_port(SocketProtocol::UDP, LOCAL_PORT)
             .await
             .map_err(|_| RobotRadioNoraError::OpenSocketError)?;
 
@@ -323,6 +324,22 @@ impl<
             .map_err(|_| RobotRadioNoraError::OpenMulticastError)?;
 
         self.socket = Some(socket);
+        Ok(())
+    }
+
+    /// Close the connected multicast TX socket and open a new unconnected socket on
+    /// LOCAL_PORT. Call this after send_hello so the module accepts HelloResponse from
+    /// any source (connected sockets filter to the connected peer only).
+    pub async fn reopen_multicast_rx_only(&mut self) -> Result<(), RobotRadioNoraError> {
+        if let Some(socket) = self.socket.take() {
+            self.nora_driver.close_socket(socket.socket_id).await?;
+        }
+        let socket_id = self
+            .nora_driver
+            .create_socket_on_port(SocketProtocol::UDP, LOCAL_PORT)
+            .await
+            .map_err(|_| RobotRadioNoraError::OpenSocketError)?;
+        self.socket = Some(SocketConnection { socket_id });
         Ok(())
     }
 
@@ -463,9 +480,7 @@ impl<
     }
 
     pub async fn send_hello(&self, id: u8, team: TeamColor) -> Result<(), RobotRadioNoraError> {
-        let coms_repo_dirty = false;
-        let controls_repo_dirty = false;
-        let firmware_repo_dirty = false;
+        use crate::git_version;
 
         let packet = RadioPacket {
             header: RadioHeader {
@@ -482,16 +497,16 @@ impl<
                         TeamColor::Blue => bindings::TeamColor::TC_BLUE,
                     },
                     _bitfield_1: HelloRequest::new_bitfield_1(
-                        coms_repo_dirty.into(),
-                        controls_repo_dirty.into(),
-                        firmware_repo_dirty.into(),
+                        git_version::COMS_DIRTY.into(),
+                        git_version::CONTROLS_DIRTY.into(),
+                        git_version::FIRMWARE_DIRTY.into(),
                         0,
                     ),
                     _bitfield_align_1: Default::default(),
                     reserved: Default::default(),
-                    coms_hash: [0; 4],
-                    controls_hash: [0; 4],
-                    firmware_hash: [0; 4],
+                    coms_hash: git_version::COMS_HASH,
+                    controls_hash: git_version::CONTROLS_HASH,
+                    firmware_hash: git_version::FIRMWARE_HASH,
                 },
             },
         };

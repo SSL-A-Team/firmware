@@ -385,9 +385,9 @@ impl<
     }
 
     /// Create a TCP or UDP socket.
-    /// AT+USOCR=<protocol>[,<pref_ip_ver>]
+    /// AT+USOCR=<protocol>[,<local_port>]
     /// - <protocol>: 6 for TCP, 17 for UDP
-    /// - <pref_ip_ver> is optional, 0 for IPv4 (default) or 1 for IPv6.
+    /// - <local_port> is optional; omit to let the module assign an ephemeral port.
     ///
     /// Returns the socket ID assigned by the module.
     pub async fn create_socket(&self, protocol: SocketProtocol) -> Result<u8, NoraRadioError> {
@@ -411,6 +411,10 @@ impl<
                     if end > 0 {
                         if let Ok(s) = core::str::from_utf8(&after[..end]) {
                             if let Ok(id) = s.trim().parse::<u8>() {
+                                // Wait for trailing OK\r\n so it isn't left in the queue
+                                if !accum.windows(4).any(|w| w == b"OK\r\n") {
+                                    return None;
+                                }
                                 return Some(Ok(id));
                             }
                         }
@@ -421,6 +425,51 @@ impl<
             .await?;
 
         defmt::debug!("create_socket: socket handle {}", socket_handle);
+        Ok(socket_handle)
+    }
+
+    /// Create a TCP or UDP socket bound to a specific local port.
+    /// AT+USOCR=<protocol>,<local_port>
+    /// Useful for UDP sockets that need a predictable source port.
+    pub async fn create_socket_on_port(
+        &self,
+        protocol: SocketProtocol,
+        local_port: u16,
+    ) -> Result<u8, NoraRadioError> {
+        let mut str: String<24> = String::new();
+        let proto_num = protocol as u8;
+        write!(str, "AT+USOCR={proto_num},{local_port}")
+            .or(Err(NoraRadioError::CommandConstructionFailed))?;
+        self.send_command(str.as_str()).await?;
+        defmt::debug!("create_socket_on_port: command sent ({})", str.as_str());
+
+        let socket_handle = self
+            .read_response_raw::<64, _, _>(|accum| {
+                if accum.windows(5).any(|w| w == b"ERROR") {
+                    return Some(Err(NoraRadioError::SocketCreationFailed));
+                }
+                if let Some(start) = accum.windows(7).position(|w| w == b"+USOCR:") {
+                    let after = &accum[start + 7..];
+                    let end = after
+                        .iter()
+                        .position(|&b| b == b'\r' || b == b'\n')
+                        .unwrap_or(after.len());
+                    if end > 0 {
+                        if let Ok(s) = core::str::from_utf8(&after[..end]) {
+                            if let Ok(id) = s.trim().parse::<u8>() {
+                                if !accum.windows(4).any(|w| w == b"OK\r\n") {
+                                    return None;
+                                }
+                                return Some(Ok(id));
+                            }
+                        }
+                    }
+                }
+                None
+            })
+            .await?;
+
+        defmt::debug!("create_socket_on_port: socket handle {}", socket_handle);
         Ok(socket_handle)
     }
 
@@ -579,6 +628,7 @@ impl<
         }
 
         // Read +USOWB:<socket_handle>,<written_length>\r\nOK\r\n response and validate written length.
+        // Must also see OK\r\n before returning so the trailing OK is not left in the queue.
         self.read_response_raw::<64, _, _>(|accum| {
             if accum.windows(5).any(|w| w == b"ERROR") {
                 return Some(Err(NoraRadioError::SocketWriteFailed));
@@ -594,6 +644,10 @@ impl<
                     if end > 0 {
                         if let Ok(s) = core::str::from_utf8(&len_bytes[..end]) {
                             if let Ok(written) = s.trim().parse::<usize>() {
+                                // Wait for trailing OK\r\n so it isn't left in the queue
+                                if !accum.windows(4).any(|w| w == b"OK\r\n") {
+                                    return None;
+                                }
                                 if written != data.len() {
                                     defmt::warn!(
                                         "AT+USOWB: written {} != intended {}",
