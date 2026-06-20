@@ -107,50 +107,103 @@ const HEADING_LAG_STEP: f32 = 0.05;
 const HEADING_LAG_MIN: f32 = 0.0;
 const HEADING_LAG_MAX: f32 = core::f32::consts::PI;
 
+/// Angular acceleration adjustment per button press (rad/s²).
+const ACCEL_STEP: f32 = 0.5;
+const ACCEL_MIN: f32 = 0.5;
+const ACCEL_MAX: f32 = 20.0 * core::f32::consts::PI;
+
+/// Default max angular velocity — set high so the trajectory stays in the
+/// triangular (acceleration-limited) regime regardless of accel setting.
+const DEFAULT_MAX_ANGULAR_VEL: f32 = 4.0 * core::f32::consts::PI; // rad/s
+
+/// Sequence mode — change this constant to switch between half and full circle.
+const SEQUENCE_MODE: SequenceMode = SequenceMode::FullCircle;
+
+// ============================================================================
+// Sequence mode
+// ============================================================================
+
+#[derive(Clone, Copy, PartialEq)]
+enum SequenceMode {
+    /// Alternates 0° → 180° → 0° repeatedly.
+    HalfCircle,
+    /// Sweeps CCW through 0° → 90° → 180° → 270° → 0° repeatedly.
+    FullCircle,
+}
+
+impl SequenceMode {
+    fn label(self) -> &'static str {
+        match self {
+            SequenceMode::HalfCircle => "half-circle (0° ↔ 180°)",
+            SequenceMode::FullCircle => "full-circle (0° → 90° → 180° → 270° → 0°)",
+        }
+    }
+
+    fn toggle(self) -> Self {
+        match self {
+            SequenceMode::HalfCircle => SequenceMode::FullCircle,
+            SequenceMode::FullCircle => SequenceMode::HalfCircle,
+        }
+    }
+}
+
 // ============================================================================
 // Phase state machine
 // ============================================================================
 
-#[derive(Clone, Copy, PartialEq)]
-enum Phase {
-    PivotToPI,
-    HoldAtPI,
-    PivotToZero,
-    HoldAtZero,
+/// Target heading (rad) for each phase index.
+/// Half-circle: [180°, 0°]  — phase index 0..4 (pivot, hold, pivot, hold)
+/// Full-circle: [90°, 180°, 270°(-90°), 0°] — phase index 0..8
+fn phase_target(phase_idx: u32, mode: SequenceMode) -> f32 {
+    use core::f32::consts::PI;
+    let step = match mode {
+        SequenceMode::HalfCircle => PI,
+        SequenceMode::FullCircle => PI / 2.0,
+    };
+    let num_targets = match mode {
+        SequenceMode::HalfCircle => 2,
+        SequenceMode::FullCircle => 4,
+    };
+    // phase_idx counts pivot+hold pairs: even = pivot, odd = hold
+    // target index = (phase_idx / 2) % num_targets
+    let target_idx = (phase_idx / 2) % num_targets;
+    // Accumulate CCW from 0: target = step * (idx + 1), wrapped
+    let raw = step * (target_idx as f32 + 1.0);
+    // Normalise to (-π, π] via simple wrap
+    let pi2 = 2.0 * PI;
+    let mut a = raw % pi2;
+    if a > PI { a -= pi2; }
+    else if a <= -PI { a += pi2; }
+    a
 }
 
-impl Phase {
-    /// Commanded heading target sent in each `PivotCommand`.
-    fn target_theta(self) -> f32 {
-        match self {
-            Phase::PivotToPI | Phase::HoldAtPI => core::f32::consts::PI,
-            Phase::PivotToZero | Phase::HoldAtZero => 0.0,
-        }
-    }
+fn phase_duration_ticks(phase_idx: u32) -> u32 {
+    if phase_idx % 2 == 0 { EXEC_TICKS } else { HOLD_TICKS }
+}
 
-    fn duration_ticks(self) -> u32 {
-        match self {
-            Phase::PivotToPI | Phase::PivotToZero => EXEC_TICKS,
-            Phase::HoldAtPI | Phase::HoldAtZero => HOLD_TICKS,
-        }
+fn phase_num_steps(mode: SequenceMode) -> u32 {
+    match mode {
+        SequenceMode::HalfCircle => 4,  // 2 pivots + 2 holds
+        SequenceMode::FullCircle => 8,  // 4 pivots + 4 holds
     }
+}
 
-    fn next(self) -> Self {
-        match self {
-            Phase::PivotToPI => Phase::HoldAtPI,
-            Phase::HoldAtPI => Phase::PivotToZero,
-            Phase::PivotToZero => Phase::HoldAtZero,
-            Phase::HoldAtZero => Phase::PivotToPI,
+fn phase_label(phase_idx: u32, mode: SequenceMode) -> &'static str {
+    if phase_idx % 2 == 0 {
+        match mode {
+            SequenceMode::HalfCircle => match phase_idx {
+                0 => "pivot  0° → 180°",
+                _ => "pivot 180° →   0°",
+            },
+            SequenceMode::FullCircle => match phase_idx {
+                0 => "pivot   0° →  90°",
+                2 => "pivot  90° → 180°",
+                4 => "pivot 180° → 270°",
+                _ => "pivot 270° →   0°",
+            },
         }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Phase::PivotToPI => "pivot  0° → 180°",
-            Phase::HoldAtPI => "hold  at 180°",
-            Phase::PivotToZero => "pivot 180° →   0°",
-            Phase::HoldAtZero => "hold  at   0°",
-        }
+    } else {
+        "hold"
     }
 }
 
@@ -187,6 +240,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let btn_down  = Input::new(p.PE15, Pull::Up);
     let btn_left  = Input::new(p.PE12, Pull::Up);
     let btn_right = Input::new(p.PE13, Pull::Up);
+    let btn_enter = Input::new(p.PE11, Pull::Up); // lower acceleration
+    let btn_back  = Input::new(p.PE10, Pull::Up); // unused (accel set in code)
 
     // ── inter-task channels ──────────────────────────────────────────────────
 
@@ -255,10 +310,11 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     let mut orbit_radius: f32 = PivotParams::default().orbit_radius;
     let mut heading_lag: f32 = PivotParams::default().heading_lag;
+    let mut max_angular_acc: f32 = PivotParams::default().max_accel_angular;
 
     defmt::info!(
-        "hwtest-pivot: orbit_radius = {} m, heading_lag = {} rad",
-        orbit_radius, heading_lag,
+        "hwtest-pivot: orbit_radius = {} m, heading_lag = {} rad, max_angular_acc = {} rad/s²",
+        orbit_radius, heading_lag, max_angular_acc,
     );
 
     // ── wait for the control task to finish motor firmware flashing ──────────
@@ -267,7 +323,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     // ── pivot sequencer loop ─────────────────────────────────────────────────
 
-    let mut phase = Phase::PivotToPI;
+    let mut phase_idx: u32 = 0;
     let mut phase_tick: u32 = 0;
 
     // Previous button states for falling-edge detection (true = not pressed).
@@ -275,8 +331,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut prev_down  = true;
     let mut prev_left  = true;
     let mut prev_right = true;
+    let mut prev_enter = true;
+    let mut prev_back  = true;
 
-    defmt::info!("hwtest-pivot: starting — {}", phase.label());
+    defmt::info!("hwtest-pivot: starting — mode: {}", SEQUENCE_MODE.label());
 
     loop {
         Timer::after_millis(LOOP_INTERVAL_MS).await;
@@ -288,6 +346,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         let cur_down  = btn_down.is_high();
         let cur_left  = btn_left.is_high();
         let cur_right = btn_right.is_high();
+        let cur_enter = btn_enter.is_high();
+        let cur_back  = btn_back.is_high();
 
         if prev_down && !cur_down {
             orbit_radius = (orbit_radius + ORBIT_RADIUS_STEP).min(ORBIT_RADIUS_MAX);
@@ -305,21 +365,31 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             heading_lag = (heading_lag - HEADING_LAG_STEP).max(HEADING_LAG_MIN);
             defmt::info!("hwtest-pivot: heading_lag → {} rad", heading_lag);
         }
+        if prev_enter && !cur_enter {
+            max_angular_acc = (max_angular_acc + ACCEL_STEP).min(ACCEL_MAX);
+            defmt::info!("hwtest-pivot: max_angular_acc → {} rad/s²", max_angular_acc);
+        }
+        if prev_back && !cur_back {
+            max_angular_acc = (max_angular_acc - ACCEL_STEP).max(ACCEL_MIN);
+            defmt::info!("hwtest-pivot: max_angular_acc → {} rad/s²", max_angular_acc);
+        }
 
         prev_up    = cur_up;
         prev_down  = cur_down;
         prev_left  = cur_left;
         prev_right = cur_right;
+        prev_enter = cur_enter;
+        prev_back  = cur_back;
 
         // ── phase advance ────────────────────────────────────────────────────
 
-        if phase_tick >= phase.duration_ticks() {
-            phase = phase.next();
+        if phase_tick >= phase_duration_ticks(phase_idx) {
+            phase_idx = (phase_idx + 1) % phase_num_steps(SEQUENCE_MODE);
             phase_tick = 0;
-            defmt::info!("hwtest-pivot: phase → {}", phase.label());
+            defmt::info!("hwtest-pivot: phase → {}", phase_label(phase_idx, SEQUENCE_MODE));
         }
 
-        let target_theta = phase.target_theta();
+        let target_theta = phase_target(phase_idx, SEQUENCE_MODE);
 
         // ── publish command ──────────────────────────────────────────────────
 
@@ -352,8 +422,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                     global_x_center: BALL_X,
                     global_y_center: BALL_Y,
                     global_theta: target_theta,
-                    max_angular_vel: 0.0,
-                    max_angular_acc: 0.0,
+                    max_angular_vel: DEFAULT_MAX_ANGULAR_VEL,
+                    max_angular_acc: max_angular_acc,
                     orbit_radius,
                     heading_lag: heading_lag,
                 },
