@@ -3,6 +3,7 @@ pub mod global_position;
 pub mod global_velocity;
 pub mod local_acceleration;
 pub mod local_velocity;
+pub mod pivot;
 
 use crate::motion::control_context::ControlContext;
 pub use crate::motion::control_context::ManeuverSetpoints;
