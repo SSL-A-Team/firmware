@@ -41,6 +41,7 @@ impl MotionManeuver for PivotManeuver {
             } else {
                 default_params.orbit_radius
             },
+            heading_lag: cmd.heading_lag,
         };
 
         let (body_twist, body_accel) = ctx.pivot_control_policy(cmd.center(), cmd.global_theta, traj_params)?;
