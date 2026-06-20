@@ -61,16 +61,10 @@ impl MotionManeuver for PivotManeuver {
         };
         self.prev_cmd = Some(cmd);
 
-        let (body_twist, body_accel) = ctx.pivot_control_policy(
-            cmd.center(),
-            cmd.global_theta,
-            traj_params,
-            force_replan,
-        )?;
+        let (body_twist, body_accel) =
+            ctx.pivot_control_policy(cmd.center(), cmd.global_theta, traj_params, force_replan)?;
 
-        let telem = ManeuverExtendedTelemetry::Pivot(ExtendedPivotTelemetry {
-            cmd_echo: cmd,
-        });
+        let telem = ManeuverExtendedTelemetry::Pivot(ExtendedPivotTelemetry { cmd_echo: cmd });
 
         Ok((
             ManeuverSetpoints {
@@ -85,4 +79,3 @@ impl MotionManeuver for PivotManeuver {
         self.prev_cmd = None;
     }
 }
-

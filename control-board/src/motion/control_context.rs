@@ -534,7 +534,8 @@ impl ControlContext {
 
         // Only replan when the command changed, there is no existing trajectory,
         // or the trajectory has already finished.
-        let traj_finished = self.trajectory_pivot
+        let traj_finished = self
+            .trajectory_pivot
             .map(|t| self.trajectory_pivot_elapsed_s >= t.end_time())
             .unwrap_or(true);
 
@@ -748,7 +749,8 @@ impl ControlContext {
 
         // Advance elapsed time and update trajectory_state for tracking_error_exceeded.
         self.trajectory_pivot_elapsed_s += self.dt;
-        self.trajectory_state = traj.state_at(state_estimate, 0.0, self.trajectory_pivot_elapsed_s)?;
+        self.trajectory_state =
+            traj.state_at(state_estimate, 0.0, self.trajectory_pivot_elapsed_s)?;
 
         Ok((twist_out, accel_out))
     }

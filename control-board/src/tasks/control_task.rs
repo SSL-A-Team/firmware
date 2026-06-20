@@ -486,17 +486,19 @@ impl<
                 Ok((vel_clamped, accel_clamped)) => {
                     if vel_clamped {
                         defmt::warn!("body velocity clamped");
-                        self.telemetry_publisher
-                            .publish_immediate(TelemetryPacket::ErrorTelemetry(
-                                create_error_telemetry_from_string("body velocity clamped"),
-                            ));
+                        self.telemetry_publisher.publish_immediate(
+                            TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string(
+                                "body velocity clamped",
+                            )),
+                        );
                     }
                     if accel_clamped {
                         defmt::warn!("body acceleration clamped");
-                        self.telemetry_publisher
-                            .publish_immediate(TelemetryPacket::ErrorTelemetry(
-                                create_error_telemetry_from_string("body acceleration clamped"),
-                            ));
+                        self.telemetry_publisher.publish_immediate(
+                            TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string(
+                                "body acceleration clamped",
+                            )),
+                        );
                     }
                 }
                 Err(e) => {

@@ -26,7 +26,11 @@ use ateam_common_packets::{
     radio::DataPacket,
 };
 use embassy_executor::InterruptExecutor;
-use embassy_stm32::{gpio::{Input, Pull}, interrupt, pac::Interrupt};
+use embassy_stm32::{
+    gpio::{Input, Pull},
+    interrupt,
+    pac::Interrupt,
+};
 use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _;
@@ -173,7 +177,11 @@ fn phase_num_steps(mode: SequenceMode, pivot_angle: f32) -> u32 {
 }
 
 fn phase_duration_ticks(phase_idx: u32) -> u32 {
-    if phase_idx % 2 == 0 { EXEC_TICKS } else { HOLD_TICKS }
+    if phase_idx % 2 == 0 {
+        EXEC_TICKS
+    } else {
+        HOLD_TICKS
+    }
 }
 
 /// Target heading for the given phase, in radians.
@@ -188,8 +196,11 @@ fn phase_target(phase_idx: u32, mode: SequenceMode, pivot_angle: f32) -> f32 {
     // wrap to (-π, π]
     let pi2 = 2.0 * PI;
     let mut a = raw % pi2;
-    if a > PI { a -= pi2; }
-    else if a <= -PI { a += pi2; }
+    if a > PI {
+        a -= pi2;
+    } else if a <= -PI {
+        a += pi2;
+    }
     a
 }
 
@@ -222,12 +233,12 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     // ── buttons (active-low, polled at loop rate) ────────────────────────────
 
-    let btn_up    = Input::new(p.PE14, Pull::Up);
-    let btn_down  = Input::new(p.PE15, Pull::Up);
-    let btn_left  = Input::new(p.PE12, Pull::Up);
+    let btn_up = Input::new(p.PE14, Pull::Up);
+    let btn_down = Input::new(p.PE15, Pull::Up);
+    let btn_left = Input::new(p.PE12, Pull::Up);
     let btn_right = Input::new(p.PE13, Pull::Up);
     let btn_enter = Input::new(p.PE11, Pull::Up); // lower acceleration
-    let btn_back  = Input::new(p.PE10, Pull::Up); // unused (accel set in code)
+    let btn_back = Input::new(p.PE10, Pull::Up); // unused (accel set in code)
 
     // ── inter-task channels ──────────────────────────────────────────────────
 
@@ -300,7 +311,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     defmt::info!(
         "hwtest-pivot: orbit_radius = {} m, heading_lag = {} rad, max_angular_acc = {} rad/s²",
-        orbit_radius, heading_lag, max_angular_acc,
+        orbit_radius,
+        heading_lag,
+        max_angular_acc,
     );
 
     // ── wait for the control task to finish motor firmware flashing ──────────
@@ -313,12 +326,12 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut phase_tick: u32 = 0;
 
     // Previous button states for falling-edge detection (true = not pressed).
-    let mut prev_up    = true;
-    let mut prev_down  = true;
-    let mut prev_left  = true;
+    let mut prev_up = true;
+    let mut prev_down = true;
+    let mut prev_left = true;
     let mut prev_right = true;
     let mut prev_enter = true;
-    let mut prev_back  = true;
+    let mut prev_back = true;
 
     defmt::info!("hwtest-pivot: starting — mode: {}", SEQUENCE_MODE.label());
 
@@ -328,12 +341,12 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
         // ── button edge detection (falling edge = press) ─────────────────────
 
-        let cur_up    = btn_up.is_high();
-        let cur_down  = btn_down.is_high();
-        let cur_left  = btn_left.is_high();
+        let cur_up = btn_up.is_high();
+        let cur_down = btn_down.is_high();
+        let cur_left = btn_left.is_high();
         let cur_right = btn_right.is_high();
         let cur_enter = btn_enter.is_high();
-        let cur_back  = btn_back.is_high();
+        let cur_back = btn_back.is_high();
 
         if prev_down && !cur_down {
             orbit_radius = (orbit_radius + ORBIT_RADIUS_STEP).min(ORBIT_RADIUS_MAX);
@@ -360,12 +373,12 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             defmt::info!("hwtest-pivot: max_angular_acc → {} rad/s²", max_angular_acc);
         }
 
-        prev_up    = cur_up;
-        prev_down  = cur_down;
-        prev_left  = cur_left;
+        prev_up = cur_up;
+        prev_down = cur_down;
+        prev_left = cur_left;
         prev_right = cur_right;
         prev_enter = cur_enter;
-        prev_back  = cur_back;
+        prev_back = cur_back;
 
         // ── phase advance ────────────────────────────────────────────────────
 
@@ -423,4 +436,3 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         }));
     }
 }
-
