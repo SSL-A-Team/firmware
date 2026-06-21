@@ -19,13 +19,11 @@ use crate::motion::maneuvers::local_velocity::LocalVelocityManeuver;
 use crate::motion::maneuvers::pivot::PivotManeuver;
 
 pub trait MotionManeuver {
-    type Command: Copy;
-
-    fn entry(&mut self, cmd: Self::Command, ctx: &mut ControlContext);
+    fn entry(&mut self, cmd: ManeuverCommand, ctx: &mut ControlContext);
 
     fn update(
         &mut self,
-        cmd: Self::Command,
+        cmd: ManeuverCommand,
         ctx: &mut ControlContext,
     ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError>;
 
@@ -75,17 +73,15 @@ impl ActiveManeuver {
         }
     }
 
-    fn entry_cmd(&mut self, cmd: &ManeuverCommand, ctx: &mut ControlContext) {
-        match (self, cmd) {
-            (Self::GlobalPosition(s), ManeuverCommand::GlobalPosition(c)) => s.entry(*c, ctx),
-            (Self::GlobalVelocity(s), ManeuverCommand::GlobalVelocity(c)) => s.entry(*c, ctx),
-            (Self::LocalVelocity(s), ManeuverCommand::LocalVelocity(c)) => s.entry(*c, ctx),
-            (Self::GlobalAcceleration(s), ManeuverCommand::GlobalAcceleration(c)) => {
-                s.entry(*c, ctx)
-            }
-            (Self::LocalAcceleration(s), ManeuverCommand::LocalAcceleration(c)) => s.entry(*c, ctx),
-            (Self::Pivot(s), ManeuverCommand::Pivot(c)) => s.entry(*c, ctx),
-            _ => {}
+    fn entry_cmd(&mut self, cmd: ManeuverCommand, ctx: &mut ControlContext) {
+        match self {
+            Self::Off => {}
+            Self::GlobalPosition(s) => s.entry(cmd, ctx),
+            Self::GlobalVelocity(s) => s.entry(cmd, ctx),
+            Self::LocalVelocity(s) => s.entry(cmd, ctx),
+            Self::GlobalAcceleration(s) => s.entry(cmd, ctx),
+            Self::LocalAcceleration(s) => s.entry(cmd, ctx),
+            Self::Pivot(s) => s.entry(cmd, ctx),
         }
     }
 
@@ -94,16 +90,14 @@ impl ActiveManeuver {
         cmd: ManeuverCommand,
         ctx: &mut ControlContext,
     ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError> {
-        match (self, cmd) {
-            (Self::GlobalPosition(s), ManeuverCommand::GlobalPosition(c)) => s.update(c, ctx),
-            (Self::GlobalVelocity(s), ManeuverCommand::GlobalVelocity(c)) => s.update(c, ctx),
-            (Self::LocalVelocity(s), ManeuverCommand::LocalVelocity(c)) => s.update(c, ctx),
-            (Self::GlobalAcceleration(s), ManeuverCommand::GlobalAcceleration(c)) => {
-                s.update(c, ctx)
-            }
-            (Self::LocalAcceleration(s), ManeuverCommand::LocalAcceleration(c)) => s.update(c, ctx),
-            (Self::Pivot(s), ManeuverCommand::Pivot(c)) => s.update(c, ctx),
-            _ => Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off)),
+        match self {
+            Self::Off => Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off)),
+            Self::GlobalPosition(s) => s.update(cmd, ctx),
+            Self::GlobalVelocity(s) => s.update(cmd, ctx),
+            Self::LocalVelocity(s) => s.update(cmd, ctx),
+            Self::GlobalAcceleration(s) => s.update(cmd, ctx),
+            Self::LocalAcceleration(s) => s.update(cmd, ctx),
+            Self::Pivot(s) => s.update(cmd, ctx),
         }
     }
 }
@@ -136,8 +130,9 @@ impl ManeuverManager {
         if cmd.body_control_mode != self.prev_mode {
             self.prev_mode = cmd.body_control_mode;
             self.active.reset();
+            ctx.reset_trajectory();
             self.active = ActiveManeuver::from_maneuver_command(&maneuver_cmd);
-            self.active.entry_cmd(&maneuver_cmd, ctx);
+            self.active.entry_cmd(maneuver_cmd, ctx);
         }
         self.active.update_cmd(maneuver_cmd, ctx)
     }

@@ -1,9 +1,9 @@
-use crate::motion::control_context::{CommandFrame, ControlContext, ManeuverSetpoints};
+use crate::motion::control_context::{ControlContext, ManeuverSetpoints, TrackedTrajectory};
 use crate::motion::maneuvers::MotionManeuver;
-use ateam_common_packets::bindings::{ExtendedLocalVelocityTelemetry, LocalVelocityCommand};
-use ateam_common_packets::radio::ManeuverExtendedTelemetry;
-use ateam_controls::bangbang_trajectory::TrajectoryParams;
-use ateam_controls::ControlsError;
+use ateam_common_packets::bindings::ExtendedLocalVelocityTelemetry;
+use ateam_common_packets::radio::{ManeuverCommand, ManeuverExtendedTelemetry};
+use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
+use ateam_controls::{z_rotation_mat, ControlsError};
 
 pub struct LocalVelocityManeuver;
 
@@ -14,46 +14,46 @@ impl LocalVelocityManeuver {
 }
 
 impl MotionManeuver for LocalVelocityManeuver {
-    type Command = LocalVelocityCommand;
-
-    fn entry(&mut self, _cmd: LocalVelocityCommand, _ctx: &mut ControlContext) {}
+    fn entry(&mut self, _cmd: ManeuverCommand, _ctx: &mut ControlContext) {}
 
     fn update(
         &mut self,
-        cmd: LocalVelocityCommand,
+        cmd: ManeuverCommand,
         ctx: &mut ControlContext,
     ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError> {
-        let default_params = TrajectoryParams::default();
+        let ManeuverCommand::LocalVelocity(c) = cmd else {
+            return Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off));
+        };
 
+        let default_params = TrajectoryParams::default();
         let traj_params = TrajectoryParams {
             max_vel_linear: default_params.max_vel_linear,
             max_vel_angular: default_params.max_vel_angular,
-            max_accel_linear: if cmd.max_linear_acc != 0.0 {
-                cmd.max_linear_acc
+            max_accel_linear: if c.max_linear_acc != 0.0 {
+                c.max_linear_acc
             } else {
                 default_params.max_accel_linear
             },
-            max_accel_angular: if cmd.max_angular_acc != 0.0 {
-                cmd.max_angular_acc
+            max_accel_angular: if c.max_angular_acc != 0.0 {
+                c.max_angular_acc
             } else {
                 default_params.max_accel_angular
             },
         };
+        // Rotate local-frame target twist into the global frame using the
+        // current KF heading estimate.
+        let theta = ctx.state_estimate.z;
+        let global_target_twist = z_rotation_mat(theta) * c.as_vec3f();
 
-        let (body_twist, body_accel) =
-            ctx.twist_control_policy(cmd.as_vec3f(), CommandFrame::Local, traj_params)?;
+        let setpoints = ctx.run_traj_track(cmd, |seed| {
+            let traj = BangBangTraj3D::from_target_twist(seed, global_target_twist, traj_params)?;
+            Ok(TrackedTrajectory::BangBang(traj))
+        })?;
 
         let telem = ManeuverExtendedTelemetry::LocalVelocity(ExtendedLocalVelocityTelemetry {
-            cmd_echo: cmd,
+            cmd_echo: c,
         });
-
-        Ok((
-            ManeuverSetpoints {
-                body_twist,
-                body_accel,
-            },
-            telem,
-        ))
+        Ok((setpoints, telem))
     }
 
     fn reset(&mut self) {}

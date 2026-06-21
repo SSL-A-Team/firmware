@@ -9,6 +9,7 @@ use ateam_common_packets::bindings::{
     BasicControl, BodyControlExtendedTelemetry, BodyControlTelemetry, ParameterCommand,
     ParameterCommandCode::*, ParameterName,
 };
+use ateam_controls::trajectory::Trajectory;
 use ateam_controls::{ControlsError, Vector3f, Vector4f};
 use embassy_time::Instant;
 use nalgebra::SVector;
@@ -174,14 +175,22 @@ impl BodyController {
             vision_pose: vision_pose_meas.into(),
             body_traj_pos: self
                 .control_context
-                .trajectory_state
-                .fixed_rows::<3>(0)
-                .into(),
+                .trajectory
+                .as_ref()
+                .map(|t| {
+                    let pos: Vector3f = t.sample().0.fixed_rows::<3>(0).into();
+                    pos.into()
+                })
+                .unwrap_or_default(),
             body_traj_vel: self
                 .control_context
-                .trajectory_state
-                .fixed_rows::<3>(3)
-                .into(),
+                .trajectory
+                .as_ref()
+                .map(|t| {
+                    let vel: Vector3f = t.sample().0.fixed_rows::<3>(3).into();
+                    vel.into()
+                })
+                .unwrap_or_default(),
             kf_body_pos_prediction: state_prediction.fixed_rows::<3>(0).into(),
             kf_body_vel_prediction: state_prediction.fixed_rows::<3>(3).into(),
             kf_body_pos_estimate: self
