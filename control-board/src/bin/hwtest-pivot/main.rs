@@ -110,19 +110,15 @@ const EXEC_TICKS: u32 = 300;
 /// Ticks spent holding position after each pivot completes (1 s at 100 Hz).
 const HOLD_TICKS: u32 = 100;
 
-/// Ball centre in field coordinates (meters).
-const BALL_X: f32 = 0.0;
-const BALL_Y: f32 = 0.0;
-
 /// Orbit radius adjustment per button press (meters).
 const ORBIT_RADIUS_STEP: f32 = 0.005;
 const ORBIT_RADIUS_MIN: f32 = 0.001;
 const ORBIT_RADIUS_MAX: f32 = 0.5;
 
-/// Heading lag adjustment per button press (radians).
-const HEADING_LAG_STEP: f32 = 0.05;
-const HEADING_LAG_MIN: f32 = 0.0;
-const HEADING_LAG_MAX: f32 = core::f32::consts::PI;
+/// Inset angle adjustment per button press (radians).
+const INSET_ANGLE_STEP: f32 = 0.05;
+const INSET_ANGLE_MIN: f32 = -core::f32::consts::PI;
+const INSET_ANGLE_MAX: f32 = core::f32::consts::PI;
 
 /// Angular acceleration adjustment per button press (rad/s²).
 const ACCEL_STEP: f32 = 0.5;
@@ -306,13 +302,13 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     // ── tunable parameters (adjusted via buttons) ────────────────────────────
 
     let mut orbit_radius: f32 = PivotParams::default().orbit_radius;
-    let mut heading_lag: f32 = PivotParams::default().heading_lag;
+    let mut inset_angle: f32 = PivotParams::default().inset_angle;
     let mut max_angular_acc: f32 = PivotParams::default().max_accel_angular;
 
     defmt::info!(
-        "hwtest-pivot: orbit_radius = {} m, heading_lag = {} rad, max_angular_acc = {} rad/s²",
+        "hwtest-pivot: orbit_radius = {} m, inset_angle = {} rad, max_angular_acc = {} rad/s²",
         orbit_radius,
-        heading_lag,
+        inset_angle,
         max_angular_acc,
     );
 
@@ -357,12 +353,12 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             defmt::info!("hwtest-pivot: orbit_radius → {} m", orbit_radius);
         }
         if prev_right && !cur_right {
-            heading_lag = (heading_lag + HEADING_LAG_STEP).min(HEADING_LAG_MAX);
-            defmt::info!("hwtest-pivot: heading_lag → {} rad", heading_lag);
+            inset_angle = (inset_angle + INSET_ANGLE_STEP).min(INSET_ANGLE_MAX);
+            defmt::info!("hwtest-pivot: inset_angle → {} rad", inset_angle);
         }
         if prev_left && !cur_left {
-            heading_lag = (heading_lag - HEADING_LAG_STEP).max(HEADING_LAG_MIN);
-            defmt::info!("hwtest-pivot: heading_lag → {} rad", heading_lag);
+            inset_angle = (inset_angle - INSET_ANGLE_STEP).max(INSET_ANGLE_MIN);
+            defmt::info!("hwtest-pivot: inset_angle → {} rad", inset_angle);
         }
         if prev_enter && !cur_enter {
             max_angular_acc = (max_angular_acc + ACCEL_STEP).min(ACCEL_MAX);
@@ -424,13 +420,11 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
             cmd: BodyControlCommand {
                 pivot: PivotCommand {
-                    global_x_center: BALL_X,
-                    global_y_center: BALL_Y,
                     global_theta: target_theta,
                     max_angular_vel: DEFAULT_MAX_ANGULAR_VEL,
                     max_angular_acc: max_angular_acc,
                     orbit_radius,
-                    heading_lag: heading_lag,
+                    inset_angle: inset_angle,
                 },
             },
         }));
