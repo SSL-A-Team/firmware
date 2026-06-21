@@ -250,6 +250,47 @@ impl<
 
         Ok(())
     }
+
+    /// Query the current Wi-Fi channel list from the NORA-W36 module and log it.
+    /// Uses AT+UWAC? (manual 9.1.19). Response is `+UWAC:<channel_list>\r\nOK\r\n`,
+    /// where <channel_list> is a bracketed integer list, e.g. [1,6,11,48,64].
+    /// Together with the regulatory domain, the channel list determines which
+    /// channels are used during scanning and connection. Log-only.
+    pub async fn get_wifi_channel_list(&self) -> Result<(), NoraRadioError> {
+        self.send_command("AT+UWAC?").await?;
+        defmt::trace!("sent Wi-Fi channel list query command");
+
+        self.read_response_raw::<256, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                return Some(Err(NoraRadioError::ReadDataInvalid));
+            }
+            if accum.windows(4).any(|w| w == b"OK\r\n") {
+                // Locate the "+UWAC:" prefix and log the channel list that follows,
+                // trimmed at the end of the line.
+                if let Some(start) = accum
+                    .windows(6)
+                    .position(|w| w == b"+UWAC:")
+                    .map(|i| i + 6)
+                {
+                    let rest = &accum[start..];
+                    let end = rest
+                        .iter()
+                        .position(|&b| b == b'\r' || b == b'\n')
+                        .unwrap_or(rest.len());
+                    let list = core::str::from_utf8(&rest[..end])
+                        .unwrap_or("<invalid utf8>")
+                        .trim();
+                    defmt::info!("Wi-Fi channel list: {}", list);
+                } else {
+                    defmt::warn!("AT+UWAC? response missing +UWAC: prefix");
+                }
+                return Some(Ok(()));
+            }
+            None
+        })
+        .await
+    }
+
     /// Uses separate commands per configuration aspect:
     ///   1. Set SSID:     AT+UWSCP=<wlan_handle>,<ssid>
     ///      - <wlan_handle> can only be 0.
