@@ -304,6 +304,7 @@ impl ATEvent<'_> {
             let remote_port = parts
                 .next()
                 .ok_or(AtPacketError::TypeDecodeParameterMissing)?
+                .trim_end_matches(',')
                 .parse::<u16>()
                 .or(Err(AtPacketError::TypeDecodeParameterDataTypeInvalid))?;
 
