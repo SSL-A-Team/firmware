@@ -4,7 +4,8 @@ use ateam_common_packets::bindings::{
 };
 use ateam_common_packets::radio::DataPacket;
 use ateam_lib_stm32::drivers::radio::nora_w36x::{
-    NoraRadioError, NoraW36x, SocketConnection, WifiAuth, DataMode,
+    NoraRadioError, NoraW36x, SocketConnection, WifiAuth, WifiRegulatoryDomain,
+    INTERNATIONAL_WIFI_REGULATORY_DOMAIN, DataMode,
 };
 use ateam_lib_stm32::drivers::radio::w36x::at_protocol::SocketProtocol;
 use ateam_lib_stm32::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
@@ -38,6 +39,7 @@ pub enum RobotRadioNoraError {
     ConnectUartBadHostConfigUpdate,
 
     ConnectWifiBadHostName,
+    ConnectWifiBadRegulatoryDomain,
     ConnectWifiBadConfig,
     ConnectWifiConnectionFailed,
 
@@ -263,6 +265,7 @@ impl<
         &mut self,
         wifi_credential: WifiCredential,
         robot_number: u8,
+        international: bool,
     ) -> Result<(), RobotRadioNoraError> {
         // set radio hardware name enumeration
         let uid = uid::uid();
@@ -279,6 +282,22 @@ impl<
         if self.nora_driver.set_host_name(s.as_str()).await.is_err() {
             defmt::trace!("could not set radio host name");
             return Err(RobotRadioNoraError::ConnectWifiBadHostName);
+        }
+
+        // Set the Wi-Fi regulatory domain (must be set before starting Station).
+        let regulatory_domain = if international {
+            INTERNATIONAL_WIFI_REGULATORY_DOMAIN
+        } else {
+            WifiRegulatoryDomain::Fcc
+        };
+        if self
+            .nora_driver
+            .set_regulatory_domain(regulatory_domain)
+            .await
+            .is_err()
+        {
+            defmt::trace!("could not set radio regulatory domain");
+            return Err(RobotRadioNoraError::ConnectWifiBadRegulatoryDomain);
         }
 
         // Load the wifi network configuration (only supports one profile, at index 0)
@@ -660,6 +679,7 @@ impl<
                 const PACKET_SIZE: usize =
                     size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloResponse>();
                 if data.len() != PACKET_SIZE {
+                    defmt::warn!("wait_hello: invalid packet size: {}", data.len());
                     return Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid);
                 }
 

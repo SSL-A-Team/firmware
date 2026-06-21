@@ -105,8 +105,9 @@ async fn user_io_task_entry(
         let cur_robot_state = robot_state.get_state();
 
         // read switches
-        let robot_network_index = dip_switch.read_block(7..4);
+        let robot_network_index = dip_switch.read_block(6..4);
         let robot_radio_driver_use_flow_control = dip_switch.read_pin(3);
+        let robot_wifi_international = dip_switch.read_pin(7);
         let send_extended_telem = dip_switch.read_pin(0);
 
         let hw_debug_mode = debug_mode_dip_switch.read_pin(0);
@@ -128,6 +129,15 @@ async fn user_io_task_entry(
                 "updated radio driver use flow control {} -> {}",
                 cur_robot_state.hw_wifi_driver_use_flow_control,
                 robot_radio_driver_use_flow_control
+            );
+        }
+
+        if robot_wifi_international != cur_robot_state.hw_wifi_international {
+            robot_state.set_hw_wifi_international(robot_wifi_international);
+            defmt::info!(
+                "updated radio wifi international {} -> {}",
+                cur_robot_state.hw_wifi_international,
+                robot_wifi_international
             );
         }
 

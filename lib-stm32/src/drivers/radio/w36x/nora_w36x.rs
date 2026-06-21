@@ -55,6 +55,30 @@ pub enum WifiAuth<'a> {
     // TODO (W36): W36 supports WPA3/SAE via AT+UWSSS=<handle>,<passphrase>
 }
 
+/// Wi-Fi regulatory domain used by AT+UWRD. The discriminant matches the
+/// <reg_domain> enumerator defined in the NORA-W36 AT command manual (9.1.16).
+#[allow(dead_code)]
+#[derive(Copy, Clone, PartialEq, Debug, Default, Format)]
+pub enum WifiRegulatoryDomain {
+    World = 0,
+    Etsi = 1,
+    #[default]
+    Fcc = 2,
+    IcIsed = 3,
+    Nz = 4,
+    MkkJapan = 5,
+    NccTaiwan = 6,
+    AcmaAu = 7,
+    KccSouthKorea = 8,
+    SaSouthAfrica = 9,
+    Brazil = 10,
+}
+
+/// Regulatory domain used when the robot is configured for international operation.
+/// NOTE: Must be updated per competition based on destination.
+pub const INTERNATIONAL_WIFI_REGULATORY_DOMAIN: WifiRegulatoryDomain =
+    WifiRegulatoryDomain::KccSouthKorea;
+
 pub struct SocketConnection {
     pub socket_id: u8,
 }
@@ -209,7 +233,23 @@ impl<
         Ok(())
     }
 
-    /// Configure WiFi on the NORA-W36 module.
+    /// Set the Wi-Fi regulatory domain on the NORA-W36 module.
+    /// Uses AT+UWRD=<reg_domain>. Must be set before starting AP or Station.
+    pub async fn set_regulatory_domain(
+        &self,
+        domain: WifiRegulatoryDomain,
+    ) -> Result<(), NoraRadioError> {
+        let mut str: String<16> = String::new();
+        write!(str, "AT+UWRD={}", domain as u8)
+            .or(Err(NoraRadioError::CommandConstructionFailed))?;
+        defmt::trace!("regulatory domain configuration string: {}", str.as_str());
+        self.send_command(str.as_str()).await?;
+        defmt::trace!("sent regulatory domain command");
+        self.read_ok().await?;
+        defmt::trace!("read OK");
+
+        Ok(())
+    }
     /// Uses separate commands per configuration aspect:
     ///   1. Set SSID:     AT+UWSCP=<wlan_handle>,<ssid>
     ///      - <wlan_handle> can only be 0.

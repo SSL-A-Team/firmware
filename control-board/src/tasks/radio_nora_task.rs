@@ -320,7 +320,7 @@ impl<
                         wifi_credential.get_password()
                     );
                     if self
-                        .connect_network(wifi_credential, cur_robot_state.hw_robot_id)
+                        .connect_network(wifi_credential, cur_robot_state.hw_robot_id, cur_robot_state.hw_wifi_international)
                         .await
                         .is_err()
                     {
@@ -459,10 +459,11 @@ impl<
         &mut self,
         wifi_network: WifiCredential,
         robot_id: u8,
+        international: bool,
     ) -> Result<(), ()> {
         if self
             .radio
-            .connect_to_network(wifi_network, robot_id)
+            .connect_to_network(wifi_network, robot_id, international)
             .await
             .is_err()
         {
