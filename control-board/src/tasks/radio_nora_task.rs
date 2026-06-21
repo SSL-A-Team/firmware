@@ -422,7 +422,7 @@ impl<
             if loop_execution_time > Duration::from_millis(2)
                 && self.connection_state == RadioConnectionState::Connected
             {
-                defmt::warn!("radio loop is connected and taking >2ms to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {:?}", loop_execution_time);
+                defmt::warn!("radio loop is connected and taking >2ms to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {:?}", loop_execution_time.as_micros());
             }
 
             last_loop_term_time = Instant::now();
@@ -562,6 +562,7 @@ impl<
                 }
             } else {
                 defmt::warn!("RadioNoraTask - error reading data packet");
+                break;
             }
         }
 
@@ -605,14 +606,14 @@ impl<
         }
 
         // always send the latest telemetry
-        if tx_ctr == 0 {
+        // if tx_ctr == 0 {
             self.last_basic_telemetry.transmission_sequence_number = self.seq_number as u8;
             self.seq_number = (self.seq_number + 1) & 0x00FF;
 
             if let Err(e) = self.radio.send_telemetry(self.last_basic_telemetry).await {
                 defmt::warn!("RadioNoraTask - failed to send basic telem packet {:?}", e);
             }
-        }
+        // }
 
         return Ok(());
     }

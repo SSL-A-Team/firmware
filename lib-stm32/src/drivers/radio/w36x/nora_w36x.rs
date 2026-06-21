@@ -607,7 +607,8 @@ impl<
     async fn wait_send_ack(&self, intended_len: usize) -> Result<(), NoraRadioError> {
         // Read +USOWB:<socket_handle>,<written_length>\r\nOK\r\n response and validate written length.
         // Must also see OK\r\n before returning so the trailing OK is not left in the queue.
-        self.read_response_raw::<64, _, _>(|accum| {
+        // 100ms timeout guards against NORA becoming unresponsive (socket failure, firmware hang).
+        let ack_future = self.read_response_raw::<64, _, _>(|accum| {
             if accum.windows(5).any(|w| w == b"ERROR") {
                 return Some(Err(NoraRadioError::SocketWriteFailed));
             }
@@ -639,8 +640,14 @@ impl<
                 }
             }
             None
-        })
-        .await?;
+        });
+        match select(ack_future, Timer::after_millis(100)).await {
+            embassy_futures::select::Either::First(r) => r?,
+            embassy_futures::select::Either::Second(_) => {
+                defmt::warn!("NoraW36x - wait_send_ack timed out (NORA unresponsive)");
+                return Err(NoraRadioError::OperationTimedOut);
+            }
+        }
         Ok(())
     }
 
