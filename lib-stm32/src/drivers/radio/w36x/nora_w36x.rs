@@ -3,7 +3,7 @@ use core::fmt::Write;
 use defmt::Format;
 use embassy_futures::select::select;
 use embassy_stm32::usart;
-use embassy_time::Timer;
+use embassy_time::{Instant, Timer};
 use heapless::{String, Vec};
 
 use crate::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
@@ -573,7 +573,10 @@ impl<
             return Err(NoraRadioError::SendCommandLowLevelBufferFull);
         }
 
-        self.wait_send_ack(data.len()).await
+        let ack_t0 = Instant::now();
+        let r = self.wait_send_ack(data.len()).await;
+        defmt::trace!("NoraW36x - wait_send_ack took {}us", (Instant::now() - ack_t0).as_micros());
+        r
     }
 
     /// Write binary data to a socket without waiting for the +USOWB acknowledgement.
@@ -641,7 +644,7 @@ impl<
             }
             None
         });
-        match select(ack_future, Timer::after_millis(100)).await {
+        match select(ack_future, Timer::after_millis(10)).await {
             embassy_futures::select::Either::First(r) => r?,
             embassy_futures::select::Either::Second(_) => {
                 defmt::warn!("NoraW36x - wait_send_ack timed out (NORA unresponsive)");

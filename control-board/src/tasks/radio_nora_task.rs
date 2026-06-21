@@ -419,10 +419,11 @@ impl<
 
             let loop_end_time = Instant::now();
             let loop_execution_time = loop_end_time - loop_start_time;
-            if loop_execution_time > Duration::from_millis(2)
+            if loop_execution_time > Duration::from_millis(10)
                 && self.connection_state == RadioConnectionState::Connected
             {
-                defmt::warn!("radio loop is connected and taking >2ms to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {:?}", loop_execution_time.as_micros());
+                // delay is probably due to delay in ack from the module. This task async awaits the module ack, so it's not hanging up the system.
+                defmt::warn!("radio loop is connected and taking >10ms to complete (it may be interrupted by higher priority tasks). This is >100% of an execution frame. Did transmit ack pile up in a brust transfer? Loop execution time {:?}", loop_execution_time.as_micros());
             }
 
             last_loop_term_time = Instant::now();
