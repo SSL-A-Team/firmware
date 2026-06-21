@@ -573,6 +573,38 @@ impl<
             return Err(NoraRadioError::SendCommandLowLevelBufferFull);
         }
 
+        self.wait_send_ack(data.len()).await
+    }
+
+    /// Write binary data to a socket without waiting for the +USOWB acknowledgement.
+    /// The ack arrives later and will be silently consumed by try_read_data_binary.
+    /// Only safe to use when no other AT command response is expected before the ack drains
+    /// (i.e. the connected data-phase loop, not during handshake or socket setup).
+    pub async fn send_data_no_ack(&self, socket_handle: u8, data: &[u8]) -> Result<(), NoraRadioError> {
+        let data_len = data.len() as u16;
+        if data_len == 0 || data_len > 1460 {
+            defmt::error!("data length out of range: {}, must be between 1 and 1460", data_len);
+            return Err(NoraRadioError::CommandConstructionFailed);
+        }
+        let mut cmd: String<24> = String::new();
+        write!(cmd, "AT+USOWB={socket_handle}").or(Err(NoraRadioError::CommandConstructionFailed))?;
+        let res = self.writer.enqueue(|buf| {
+            let cmd_bytes = cmd.as_bytes();
+            let cmd_len = cmd_bytes.len();
+            buf[..cmd_len].copy_from_slice(cmd_bytes);
+            buf[cmd_len] = 0x01;
+            buf[cmd_len + 1] = (data_len >> 8) as u8;
+            buf[cmd_len + 2] = (data_len & 0xFF) as u8;
+            buf[cmd_len + 3..cmd_len + 3 + data.len()].copy_from_slice(data);
+            cmd_len + 3 + data.len()
+        });
+        if res.is_err() {
+            return Err(NoraRadioError::SendCommandLowLevelBufferFull);
+        }
+        Ok(())
+    }
+
+    async fn wait_send_ack(&self, intended_len: usize) -> Result<(), NoraRadioError> {
         // Read +USOWB:<socket_handle>,<written_length>\r\nOK\r\n response and validate written length.
         // Must also see OK\r\n before returning so the trailing OK is not left in the queue.
         self.read_response_raw::<64, _, _>(|accum| {
@@ -590,15 +622,14 @@ impl<
                     if end > 0 {
                         if let Ok(s) = core::str::from_utf8(&len_bytes[..end]) {
                             if let Ok(written) = s.trim().parse::<usize>() {
-                                // Wait for trailing OK\r\n so it isn't left in the queue
                                 if !accum.windows(4).any(|w| w == b"OK\r\n") {
                                     return None;
                                 }
-                                if written != data.len() {
+                                if written != intended_len {
                                     defmt::warn!(
                                         "AT+USOWB: written {} != intended {}",
                                         written,
-                                        data.len()
+                                        intended_len
                                     );
                                 }
                                 return Some(Ok(()));
@@ -610,7 +641,6 @@ impl<
             None
         })
         .await?;
-
         Ok(())
     }
 
@@ -729,7 +759,7 @@ impl<
                     socket_id: _, data, ..
                 })) => Ok(Some(fn_read(data))),
                 other => {
-                    defmt::warn!("NoraW36x - expected binary data event, got {:?}", other);
+                    defmt::trace!("NoraW36x - expected binary data event, got {:?}", other);
                     Err(NoraRadioError::ReadDataInvalid)
                 }
             },

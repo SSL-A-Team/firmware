@@ -86,6 +86,7 @@ pub struct RobotRadioNora<
     #[allow(dead_code)]
     use_flow_control: bool,
     socket: Option<SocketConnection>,
+    fire_and_forget_sends: bool,
 }
 
 impl<
@@ -112,6 +113,7 @@ impl<
             reset_pin,
             socket: None,
             use_flow_control,
+            fire_and_forget_sends: false,
         }
     }
 
@@ -365,9 +367,17 @@ impl<
         }
     }
 
+    pub fn set_fire_and_forget_sends(&mut self, enabled: bool) {
+        self.fire_and_forget_sends = enabled;
+    }
+
     pub async fn send_data(&self, data: &[u8]) -> Result<(), RobotRadioNoraError> {
         if let Some(socket) = &self.socket {
-            self.nora_driver.send_data(socket.socket_id, data).await?;
+            if self.fire_and_forget_sends {
+                self.nora_driver.send_data_no_ack(socket.socket_id, data).await?;
+            } else {
+                self.nora_driver.send_data(socket.socket_id, data).await?;
+            }
             Ok(())
         } else {
             Err(RobotRadioNoraError::SocketMissing)
