@@ -500,59 +500,38 @@ impl<
         })
     }
 
-    /// Remove the connected peer from a UDP socket using BSD "unconnect" semantics.
-    /// AT+USOC=<socket_handle>,"0.0.0.0",0
-    /// This clears the peer filter set by connect_socket so the socket receives from
-    /// any source. The socket remains open on its current local port.
-    pub async fn unconnect_socket(&self, socket_handle: u8) -> Result<(), NoraRadioError> {
-        let mut str: String<32> = String::new();
-        write!(str, "AT+USOC={socket_handle},\"0.0.0.0\",0")
+    /// Bind a socket to a specific local port.
+    /// AT+USOB=<socket_handle>,<local_port>
+    /// Must be called after create_socket and before connect_socket or send.
+    pub async fn bind_socket(&self, socket_handle: u8, local_port: u16) -> Result<(), NoraRadioError> {
+        let mut str: String<24> = String::new();
+        write!(str, "AT+USOB={socket_handle},{local_port}")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
+        defmt::debug!("bind_socket: socket {} bound to port {}", socket_handle, local_port);
         self.read_ok().await
     }
 
     /// Close a socket.
     /// Uses AT+USOCL=<socket_handle>
+    /// NORA-W36x returns OK for explicit close; +UESOCL is only unsolicited (remote peer close).
     pub async fn close_socket(&self, socket_handle: u8) -> Result<(), NoraRadioError> {
         let mut str: String<16> = String::new();
         write!(str, "AT+USOCL={socket_handle}")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
 
-        let mut ok = false;
-        let mut socket_closed = false;
-
-        while !ok || !socket_closed {
-            self.reader
-                .dequeue(|buf| {
-                    match self.parse_packet(buf) {
-                        Ok(NoraPacket::Event(ATEvent::SocketClosed { socket_id: sid }))
-                            if sid == socket_handle =>
-                        {
-                            defmt::debug!("nora - close socket - ATEvent::SocketClosed");
-                            socket_closed = true;
-                        }
-                        Ok(NoraPacket::Response(ATResponse::Ok(_))) => {
-                            defmt::debug!("nora - close socket - ATResponse::Ok");
-                            ok = true;
-                        }
-                        Ok(NoraPacket::Response(ATResponse::Error)) => {
-                            return Err(NoraRadioError::SocketCloseFailed);
-                        }
-                        Ok(NoraPacket::Event(ATEvent::Empty | ATEvent::Startup)) => {}
-                        Ok(other) => {
-                            defmt::warn!("nora - close_socket: unsupported packet: {}", other);
-                        }
-                        Err(_) => {} // echo fragment, skip
-                    };
-
-                    Ok(())
-                })
-                .await?;
-        }
-
-        Ok(())
+        self.read_response_raw::<64, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                return Some(Err(NoraRadioError::SocketCloseFailed));
+            }
+            if accum.windows(4).any(|w| w == b"OK\r\n") {
+                defmt::debug!("nora - close socket - OK");
+                return Some(Ok(()));
+            }
+            None
+        })
+        .await
     }
 
     /// Write binary data to a socket.
@@ -634,6 +613,7 @@ impl<
 
         Ok(())
     }
+
 
     /// Read binary data from a socket.
     /// Uses AT+USORB=<socket_handle>,<length>

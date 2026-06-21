@@ -24,6 +24,7 @@ use super::radio_robot::TeamColor;
 
 const MULTICAST_IP: &str = "224.4.20.69";
 const MULTICAST_PORT: u16 = 42069;
+const LOCAL_PORT: u16 = 42069;
 
 #[derive(Clone, Copy, PartialEq, Debug, Format)]
 pub enum RobotRadioNoraError {
@@ -307,35 +308,23 @@ impl<
     }
 
     pub async fn open_multicast(&mut self) -> Result<(), RobotRadioNoraError> {
+        // Create an unconnected socket bound to LOCAL_PORT. Unconnected so it receives
+        // from any source (HelloResponse comes from software's unicast address).
+        // Bound to LOCAL_PORT so software knows exactly which port to reply to.
+        // send_hello creates its own temporary connected TX socket for the multicast send.
         let socket_id = self
             .nora_driver
             .create_socket(SocketProtocol::UDP)
             .await
             .map_err(|_| RobotRadioNoraError::OpenSocketError)?;
 
-        let socket = self
-            .nora_driver
-            .connect_socket(socket_id, MULTICAST_IP, MULTICAST_PORT, SocketProtocol::UDP)
+        self.nora_driver
+            .bind_socket(socket_id, LOCAL_PORT)
             .await
-            .map_err(|_| RobotRadioNoraError::OpenMulticastError)?;
+            .map_err(|_| RobotRadioNoraError::OpenSocketError)?;
 
-        self.socket = Some(socket);
+        self.socket = Some(SocketConnection { socket_id });
         Ok(())
-    }
-
-    /// Clear the connected peer on the current socket so it receives from any source.
-    /// After send_hello, the connected socket filters to the multicast peer only.
-    /// Sending AT+USOC with 0.0.0.0:0 uses BSD "unconnect" semantics to remove the
-    /// peer filter while keeping the socket open on its current local port.
-    pub async fn unconnect_peer(&mut self) -> Result<(), RobotRadioNoraError> {
-        if let Some(socket) = &self.socket {
-            self.nora_driver
-                .unconnect_socket(socket.socket_id)
-                .await?;
-            Ok(())
-        } else {
-            Err(RobotRadioNoraError::SocketMissing)
-        }
     }
 
     pub async fn open_unicast(
@@ -349,6 +338,11 @@ impl<
         let socket_id = self
             .nora_driver
             .create_socket(SocketProtocol::UDP)
+            .await
+            .map_err(|_| RobotRadioNoraError::OpenSocketError)?;
+
+        self.nora_driver
+            .bind_socket(socket_id, LOCAL_PORT)
             .await
             .map_err(|_| RobotRadioNoraError::OpenSocketError)?;
 
@@ -510,7 +504,25 @@ impl<
                 size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloRequest>(),
             )
         };
-        self.send_data(packet_bytes).await?;
+
+        // Temporary connected TX socket for the multicast send.
+        // self.socket is the unconnected RX socket (bound to LOCAL_PORT) and stays open.
+        // AT+USOWB requires a connected socket; after send close TX immediately.
+        // Software must reply to LOCAL_PORT (not the hello source port) for the
+        // unconnected RX socket to receive the HelloResponse.
+        let tx_id = self
+            .nora_driver
+            .create_socket(SocketProtocol::UDP)
+            .await
+            .map_err(|_| RobotRadioNoraError::OpenSocketError)?;
+        let tx = self
+            .nora_driver
+            .connect_socket(tx_id, MULTICAST_IP, MULTICAST_PORT, SocketProtocol::UDP)
+            .await
+            .map_err(|_| RobotRadioNoraError::OpenMulticastError)?;
+        let send_result = self.nora_driver.send_data(tx.socket_id, packet_bytes).await;
+        let _ = self.nora_driver.close_socket(tx.socket_id).await;
+        send_result?;
 
         Ok(())
     }
