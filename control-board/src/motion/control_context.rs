@@ -332,12 +332,14 @@ impl ControlContext {
         let effective_vision_update = match gate_action {
             GateAction::SeedComplete | GateAction::AcceptJump => {
                 self.robot_model.kf_set_pose(vision_pose_meas);
-                // Snap KF velocity to encoder-implied global-frame velocity.
-                // Prevents the velocity estimate from reflecting motion toward
-                // the old position after the position snap.
-                let enc_vel = self.robot_model.transform_wheel2twist(vision_pose_meas.z)
+                // Snap KF velocity to directly-measured values.
+                // Linear (vx, vy): encoder-implied via wheel Jacobian.
+                // Angular (ω): gyro, bypassing the Jacobian — lower noise
+                // (0.015 rad/s vs 50 rad/s encoder std) and no wheel-slip error.
+                let mut vel_seed = self.robot_model.transform_wheel2twist(vision_pose_meas.z)
                     * wheel_vel_meas;
-                self.robot_model.kf_set_vel(enc_vel);
+                vel_seed[2] = imu_gyro_theta_meas;
+                self.robot_model.kf_set_vel(vel_seed);
                 self.trajectory = None;
                 self.prev_cmd = None;
                 self.pose_pid_controller.reset();
