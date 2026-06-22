@@ -19,7 +19,7 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{
     include_external_cpp_bin,
-    motion::body_controller::BodyController,
+    motion::{body_controller::BodyController, control_context::VisionGateEvent},
     motor::CurrentControlledMotor,
     parameter_interface::ParameterInterface,
     pins::*,
@@ -144,6 +144,7 @@ pub struct ControlTask<
     control_update_err_limiter: RateLimiter,
     high_current_err_limiter: RateLimiter,
     loop_exec_err_limiter: RateLimiter,
+    vision_gate_err_limiter: RateLimiter,
 
     motor_fl: ControlWheelMotor,
     motor_bl: ControlWheelMotor,
@@ -197,6 +198,9 @@ impl<
                 ERROR_TELEM_RATE_LIMIT_MS,
             )),
             loop_exec_err_limiter: RateLimiter::new(Duration::from_millis(
+                ERROR_TELEM_RATE_LIMIT_MS,
+            )),
+            vision_gate_err_limiter: RateLimiter::new(Duration::from_millis(
                 ERROR_TELEM_RATE_LIMIT_MS,
             )),
             motor_fl: motor_fl,
@@ -499,6 +503,24 @@ impl<
                                 "body acceleration clamped",
                             )),
                         );
+                    }
+                    if self.vision_gate_err_limiter.is_allowed() {
+                        let msg = match robot_controller.control_context.last_gate_event {
+                            VisionGateEvent::SeedReset =>
+                                Some("vision gate: seed unstable, restarting"),
+                            VisionGateEvent::FirstReject =>
+                                Some("vision gate: outlier rejected"),
+                            VisionGateEvent::AcceptJump =>
+                                Some("vision gate: large jump accepted, controller reset"),
+                            VisionGateEvent::None => None,
+                        };
+                        if let Some(msg) = msg {
+                            self.telemetry_publisher.publish_immediate(
+                                TelemetryPacket::ErrorTelemetry(
+                                    create_error_telemetry_from_string(msg),
+                                ),
+                            );
+                        }
                     }
                 }
                 Err(e) => {

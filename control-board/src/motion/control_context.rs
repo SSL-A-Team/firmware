@@ -1,6 +1,7 @@
 use crate::motion::params::controller_params::{
     EncLagMode, PoseAccelMode, PoseVelMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON,
-    ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE,
+    ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE, VISION_GATE_BASE_RADIUS_M,
+    VISION_GATE_EXPAND_RATE_M_PER_S, VISION_SEED_POS_STD_THRESH_M, VISION_SEED_SAMPLES,
 };
 use crate::motion::pid::PidController;
 use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
@@ -15,7 +16,7 @@ use ateam_controls::{
 use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
 use core::f32::consts::PI;
 use embassy_time::Duration;
-use libm::{fabsf, hypotf, remainderf};
+use libm::{fabsf, hypotf, remainderf, sqrtf};
 use nalgebra::SVector;
 
 pub(crate) const VISION_ACTIVE_TIMEOUT_S: f32 = 0.5;
@@ -62,6 +63,77 @@ impl ManeuverSetpoints {
     }
 }
 
+/// Startup seeding and steady-state tracking state for the vision outlier gate.
+///
+/// On boot the gate starts in `Seeding`, collecting vision samples until the
+/// position estimates are stable enough to trust. Once seeded it transitions to
+/// `Tracking`, where each incoming vision measurement is compared against the
+/// KF's predicted position. Measurements outside the gate are rejected as
+/// outliers; the gate expands over time so a robot that has been physically
+/// repositioned can eventually re-enter and be accepted.
+pub enum VisionGateState {
+    /// Collecting initial vision samples. Transitions to `Tracking` once
+    /// `VISION_SEED_SAMPLES` samples have been received and their positional
+    /// standard deviation is below `VISION_SEED_POS_STD_THRESH_M`.
+    Seeding {
+        n: u32,
+        pos_sum: Vector2f,
+        pos_sq_sum: Vector2f,
+    },
+    /// Gate is active. Measurements within `VISION_GATE_BASE_RADIUS_M +
+    /// VISION_GATE_EXPAND_RATE_M_PER_S * time_since_last_valid_s` of the KF
+    /// predicted position are accepted; others are rejected and the expansion
+    /// timer advances.
+    Tracking { time_since_last_valid_s: f32 },
+}
+
+impl Default for VisionGateState {
+    fn default() -> Self {
+        VisionGateState::Seeding {
+            n: 0,
+            pos_sum: Vector2f::zeros(),
+            pos_sq_sum: Vector2f::zeros(),
+        }
+    }
+}
+
+/// Notable vision gate events reported to the caller each tick via
+/// `ControlContext::last_gate_event`. Reset to `None` on normal ticks.
+/// Used by `control_task` to emit `ErrorTelemetry` over radio.
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum VisionGateEvent {
+    None,
+    /// Seed stability check failed — robot was not stationary, restarting.
+    SeedReset,
+    /// First outlier rejection after a valid tracking period (start of a burst).
+    /// Subsequent rejections in the same burst are suppressed to avoid spam.
+    FirstReject,
+    /// Measurement accepted after gate expansion — robot was physically repositioned.
+    AcceptJump,
+}
+
+/// Internal gate decision for a single vision tick. Computed with only
+/// `vision_gate` borrowed, then applied once that borrow ends.
+enum GateAction {
+    /// Still accumulating seed samples — no update to KF.
+    Accumulate,
+    /// Seed samples collected but variance check failed — restart accumulator.
+    SeedReset,
+    /// Seed stable — snap KF to vision and transition to Tracking.
+    SeedComplete,
+    /// Measurement within base radius — pass to KF update normally.
+    Accept,
+    /// Measurement outside base radius but within expanded gate — snap KF
+    /// to vision and reset velocity to encoder-implied.
+    AcceptJump,
+    /// First outlier rejection since the last valid update — emit telemetry once.
+    FirstReject,
+    /// Subsequent outlier rejection in the same burst — suppress telemetry.
+    Reject,
+    /// No vision packet this tick.
+    NoVision,
+}
+
 /// Controller infrastructure passed into each maneuver on every tick.
 ///
 /// Owns the KF/robot-model, trajectory state, PID, and encoder-lag model.
@@ -87,6 +159,10 @@ pub struct ControlContext {
     /// Cached KF state estimate — updated each tick before maneuver dispatch.
     pub state_estimate: Vector6f,
     pub time_since_vision_update_s: f32,
+    pub vision_gate: VisionGateState,
+    /// Notable gate event from the most recent `update_state_estimate` call.
+    /// Reset to `None` every tick; set when a reportable condition occurs.
+    pub last_gate_event: VisionGateEvent,
     pub wheels_disabled: bool,
 }
 
@@ -132,6 +208,8 @@ impl ControlContext {
             dt,
             state_estimate: Vector6f::zeros(),
             time_since_vision_update_s: VISION_ACTIVE_TIMEOUT_S + 1.0,
+            vision_gate: VisionGateState::default(),
+            last_gate_event: VisionGateEvent::None,
             wheels_disabled: true,
         }
     }
@@ -146,6 +224,8 @@ impl ControlContext {
         self.trajectory = None;
         self.prev_cmd = None;
         self.time_since_vision_update_s = VISION_ACTIVE_TIMEOUT_S + 1.0;
+        self.vision_gate = VisionGateState::default();
+        self.last_gate_event = VisionGateEvent::None;
         self.enc_lag.reset();
         self.wheels_disabled = true;
     }
@@ -168,23 +248,135 @@ impl ControlContext {
         wheel_vel_meas: Vector4f,
         imu_gyro_theta_meas: f32,
     ) -> Result<Vector6f, ControlsError> {
-        if vision_update {
-            if !self.vision_active() {
-                // Vision transitioning inactive → active (first sample after
-                // init/reset, or vision returning after a >timeout dropout).
-                // Snap the KF to vision, drop any in-flight trajectory, and
-                // reset the PID so the next tracker call replans cleanly
-                // from the freshly-snapped state estimate.
+        // Capture the KF's current predicted position before any snap so the gate
+        // compares against dead-reckoned state, not a freshly-overwritten value.
+        let predicted_state = self.robot_model.get_state();
+
+        // [1] Outlier gate: classify this vision tick.
+        //
+        // Gate is XY-only. Theta outliers are not rejected here because heading
+        // errors from wheel slip are common and the controller handles them.
+        //
+        // Accumulator mutations happen inside the match; KF and state-machine
+        // mutations happen after so `vision_gate` is not borrowed when calling
+        // into `robot_model`.
+        let gate_action = if vision_update {
+            match &mut self.vision_gate {
+                VisionGateState::Seeding { n, pos_sum, pos_sq_sum } => {
+                    *n += 1;
+                    pos_sum.x += vision_pose_meas.x;
+                    pos_sum.y += vision_pose_meas.y;
+                    pos_sq_sum.x += vision_pose_meas.x * vision_pose_meas.x;
+                    pos_sq_sum.y += vision_pose_meas.y * vision_pose_meas.y;
+
+                    if *n >= VISION_SEED_SAMPLES {
+                        let nf = *n as f32;
+                        let mean_x = pos_sum.x / nf;
+                        let mean_y = pos_sum.y / nf;
+                        // Variance = E[x²] - (E[x])²
+                        let var_x = pos_sq_sum.x / nf - mean_x * mean_x;
+                        let var_y = pos_sq_sum.y / nf - mean_y * mean_y;
+                        if sqrtf(var_x) < VISION_SEED_POS_STD_THRESH_M
+                            && sqrtf(var_y) < VISION_SEED_POS_STD_THRESH_M
+                        {
+                            GateAction::SeedComplete
+                        } else {
+                            GateAction::SeedReset
+                        }
+                    } else {
+                        GateAction::Accumulate
+                    }
+                }
+                VisionGateState::Tracking { time_since_last_valid_s } => {
+                    let dist = hypotf(
+                        vision_pose_meas.x - predicted_state[0],
+                        vision_pose_meas.y - predicted_state[1],
+                    );
+                    // Gate radius expands linearly while no valid update is received,
+                    // allowing a physically repositioned robot to eventually re-enter.
+                    let gate_radius = VISION_GATE_BASE_RADIUS_M
+                        + VISION_GATE_EXPAND_RATE_M_PER_S * *time_since_last_valid_s;
+
+                    if dist < gate_radius {
+                        *time_since_last_valid_s = 0.0;
+                        if dist >= VISION_GATE_BASE_RADIUS_M {
+                            GateAction::AcceptJump
+                        } else {
+                            GateAction::Accept
+                        }
+                    } else {
+                        // Distinguish first rejection from subsequent ones so
+                        // the caller can emit a single telemetry burst event.
+                        let is_first = *time_since_last_valid_s == 0.0;
+                        *time_since_last_valid_s += self.dt;
+                        if is_first { GateAction::FirstReject } else { GateAction::Reject }
+                    }
+                }
+            }
+        } else {
+            // No vision packet — advance the expansion timer so a robot that
+            // loses vision entirely can still recover when it returns.
+            if let VisionGateState::Tracking { time_since_last_valid_s } = &mut self.vision_gate {
+                *time_since_last_valid_s += self.dt;
+            }
+            GateAction::NoVision
+        };
+
+        // [2] Apply gate decision: KF snaps and state-machine transitions.
+        //
+        // SeedComplete and AcceptJump both snap position and velocity. SeedComplete
+        // additionally transitions the gate to Tracking. AcceptJump drops any
+        // in-flight trajectory so the controller replans from the new pose
+        // instead of continuing to chase the old one.
+        self.last_gate_event = VisionGateEvent::None;
+        let effective_vision_update = match gate_action {
+            GateAction::SeedComplete | GateAction::AcceptJump => {
                 self.robot_model.kf_set_pose(vision_pose_meas);
+                // Snap KF velocity to encoder-implied global-frame velocity.
+                // Prevents the velocity estimate from reflecting motion toward
+                // the old position after the position snap.
+                let enc_vel = self.robot_model.transform_wheel2twist(vision_pose_meas.z)
+                    * wheel_vel_meas;
+                self.robot_model.kf_set_vel(enc_vel);
                 self.trajectory = None;
                 self.prev_cmd = None;
                 self.pose_pid_controller.reset();
+                if matches!(gate_action, GateAction::SeedComplete) {
+                    self.vision_gate = VisionGateState::Tracking { time_since_last_valid_s: 0.0 };
+                    defmt::info!("vision gate: seeding complete");
+                } else {
+                    self.last_gate_event = VisionGateEvent::AcceptJump;
+                    defmt::info!("vision gate: large jump accepted");
+                }
+                true
             }
+            GateAction::SeedReset => {
+                self.vision_gate = VisionGateState::default();
+                self.last_gate_event = VisionGateEvent::SeedReset;
+                defmt::warn!("vision gate: seed stability check failed, restarting");
+                false
+            }
+            GateAction::FirstReject => {
+                self.last_gate_event = VisionGateEvent::FirstReject;
+                defmt::warn!("vision gate: outlier rejected");
+                false
+            }
+            GateAction::Accept => true,
+            GateAction::Reject => {
+                defmt::warn!("vision gate: outlier rejected");
+                false
+            }
+            GateAction::Accumulate | GateAction::NoVision => false,
+        };
+
+        // [3] Update the vision activity timer used by global-position maneuvers.
+        if effective_vision_update {
             self.time_since_vision_update_s = 0.0;
         } else if self.time_since_vision_update_s <= VISION_ACTIVE_TIMEOUT_S {
             self.time_since_vision_update_s += self.dt;
         }
 
+        // Capture post-snap / pre-KF-update state for telemetry.
         let state_prediction = self.robot_model.get_state();
 
         let measurement: Vector8f = if matches!(
@@ -218,7 +410,7 @@ impl ControlContext {
         };
 
         self.robot_model
-            .kf_update(measurement, !vision_update, false, false)?;
+            .kf_update(measurement, !effective_vision_update, false, false)?;
         self.state_estimate = self.robot_model.get_state();
 
         Ok(state_prediction)
