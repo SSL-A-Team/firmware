@@ -696,6 +696,122 @@ impl<
         }
     }
 
+    /// Read manufacturer identification string (AT+CGMI).
+    /// Response has no prefix — typically "u-blox".
+    pub async fn read_manufacturer(&self) -> Result<String<32>, NoraRadioError> {
+        self.send_command("AT+CGMI").await?;
+        self.reader
+            .dequeue(|buf| match self.parse_packet(buf)? {
+                NoraPacket::Response(ATResponse::Ok(s)) => {
+                    let mut out: String<32> = String::new();
+                    out.push_str(s.trim())
+                        .or(Err(NoraRadioError::CommandConstructionFailed))?;
+                    Ok(out)
+                }
+                _ => Err(NoraRadioError::ReadDataInvalid),
+            })
+            .await
+    }
+
+    /// Read model identification string (AT+CGMM).
+    /// Response has no prefix — e.g. "NORA-W36-OINK".
+    pub async fn read_model(&self) -> Result<String<32>, NoraRadioError> {
+        self.send_command("AT+CGMM").await?;
+        self.reader
+            .dequeue(|buf| match self.parse_packet(buf)? {
+                NoraPacket::Response(ATResponse::Ok(s)) => {
+                    let mut out: String<32> = String::new();
+                    out.push_str(s.trim())
+                        .or(Err(NoraRadioError::CommandConstructionFailed))?;
+                    Ok(out)
+                }
+                _ => Err(NoraRadioError::ReadDataInvalid),
+            })
+            .await
+    }
+
+    /// Read firmware version string (AT+CGMR).
+    /// Response has no prefix — e.g. "3.4.1".
+    pub async fn read_firmware_version(&self) -> Result<String<32>, NoraRadioError> {
+        self.send_command("AT+CGMR").await?;
+        self.reader
+            .dequeue(|buf| match self.parse_packet(buf)? {
+                NoraPacket::Response(ATResponse::Ok(s)) => {
+                    let mut out: String<32> = String::new();
+                    out.push_str(s.trim())
+                        .or(Err(NoraRadioError::CommandConstructionFailed))?;
+                    Ok(out)
+                }
+                _ => Err(NoraRadioError::ReadDataInvalid),
+            })
+            .await
+    }
+
+    /// Read current UART settings (AT+USYUS?).
+    /// Returns (baud_rate, flow_control_enabled).
+    pub async fn read_uart_settings(&self) -> Result<(u32, bool), NoraRadioError> {
+        self.send_command("AT+USYUS?").await?;
+        self.reader
+            .dequeue(|buf| match self.parse_packet(buf)? {
+                NoraPacket::Response(ATResponse::Ok(s)) => {
+                    let payload = s.trim().trim_start_matches("+USYUS:");
+                    let mut parts = payload.splitn(2, ',');
+                    let baud: u32 = parts
+                        .next()
+                        .and_then(|x| x.trim().parse().ok())
+                        .ok_or(NoraRadioError::ReadDataInvalid)?;
+                    let flow: u8 = parts
+                        .next()
+                        .and_then(|x| x.trim().parse().ok())
+                        .ok_or(NoraRadioError::ReadDataInvalid)?;
+                    Ok((baud, flow != 0))
+                }
+                _ => Err(NoraRadioError::ReadDataInvalid),
+            })
+            .await
+    }
+
+    /// Store current configuration to persistent memory (AT&W).
+    pub async fn store_config(&self) -> Result<(), NoraRadioError> {
+        self.send_command("AT&W").await?;
+        self.read_ok().await
+    }
+
+    /// Read current Wi-Fi regulatory domain (AT+UWRD?).
+    /// 0=World, 1=ETSI, 2=FCC, 3=IC/ISED — see AT command spec for full list.
+    pub async fn read_regulatory_domain(&self) -> Result<u8, NoraRadioError> {
+        self.send_command("AT+UWRD?").await?;
+        self.reader
+            .dequeue(|buf| match self.parse_packet(buf)? {
+                NoraPacket::Response(ATResponse::Ok(s)) => s
+                    .trim()
+                    .trim_start_matches("+UWRD:")
+                    .trim()
+                    .parse::<u8>()
+                    .or(Err(NoraRadioError::ReadDataInvalid)),
+                _ => Err(NoraRadioError::ReadDataInvalid),
+            })
+            .await
+    }
+
+    /// Set Wi-Fi regulatory domain (AT+UWRD=<domain>).
+    /// Call store_config() to persist. Must be set before starting AP or Station.
+    pub async fn set_regulatory_domain(&self, domain: u8) -> Result<(), NoraRadioError> {
+        let mut cmd: String<16> = String::new();
+        write!(&mut cmd, "AT+UWRD={domain}")
+            .or(Err(NoraRadioError::CommandConstructionFailed))?;
+        self.send_command(cmd.as_str()).await?;
+        self.read_ok().await
+    }
+
+    /// Restore factory defaults (AT+USYFR).
+    /// Requires store_config() + radio reboot to take effect.
+    /// Resets all settings; removes certificates and BT bonding info.
+    pub async fn factory_restore(&self) -> Result<(), NoraRadioError> {
+        self.send_command("AT+USYFR").await?;
+        self.read_ok().await
+    }
+
     /// Send an AT command string over UART with \r terminator.
     pub async fn send_command(&self, cmd: &str) -> Result<(), NoraRadioError> {
         let res = self.writer.enqueue(|buf| {

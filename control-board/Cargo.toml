@@ -132,6 +132,11 @@ test = false
 harness = false
 
 [[bin]]
+name = "bootstrap-radio-nora"
+test = false
+harness = false
+
+[[bin]]
 name = "hwtest-torque"
 test = false
 harness = false
