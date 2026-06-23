@@ -56,6 +56,22 @@ pub enum RobotRadioNoraError {
     ControlPacketDecodeInvalid,
     ParameterPacketDecodeInvalid,
     PacketTypeUnknown,
+
+    SendDataFailed,
+
+    QueueEmpty,
+    WriteAckSkipped,
+}
+
+impl RobotRadioNoraError {
+    /// Non-fatal errors represent benign read-loop conditions (an empty queue or a
+    /// drained fire-and-forget write ack) rather than a real radio failure.
+    pub fn is_fatal(&self) -> bool {
+        !matches!(
+            self,
+            RobotRadioNoraError::QueueEmpty | RobotRadioNoraError::WriteAckSkipped
+        )
+    }
 }
 
 impl From<NoraRadioError> for RobotRadioNoraError {
@@ -115,7 +131,7 @@ impl<
             reset_pin,
             socket: None,
             use_flow_control,
-            fire_and_forget_sends: false,
+            fire_and_forget_sends: true,
         }
     }
 
@@ -432,11 +448,27 @@ impl<
                 match self.nora_driver.try_read_data_binary(fn_read) {
                     Ok(Some(ret)) => Ok(Some(ret)),
                     Ok(None) => Ok(None),
-                    Err(NoraRadioError::ReadLowLevelBufferEmpty) => Ok(None),
+                    Err(NoraRadioError::ReadLowLevelBufferEmpty) => {
+                        // Queue drained between the can_read_data() check and the
+                        // dequeue. Non-fatal; surface it so the caller stops reading.
+                        Err(RobotRadioNoraError::QueueEmpty)
+                    }
                     Err(NoraRadioError::ReadDataInvalid) => {
                         // Non-data event in the queue (e.g. connection event) — skip it
                         defmt::trace!("non-data event in queue, skipping");
                         Ok(None)
+                    }
+                    Err(NoraRadioError::WriteAckConsumed) => {
+                        // A fire-and-forget write ack was drained. Non-fatal; surface a
+                        // distinct error so the caller keeps reading the queue.
+                        defmt::trace!("consumed write ack, continuing");
+                        Err(RobotRadioNoraError::WriteAckSkipped)
+                    }
+                    Err(NoraRadioError::SocketWriteFailed) => {
+                        // The module reported an ERROR for a prior fire-and-forget write.
+                        // Surface it as a diagnosable send failure rather than skipping.
+                        defmt::error!("radio reported a socket write failure (AT ERROR)");
+                        Err(RobotRadioNoraError::SendDataFailed)
                     }
                     Err(e) => {
                         defmt::trace!("try_read_data_binary failed: {:?}", e);
@@ -444,7 +476,7 @@ impl<
                     }
                 }
             } else {
-                Ok(None)
+                Err(RobotRadioNoraError::QueueEmpty)
             }
         } else {
             defmt::trace!("socket was none");
@@ -741,6 +773,7 @@ impl<
 
             Ok(unsafe { DataPacket::ParameterCommand(packet.data.robot_parameter_command) })
         } else {
+            defmt::warn!("received packet with invalid size: {}", data.len());
             return Err(RobotRadioNoraError::PacketTypeUnknown);
         }
     }
@@ -749,7 +782,9 @@ impl<
         self.read_data(|data| self.parse_data_packet(data)).await?
     }
 
-    pub fn read_packet_nonblocking(&self) -> Result<Option<DataPacket>, ()> {
+    pub fn read_packet_nonblocking(
+        &self,
+    ) -> Result<Option<DataPacket>, RobotRadioNoraError> {
         let res = self.read_data_nonblocking(|data| self.parse_data_packet(data));
 
         match res {
@@ -758,16 +793,18 @@ impl<
                     Ok(pkt) => {
                         return Ok(Some(pkt));
                     }
-                    Err(_) => {
-                        defmt::debug!("got AT packet but wasn't A-Team");
-                        return Err(());
+                    Err(e) => {
+                        defmt::warn!("got AT packet but wasn't A-Team");
+                        return Err(e);
                     }
                 },
                 None => return Ok(None),
             },
             Err(err_res) => {
-                defmt::debug!("radio in invalid state {:?}", err_res);
-                return Err(());
+                if err_res.is_fatal() {
+                    defmt::warn!("radio in invalid state {:?}", err_res);
+                }
+                return Err(err_res);
             }
         }
     }

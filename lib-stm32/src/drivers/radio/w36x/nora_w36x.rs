@@ -25,6 +25,7 @@ pub enum NoraRadioError {
     AtPacketError(AtPacketError),
     SendCommandLowLevelBufferFull,
     ReadDataInvalid,
+    WriteAckConsumed,
     ReadLowLevelBufferEmpty,
     ReadLowLevelBufferBusy,
     AtEventUnsupported,
@@ -841,13 +842,50 @@ impl<
         match self.reader.try_dequeue() {
             Ok(buf) => match self.parse_packet(buf.data()) {
                 Ok(NoraPacket::Event(ATEvent::SocketDataBinary { socket_id: _, data })) => {
+                    defmt::trace!("NoraW36x - read {} bytes (SocketDataBinary)", data.len());
                     Ok(Some(fn_read(data)))
                 }
                 Ok(NoraPacket::Event(ATEvent::SocketDataBinaryFrom {
                     socket_id: _, data, ..
-                })) => Ok(Some(fn_read(data))),
-                other => {
-                    defmt::trace!("NoraW36x - expected binary data event, got {:?}", other);
+                })) => {
+                    defmt::trace!("NoraW36x - read {} bytes (SocketDataBinaryFrom)", data.len());
+                    Ok(Some(fn_read(data)))
+                }
+                // An AT ERROR in the data phase means the module rejected the prior
+                // fire-and-forget write (AT+USOWB). Surface it as a diagnosable write
+                // failure instead of silently skipping it.
+                Ok(NoraPacket::Response(ATResponse::Error)) => {
+                    defmt::warn!("NoraW36x - AT ERROR in read queue (socket write failed)");
+                    Err(NoraRadioError::SocketWriteFailed)
+                }
+                // The expected +USOWB success acknowledgement for a fire-and-forget
+                // write. Non-fatal: report a distinct error (separate from
+                // ReadDataInvalid) so callers can drain it and keep reading.
+                Ok(NoraPacket::Response(ATResponse::Ok(_))) => {
+                    defmt::trace!("NoraW36x - consumed write ack in read queue");
+                    Err(NoraRadioError::WriteAckConsumed)
+                }
+                // Bare \r\n / empty buffer from UART read-to-idle fragmentation
+                // (e.g. the framing left over after a +USOWB send). Benign noise.
+                Ok(NoraPacket::Event(ATEvent::Empty)) => {
+                    defmt::trace!("NoraW36x - drained UART idle artifact (empty frame)");
+                    Err(NoraRadioError::ReadDataInvalid)
+                }
+                // A genuine, recognized URC that simply isn't socket data
+                // (e.g. a connection/link event). Log which one for diagnosis.
+                Ok(NoraPacket::Event(event)) => {
+                    defmt::trace!("NoraW36x - drained non-data event: {:?}", event);
+                    Err(NoraRadioError::ReadDataInvalid)
+                }
+                // A non-data response body (+UWxx read, etc.) left in the queue.
+                Ok(NoraPacket::Response(ATResponse::Other(body))) => {
+                    defmt::trace!("NoraW36x - drained non-data response: {:?}", body);
+                    Err(NoraRadioError::ReadDataInvalid)
+                }
+                // The buffer could not be framed as a response or URC, usually a
+                // partial line split across an idle boundary. Surface the parse error.
+                Err(parse_err) => {
+                    defmt::trace!("NoraW36x - drained unparseable frame: {:?}", parse_err);
                     Err(NoraRadioError::ReadDataInvalid)
                 }
             },

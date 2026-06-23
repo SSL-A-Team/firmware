@@ -19,7 +19,7 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 use crate::{
     create_error_telemetry_from_string,
     drivers::radio_robot::TeamColor,
-    drivers::radio_robot_nora::RobotRadioNora,
+    drivers::radio_robot_nora::{RobotRadioNora, RobotRadioNoraError},
     pins::*,
     robot_state::SharedRobotState,
     tasks::dotstar_task::{ControlBoardLedCommand, RadioStatusLedCommand},
@@ -283,6 +283,8 @@ impl<
                             ))
                             .await;
                     }
+
+                    radio_loop_rate_ticker.reset();
                 }
                 RadioConnectionState::ConnectedPhys => {
                     if self.connect_uart().await.is_err() {
@@ -304,6 +306,8 @@ impl<
                             ))
                             .await;
                     }
+
+                    radio_loop_rate_ticker.reset();
                 }
                 RadioConnectionState::ConnectedUart => {
                     let wifi_network_ind = cur_robot_state.hw_wifi_network_index as usize;
@@ -362,7 +366,7 @@ impl<
                                 .await;
                         } else {
                             // Software didn't respond to our hello, it may not be started yet.
-    
+
                             self.connection_state = RadioConnectionState::ConnectedNetwork;
                             self.led_command_pub
                                 .publish(ControlBoardLedCommand::Radio(
@@ -390,11 +394,11 @@ impl<
                     // If timeout have elapsed since we last got a packet,
                     // reboot the robot (unless we had a shutdown request).
                     let cur_time = Instant::now();
+                    let since_last_packet_ms = Instant::duration_since(&cur_time, self.last_software_packet).as_millis();
                     if !cur_robot_state.shutdown_requested
-                        && Instant::duration_since(&cur_time, self.last_software_packet).as_millis()
-                            > Self::RESPONSE_FROM_PC_TIMEOUT_MS
+                        && since_last_packet_ms > Self::RESPONSE_FROM_PC_TIMEOUT_MS
                     {
-                        defmt::warn!("software timeout - rebooting...");
+                        defmt::warn!("software timeout - rebooting... ({}ms since last packet)", since_last_packet_ms);
                         Timer::after_millis(100).await;
                         cortex_m::peripheral::SCB::sys_reset();
                     }
@@ -538,8 +542,8 @@ impl<
     async fn process_packets(&mut self, tx_ctr: i32) -> Result<(), ()> {
         // read any packets
         loop {
-            if let Ok(pkt) = self.radio.read_packet_nonblocking() {
-                if let Some(c2_pkt) = pkt {
+            match self.radio.read_packet_nonblocking() {
+                Ok(Some(c2_pkt)) => {
                     // update the last packet timestamp
                     self.last_software_packet = Instant::now();
                     if is_data_packet_safe(&c2_pkt) {
@@ -558,12 +562,21 @@ impl<
                             defmt::warn!("RadioNoraTask - failed to send error telemetry packet");
                         }
                     }
-                } else {
+                }
+                Ok(None) => break,
+                // A fire-and-forget write ack was drained from the queue. Non-fatal;
+                // keep reading the remaining packets.
+                Err(RobotRadioNoraError::WriteAckSkipped) => continue,
+                // Queue drained. Non-fatal; stop reading for this cycle.
+                Err(RobotRadioNoraError::QueueEmpty) => break,
+                Err(e) => {
+                    if e.is_fatal() {
+                        defmt::warn!("RadioNoraTask - error reading data packet: {:?}", e);
+                    } else {
+                        defmt::trace!("RadioNoraTask - stop reading packets: {:?}", e);
+                    }
                     break;
                 }
-            } else {
-                defmt::warn!("RadioNoraTask - error reading data packet");
-                break;
             }
         }
 
