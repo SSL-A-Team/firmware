@@ -2,7 +2,7 @@ use crate::motion::control_context::{ControlContext, ManeuverSetpoints, TrackedT
 use crate::motion::maneuvers::MotionManeuver;
 use ateam_common_packets::bindings::ExtendedPivotTelemetry;
 use ateam_common_packets::radio::{ManeuverCommand, ManeuverExtendedTelemetry};
-use ateam_controls::pivot_trajectory::{PivotParams, PivotTrajectory};
+use ateam_controls::pivot_trajectory::{PivotDirection, PivotParams, PivotTrajectory};
 use ateam_controls::ControlsError;
 
 pub struct PivotManeuver;
@@ -43,9 +43,11 @@ impl MotionManeuver for PivotManeuver {
                 default_params.orbit_radius
             },
             inset_angle: c.inset_angle,
+            compute_inset_angle: false,
+            direction: PivotDirection::Forward,
         };
         let setpoints = ctx.run_traj_track(cmd, |seed| {
-            let traj = PivotTrajectory::new(seed, c.global_theta, traj_params)?;
+            let traj = PivotTrajectory::from_target_heading(seed, c.global_theta, traj_params)?;
             Ok(TrackedTrajectory::Pivot(traj))
         })?;
 
