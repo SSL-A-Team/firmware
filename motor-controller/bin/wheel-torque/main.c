@@ -65,7 +65,7 @@ static bool current_limited = false;
 
 //     // KNOWN GOOD
 //     .kP = 338 * 3,      // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
-//     .kI = 145 * 3,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910 
+//     .kI = 145 * 3,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910
 //     .kI_max = 4095,  // S12F0
 //     .kI_min = -(4095),  // S12F0
 //     .anti_jitter_thresh = 0,
@@ -260,7 +260,7 @@ int main() {
 
     while (true) {
         IWDG->KR = 0x0000AAAA; // feed the watchdog
-        
+
         // increment the soft watchdog
         ticks_since_last_command_packet++;
 #ifdef COMP_MODE
@@ -340,8 +340,8 @@ int main() {
 }
 
 static bool allow_motor_to_run() {
-    return motor_command_packet.enable_telemetry 
-        && ticks_since_last_command_packet <= COMMAND_PACKET_TIMEOUT_TICKS 
+    return motor_command_packet.enable_telemetry
+        && ticks_since_last_command_packet <= COMMAND_PACKET_TIMEOUT_TICKS
         && !response_packet.master_error
         && uart_logging_status_receive == UART_LOGGING_OK
         && uart_logging_status_send == UART_LOGGING_OK;

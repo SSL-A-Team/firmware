@@ -224,7 +224,7 @@ int main() {
 
     while (true) {
         IWDG->KR = 0x0000AAAA; // feed the watchdog
-        
+
         // increment the soft watchdog
         ticks_since_last_command_packet++;
 #ifdef COMP_MODE
@@ -293,8 +293,8 @@ int main() {
 }
 
 static bool allow_motor_to_run() {
-    return motor_command_packet.enable_telemetry 
-        && ticks_since_last_command_packet <= COMMAND_PACKET_TIMEOUT_TICKS 
+    return motor_command_packet.enable_telemetry
+        && ticks_since_last_command_packet <= COMMAND_PACKET_TIMEOUT_TICKS
         && !response_packet.master_error
         && uart_logging_status_receive == UART_LOGGING_OK
         && uart_logging_status_send == UART_LOGGING_OK;
