@@ -87,7 +87,7 @@ async fn main(_main_spawner: embassy_executor::Spawner) {
     let uart_queue_spawner = UART_QUEUE_EXECUTOR.start(Interrupt::CEC);
 
     let mut radio_uart_config = embassy_stm32::usart::Config::default();
-    radio_uart_config.baudrate = 115_200;
+    radio_uart_config.baudrate = 3_000_000;
     radio_uart_config.data_bits = DataBits::DataBits8;
     radio_uart_config.stop_bits = StopBits::STOP1;
     radio_uart_config.parity = Parity::ParityNone;
@@ -137,7 +137,7 @@ async fn main(_main_spawner: embassy_executor::Spawner) {
 
     defmt::info!("UART queues started, entering connection loop");
 
-    loop {
+    'uart: loop {
         // --- UART ---
         defmt::info!("connecting UART...");
         loop {
@@ -154,87 +154,94 @@ async fn main(_main_spawner: embassy_executor::Spawner) {
         }
         defmt::info!("UART connected");
 
-        // --- WiFi ---
-        defmt::info!("connecting WiFi...");
-        loop {
-            let cred = wifi_credentials[0];
-            match radio.connect_to_network(cred, 0).await {
-                Ok(_) => break,
-                Err(e) => {
-                    defmt::warn!("WiFi connect failed: {}, retrying in 2s", e);
-                    Timer::after_millis(2000).await;
-                }
-            }
-        }
-        defmt::info!("WiFi connected");
-
-        // --- Multicast discovery ---
-        if let Err(e) = radio.open_multicast().await {
-            defmt::warn!("multicast open failed: {}", e);
-            let _ = radio.disconnect_network().await;
-            continue;
-        }
-        defmt::info!("multicast open, sending hello...");
-
-        // --- Software hello ---
-        if let Err(e) = radio.send_hello(0, TeamColor::Yellow).await {
-            defmt::warn!("send_hello failed: {}", e);
-            let _ = radio.disconnect_network().await;
-            continue;
-        }
-
-        let hello = match radio.wait_hello(Duration::from_millis(5000)).await {
-            Ok(h) => h,
-            Err(e) => {
-                defmt::warn!("wait_hello failed: {}", e);
-                let _ = radio.disconnect_network().await;
-                continue;
-            }
-        };
-        defmt::info!(
-            "hello from {}.{}.{}.{}:{}",
-            hello.ipv4[0], hello.ipv4[1], hello.ipv4[2], hello.ipv4[3], hello.port
-        );
-
-        // --- Switch to unicast ---
-        if let Err(e) = radio.close_peer().await {
-            defmt::warn!("close_peer failed: {}", e);
-            let _ = radio.disconnect_network().await;
-            continue;
-        }
-        if let Err(e) = radio.open_unicast(hello.ipv4, hello.port).await {
-            defmt::warn!("open_unicast failed: {}", e);
-            let _ = radio.disconnect_network().await;
-            continue;
-        }
-        defmt::info!("unicast open, entering echo loop");
-
-        // --- Echo loop ---
-        loop {
-            let result = radio
-                .read_data(|data| {
-                    let mut buf = [0u8; PROFILE_PAYLOAD_SIZE];
-                    let n = data.len().min(PROFILE_PAYLOAD_SIZE);
-                    buf[..n].copy_from_slice(&data[..n]);
-                    (buf, n)
-                })
-                .await;
-
-            match result {
-                Ok((buf, n)) => {
-                    defmt::trace!("rx {} bytes, echoing", n);
-                    if let Err(e) = radio.send_data(&buf[..n]).await {
-                        defmt::warn!("send_data failed: {}", e);
-                        break;
+        // Network session loop: WiFi failures and echo failures stay here;
+        // only a hard UART-level fault breaks to 'uart.
+        'net: loop {
+            // --- WiFi ---
+            defmt::info!("connecting WiFi...");
+            loop {
+                let cred = wifi_credentials[1];
+                match radio.connect_to_network(cred, 0).await {
+                    Ok(_) => break,
+                    Err(e) => {
+                        defmt::warn!("WiFi connect failed: {}, retrying in 2s", e);
+                        Timer::after_millis(2000).await;
                     }
                 }
+            }
+            defmt::info!("WiFi connected");
+
+            // --- Multicast discovery ---
+            if let Err(e) = radio.open_multicast().await {
+                defmt::warn!("multicast open failed: {}", e);
+                let _ = radio.disconnect_network().await;
+                continue 'net;
+            }
+            defmt::info!("multicast open, sending hello...");
+
+            // --- Software hello ---
+            if let Err(e) = radio.send_hello(0, TeamColor::Yellow).await {
+                defmt::warn!("send_hello failed: {}", e);
+                let _ = radio.disconnect_network().await;
+                continue 'net;
+            }
+
+            let hello = match radio.wait_hello(Duration::from_millis(5000)).await {
+                Ok(h) => h,
                 Err(e) => {
-                    defmt::warn!("read_data failed: {}, reconnecting", e);
-                    break;
+                    defmt::warn!("wait_hello failed: {}", e);
+                    let _ = radio.disconnect_network().await;
+                    continue 'net;
+                }
+            };
+            defmt::info!(
+                "hello from {}.{}.{}.{}:{}",
+                hello.ipv4[0], hello.ipv4[1], hello.ipv4[2], hello.ipv4[3], hello.port
+            );
+
+            // --- Switch to unicast ---
+            if let Err(e) = radio.close_peer().await {
+                defmt::warn!("close_peer failed: {}", e);
+                let _ = radio.disconnect_network().await;
+                continue 'net;
+            }
+            if let Err(e) = radio.open_unicast(hello.ipv4, hello.port).await {
+                defmt::warn!("open_unicast failed: {}", e);
+                let _ = radio.disconnect_network().await;
+                continue 'net;
+            }
+            defmt::info!("unicast open, entering echo loop");
+
+            // --- Echo loop ---
+            // Radio is in direct binary mode (AT+USORM=2): data arrives as +UESODBF URCs.
+            // read_data uses AT+USORB (buffered mode) and will fail. Poll read_data_nonblocking
+            // instead, which reads from the direct-binary event queue.
+            loop {
+                let result = loop {
+                    match radio.read_data_nonblocking(|data| {
+                        let mut buf = [0u8; PROFILE_PAYLOAD_SIZE];
+                        let n = data.len().min(PROFILE_PAYLOAD_SIZE);
+                        buf[..n].copy_from_slice(&data[..n]);
+                        (buf, n)
+                    }) {
+                        Ok(Some(val)) => break Ok(val),
+                        Ok(None) => Timer::after_millis(1).await,
+                        Err(e) => break Err(e),
+                    }
+                };
+
+                match result {
+                    Ok((buf, n)) => {
+                        defmt::trace!("rx {} bytes, echoing", n);
+                        if let Err(e) = radio.send_data(&buf[..n]).await {
+                            defmt::warn!("send_data failed: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        defmt::warn!("read_data failed: {}", e);
+                    }
                 }
             }
         }
-
-        let _ = radio.disconnect_network().await;
     }
 }

@@ -399,7 +399,7 @@ impl<
         }
     }
 
-    fn read_data_nonblocking<RET, FN>(
+    pub fn read_data_nonblocking<RET, FN>(
         &'a self,
         fn_read: FN,
     ) -> Result<Option<RET>, RobotRadioNoraError>
@@ -655,26 +655,29 @@ impl<
                 continue;
             }
 
+            const PACKET_SIZE: usize =
+                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloResponse>();
+
             match self.nora_driver.try_read_data_binary(|data| {
                 defmt::trace!("wait_hello read data: {:?}", data);
-                const PACKET_SIZE: usize =
-                    size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloResponse>();
-                if data.len() != PACKET_SIZE {
-                    return Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid);
-                }
-
                 let mut data_copy = [0u8; size_of::<RadioPacket>()];
-                data_copy[0..PACKET_SIZE].clone_from_slice(&data[0..PACKET_SIZE]);
-
-                let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
-
-                if packet.header.command_code != CommandCode::CC_HELLO_RESP {
-                    return Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid);
-                }
-
-                Ok(unsafe { packet.data.hello_response })
+                let n = data.len().min(size_of::<RadioPacket>());
+                data_copy[..n].copy_from_slice(&data[..n]);
+                (data.len(), data_copy)
             }) {
-                Ok(Some(result)) => return result,
+                Ok(Some((data_len, data_copy))) => {
+                    if data_len != PACKET_SIZE {
+                        defmt::warn!("wait_hello: unexpected packet size {}, skipping", data_len);
+                        continue;
+                    }
+                    let packet =
+                        unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
+                    if packet.header.command_code != CommandCode::CC_HELLO_RESP {
+                        defmt::warn!("wait_hello: unexpected command code, skipping");
+                        continue;
+                    }
+                    return Ok(unsafe { packet.data.hello_response });
+                }
                 Ok(None) => {
                     Timer::after_millis(1).await;
                     continue;

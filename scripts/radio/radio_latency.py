@@ -142,11 +142,13 @@ def do_hello_handshake(
     Full discovery + handshake. Returns robot_ip string.
     """
     robot_addr = discover_robot(sock, timeout=hello_timeout)
-    robot_ip, robot_port = robot_addr
+    robot_ip, _robot_ephemeral_port = robot_addr
 
     resp = build_hello_resp(local_ip, listen_port)
-    sock.sendto(resp, robot_addr)
-    print(f"Sent hello response: local={local_ip}:{listen_port}")
+    # Reply to LOCAL_PORT (the firmware's bound RX socket), not the ephemeral TX
+    # source port used when the robot sent the hello request.
+    sock.sendto(resp, (robot_ip, LOCAL_PORT))
+    print(f"Sent hello response: local={local_ip}:{listen_port} → {robot_ip}:{LOCAL_PORT}")
     return robot_ip
 
 
@@ -279,10 +281,19 @@ class Stats:
 # Probe loop
 # ---------------------------------------------------------------------------
 
+def is_hello_req(data: bytes) -> bool:
+    """Return True if data is exactly a CC_HELLO_REQ packet."""
+    if len(data) != HELLO_REQ_PACKET_SIZE:
+        return False
+    _, cmd, _, _ = struct.unpack_from(RADIO_HEADER_FMT, data, 0)
+    return cmd == CC_HELLO_REQ
+
+
 def run_probe_loop(
     sock: socket.socket,
     robot_ip: str,
     robot_port: int,
+    local_ip: str,
     rate_hz: float,
     payload_size: int,
     max_count: Optional[int],
@@ -346,8 +357,17 @@ def run_probe_loop(
 
             # Try to receive an echo
             try:
-                data, _src = sock.recvfrom(payload_size + 64)
+                data, src = sock.recvfrom(payload_size + 64)
                 rx_time = time.perf_counter()
+
+                # Firmware reconnected and re-sent CC_HELLO_REQ — re-handshake transparently.
+                # In-flight probes will drain as drops, which accurately reflects the outage.
+                if is_hello_req(data):
+                    resp = build_hello_resp(local_ip, LOCAL_PORT)
+                    sock.sendto(resp, (src[0], LOCAL_PORT))
+                    print(f"\n  [reconnect] firmware re-hello from {src[0]}, sent response")
+                    continue
+
                 rx_seq, tx_time_embedded = parse_probe(data)
 
                 if rx_seq is not None and tx_time_embedded is not None:
@@ -485,6 +505,7 @@ def main():
         sock=sock,
         robot_ip=robot_ip,
         robot_port=LOCAL_PORT,
+        local_ip=local_ip,
         rate_hz=args.rate,
         payload_size=args.payload_size,
         max_count=args.count,
