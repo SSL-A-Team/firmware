@@ -262,7 +262,11 @@ impl ControlContext {
         // into `robot_model`.
         let gate_action = if vision_update {
             match &mut self.vision_gate {
-                VisionGateState::Seeding { n, pos_sum, pos_sq_sum } => {
+                VisionGateState::Seeding {
+                    n,
+                    pos_sum,
+                    pos_sq_sum,
+                } => {
                     *n += 1;
                     pos_sum.x += vision_pose_meas.x;
                     pos_sum.y += vision_pose_meas.y;
@@ -287,7 +291,9 @@ impl ControlContext {
                         GateAction::Accumulate
                     }
                 }
-                VisionGateState::Tracking { time_since_last_valid_s } => {
+                VisionGateState::Tracking {
+                    time_since_last_valid_s,
+                } => {
                     let dist = hypotf(
                         vision_pose_meas.x - predicted_state[0],
                         vision_pose_meas.y - predicted_state[1],
@@ -309,14 +315,21 @@ impl ControlContext {
                         // the caller can emit a single telemetry burst event.
                         let is_first = *time_since_last_valid_s == 0.0;
                         *time_since_last_valid_s += self.dt;
-                        if is_first { GateAction::FirstReject } else { GateAction::Reject }
+                        if is_first {
+                            GateAction::FirstReject
+                        } else {
+                            GateAction::Reject
+                        }
                     }
                 }
             }
         } else {
             // No vision packet — advance the expansion timer so a robot that
             // loses vision entirely can still recover when it returns.
-            if let VisionGateState::Tracking { time_since_last_valid_s } = &mut self.vision_gate {
+            if let VisionGateState::Tracking {
+                time_since_last_valid_s,
+            } = &mut self.vision_gate
+            {
                 *time_since_last_valid_s += self.dt;
             }
             GateAction::NoVision
@@ -336,15 +349,17 @@ impl ControlContext {
                 // Linear (vx, vy): encoder-implied via wheel Jacobian.
                 // Angular (ω): gyro, bypassing the Jacobian — lower noise
                 // (0.015 rad/s vs 50 rad/s encoder std) and no wheel-slip error.
-                let mut vel_seed = self.robot_model.transform_wheel2twist(vision_pose_meas.z)
-                    * wheel_vel_meas;
+                let mut vel_seed =
+                    self.robot_model.transform_wheel2twist(vision_pose_meas.z) * wheel_vel_meas;
                 vel_seed[2] = imu_gyro_theta_meas;
                 self.robot_model.kf_set_vel(vel_seed);
                 self.trajectory = None;
                 self.prev_cmd = None;
                 self.pose_pid_controller.reset();
                 if matches!(gate_action, GateAction::SeedComplete) {
-                    self.vision_gate = VisionGateState::Tracking { time_since_last_valid_s: 0.0 };
+                    self.vision_gate = VisionGateState::Tracking {
+                        time_since_last_valid_s: 0.0,
+                    };
                     defmt::info!("vision gate: seeding complete");
                 } else {
                     self.last_gate_event = VisionGateEvent::AcceptJump;
