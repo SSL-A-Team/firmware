@@ -114,6 +114,42 @@ pub enum EncLagMode {
 /// Active encoder lag compensation mode. Change this to enable/disable features.
 pub const ENC_LAG_MODE: EncLagMode = EncLagMode::Disabled;
 
+// Vision outlier gate parameters.
+//
+// BASE_RADIUS is derived from the worst-case prediction error between a valid
+// vision measurement and the KF's dead-reckoned position:
+//
+//   base_radius = v_max * (N_miss * T_vision + T_latency) + slack
+//
+//   v_max      = 3.0 m/s  (DEFAULT_KF_MAX_VEL_LINEAR)
+//   N_miss     = 3         consecutive missed vision packets tolerated
+//   T_vision   = 1/60 s   SSL-Vision camera rate
+//   T_latency  = 0.150 s  measured worst-case camera→KF pipeline latency
+//   slack      = 0.005 m  encoder dead-reckoning error over that window
+//
+// EXPAND_RATE controls how fast the gate grows when no valid update is received,
+// allowing a robot that has been physically repositioned to eventually re-enter
+// the gate. At 2.0 m/s the gate reaches the full half-field diagonal (~6 m)
+// in ~3 s, which is realistic for a person carrying a robot across the field.
+//
+// SEED_SAMPLES and SEED_POS_STD_THRESH_M control the startup stability check:
+// the robot must receive SEED_SAMPLES consecutive vision measurements whose
+// positional standard deviation is below the threshold before the KF is seeded,
+// implicitly requiring the robot to be near-stationary at boot.
+
+const VISION_GATE_V_MAX_M_PER_S: f32 = 3.0;
+const VISION_GATE_N_MISS: u32 = 3;
+const VISION_GATE_T_VISION_S: f32 = 1.0 / 60.0;
+const VISION_GATE_T_LATENCY_S: f32 = 0.150;
+const VISION_GATE_SLACK_M: f32 = 0.005;
+
+pub const VISION_SEED_SAMPLES: u32 = 20;
+pub const VISION_SEED_POS_STD_THRESH_M: f32 = 0.03;
+pub const VISION_GATE_BASE_RADIUS_M: f32 = VISION_GATE_V_MAX_M_PER_S
+    * (VISION_GATE_N_MISS as f32 * VISION_GATE_T_VISION_S + VISION_GATE_T_LATENCY_S)
+    + VISION_GATE_SLACK_M;
+pub const VISION_GATE_EXPAND_RATE_M_PER_S: f32 = 2.0;
+
 // Encoder lag model physical parameters.
 // K[i]:       DC gain per axis (dimensionless).
 // T_SLOPE[i]: dT_eff/d|u| per axis [s / (m/s)].
