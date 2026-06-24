@@ -792,75 +792,102 @@ impl<
     /// Response has no prefix — typically "u-blox".
     pub async fn read_manufacturer(&self) -> Result<String<32>, NoraRadioError> {
         self.send_command("AT+CGMI").await?;
-        self.reader
-            .dequeue(|buf| match self.parse_packet(buf)? {
-                NoraPacket::Response(ATResponse::Ok(s)) => {
-                    let mut out: String<32> = String::new();
-                    out.push_str(s.trim())
-                        .or(Err(NoraRadioError::CommandConstructionFailed))?;
-                    Ok(out)
-                }
-                _ => Err(NoraRadioError::ReadDataInvalid),
-            })
-            .await
+        self.read_response_raw::<128, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                return Some(Err(NoraRadioError::ReadDataInvalid));
+            }
+            if !accum.windows(4).any(|w| w == b"OK\r\n") {
+                return None;
+            }
+            let s = match ATResponse::new(accum) {
+                Ok(ATResponse::Ok(s)) => s,
+                _ => return Some(Err(NoraRadioError::ReadDataInvalid)),
+            };
+            let mut out: String<32> = String::new();
+            if out.push_str(s.trim().trim_matches('"')).is_err() {
+                return Some(Err(NoraRadioError::CommandConstructionFailed));
+            }
+            Some(Ok(out))
+        })
+        .await
     }
 
     /// Read model identification string (AT+CGMM).
     /// Response has no prefix — e.g. "NORA-W36-OINK".
     pub async fn read_model(&self) -> Result<String<32>, NoraRadioError> {
         self.send_command("AT+CGMM").await?;
-        self.reader
-            .dequeue(|buf| match self.parse_packet(buf)? {
-                NoraPacket::Response(ATResponse::Ok(s)) => {
-                    let mut out: String<32> = String::new();
-                    out.push_str(s.trim())
-                        .or(Err(NoraRadioError::CommandConstructionFailed))?;
-                    Ok(out)
-                }
-                _ => Err(NoraRadioError::ReadDataInvalid),
-            })
-            .await
+        self.read_response_raw::<128, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                return Some(Err(NoraRadioError::ReadDataInvalid));
+            }
+            if !accum.windows(4).any(|w| w == b"OK\r\n") {
+                return None;
+            }
+            let s = match ATResponse::new(accum) {
+                Ok(ATResponse::Ok(s)) => s,
+                _ => return Some(Err(NoraRadioError::ReadDataInvalid)),
+            };
+            let mut out: String<32> = String::new();
+            if out.push_str(s.trim().trim_matches('"')).is_err() {
+                return Some(Err(NoraRadioError::CommandConstructionFailed));
+            }
+            Some(Ok(out))
+        })
+        .await
     }
 
     /// Read firmware version string (AT+CGMR).
     /// Response has no prefix — e.g. "3.4.1".
     pub async fn read_firmware_version(&self) -> Result<String<32>, NoraRadioError> {
         self.send_command("AT+CGMR").await?;
-        self.reader
-            .dequeue(|buf| match self.parse_packet(buf)? {
-                NoraPacket::Response(ATResponse::Ok(s)) => {
-                    let mut out: String<32> = String::new();
-                    out.push_str(s.trim())
-                        .or(Err(NoraRadioError::CommandConstructionFailed))?;
-                    Ok(out)
-                }
-                _ => Err(NoraRadioError::ReadDataInvalid),
-            })
-            .await
+        self.read_response_raw::<128, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                return Some(Err(NoraRadioError::ReadDataInvalid));
+            }
+            if !accum.windows(4).any(|w| w == b"OK\r\n") {
+                return None;
+            }
+            let s = match ATResponse::new(accum) {
+                Ok(ATResponse::Ok(s)) => s,
+                _ => return Some(Err(NoraRadioError::ReadDataInvalid)),
+            };
+            let mut out: String<32> = String::new();
+            if out.push_str(s.trim().trim_matches('"')).is_err() {
+                return Some(Err(NoraRadioError::CommandConstructionFailed));
+            }
+            Some(Ok(out))
+        })
+        .await
     }
 
     /// Read current UART settings (AT+USYUS?).
     /// Returns (baud_rate, flow_control_enabled).
     pub async fn read_uart_settings(&self) -> Result<(u32, bool), NoraRadioError> {
         self.send_command("AT+USYUS?").await?;
-        self.reader
-            .dequeue(|buf| match self.parse_packet(buf)? {
-                NoraPacket::Response(ATResponse::Ok(s)) => {
-                    let payload = s.trim().trim_start_matches("+USYUS:");
-                    let mut parts = payload.splitn(2, ',');
-                    let baud: u32 = parts
-                        .next()
-                        .and_then(|x| x.trim().parse().ok())
-                        .ok_or(NoraRadioError::ReadDataInvalid)?;
-                    let flow: u8 = parts
-                        .next()
-                        .and_then(|x| x.trim().parse().ok())
-                        .ok_or(NoraRadioError::ReadDataInvalid)?;
-                    Ok((baud, flow != 0))
-                }
-                _ => Err(NoraRadioError::ReadDataInvalid),
-            })
-            .await
+        self.read_response_raw::<128, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                return Some(Err(NoraRadioError::ReadDataInvalid));
+            }
+            if !accum.windows(4).any(|w| w == b"OK\r\n") {
+                return None;
+            }
+            let s = match ATResponse::new(accum) {
+                Ok(ATResponse::Ok(s)) => s,
+                _ => return Some(Err(NoraRadioError::ReadDataInvalid)),
+            };
+            let payload = s.trim().trim_start_matches("+USYUS:");
+            let mut parts = payload.splitn(2, ',');
+            let baud: u32 = match parts.next().and_then(|x| x.trim().parse().ok()) {
+                Some(v) => v,
+                None => return Some(Err(NoraRadioError::ReadDataInvalid)),
+            };
+            let flow: u8 = match parts.next().and_then(|x| x.trim().parse().ok()) {
+                Some(v) => v,
+                None => return Some(Err(NoraRadioError::ReadDataInvalid)),
+            };
+            Some(Ok((baud, flow != 0)))
+        })
+        .await
     }
 
     /// Store current configuration to persistent memory (AT&W).
@@ -873,17 +900,31 @@ impl<
     /// 0=World, 1=ETSI, 2=FCC, 3=IC/ISED — see AT command spec for full list.
     pub async fn read_regulatory_domain(&self) -> Result<u8, NoraRadioError> {
         self.send_command("AT+UWRD?").await?;
-        self.reader
-            .dequeue(|buf| match self.parse_packet(buf)? {
-                NoraPacket::Response(ATResponse::Ok(s)) => s
-                    .trim()
-                    .trim_start_matches("+UWRD:")
-                    .trim()
-                    .parse::<u8>()
-                    .or(Err(NoraRadioError::ReadDataInvalid)),
-                _ => Err(NoraRadioError::ReadDataInvalid),
-            })
-            .await
+        self.read_response_raw::<64, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                defmt::warn!("read_regulatory_domain: AT+UWRD? returned ERROR");
+                return Some(Err(NoraRadioError::ReadDataInvalid));
+            }
+            if !accum.windows(4).any(|w| w == b"OK\r\n") {
+                return None;
+            }
+            let s = match ATResponse::new(accum) {
+                Ok(ATResponse::Ok(s)) => s,
+                _ => {
+                    defmt::warn!("read_regulatory_domain: ATResponse::new failed");
+                    return Some(Err(NoraRadioError::ReadDataInvalid));
+                }
+            };
+            let val_str = s.trim().trim_start_matches("+UWRD:").trim().trim_matches('"');
+            match val_str.parse::<u8>() {
+                Ok(v) => Some(Ok(v)),
+                Err(_) => {
+                    defmt::warn!("read_regulatory_domain: parse failed on {:?}", val_str);
+                    Some(Err(NoraRadioError::ReadDataInvalid))
+                }
+            }
+        })
+        .await
     }
 
     /// Set Wi-Fi regulatory domain (AT+UWRD=<domain>).
