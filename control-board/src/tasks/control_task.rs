@@ -506,12 +506,13 @@ impl<
                     }
                     if self.vision_gate_err_limiter.is_allowed() {
                         let msg = match robot_controller.control_context.last_gate_event {
-                            VisionGateEvent::SeedReset =>
-                                Some("vision gate: seed unstable, restarting"),
-                            VisionGateEvent::FirstReject =>
-                                Some("vision gate: outlier rejected"),
-                            VisionGateEvent::AcceptJump =>
-                                Some("vision gate: large jump accepted, controller reset"),
+                            VisionGateEvent::SeedReset => {
+                                Some("vision gate: seed unstable, restarting")
+                            }
+                            VisionGateEvent::FirstReject => Some("vision gate: outlier rejected"),
+                            VisionGateEvent::AcceptJump => {
+                                Some("vision gate: large jump accepted, controller reset")
+                            }
                             VisionGateEvent::None => None,
                         };
                         if let Some(msg) = msg {
