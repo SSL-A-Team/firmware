@@ -535,7 +535,7 @@ impl<
                             );
                         }
                     }
-                }
+                },
                 Err(e) => {
                     self.shared_robot_state.set_controls_err(true);
                     if self.control_update_err_limiter.is_allowed() {
