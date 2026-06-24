@@ -224,7 +224,7 @@ async fn main(_main_spawner: embassy_executor::Spawner) {
                         defmt::warn!("send_data failed: {}", e);
                         break;
                     }
-                    if run_start.elapsed() >= embassy_time::Duration::from_secs(30 * 60) {
+                    if run_start.elapsed() >= embassy_time::Duration::from_secs(31 * 60) {
                         defmt::info!("profile complete (30 min), resetting");
                         cortex_m::peripheral::SCB::sys_reset();
                     }
