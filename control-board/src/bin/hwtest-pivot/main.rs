@@ -425,6 +425,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                     max_angular_acc: max_angular_acc,
                     orbit_radius,
                     inset_angle: inset_angle,
+                    ..Default::default()
                 },
             },
         }));
