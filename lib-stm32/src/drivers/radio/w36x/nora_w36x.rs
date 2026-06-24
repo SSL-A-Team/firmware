@@ -161,7 +161,7 @@ impl<
     ) -> Result<(), NoraRadioError> {
         let mut str: String<32> = String::new();
         let flow_control = if flow_control { 1 } else { 0 };
-        write!(&mut str, "AT+USYUS={baudrate},{flow_control},1")
+        write!(&mut str, "AT+USYUS={baudrate},{flow_control},0")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;

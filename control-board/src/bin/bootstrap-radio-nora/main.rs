@@ -33,7 +33,7 @@ const MAX_RX_PKT: usize = 256;
 const RX_DEPTH: usize = 4;
 const MAX_TX_PKT: usize = 128;
 const TX_DEPTH: usize = 4;
-const DBG_UART: bool = true;
+const DBG_UART: bool = false;
 
 static_idle_buffered_uart!(
     BOOTSTRAP_NORA,
@@ -322,16 +322,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
         if do_uart {
             defmt::info!("setting UART {} baud flow={}", TARGET_BAUD, TARGET_FLOW);
-            // config_uart uses change_after_confirm=1: radio switches immediately after OK
+            // change_after_confirm=0: radio stays at current baud, config applies after reboot.
+            // Avoids flow-control deadlock: if we used confirm=1, the radio would immediately
+            // enable CTS/RTS; the host baud-switch (which briefly deasserts RTSE/PD4) would
+            // then block the radio from sending the AT&W response.
             if radio.config_uart(TARGET_BAUD, TARGET_FLOW).await.is_err() {
                 defmt::error!("config_uart failed"); Timer::after_millis(2000).await; continue;
             }
-            // follow the radio to its new baud
-            radio.update_host_uart_config(target_uart_cfg()).await.ok();
-            if radio.store_config().await.is_err() {
-                defmt::error!("store_config (uart) failed"); Timer::after_millis(2000).await; continue;
-            }
-            defmt::info!("UART stored");
         }
 
         if do_region {
@@ -339,17 +336,24 @@ async fn main(_spawner: embassy_executor::Spawner) {
             if radio.set_regulatory_domain(TARGET_REGION).await.is_err() {
                 defmt::error!("set_regulatory_domain failed"); Timer::after_millis(2000).await; continue;
             }
-            if radio.store_config().await.is_err() {
-                defmt::error!("store_config (region) failed"); Timer::after_millis(2000).await; continue;
+        }
+
+        // Store all pending config at current baud, then reboot to apply.
+        if radio.store_config().await.is_err() {
+            defmt::error!("store_config failed"); Timer::after_millis(2000).await; continue;
+        }
+        defmt::info!("config stored — rebooting to apply");
+        // Switch host to target baud before radio boots into new config.
+        radio.update_host_uart_config(target_uart_cfg()).await.ok();
+        pulse_reset(&mut rst).await;
+        match select(radio.wait_startup(), Timer::after_millis(5000)).await {
+            Either::First(Ok(_)) => defmt::info!("config reboot complete"),
+            _ => {
+                defmt::error!("no +STARTUP after config reboot"); Timer::after_millis(2000).await; continue;
             }
-            defmt::info!("region stored");
         }
 
         // ── Phase 7: verify ───────────────────────────────────────────────
-        // Ensure host is at target baud for verification query
-        radio.update_host_uart_config(target_uart_cfg()).await.ok();
-        Timer::after_millis(50).await;
-
         if radio.probe().await.is_err() {
             defmt::error!("verify probe failed"); Timer::after_millis(2000).await; continue;
         }
