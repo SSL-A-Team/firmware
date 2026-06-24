@@ -50,9 +50,9 @@ MULTICAST_IP = "224.4.20.69"
 MULTICAST_PORT = 42069
 LOCAL_PORT = 42069
 
-RADIO_PACKET_TOTAL_SIZE = 528
+RADIO_PACKET_TOTAL_SIZE = 524
 RADIO_HEADER_SIZE = 8       # crc32(4) + command_code(1) + reserved(1) + data_length(2)
-RADIO_DATA_MAX_SIZE = RADIO_PACKET_TOTAL_SIZE - RADIO_HEADER_SIZE  # 520
+RADIO_DATA_MAX_SIZE = RADIO_PACKET_TOTAL_SIZE - RADIO_HEADER_SIZE  # 516
 
 
 class CommandCode(IntEnum):
@@ -169,7 +169,7 @@ def build_control_packet(
     reset_controller: bool = False,
 ) -> bytes:
     """
-    Build a CC_CONTROL packet with BasicControl payload (60 bytes).
+    Build a CC_CONTROL packet with BasicControl payload (56 bytes).
 
     Bitfield (u32):
       bit 0:  request_shutdown
@@ -192,7 +192,7 @@ def build_control_packet(
     float kick_vel
     float dribbler_speed
 
-    BodyControlCommand (32 bytes, union zero-padded)
+    BodyControlCommand (28 bytes, union zero-padded)
     """
     bitfield = 0
     if emergency_stop:
@@ -202,8 +202,8 @@ def build_control_packet(
     if reset_controller:
         bitfield |= (1 << 7)
 
-    # Build the BodyControlCommand union (always 32 bytes, zero-padded)
-    BODY_CONTROL_CMD_SIZE = 32
+    # Build the BodyControlCommand union (always 28 bytes, zero-padded)
+    BODY_CONTROL_CMD_SIZE = 28
     if body_control_mode == BodyControlMode.BCM_LOCAL_VELOCITY:
         cmd_data = struct.pack("<5f", body_x, body_y, body_w, 0.0, 0.0)  # xd, yd, omega, max_lin_acc, max_ang_acc
     elif body_control_mode == BodyControlMode.BCM_GLOBAL_VELOCITY:
@@ -218,7 +218,7 @@ def build_control_packet(
         cmd_data = b''
     cmd_data = cmd_data.ljust(BODY_CONTROL_CMD_SIZE, b'\x00')
 
-    # 60 bytes: u32 bitfield + 3 floats + 4 u8s + 2 floats + 32 bytes cmd
+    # 56 bytes: u32 bitfield + 3 floats + 4 u8s + 2 floats + 28 bytes cmd
     data = struct.pack(
         "<I 3f BB B x 2f",
         bitfield,
@@ -231,7 +231,7 @@ def build_control_packet(
         kick_vel,
         dribbler_speed,
     ) + cmd_data
-    assert len(data) == 60, f"BasicControl size mismatch: {len(data)}"
+    assert len(data) == 56, f"BasicControl size mismatch: {len(data)}"
     return build_packet(CommandCode.CC_CONTROL, data)
 
 
