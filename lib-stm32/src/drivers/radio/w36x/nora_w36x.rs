@@ -644,7 +644,7 @@ impl<
             }
             None
         });
-        match select(ack_future, Timer::after_millis(10)).await {
+        match select(ack_future, Timer::after_millis(7)).await {
             embassy_futures::select::Either::First(r) => r?,
             embassy_futures::select::Either::Second(_) => {
                 defmt::warn!("NoraW36x - wait_send_ack timed out (NORA unresponsive)");
