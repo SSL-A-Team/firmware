@@ -1,9 +1,11 @@
 pub mod global_acceleration;
 pub mod global_position;
 pub mod global_velocity;
+pub mod heading_pivot;
 pub mod local_acceleration;
 pub mod local_velocity;
 pub mod pivot;
+pub mod point_pivot;
 
 use crate::motion::control_context::ControlContext;
 pub use crate::motion::control_context::ManeuverSetpoints;
@@ -14,9 +16,10 @@ use ateam_controls::ControlsError;
 use crate::motion::maneuvers::global_acceleration::GlobalAccelerationManeuver;
 use crate::motion::maneuvers::global_position::GlobalPositionManeuver;
 use crate::motion::maneuvers::global_velocity::GlobalVelocityManeuver;
+use crate::motion::maneuvers::heading_pivot::HeadingPivotManeuver;
 use crate::motion::maneuvers::local_acceleration::LocalAccelerationManeuver;
 use crate::motion::maneuvers::local_velocity::LocalVelocityManeuver;
-use crate::motion::maneuvers::pivot::PivotManeuver;
+use crate::motion::maneuvers::point_pivot::PointPivotManeuver;
 
 pub trait MotionManeuver {
     fn entry(&mut self, cmd: ManeuverCommand, ctx: &mut ControlContext);
@@ -37,7 +40,8 @@ enum ActiveManeuver {
     LocalVelocity(LocalVelocityManeuver),
     GlobalAcceleration(GlobalAccelerationManeuver),
     LocalAcceleration(LocalAccelerationManeuver),
-    Pivot(PivotManeuver),
+    HeadingPivot(HeadingPivotManeuver),
+    PointPivot(PointPivotManeuver),
 }
 
 impl ActiveManeuver {
@@ -56,7 +60,8 @@ impl ActiveManeuver {
             ManeuverCommand::LocalAcceleration(_) => {
                 Self::LocalAcceleration(LocalAccelerationManeuver::new())
             }
-            ManeuverCommand::Pivot(_) => Self::Pivot(PivotManeuver::new()),
+            ManeuverCommand::HeadingPivot(_) => Self::HeadingPivot(HeadingPivotManeuver::new()),
+            ManeuverCommand::PointPivot(_) => Self::PointPivot(PointPivotManeuver::new()),
             ManeuverCommand::Off => Self::Off,
         }
     }
@@ -69,7 +74,8 @@ impl ActiveManeuver {
             Self::LocalVelocity(s) => s.reset(),
             Self::GlobalAcceleration(s) => s.reset(),
             Self::LocalAcceleration(s) => s.reset(),
-            Self::Pivot(s) => s.reset(),
+            Self::HeadingPivot(s) => s.reset(),
+            Self::PointPivot(s) => s.reset(),
         }
     }
 
@@ -81,7 +87,8 @@ impl ActiveManeuver {
             Self::LocalVelocity(s) => s.entry(cmd, ctx),
             Self::GlobalAcceleration(s) => s.entry(cmd, ctx),
             Self::LocalAcceleration(s) => s.entry(cmd, ctx),
-            Self::Pivot(s) => s.entry(cmd, ctx),
+            Self::HeadingPivot(s) => s.entry(cmd, ctx),
+            Self::PointPivot(s) => s.entry(cmd, ctx),
         }
     }
 
@@ -97,7 +104,8 @@ impl ActiveManeuver {
             Self::LocalVelocity(s) => s.update(cmd, ctx),
             Self::GlobalAcceleration(s) => s.update(cmd, ctx),
             Self::LocalAcceleration(s) => s.update(cmd, ctx),
-            Self::Pivot(s) => s.update(cmd, ctx),
+            Self::HeadingPivot(s) => s.update(cmd, ctx),
+            Self::PointPivot(s) => s.update(cmd, ctx),
         }
     }
 }

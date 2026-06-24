@@ -22,7 +22,9 @@
 //! The ball is placed at the field origin (0, 0).
 
 use ateam_common_packets::{
-    bindings::{BasicControl, BodyControlCommand, BodyControlMode, KickRequest, PivotCommand},
+    bindings::{
+        BasicControl, BodyControlCommand, BodyControlMode, HeadingPivotCommand, KickRequest,
+    },
     radio::DataPacket,
 };
 use embassy_executor::InterruptExecutor;
@@ -410,7 +412,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
             vision_position_update: [0.0, 0.0, 0.0],
 
-            body_control_mode: BodyControlMode::BCM_PIVOT,
+            body_control_mode: BodyControlMode::BCM_HEADING_PIVOT,
             kick_request: KickRequest::KR_DISABLE,
             play_song: 0,
             reserved2: [0; 1],
@@ -419,12 +421,13 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             dribbler_speed: 200.0,
 
             cmd: BodyControlCommand {
-                pivot: PivotCommand {
+                heading_pivot: HeadingPivotCommand {
                     global_theta: target_theta,
                     max_angular_vel: DEFAULT_MAX_ANGULAR_VEL,
                     max_angular_acc: max_angular_acc,
                     orbit_radius,
                     inset_angle: inset_angle,
+                    ..Default::default()
                 },
             },
         }));
