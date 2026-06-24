@@ -145,6 +145,8 @@ pub struct ControlTask<
     high_current_err_limiter: RateLimiter,
     loop_exec_err_limiter: RateLimiter,
     vision_gate_err_limiter: RateLimiter,
+    body_vel_clamp_err_limiter: RateLimiter,
+    body_accel_clamp_err_limiter: RateLimiter,
 
     motor_fl: ControlWheelMotor,
     motor_bl: ControlWheelMotor,
@@ -201,6 +203,12 @@ impl<
                 ERROR_TELEM_RATE_LIMIT_MS,
             )),
             vision_gate_err_limiter: RateLimiter::new(Duration::from_millis(
+                ERROR_TELEM_RATE_LIMIT_MS,
+            )),
+            body_vel_clamp_err_limiter: RateLimiter::new(Duration::from_millis(
+                ERROR_TELEM_RATE_LIMIT_MS,
+            )),
+            body_accel_clamp_err_limiter: RateLimiter::new(Duration::from_millis(
                 ERROR_TELEM_RATE_LIMIT_MS,
             )),
             motor_fl: motor_fl,
@@ -490,19 +498,42 @@ impl<
                 Ok((vel_clamped, accel_clamped)) => {
                     if vel_clamped {
                         defmt::warn!("body velocity clamped");
-                        self.telemetry_publisher.publish_immediate(
-                            TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string(
-                                "body velocity clamped",
-                            )),
-                        );
+                        if self.body_vel_clamp_err_limiter.is_allowed() {
+                            self.telemetry_publisher.publish_immediate(
+                                TelemetryPacket::ErrorTelemetry(
+                                    create_error_telemetry_from_string("body velocity clamped"),
+                                ),
+                            );
+                        }
                     }
                     if accel_clamped {
                         defmt::warn!("body acceleration clamped");
-                        self.telemetry_publisher.publish_immediate(
-                            TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string(
-                                "body acceleration clamped",
-                            )),
-                        );
+                        if self.body_accel_clamp_err_limiter.is_allowed() {
+                            self.telemetry_publisher.publish_immediate(
+                                TelemetryPacket::ErrorTelemetry(
+                                    create_error_telemetry_from_string("body acceleration clamped"),
+                                ),
+                            );
+                        }
+                    }
+                    if self.vision_gate_err_limiter.is_allowed() {
+                        let msg = match robot_controller.control_context.last_gate_event {
+                            VisionGateEvent::SeedReset => {
+                                Some("vision gate: seed unstable, restarting")
+                            }
+                            VisionGateEvent::FirstReject => Some("vision gate: outlier rejected"),
+                            VisionGateEvent::AcceptJump => {
+                                Some("vision gate: large jump accepted, controller reset")
+                            }
+                            VisionGateEvent::None => None,
+                        };
+                        if let Some(msg) = msg {
+                            self.telemetry_publisher.publish_immediate(
+                                TelemetryPacket::ErrorTelemetry(
+                                    create_error_telemetry_from_string(msg),
+                                ),
+                            );
+                        }
                     }
                     if self.vision_gate_err_limiter.is_allowed() {
                         let msg = match robot_controller.control_context.last_gate_event {
