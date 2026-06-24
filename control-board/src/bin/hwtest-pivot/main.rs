@@ -22,7 +22,9 @@
 //! The ball is placed at the field origin (0, 0).
 
 use ateam_common_packets::{
-    bindings::{BasicControl, BodyControlCommand, BodyControlMode, HeadingPivotCommand, KickRequest},
+    bindings::{
+        BasicControl, BodyControlCommand, BodyControlMode, HeadingPivotCommand, KickRequest,
+    },
     radio::DataPacket,
 };
 use embassy_executor::InterruptExecutor;

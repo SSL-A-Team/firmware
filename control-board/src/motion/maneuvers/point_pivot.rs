@@ -35,7 +35,8 @@ impl MotionManeuver for PointPivotManeuver {
             c.compute_inset_angle,
         );
         let setpoints = ctx.run_traj_track(cmd, |seed| {
-            let traj = PivotTrajectory::from_target_point(seed, c.target_x, c.target_y, traj_params)?;
+            let traj =
+                PivotTrajectory::from_target_point(seed, c.target_x, c.target_y, traj_params)?;
             Ok(TrackedTrajectory::Pivot(traj))
         })?;
 
