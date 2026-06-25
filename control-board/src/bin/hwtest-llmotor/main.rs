@@ -311,12 +311,24 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             last_seq_num = cur_seq;
         }
 
-        if cd_back > 0 { cd_back -= 1; }
-        if cd_enter > 0 { cd_enter -= 1; }
-        if cd_left > 0 { cd_left -= 1; }
-        if cd_right > 0 { cd_right -= 1; }
-        if cd_up > 0 { cd_up -= 1; }
-        if cd_down > 0 { cd_down -= 1; }
+        if cd_back > 0 {
+            cd_back -= 1;
+        }
+        if cd_enter > 0 {
+            cd_enter -= 1;
+        }
+        if cd_left > 0 {
+            cd_left -= 1;
+        }
+        if cd_right > 0 {
+            cd_right -= 1;
+        }
+        if cd_up > 0 {
+            cd_up -= 1;
+        }
+        if cd_down > 0 {
+            cd_down -= 1;
+        }
 
         let now_back = btn_back.is_low();
         let now_enter = btn_enter.is_low();
@@ -453,4 +465,3 @@ async fn usb_writer_task(
         }
     }
 }
-
