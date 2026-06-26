@@ -27,7 +27,10 @@ pub fn pose_pid_gains() -> Matrix3x5<f32> {
 pub const POSE_PID_ANTI_JITTER_THRESH: Vector3f = Vector3f::new(0.001, 0.001, 0.01);
 
 /// Acceleration (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
-/// Scales traj accel and PID feedback respectively in the wheel torque feedforward.
+/// NOTE: Currently hardcoded to 1.0 in the FB pose controller. The
+/// `POSE_CONTROL_GAIN` parameter that previously tuned these now tunes the
+/// jerk clamp (`JERK_CLAMP_*`) instead, for live jerk-filter tuning.
+#[allow(dead_code)]
 pub const POSE_ACCEL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
 
 /// Velocity path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
@@ -89,6 +92,20 @@ pub const BODY_ACCEL_CLAMP_ANGULAR: f32 = 100.0; // rad/s²
 /// Clamped before conversion to wheel velocity setpoints.
 pub const BODY_VEL_CLAMP_LINEAR: f32 = 10.0; // m/s
 pub const BODY_VEL_CLAMP_ANGULAR: f32 = 50.0; // rad/s
+
+/// Maximum rate of change of the feedback pose controller's acceleration output
+/// (i.e. jerk) [linear (m/s³), angular (rad/s³)]. The acceleration output of the
+/// FB pose controller is slew-rate limited so that it cannot change faster than
+/// `JERK_CLAMP * dt` per control tick. This smooths the commanded body
+/// acceleration (and therefore the wheel torques) at the cost of a small amount
+/// of responsiveness. Set high enough that normal moves are unaffected while
+/// large step changes in the PID output are ramped instead of applied instantly.
+///
+/// With a 1 kHz control loop, 300 m/s³ ramps the full linear accel clamp
+/// (20 m/s²) over ~67 ms, and 1500 rad/s³ ramps the full angular accel clamp
+/// (100 rad/s²) over ~67 ms.
+pub const JERK_CLAMP_LINEAR: f32 = 300.0; // m/s³
+pub const JERK_CLAMP_ANGULAR: f32 = 1500.0; // rad/s³
 
 /// Encoder lag compensation operating mode.
 ///

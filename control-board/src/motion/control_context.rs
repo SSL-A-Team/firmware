@@ -142,8 +142,11 @@ enum GateAction {
 pub struct ControlContext {
     pub robot_model: RobotModel,
     pub pose_pid_controller: PidController<3>,
-    /// Accel (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
-    pub pose_accel_gain: Vector2f,
+    /// Jerk (acceleration slew-rate) clamp for the FB pose controller output:
+    /// [linear (m/s³), angular (rad/s³)]. Tunable live via the
+    /// `POSE_CONTROL_GAIN` parameter (repurposed). The FF/FB pose accel gains
+    /// are hardcoded to 1.0.
+    pub jerk_clamp: Vector2f,
     /// Velocity setpoint path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
     pub pose_vel_gain: Vector2f,
     /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
@@ -156,6 +159,9 @@ pub struct ControlContext {
     pub prev_cmd: Option<ManeuverCommand>,
     pub enc_lag: FirstOrderLag<2>,
     pub dt: f32,
+    /// Previous (jerk-limited) acceleration output of the FB pose controller.
+    /// Used to slew-rate limit the acceleration output between control ticks.
+    pub prev_accel_out: Vector3f,
     /// Cached KF state estimate — updated each tick before maneuver dispatch.
     pub state_estimate: Vector6f,
     pub time_since_vision_update_s: f32,
@@ -198,7 +204,10 @@ impl ControlContext {
                 &controller_params::pose_pid_gains(),
                 Some(controller_params::POSE_PID_ANTI_JITTER_THRESH),
             ),
-            pose_accel_gain: controller_params::POSE_ACCEL_GAIN,
+            jerk_clamp: Vector2f::new(
+                controller_params::JERK_CLAMP_LINEAR,
+                controller_params::JERK_CLAMP_ANGULAR,
+            ),
             pose_vel_gain: controller_params::POSE_VEL_GAIN,
             traj_recompute_error: controller_params::TRAJ_RECOMPUTE_ERROR,
             friction_comp_gating: controller_params::FRICTION_COMP_GATING,
@@ -206,6 +215,7 @@ impl ControlContext {
             prev_cmd: None,
             enc_lag,
             dt,
+            prev_accel_out: Vector3f::zeros(),
             state_estimate: Vector6f::zeros(),
             time_since_vision_update_s: VISION_ACTIVE_TIMEOUT_S + 1.0,
             vision_gate: VisionGateState::default(),
@@ -227,6 +237,7 @@ impl ControlContext {
         self.vision_gate = VisionGateState::default();
         self.last_gate_event = VisionGateEvent::None;
         self.enc_lag.reset();
+        self.prev_accel_out = Vector3f::zeros();
         self.wheels_disabled = true;
     }
 
@@ -596,7 +607,7 @@ impl ControlContext {
                 POSE_ACCEL_MODE,
                 PoseAccelMode::FeedforwardOnly | PoseAccelMode::Full
             ) {
-                self.pose_accel_gain[0] * traj_accel
+                traj_accel
             } else {
                 Vector3f::zeros()
             };
@@ -605,12 +616,30 @@ impl ControlContext {
                 POSE_ACCEL_MODE,
                 PoseAccelMode::FeedbackOnly | PoseAccelMode::Full
             ) {
-                self.pose_accel_gain[1] * pos_pid_feedback
+                pos_pid_feedback
             } else {
                 Vector3f::zeros()
             };
 
             accel_ff_term + accel_fb_term
+        };
+
+        // Jerk-limit (slew-rate limit) the FB pose controller's acceleration
+        // output. The acceleration cannot change by more than `JERK_CLAMP * dt`
+        // per control tick, smoothing the commanded body acceleration (and the
+        // resulting wheel torques) at the cost of a small amount of
+        // responsiveness on large step changes.
+        let accel_out = {
+            let max_delta_lin = self.jerk_clamp[0] * self.dt;
+            let max_delta_ang = self.jerk_clamp[1] * self.dt;
+            let delta = accel_out - self.prev_accel_out;
+            let limited = Vector3f::new(
+                self.prev_accel_out.x + delta.x.clamp(-max_delta_lin, max_delta_lin),
+                self.prev_accel_out.y + delta.y.clamp(-max_delta_lin, max_delta_lin),
+                self.prev_accel_out.z + delta.z.clamp(-max_delta_ang, max_delta_ang),
+            );
+            self.prev_accel_out = limited;
+            limited
         };
 
         let twist_out: Vector3f = {
@@ -737,7 +766,7 @@ impl ControlContext {
                 reply.data.vec4_f32 = self.friction_comp_gating.into();
             }
             ParameterName::POSE_CONTROL_GAIN => {
-                reply.data.vec2_f32 = self.pose_accel_gain.into();
+                reply.data.vec2_f32 = self.jerk_clamp.into();
             }
             ParameterName::TRAJ_RECOMPUTE_ERROR => {
                 reply.data.vec4_f32 = self.traj_recompute_error.into();
@@ -829,7 +858,7 @@ impl ControlContext {
             }
             ParameterName::POSE_CONTROL_GAIN => {
                 let v = unsafe { cmd.data.vec2_f32 };
-                self.pose_accel_gain = Vector2f::new(v[0], v[1]);
+                self.jerk_clamp = Vector2f::new(v[0], v[1]);
             }
             ParameterName::TRAJ_RECOMPUTE_ERROR => {
                 let v = unsafe { cmd.data.vec4_f32 };
