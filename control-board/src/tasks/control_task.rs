@@ -245,6 +245,8 @@ impl<
             .dribbler_motor
             .hall_disconnected_error() as u32;
 
+        let state_est = robot_controller.control_context.state_estimate;
+
         let basic_telem = TelemetryPacket::Basic(BasicTelemetry {
             transmission_sequence_number: 0,
             control_data_sequence_number: seq_number as u8,
@@ -284,6 +286,16 @@ impl<
             battery_percent: self.last_power_telemetry.battery_info.battery_pct as u16,
             kicker_charge_percent: self.last_kicker_telemetry.charge_pct,
             control_telem: robot_controller.get_control_telem(),
+            kf_body_pos_estimate: [
+                (state_est.x * 1000.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+                (state_est.y * 1000.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+                (state_est.z * 1000.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+            ],
+            kf_body_vel_estimate: [
+                (state_est[3] * 1000.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+                (state_est[4] * 1000.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+                (state_est[5] * 1000.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+            ],
         });
 
         self.ticks_since_basic_telem += 1;

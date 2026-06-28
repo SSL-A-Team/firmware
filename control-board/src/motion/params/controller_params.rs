@@ -88,7 +88,16 @@ pub const BODY_ACCEL_CLAMP_ANGULAR: f32 = 100.0; // rad/s²
 /// Maximum magnitude of the body-level velocity output [linear (m/s), angular (rad/s)].
 /// Clamped before conversion to wheel velocity setpoints.
 pub const BODY_VEL_CLAMP_LINEAR: f32 = 10.0; // m/s
-pub const BODY_VEL_CLAMP_ANGULAR: f32 = 50.0; // rad/s
+pub const BODY_VEL_CLAMP_ANGULAR: f32 = 5.0 * core::f32::consts::TAU; // rad/s (5 RPS), approx. 31.5 rad/s
+
+/// IMU gyroscope full-scale ceiling (BMI088, 2000 deg/s range).
+/// BODY_VEL_CLAMP_ANGULAR must stay below this — the KF cannot observe angular
+/// velocities beyond this limit, so the state estimate would saturate and drift.
+const IMU_GYRO_MAX_RAD_S: f32 = 2000.0 * core::f32::consts::PI / 180.0;
+const _: () = assert!(
+    BODY_VEL_CLAMP_ANGULAR <= IMU_GYRO_MAX_RAD_S,
+    "BODY_VEL_CLAMP_ANGULAR exceeds IMU gyroscope maximum (2000 deg/s)"
+);
 
 /// Encoder lag compensation operating mode.
 ///
