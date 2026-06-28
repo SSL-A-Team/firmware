@@ -3,7 +3,8 @@
 
 use ateam_common_packets::{
     bindings::{
-        BasicControl, BodyControlCommand, BodyControlMode, KickRequest, LocalVelocityCommand,
+        BasicControl, BodyControlCommand, BodyControlMode, DribblerCommand, KickRequest,
+        LocalVelocityCommand,
     },
     radio::DataPacket,
 };
@@ -166,10 +167,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             body_control_mode: BodyControlMode::BCM_LOCAL_VELOCITY,
             kick_request: KickRequest::KR_DISABLE,
             play_song: 0,
-            reserved2: [0; 1],
+            dribbler_mode: DribblerCommand::DC_CURRENT,
 
             kick_vel: 0.0,
-            dribbler_speed: 50.0,
+            dribbler_setpoint: 0.1,
 
             cmd: BodyControlCommand {
                 local_vel: LocalVelocityCommand {

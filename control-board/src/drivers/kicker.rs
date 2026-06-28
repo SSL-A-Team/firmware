@@ -9,9 +9,38 @@ use embassy_stm32::{
 };
 use embassy_time::{with_timeout, Duration, Timer};
 
-use ateam_common_packets::bindings::{KickRequest::KR_DISABLE, KickerControl, KickerTelemetry};
+use core::mem::MaybeUninit;
+
+use ateam_common_packets::bindings::{
+    DribblerCommand, ErrorTelemetry, KickRequest::KR_DISABLE, KickerControl, KickerTelemetry,
+};
 
 use crate::{image_hash, DEBUG_KICKER_UART_QUEUES};
+
+// Packet dispatch uses length to distinguish types — assert sizes differ so a future
+// struct change doesn't silently break the dispatch.
+const _: () = assert!(
+    core::mem::size_of::<KickerTelemetry>() != core::mem::size_of::<ErrorTelemetry>(),
+    "KickerTelemetry and ErrorTelemetry must have different sizes for length-based dispatch"
+);
+
+#[derive(defmt::Format)]
+pub enum KickerFlashStatus {
+    OkHashMatch,
+    OkFlashed,
+    ErrFlashFail,
+    ErrHashTimeoutFlashFail,
+}
+
+impl KickerFlashStatus {
+    pub fn is_ok(&self) -> bool {
+        matches!(self, Self::OkHashMatch | Self::OkFlashed)
+    }
+
+    pub fn is_err(&self) -> bool {
+        !self.is_ok()
+    }
+}
 
 pub struct Kicker<
     'a,
@@ -89,28 +118,44 @@ impl<
         while let Ok(res) = self.stm32_uart_interface.try_read_data() {
             let buf = res.data();
 
-            if buf.len() != core::mem::size_of::<KickerTelemetry>() {
+            if buf.len() == core::mem::size_of::<KickerTelemetry>() {
+                received_packet = true;
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        buf.as_ptr(),
+                        &mut self.telemetry_state as *mut _ as *mut u8,
+                        core::mem::size_of::<KickerTelemetry>(),
+                    );
+                }
+            } else if buf.len() == core::mem::size_of::<ErrorTelemetry>() {
+                unsafe {
+                    let mut err_telem: ErrorTelemetry = MaybeUninit::zeroed().assume_init();
+                    core::ptr::copy_nonoverlapping(
+                        buf.as_ptr(),
+                        &mut err_telem as *mut _ as *mut u8,
+                        core::mem::size_of::<ErrorTelemetry>(),
+                    );
+                    let msg_len = err_telem
+                        .error_message
+                        .iter()
+                        .position(|&b| b == 0)
+                        .unwrap_or(60);
+                    defmt::error!(
+                        "kicker ErrorTelemetry [ts={}]: {=[u8]:a}",
+                        err_telem.timestamp,
+                        &err_telem.error_message[..msg_len]
+                    );
+                }
+            } else {
                 defmt::warn!(
                     "kicker interface - invalid packet of len {:?} data: {:?}",
                     buf.len(),
                     buf
                 );
-                continue;
-            }
-
-            received_packet = true;
-
-            // reinterpreting/initializing packed ffi structs is nearly entirely unsafe
-            unsafe {
-                // copy receieved uart bytes into packet
-                let state = &mut self.telemetry_state as *mut _ as *mut u8;
-                for i in 0..core::mem::size_of::<KickerTelemetry>() {
-                    *state.offset(i as isize) = buf[i];
-                }
             }
         }
 
-        return received_packet;
+        received_packet
     }
 
     pub fn send_command(&mut self) {
@@ -142,8 +187,9 @@ impl<
         self.command_state.kick_speed = kick_str;
     }
 
-    pub fn set_drib_vel(&mut self, drib_vel: f32) {
-        self.command_state.drib_speed = drib_vel;
+    pub fn set_drib_command(&mut self, mode: DribblerCommand::Type, setpoint: f32) {
+        self.command_state.dribbler_mode = mode;
+        self.command_state.drib_setpoint = setpoint;
     }
 
     pub fn ball_detected(&self) -> bool {
@@ -227,7 +273,7 @@ impl<
         }
     }
 
-    pub async fn check_device_has_latest_default_image(&mut self) -> Result<bool, ()> {
+    async fn check_device_has_latest_default_image(&mut self) -> Result<bool, ()> {
         let latest_img_hash = self.get_latest_default_img_hash();
         defmt::debug!(
             "Kicker Interface - Latest default image hash - {:x}",
@@ -260,11 +306,9 @@ impl<
                 res = Err(());
             }
         }
-        // Make sure that the uart queue is empty of any possible parameter
-        // response packets, which may cause side effects for the flashing
-        // process
+        // drain any parameter response packets before flashing
         self.process_telemetry();
-        return res;
+        res
     }
 
     pub async fn init_firmware_image(
@@ -287,34 +331,38 @@ impl<
 
         Timer::after(Duration::from_millis(1)).await;
 
-        // load firmware image call leaves the part in reset, now that our uart is ready, bring the part out of reset
         self.stm32_uart_interface.leave_reset().await;
 
-        return Ok(());
+        Ok(())
     }
 
-    pub async fn init_default_firmware_image(&mut self, force_flash: bool) -> Result<(), ()> {
-        let flash;
-        if force_flash {
+    pub async fn init_default_firmware_image(&mut self, force_flash: bool) -> KickerFlashStatus {
+        let (flash, hash_timed_out) = if force_flash {
             defmt::info!("Kicker Interface - Force flash enabled");
-            flash = true
+            (true, false)
         } else {
             defmt::debug!("Kicker Interface - Resetting kicker");
             self.reset().await;
-            let res = self.check_device_has_latest_default_image().await;
-            match res {
-                Ok(has_latest) => {
-                    if has_latest {
-                        flash = false;
-                    } else {
-                        flash = true;
-                    }
-                }
-                Err(_) => {
-                    flash = true;
+            match self.check_device_has_latest_default_image().await {
+                Ok(has_latest) => (!has_latest, false),
+                Err(_) => (true, true),
+            }
+        };
+
+        if !flash {
+            let _ = self.init_firmware_image(false, self.firmware_image).await;
+            return KickerFlashStatus::OkHashMatch;
+        }
+
+        match self.init_firmware_image(true, self.firmware_image).await {
+            Ok(()) => KickerFlashStatus::OkFlashed,
+            Err(()) => {
+                if hash_timed_out {
+                    KickerFlashStatus::ErrHashTimeoutFlashFail
+                } else {
+                    KickerFlashStatus::ErrFlashFail
                 }
             }
         }
-        return self.init_firmware_image(flash, self.firmware_image).await;
     }
 }

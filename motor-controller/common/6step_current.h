@@ -3,9 +3,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// motor_config.h is provided per-binary and defines:
+//   MOTOR_POLE_PAIRS       - rotor pole pair count (compile-time constant for velocity calc)
+//   INVERT_MOTOR_DIRECTION - flip commutation sense (bool)
+#include "motor_config.h"
+#include "pid.h"
+
 #define MAX_DUTYCYCLE_COMMAND 4095U
 #define MIN_DUTYCYCLE_COMMAND -(MAX_DUTYCYCLE_COMMAND)
-#define INVERT_MOTOR_DIRECTION false
 
 // period 20833ns
 #define PWM_FREQ_HZ 40000    // if you update date, be conscious of dead time ratio
@@ -49,9 +54,6 @@ typedef struct MotorErrors {
 // 0000 0111 = 0x07
 #define DEAD_TIME 0x07
 
-// Number of rotor pole pairs. Used to convert electrical RPS to mechanical RPS.
-#define MOTOR_POLE_PAIRS 8U
-
 #define NUM_RAW_DC_STEPS (((uint16_t) (F_SYS_CLK_HZ / ((uint32_t) PWM_FREQ_HZ * (PWM_TIM_PRESCALER + 1)))) / 2)
 #define SCALING_FACTOR (MAX_DUTYCYCLE_COMMAND / NUM_RAW_DC_STEPS + 1U)
 #define MAP_MAX_DUTY_TO_ARR_DUTY(dc) (dc / SCALING_FACTOR)
@@ -63,7 +65,7 @@ typedef struct MotorErrors {
 //  PUBLIC FUNCTIONS  //
 ////////////////////////
 
-void pwm6step_setup();
+void pwm6step_setup(const FixedPointS12F4_PiConstants_t *current_pi_constants);
 void pwm6step_set_duty_cycle(int16_t duty_cycle);
 void pwm6step_set_duty_cycle_f(float duty_cycle_pct);
 void pwm6step_set_voltage(int16_t voltage_mv);

@@ -16,11 +16,11 @@ use crate::image_hash;
 use ateam_common_packets::bindings::{
     CcmCommand,
     CcmCommandType::{CCM_CMD_MOTION, CCM_CMD_PARAMS},
-    CcmMotionControlType, CcmParameter, CcmParameterDirection, CcmParameterOperation,
-    CcmParameterPacket, CcmResponse,
+    CcmMotionControlType,
+    CcmMotionControlType::CCM_MCT_MOTOR_OFF,
+    CcmParameter, CcmParameterDirection, CcmParameterOperation, CcmParameterPacket, CcmResponse,
     CcmResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM},
     CcmTelemetry,
-    MotionCommandType::OPEN_LOOP,
 };
 
 pub struct CurrentControlledMotor<
@@ -84,7 +84,7 @@ impl<
 
             setpoint: 0.0,
             current_setpoint_ma: 0,
-            motion_type: OPEN_LOOP,
+            motion_type: CCM_MCT_MOTOR_OFF,
             reset_flagged: false,
             telemetry_enabled: false,
             motion_enabled: false,
@@ -125,7 +125,7 @@ impl<
 
             setpoint: 0.0,
             current_setpoint_ma: 0,
-            motion_type: OPEN_LOOP,
+            motion_type: CCM_MCT_MOTOR_OFF,
             reset_flagged: false,
             telemetry_enabled: false,
             motion_enabled: false,
@@ -501,11 +501,11 @@ impl<
         return self.current_state.current_telemetry.motor_voltage_cmd_mv;
     }
 
-    pub fn read_hall_vel_est_crads(&self) -> i16 {
-        return self.current_state.current_telemetry.hall_vel_est_crads;
+    pub fn read_hall_vel_est_drads(&self) -> i16 {
+        return self.current_state.current_telemetry.hall_vel_est_drads;
     }
 
     pub fn read_hall_rads(&self) -> f32 {
-        return self.current_state.current_telemetry.hall_vel_est_crads as f32 / 100.0;
+        return self.current_state.current_telemetry.hall_vel_est_drads as f32 / 10.0;
     }
 }

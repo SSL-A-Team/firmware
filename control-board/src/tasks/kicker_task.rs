@@ -1,4 +1,7 @@
-use ateam_common_packets::{bindings::KickRequest, radio::DataPacket};
+use ateam_common_packets::{
+    bindings::{DribblerCommand, KickRequest, KickerTelemetry},
+    radio::DataPacket,
+};
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface,
     idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
@@ -18,7 +21,7 @@ include_kicker_bin! {KICKER_FW_IMG, "kicker.bin"}
 
 const MAX_TX_PACKET_SIZE: usize = 32;
 const TX_BUF_DEPTH: usize = 3;
-const MAX_RX_PACKET_SIZE: usize = 64;
+const MAX_RX_PACKET_SIZE: usize = core::mem::size_of::<KickerTelemetry>();
 const RX_BUF_DEPTH: usize = 20;
 const TELEMETRY_TIMEOUT_MS: u64 = 2000;
 
@@ -277,7 +280,8 @@ impl<
                 self.kicker_driver.set_kick_strength(0.0);
                 self.kicker_driver
                     .request_kick(KickRequest::KR_DISABLE as u32);
-                self.kicker_driver.set_drib_vel(0.0);
+                self.kicker_driver
+                    .set_drib_command(DribblerCommand::DC_DISABLE, 0.0);
             }
 
             // if we are in any substate of connected, then send
@@ -320,7 +324,8 @@ impl<
 
                             self.kicker_driver.set_kick_strength(bc_pkt.kick_vel);
                             self.kicker_driver.request_kick(bc_pkt.kick_request as u32);
-                            self.kicker_driver.set_drib_vel(bc_pkt.dribbler_speed);
+                            self.kicker_driver
+                                .set_drib_command(bc_pkt.dribbler_mode, bc_pkt.dribbler_setpoint);
                         }
                         DataPacket::ParameterCommand(_) => {
                             // we currently don't have any kicker parameters
