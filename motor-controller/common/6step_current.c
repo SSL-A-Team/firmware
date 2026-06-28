@@ -56,23 +56,6 @@ static int hall_transition_error_count = 0;
 
 const Uint16FixedPoint_t S0F16_4096_OVER_9000 = 29826;
 
-static FixedPointS12F4_PiConstants_t current_controller_constants = {
-    // 1000 Hz bandwidth -> 6283 rads
-
-    // .kP = 2123,
-    // .kI = 910,
-
-    // KNOWN GOOD
-    .kP = 338 * 5,      // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
-    .kI = 145 * 5,  // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910 
-    .kI_max = 4095,  // S12F0
-    .kI_min = -(4095),  // S12F0
-    .anti_jitter_thresh = 0,
-    .anti_jitter_thresh_inv = 0,
-    // .anti_jitter_thresh = 30,  // S12F0
-    // .anti_jitter_thresh_inv = 135,  // S0F12
-};
-
 static FixedPointS12F4_PiController_t current_controller;
 
 static volatile uint16_t measured_current = 0;
@@ -726,9 +709,9 @@ void TIM1_CC_IRQHandler() {
  * @brief sets up the pins and timer peripherials associated with the pins 
  * 
  */
-void pwm6step_setup() {
+void pwm6step_setup(const FixedPointS12F4_PiConstants_t *current_pi_constants) {
     // setup current PI controller
-    fxptpi_initialize(&current_controller, &current_controller_constants);
+    fxptpi_initialize(&current_controller, (FixedPointS12F4_PiConstants_t *) current_pi_constants);
 
     pwm6step_setup_commutation_timer();
     pwm6step_setup_hall_timer();
@@ -887,13 +870,14 @@ int16_t pwm6step_hall_get_rps_estimate() {
     if (!pwm6step_hall_rps_estimate_valid()) return 0;
     uint32_t ticks = hall_last_transition_ticks;
     if (ticks == 0) return 0;
-    // 6 transitions/electrical rev, MOTOR_POLE_PAIRS elec-revs/mech-rev, 100*2pi crad/rev.
-    // 628 = floor(100 * 2 * pi); uint64 intermediate prevents overflow.
-    int32_t crads = (int32_t)((uint64_t)F_SYS_CLK_HZ * 628ULL / (6ULL * MOTOR_POLE_PAIRS * (uint64_t)ticks));
-    if (hall_detected_direction == CLOCKWISE) crads = -crads;
-    if (crads >  INT16_MAX) crads = INT16_MAX;
-    if (crads <  INT16_MIN) crads = INT16_MIN;
-    return (int16_t)crads;
+    // 6 transitions/electrical rev, MOTOR_POLE_PAIRS elec-revs/mech-rev, 10*2pi drad/rev.
+    // 63 = round(10 * 2 * pi); uint64 intermediate prevents overflow.
+    int32_t drads = (int32_t)((uint64_t)F_SYS_CLK_HZ * 63ULL / (6ULL * MOTOR_POLE_PAIRS * (uint64_t)ticks));
+    if (hall_detected_direction == CLOCKWISE) drads = -drads;
+    if (INVERT_MOTOR_DIRECTION) drads = -drads;
+    if (drads >  INT16_MAX) drads = INT16_MAX;
+    if (drads <  INT16_MIN) drads = INT16_MIN;
+    return (int16_t)drads;
 }
 
 const MotorErrors_t pwm6step_get_motor_errors() {

@@ -233,7 +233,21 @@ int main() {
     // motor functions can be initialized
 
     // initialize motor driver
-    pwm6step_setup();
+    static const FixedPointS12F4_PiConstants_t motor_current_pi_constants = {
+        // 1000 Hz bandwidth -> 6283 rads
+        // .kP = 2123,
+        // .kI = 910,
+        // KNOWN GOOD
+        .kP = 338 * 5,      // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
+        .kI = 145 * 5,      // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910
+        .kI_max = 4095,     // S12F0
+        .kI_min = -(4095),  // S12F0
+        .anti_jitter_thresh = 0,
+        .anti_jitter_thresh_inv = 0,
+        // .anti_jitter_thresh = 30,      // S12F0
+        // .anti_jitter_thresh_inv = 135, // S0F12
+    };
+    pwm6step_setup(&motor_current_pi_constants);
     pwm6step_set_duty_cycle_f(0.0f);
 
     // enable ADC hardware trigger (tied to 6step timer)
@@ -322,7 +336,7 @@ int main() {
         response_packet.velocity_telemetry.vel_setpoint_rads = motor_command_packet.setpoint;
         response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
         response_packet.current_telemetry.motor_voltage_cmd_mv = pwm6step_get_voltage_command();
-        response_packet.current_telemetry.hall_vel_est_crads = pwm6step_hall_get_rps_estimate();
+        response_packet.current_telemetry.hall_vel_est_drads = pwm6step_hall_get_rps_estimate();
 
         memcpy(response_packet.current_telemetry.current_samples_ma, pwm6step_get_current_log(), 40);
 
