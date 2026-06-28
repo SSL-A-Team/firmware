@@ -401,6 +401,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 0, // request_shutdown
                 0, // reboot_robot
                 0, // game_state_in_stop
+                0, // game_state_in_halt
                 0, // emergency_stop
                 1, // wheel_vel_control_enabled
                 1, // wheel_torque_control_enabled

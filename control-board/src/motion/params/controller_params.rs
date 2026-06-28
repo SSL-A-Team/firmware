@@ -90,6 +90,11 @@ pub const BODY_ACCEL_CLAMP_ANGULAR: f32 = 100.0; // rad/s²
 pub const BODY_VEL_CLAMP_LINEAR: f32 = 10.0; // m/s
 pub const BODY_VEL_CLAMP_ANGULAR: f32 = 50.0; // rad/s
 
+/// Maximum linear speed (m/s) applied during SSL stop state.
+/// Set below the 1.5 m/s rule limit to provide a safety buffer.
+/// Applied after control policy output so feedback loops cannot overshoot.
+pub const STOP_STATE_LINEAR_SPEED_LIMIT: f32 = 1.25; // m/s (SSL rule limit: 1.5 m/s)
+
 /// Encoder lag compensation operating mode.
 ///
 /// Intended progression: `Disabled` → `FeedforwardOnly` (validate model params)

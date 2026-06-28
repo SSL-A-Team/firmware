@@ -477,10 +477,6 @@ impl<
                 self.last_power_telemetry = power_telemetry;
             }
 
-            if self.last_command.game_state_in_stop() != 0 {
-                // TODO impl 1.5m/s clamping or something
-            }
-
             if self.last_command.reset_controller() != 0 {
                 robot_controller.reset();
             }
@@ -552,6 +548,8 @@ impl<
                 || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP
                 || _cmd_mode == BodyControlMode::BCM_OFF
                 || robot_controller.wheels_disabled()
+                || self.last_command.game_state_in_halt() != 0
+                || self.last_command.emergency_stop() != 0
             {
                 if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS {
                     defmt::warn!("control task - motor commands locked out");
@@ -830,7 +828,6 @@ impl<
         // self.last_power_telemetry.high_current_operations_allowed() == 0
         self.shared_robot_state.shutdown_requested()
             || self.shared_robot_state.get_controls_err()
-            || self.last_command.emergency_stop() != 0
             || self.last_command.reset_controller() != 0
     }
 }
