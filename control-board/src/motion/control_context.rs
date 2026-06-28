@@ -7,6 +7,7 @@ use crate::motion::pid::PidController;
 use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
 use ateam_common_packets::radio::ManeuverCommand;
 use ateam_controls::bangbang_trajectory::BangBangTraj3D;
+use ateam_controls::linear_trajectory::LinearTrajectory;
 use ateam_controls::pivot_trajectory::PivotTrajectory;
 use ateam_controls::robot_model::{KalmanFilterParams, RobotModel, RobotPhysicalParams};
 use ateam_controls::trajectory::Trajectory;
@@ -28,6 +29,7 @@ pub(crate) const VISION_ACTIVE_TIMEOUT_S: f32 = 0.5;
 pub enum TrackedTrajectory {
     BangBang(BangBangTraj3D),
     Pivot(PivotTrajectory),
+    Linear(LinearTrajectory),
 }
 
 impl Trajectory for TrackedTrajectory {
@@ -35,6 +37,7 @@ impl Trajectory for TrackedTrajectory {
         match self {
             Self::BangBang(t) => t.tick(dt),
             Self::Pivot(t) => t.tick(dt),
+            Self::Linear(t) => t.tick(dt),
         }
     }
 
@@ -42,6 +45,7 @@ impl Trajectory for TrackedTrajectory {
         match self {
             Self::BangBang(t) => t.sample(),
             Self::Pivot(t) => t.sample(),
+            Self::Linear(t) => t.sample(),
         }
     }
 }
