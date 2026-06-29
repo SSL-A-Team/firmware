@@ -1,3 +1,4 @@
+pub mod active_brake;
 pub mod body_controller;
 pub mod constant_gain_kalman_filter;
 pub mod control_context;

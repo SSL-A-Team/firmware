@@ -104,6 +104,25 @@ const _: () = assert!(
 /// Applied after control policy output so feedback loops cannot overshoot.
 pub const STOP_STATE_LINEAR_SPEED_LIMIT: f32 = 1.25; // m/s (SSL rule limit: 1.5 m/s)
 
+/// Active brake controller parameters (halt and emergency-stop states).
+/// Uses raw encoder velocity only — no KF state — so it is robust against
+/// state estimator divergence.
+///
+/// Per-wheel braking current (A): I = clamp(-BRAKE_KP * ω, ±BRAKE_MAX_CURRENT_A)
+///
+/// Kp derivation: BRAKE_MAX_CURRENT_A / ω_expected_max, targeting current
+/// saturation at the top of the expected play-speed range. With 1.0 A and
+/// ~100 rad/s typical motor-shaft speed at play speed: Kp ≈ 0.01 A/(rad/s).
+///
+/// BRAKE_ANTI_JITTER_RADS: output is linearly scaled to zero below this
+/// threshold (via PidController anti-jitter) to avoid fighting encoder
+/// quantization noise near rest.
+///
+/// BRAKE_MAX_CURRENT_A must stay below MAX_CURRENT_MA / 1000 (2.5 A).
+pub const BRAKE_KP: f32 = 0.01; // A / (rad/s)
+pub const BRAKE_ANTI_JITTER_RADS: f32 = 5.0; // rad/s
+pub const BRAKE_MAX_CURRENT_A: f32 = 1.0; // A
+
 /// Encoder lag compensation operating mode.
 ///
 /// Intended progression: `Disabled` → `FeedforwardOnly` (validate model params)
