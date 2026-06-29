@@ -19,13 +19,13 @@
 //! Button controls (take effect on the next command tick):
 //!   Down  — increase line velocity      (+0.1 m/s)
 //!   Up    — decrease line velocity       (-0.1 m/s)
-//!   Enter — increase colinear accel      (+0.5 m/s²)
+//!   Enter — toggle: hold heading 0 rad  ↔  face point (0, +1) while following
 //!   Back  — decrease colinear accel      (-0.5 m/s²)
 
 use ateam_common_packets::{
     bindings::{
         BasicControl, BodyControlCommand, BodyControlMode, DribblerCommand, HeadingLineCommand,
-        KickRequest,
+        KickRequest, PointLineCommand,
     },
     radio::{DataPacket, TelemetryPacket},
 };
@@ -106,13 +106,16 @@ const LINE_VEL_STEP: f32 = 0.1;
 const LINE_VEL_MIN: f32 = 0.1;
 const LINE_VEL_MAX: f32 = 3.0;
 
-/// Colinear acceleration adjustment per button press (m/s²).
+/// Colinear acceleration decrement per Back press (m/s²).
 const ACCEL_STEP: f32 = 0.5;
 const ACCEL_MIN: f32 = 0.5;
-const ACCEL_MAX: f32 = 20.0;
 
-/// Fixed target heading held throughout the test (rad).
+/// Fixed target heading held throughout the test in heading mode (rad).
 const TARGET_THETA: f32 = 0.0;
+
+/// Point the robot faces in point-line mode (m).
+const FACE_POINT_X: f32 = 0.0;
+const FACE_POINT_Y: f32 = 1.0;
 
 /// Four phases: +follow, hold, -follow, hold.
 const NUM_PHASES: u32 = 4;
@@ -263,6 +266,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     // origin until the first BasicTelemetry arrives.
     let mut mock_vision_pose: [f32; 3] = [0.0, 0.0, 0.0];
 
+    // When true, follow the line while facing FACE_POINT; otherwise hold heading.
+    let mut face_point_mode = false;
+
     // Previous button states for falling-edge detection (true = not pressed).
     let mut prev_up = true;
     let mut prev_down = true;
@@ -304,11 +310,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             defmt::info!("hwtest-line: line_vel → {} m/s", line_vel_mag);
         }
         if prev_enter && !cur_enter {
-            max_accel_colinear = (max_accel_colinear + ACCEL_STEP).min(ACCEL_MAX);
-            defmt::info!(
-                "hwtest-line: max_accel_colinear → {} m/s²",
-                max_accel_colinear
-            );
+            face_point_mode = !face_point_mode;
+            defmt::info!("hwtest-line: face_point_mode → {}", face_point_mode);
         }
         if prev_back && !cur_back {
             max_accel_colinear = (max_accel_colinear - ACCEL_STEP).max(ACCEL_MIN);
@@ -335,6 +338,41 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
         // ── publish command ──────────────────────────────────────────────────
 
+        let (body_control_mode, cmd) = if face_point_mode {
+            (
+                BodyControlMode::BCM_POINT_LINE,
+                BodyControlCommand {
+                    point_line: PointLineCommand {
+                        start_x: 0.0,
+                        start_y: 0.0,
+                        dir_x: 1.0,
+                        dir_y: 0.0,
+                        line_velocity,
+                        target_x: FACE_POINT_X,
+                        target_y: FACE_POINT_Y,
+                        max_accel_colinear,
+                        ..Default::default()
+                    },
+                },
+            )
+        } else {
+            (
+                BodyControlMode::BCM_HEADING_LINE,
+                BodyControlCommand {
+                    heading_line: HeadingLineCommand {
+                        start_x: 0.0,
+                        start_y: 0.0,
+                        dir_x: 1.0,
+                        dir_y: 0.0,
+                        line_velocity,
+                        global_theta: TARGET_THETA,
+                        max_accel_colinear,
+                        ..Default::default()
+                    },
+                },
+            )
+        };
+
         command_publisher.publish_immediate(DataPacket::BasicControl(BasicControl {
             _bitfield_1: BasicControl::new_bitfield_1(
                 0, // request_shutdown
@@ -352,7 +390,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
             vision_position_update: mock_vision_pose,
 
-            body_control_mode: BodyControlMode::BCM_HEADING_LINE,
+            body_control_mode,
             kick_request: KickRequest::KR_DISABLE,
             play_song: 0,
             dribbler_mode: DribblerCommand::DC_CURRENT,
@@ -360,18 +398,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             kick_vel: 0.0,
             dribbler_setpoint: 0.0,
 
-            cmd: BodyControlCommand {
-                heading_line: HeadingLineCommand {
-                    start_x: 0.0,
-                    start_y: 0.0,
-                    dir_x: 1.0,
-                    dir_y: 0.0,
-                    line_velocity,
-                    global_theta: TARGET_THETA,
-                    max_accel_colinear,
-                    ..Default::default()
-                },
-            },
+            cmd,
         }));
     }
 }
