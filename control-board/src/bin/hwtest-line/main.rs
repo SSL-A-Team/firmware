@@ -5,9 +5,10 @@
 //!
 //! Mocks radio commands and repeatedly drives the robot back and forth along a
 //! line through the origin pointing in +x, holding a fixed heading of 0 rad.
-//! Line following requires vision (like position mode), so a fixed vision pose
-//! at the origin is mocked each tick to keep the controller active for bring-up;
-//! on-field use needs real vision.
+//! Line following requires vision (like position mode), so vision is mocked by
+//! echoing the KF state estimate (from BasicTelemetry) back as the vision pose
+//! each tick. This keeps the controller active for bring-up; on-field use needs
+//! real vision.
 //!
 //! Phase sequence (loops forever):
 //!   1. follow line at +line_vel   (3 s)
@@ -26,7 +27,7 @@ use ateam_common_packets::{
         BasicControl, BodyControlCommand, BodyControlMode, DribblerCommand, HeadingLineCommand,
         KickRequest,
     },
-    radio::DataPacket,
+    radio::{DataPacket, TelemetryPacket},
 };
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
@@ -178,6 +179,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
     let imu_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
+    // Subscribe to telemetry so vision can be mocked from the KF state estimate.
+    let mut telemetry_subscriber = RADIO_TELEMETRY_CHANNEL.subscriber().unwrap();
 
     let imu_gyro_data_publisher = GYRO_DATA_CHANNEL.publisher().unwrap();
     let imu_accel_data_publisher = ACCEL_DATA_CHANNEL.publisher().unwrap();
@@ -231,9 +234,14 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     let _ = radio_uart_queue_spawner; // radio task not needed; suppress unused warning
 
+    // Basic/extended telemetry only publishes when the radio bridge is up. There
+    // is no radio task here, so force it on so the KF state estimate is published
+    // and can be echoed back as the mocked vision measurement.
+    robot_state.set_radio_bridge_ok(true);
+
     // ── tunable parameters (adjusted via buttons) ────────────────────────────
 
-    let mut line_vel_mag: f32 = 1.0;
+    let mut line_vel_mag: f32 = 0.1;
     let mut max_accel_colinear: f32 = LinearParams::default().max_accel_colinear;
 
     defmt::info!(
@@ -251,6 +259,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut phase_idx: u32 = 0;
     let mut phase_tick: u32 = 0;
 
+    // Mocked vision pose, fed back from the KF state estimate. Starts at the
+    // origin until the first BasicTelemetry arrives.
+    let mut mock_vision_pose: [f32; 3] = [0.0, 0.0, 0.0];
+
     // Previous button states for falling-edge detection (true = not pressed).
     let mut prev_up = true;
     let mut prev_down = true;
@@ -262,6 +274,19 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     loop {
         Timer::after_millis(LOOP_INTERVAL_MS).await;
         phase_tick += 1;
+
+        // ── mock vision: echo the latest KF state estimate from telemetry ────
+        // Drain queued telemetry, keeping the most recent BasicTelemetry pose
+        // estimate (mm/mrad → m/rad) to send back as the mocked vision update.
+        while let Some(pkt) = telemetry_subscriber.try_next_message_pure() {
+            if let TelemetryPacket::Basic(b) = pkt {
+                mock_vision_pose = [
+                    b.kf_body_pos_estimate[0] as f32 / 1000.0,
+                    b.kf_body_pos_estimate[1] as f32 / 1000.0,
+                    b.kf_body_pos_estimate[2] as f32 / 1000.0,
+                ];
+            }
+        }
 
         // ── button edge detection (falling edge = press) ─────────────────────
 
@@ -319,13 +344,13 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 0, // emergency_stop
                 1, // wheel_vel_control_enabled
                 1, // wheel_torque_control_enabled
-                1, // vision_update (mocked at origin — line following requires vision)
+                1, // vision_update (mocked from KF estimate — line following requires vision)
                 0, // reset_controller
                 0, // reserved1
             ),
             _bitfield_align_1: Default::default(),
 
-            vision_position_update: [0.0, 0.0, 0.0],
+            vision_position_update: mock_vision_pose,
 
             body_control_mode: BodyControlMode::BCM_HEADING_LINE,
             kick_request: KickRequest::KR_DISABLE,
