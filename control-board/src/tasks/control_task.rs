@@ -19,7 +19,11 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{
     include_external_cpp_bin,
-    motion::{body_controller::BodyController, control_context::VisionGateEvent},
+    motion::{
+        active_brake::ActiveBrakeController,
+        body_controller::BodyController,
+        control_context::VisionGateEvent,
+    },
     motor::CurrentControlledMotor,
     parameter_interface::ParameterInterface,
     pins::*,
@@ -152,6 +156,8 @@ pub struct ControlTask<
     motor_bl: ControlWheelMotor,
     motor_br: ControlWheelMotor,
     motor_fr: ControlWheelMotor,
+
+    active_brake_controller: ActiveBrakeController,
 }
 
 impl<
@@ -215,6 +221,7 @@ impl<
             motor_bl: motor_bl,
             motor_br: motor_br,
             motor_fr: motor_fr,
+            active_brake_controller: ActiveBrakeController::new(),
         }
     }
 
@@ -556,18 +563,38 @@ impl<
             }
             vision_update = false; // reset vision update flag after use
 
-            let (wheel_current_cmd, wheel_vel_cmd) = if self.stop_wheels()
+            let in_hard_stop = self.stop_wheels()
                 || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP
                 || _cmd_mode == BodyControlMode::BCM_OFF
-                || robot_controller.wheels_disabled()
-                || self.last_command.game_state_in_halt() != 0
-                || self.last_command.emergency_stop() != 0
-            {
+                || robot_controller.wheels_disabled();
+
+            let in_active_brake = !in_hard_stop
+                && (self.last_command.game_state_in_halt() != 0
+                    || self.last_command.emergency_stop() != 0
+                    || _cmd_mode == BodyControlMode::BCM_ESTOP_BRAKE);
+
+            // wheel_current_cmd in Amperes; converted to mA below.
+            let (wheel_current_cmd, wheel_vel_cmd) = if in_hard_stop {
                 if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS {
                     defmt::warn!("control task - motor commands locked out");
                 }
+                self.active_brake_controller.reset();
                 (Vector4f::default(), Vector4f::default())
+            } else if in_active_brake {
+                // Force current-only mode every tick while braking so the motion
+                // type cannot lag behind game state changes between command packets.
+                self.motor_fl.set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                self.motor_bl.set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                self.motor_br.set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                self.motor_fr.set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                self.motor_fl.set_motion_enabled(true);
+                self.motor_bl.set_motion_enabled(true);
+                self.motor_br.set_motion_enabled(true);
+                self.motor_fr.set_motion_enabled(true);
+                let brake_a = self.active_brake_controller.compute(wheel_vel_meas, DEFAULT_CONTROL_DT);
+                (brake_a, Vector4f::default())
             } else {
+                self.active_brake_controller.reset();
                 (
                     robot_controller.get_wheel_currents(),
                     robot_controller.get_wheel_velocities(),
