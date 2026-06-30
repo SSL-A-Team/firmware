@@ -63,6 +63,9 @@ impl ActiveManeuver {
             ManeuverCommand::HeadingPivot(_) => Self::HeadingPivot(HeadingPivotManeuver::new()),
             ManeuverCommand::PointPivot(_) => Self::PointPivot(PointPivotManeuver::new()),
             ManeuverCommand::Off => Self::Off,
+            _ => {
+                Self::Off
+            },
         }
     }
 
