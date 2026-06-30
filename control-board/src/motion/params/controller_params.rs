@@ -99,6 +99,11 @@ const _: () = assert!(
     "BODY_VEL_CLAMP_ANGULAR exceeds IMU gyroscope maximum (2000 deg/s)"
 );
 
+/// Maximum linear speed (m/s) applied during SSL stop state.
+/// Set below the 1.5 m/s rule limit to provide a safety buffer.
+/// Applied after control policy output so feedback loops cannot overshoot.
+pub const STOP_STATE_LINEAR_SPEED_LIMIT: f32 = 1.25; // m/s (SSL rule limit: 1.5 m/s)
+
 /// Encoder lag compensation operating mode.
 ///
 /// Intended progression: `Disabled` → `FeedforwardOnly` (validate model params)

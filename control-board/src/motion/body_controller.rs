@@ -2,7 +2,7 @@ use crate::motion::control_context::ControlContext;
 use crate::motion::maneuvers::ManeuverManager;
 use crate::motion::params::controller_params::{
     EncLagMode, BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_LINEAR, BODY_VEL_CLAMP_ANGULAR,
-    BODY_VEL_CLAMP_LINEAR, ENC_LAG_MODE,
+    BODY_VEL_CLAMP_LINEAR, ENC_LAG_MODE, STOP_STATE_LINEAR_SPEED_LIMIT,
 };
 use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::{
@@ -95,6 +95,17 @@ impl BodyController {
 
         self.body_twist_out = setpoints.body_twist;
         self.body_accel_out = setpoints.body_accel;
+
+        // SSL stop state: clamp linear speed after control policy output so feedback
+        // loops cannot overshoot to recover trajectory error.
+        if last_command.game_state_in_stop() != 0 {
+            let linear_speed = self.body_twist_out.xy().norm();
+            if linear_speed > STOP_STATE_LINEAR_SPEED_LIMIT {
+                let scale = STOP_STATE_LINEAR_SPEED_LIMIT / linear_speed;
+                self.body_twist_out.x *= scale;
+                self.body_twist_out.y *= scale;
+            }
+        }
 
         // Clamp body-level velocity before converting to wheel velocity setpoints.
         let twist_clamped_x = self

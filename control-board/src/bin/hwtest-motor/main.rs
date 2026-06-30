@@ -153,6 +153,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 0,
                 0,
                 0,
+                0, // game_state_in_halt
                 0,
                 WHEEL_VEL_CONTROL_ENABLED.into(),
                 WHEEL_TORQUE_CONTROL_ENABLED.into(),
