@@ -553,13 +553,6 @@ impl ControlContext {
         }
     }
 
-    /// Returns `true` when a trajectory exists and the tracking error is within
-    /// the configured thresholds.  Used by `run_traj_track` to decide the
-    /// replan seed.
-    pub fn traj_tracking_healthy(&self) -> bool {
-        self.trajectory.is_some() && !self.tracking_error_exceeded()
-    }
-
     /// Returns `true` when the stored command differs from `cmd`.
     ///
     /// Always returns `true` when no previous command has been stored, ensuring
@@ -577,14 +570,17 @@ impl ControlContext {
     /// # Replan decision
     /// A new trajectory is produced by calling `make_traj(seed)` when:
     /// - there is no existing trajectory, OR
-    /// - the tracking error exceeds the configured thresholds, OR
     /// - `cmd` differs from the last stored command.
     ///
+    /// Tracking error does **not** trigger a replan: a large unexpected error
+    /// (e.g. a collision) is handled by the divergence-recovery state machine,
+    /// which brakes and then resets (clearing the trajectory).
+    ///
     /// # Seed selection
-    /// - Tracking healthy but command changed  → seed from the trajectory's
-    ///   current `sample()` state (continuous handoff).
-    /// - No trajectory or error exceeded       → seed from `state_estimate`
-    ///   (snap to reality).
+    /// - An existing trajectory  → seed from its current `sample()` state
+    ///   (continuous handoff). Snapping to `state_estimate` would mask
+    ///   divergence from the recovery state machine.
+    /// - No trajectory          → seed from `state_estimate` (snap to reality).
     pub fn run_traj_track<F>(
         &mut self,
         cmd: ManeuverCommand,
@@ -593,16 +589,18 @@ impl ControlContext {
     where
         F: FnOnce(Vector6f) -> Result<TrackedTrajectory, ControlsError>,
     {
-        let should_replan = !self.traj_tracking_healthy() || self.command_changed(&cmd);
+        let should_replan = self.trajectory.is_none() || self.command_changed(&cmd);
 
         if should_replan {
-            let seed = if self.traj_tracking_healthy() {
-                // Command changed but tracking healthy → continuous seed from
-                // the trajectory's current state (before this tick's advance).
-                self.trajectory.as_ref().unwrap().sample().0
-            } else {
-                // No trajectory or error exceeded → snap to estimate.
-                self.state_estimate
+            let seed = match self.trajectory.as_ref() {
+                // Existing trajectory → continuous seed from its current state
+                // (before this tick's advance), even if the tracking error is
+                // high. Never snap to the estimate here: doing so would zero the
+                // tracking error and prevent the divergence-recovery state
+                // machine from ever detecting a collision.
+                Some(traj) => traj.sample().0,
+                // No trajectory yet → seed from the state estimate.
+                None => self.state_estimate,
             };
             match make_traj(seed) {
                 Ok(new_traj) => {
