@@ -1,7 +1,8 @@
 use crate::motion::params::controller_params::{
     EncLagMode, PoseAccelMode, PoseVelMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON,
-    ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE, VISION_GATE_BASE_RADIUS_M,
-    VISION_GATE_EXPAND_RATE_M_PER_S, VISION_SEED_POS_STD_THRESH_M, VISION_SEED_SAMPLES,
+    ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE, TRACKING_DIVERGENCE_RECOVERY_REST_TICKS,
+    TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL, VISION_GATE_BASE_RADIUS_M, VISION_GATE_EXPAND_RATE_M_PER_S,
+    VISION_SEED_POS_STD_THRESH_M, VISION_SEED_SAMPLES,
 };
 use crate::motion::pid::PidController;
 use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
@@ -116,6 +117,20 @@ pub enum VisionGateEvent {
     AcceptJump,
 }
 
+/// Trajectory-divergence recovery state. A large unexpected tracking error
+/// (e.g. a collision knocks the robot off course) trips the controller into
+/// `Recovering`, where it commands an active brake until the wheels stop; only
+/// then is the controller reset and normal tracking resumed.
+#[derive(PartialEq, Eq, Clone, Copy, Default)]
+pub enum TrackingDivergenceState {
+    /// Normal operation; monitoring trajectory tracking for divergence.
+    #[default]
+    Normal,
+    /// Diverged: commanding active brake, waiting for the wheels to stop before
+    /// resetting the controller.
+    Recovering,
+}
+
 /// Internal gate decision for a single vision tick. Computed with only
 /// `vision_gate` borrowed, then applied once that borrow ends.
 enum GateAction {
@@ -151,7 +166,7 @@ pub struct ControlContext {
     /// Velocity setpoint path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
     pub pose_vel_gain: Vector2f,
     /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
-    pub traj_recompute_error: Vector4f,
+    pub tracking_error_thresh: Vector4f,
     /// [LINEAR_VEL_THRESHOLD, LINEAR_ACCEL_THRESHOLD, ANGULAR_VEL_THRESHOLD, ANGULAR_ACCEL_THRESHOLD]
     pub friction_comp_gating: Vector4f,
     /// Active trajectory. t=0 is always "now" (updated via tick each control tick).
@@ -168,6 +183,11 @@ pub struct ControlContext {
     /// Reset to `None` every tick; set when a reportable condition occurs.
     pub last_gate_event: VisionGateEvent,
     pub wheels_disabled: bool,
+    /// Divergence-recovery state machine. `Recovering` engages active braking and
+    /// holds it until the wheels stop, then resets the controller.
+    pub tracking_divergence_state: TrackingDivergenceState,
+    /// Consecutive ticks the wheels have been near rest while recovering.
+    pub tracking_recovery_at_rest_ticks: u32,
 }
 
 impl ControlContext {
@@ -204,7 +224,7 @@ impl ControlContext {
             ),
             pose_accel_gain: controller_params::POSE_ACCEL_GAIN,
             pose_vel_gain: controller_params::POSE_VEL_GAIN,
-            traj_recompute_error: controller_params::TRAJ_RECOMPUTE_ERROR,
+            tracking_error_thresh: controller_params::TRACKING_ERROR_THRESHOLD,
             friction_comp_gating: controller_params::FRICTION_COMP_GATING,
             trajectory: None,
             prev_cmd: None,
@@ -215,6 +235,8 @@ impl ControlContext {
             vision_gate: VisionGateState::default(),
             last_gate_event: VisionGateEvent::None,
             wheels_disabled: true,
+            tracking_divergence_state: TrackingDivergenceState::Normal,
+            tracking_recovery_at_rest_ticks: 0,
         }
     }
 
@@ -232,6 +254,8 @@ impl ControlContext {
         self.last_gate_event = VisionGateEvent::None;
         self.enc_lag.reset();
         self.wheels_disabled = true;
+        self.tracking_divergence_state = TrackingDivergenceState::Normal;
+        self.tracking_recovery_at_rest_ticks = 0;
     }
 
     /// Clear trajectory and command history without touching the PID or KF.
@@ -485,6 +509,50 @@ impl ControlContext {
     // Trajectory management and tracking
     // -----------------------------------------------------------------------
 
+    /// Trajectory-divergence recovery state machine, run once per control tick
+    /// after the maneuver dispatch. Returns `true` while the controller is
+    /// recovering, signalling the control task to command the active brake.
+    ///
+    /// - Normal: a large unexpected tracking error (an active trajectory whose
+    ///   error exceeds `TRAJ_RECOMPUTE_ERROR`, e.g. a collision knocking the
+    ///   robot off course) trips into `Recovering`.
+    /// - Recovering: active braking is commanded until all wheels stay below
+    ///   `RECOVERY_AT_REST_WHEEL_SPEED` for `RECOVERY_AT_REST_TICKS`, then the
+    ///   controller is reset (replanning from the fresh state estimate) and
+    ///   normal operation resumes. Uses raw encoder wheel speeds, not the KF
+    ///   estimate, since divergence implies the estimate is unreliable.
+    pub fn update_tracking_divergence_recovery(&mut self, wheel_vel_meas: Vector4f) -> bool {
+        match self.tracking_divergence_state {
+            TrackingDivergenceState::Normal => {
+                if self.trajectory.is_some() && self.tracking_error_exceeded() {
+                    self.tracking_divergence_state = TrackingDivergenceState::Recovering;
+                    self.tracking_recovery_at_rest_ticks = 0;
+                    defmt::warn!("tracking diverged (possible collision), braking");
+                    true
+                } else {
+                    false
+                }
+            }
+            TrackingDivergenceState::Recovering => {
+                let at_rest = wheel_vel_meas
+                    .iter()
+                    .all(|w| fabsf(*w) < TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL);
+                if at_rest {
+                    self.tracking_recovery_at_rest_ticks += 1;
+                } else {
+                    self.tracking_recovery_at_rest_ticks = 0;
+                }
+                if self.tracking_recovery_at_rest_ticks >= TRACKING_DIVERGENCE_RECOVERY_REST_TICKS {
+                    self.reset(); // returns to Normal, clears trajectory
+                    defmt::warn!("recovery complete, controller reset");
+                    false
+                } else {
+                    true
+                }
+            }
+        }
+    }
+
     /// Returns `true` when a trajectory exists and the tracking error is within
     /// the configured thresholds.  Used by `run_traj_track` to decide the
     /// replan seed.
@@ -662,10 +730,10 @@ impl ControlContext {
             traj_state_twist.y - twist_estimate.y,
         );
         let angular_twist_error = fabsf(traj_state_twist.z - twist_estimate.z);
-        linear_pose_error > self.traj_recompute_error[0]
-            || angular_pose_error > self.traj_recompute_error[1]
-            || linear_twist_error > self.traj_recompute_error[2]
-            || angular_twist_error > self.traj_recompute_error[3]
+        linear_pose_error > self.tracking_error_thresh[0]
+            || angular_pose_error > self.tracking_error_thresh[1]
+            || linear_twist_error > self.tracking_error_thresh[2]
+            || angular_twist_error > self.tracking_error_thresh[3]
     }
 
     // -----------------------------------------------------------------------
@@ -744,7 +812,7 @@ impl ControlContext {
                 reply.data.vec2_f32 = self.pose_accel_gain.into();
             }
             ParameterName::TRAJ_RECOMPUTE_ERROR => {
-                reply.data.vec4_f32 = self.traj_recompute_error.into();
+                reply.data.vec4_f32 = self.tracking_error_thresh.into();
             }
             ParameterName::POSE_FB_PIDII_LINEAR | ParameterName::POSE_FB_PIDII_ANGULAR => {
                 let gain = self.pose_pid_controller.get_gain();
@@ -837,7 +905,7 @@ impl ControlContext {
             }
             ParameterName::TRAJ_RECOMPUTE_ERROR => {
                 let v = unsafe { cmd.data.vec4_f32 };
-                self.traj_recompute_error = Vector4f::new(v[0], v[1], v[2], v[3]);
+                self.tracking_error_thresh = Vector4f::new(v[0], v[1], v[2], v[3]);
             }
             ParameterName::POSE_FB_PIDII_LINEAR | ParameterName::POSE_FB_PIDII_ANGULAR => {
                 let v = unsafe { cmd.data.vec5_f32 };

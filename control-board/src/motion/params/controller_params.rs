@@ -71,7 +71,7 @@ pub const POSE_ACCEL_MODE: PoseAccelMode = PoseAccelMode::FeedbackOnly;
 
 /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
 /// Thresholds for when to recompute the trajectory
-pub const TRAJ_RECOMPUTE_ERROR: Vector4f = Vector4f::new(0.5, 1.0, 4.0, 8.0);
+pub const TRACKING_ERROR_THRESHOLD: Vector4f = Vector4f::new(0.25, 0.75, 2.0, 4.0);
 
 /// Only applies friction compensation when the absolute value of the
 /// velocity/acceleration is above the corresponding threshold in
@@ -122,6 +122,14 @@ pub const STOP_STATE_LINEAR_SPEED_LIMIT: f32 = 1.25; // m/s (SSL rule limit: 1.5
 pub const BRAKE_KP: f32 = 0.01; // A / (rad/s)
 pub const BRAKE_ANTI_JITTER_RADS: f32 = 5.0; // rad/s
 pub const BRAKE_MAX_CURRENT_A: f32 = 1.0; // A
+
+/// Trajectory divergence recovery: per-wheel speed (rad/s) below which all
+/// wheels are considered stopped, and the number of consecutive ticks they must
+/// stay below it for active braking to be "finished" (1 kHz, 100 ticks = 100
+/// ms). Once stopped, the controller resets and resumes from the fresh state
+/// estimate.
+pub const TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL: f32 = 1.0; // rad/s
+pub const TRACKING_DIVERGENCE_RECOVERY_REST_TICKS: u32 = 100;
 
 /// Encoder lag compensation operating mode.
 ///

@@ -149,6 +149,7 @@ pub struct ControlTask<
     high_current_err_limiter: RateLimiter,
     loop_exec_err_limiter: RateLimiter,
     vision_gate_err_limiter: RateLimiter,
+    tracking_diverged_err_limiter: RateLimiter,
     body_vel_clamp_err_limiter: RateLimiter,
     body_accel_clamp_err_limiter: RateLimiter,
 
@@ -209,6 +210,9 @@ impl<
                 ERROR_TELEM_RATE_LIMIT_MS,
             )),
             vision_gate_err_limiter: RateLimiter::new(Duration::from_millis(
+                ERROR_TELEM_RATE_LIMIT_MS,
+            )),
+            tracking_diverged_err_limiter: RateLimiter::new(Duration::from_millis(
                 ERROR_TELEM_RATE_LIMIT_MS,
             )),
             body_vel_clamp_err_limiter: RateLimiter::new(Duration::from_millis(
@@ -550,6 +554,15 @@ impl<
                             );
                         }
                     }
+                    if robot_controller.tracking_divergence_recovery_active()
+                        && self.tracking_diverged_err_limiter.is_allowed()
+                    {
+                        self.telemetry_publisher.publish_immediate(
+                            TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string(
+                                "tracking diverged (possible collision), braking before reset",
+                            )),
+                        );
+                    }
                 }
                 Err(e) => {
                     self.shared_robot_state.set_controls_err(true);
@@ -571,7 +584,8 @@ impl<
             let in_active_brake = !in_hard_stop
                 && (self.last_command.game_state_in_halt() != 0
                     || self.last_command.emergency_stop() != 0
-                    || _cmd_mode == BodyControlMode::BCM_ESTOP_BRAKE);
+                    || _cmd_mode == BodyControlMode::BCM_ESTOP_BRAKE
+                    || robot_controller.tracking_divergence_recovery_active());
 
             // wheel_current_cmd in Amperes; converted to mA below.
             let (wheel_current_cmd, wheel_vel_cmd) = if in_hard_stop {

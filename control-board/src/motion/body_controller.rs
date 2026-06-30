@@ -1,4 +1,4 @@
-use crate::motion::control_context::ControlContext;
+use crate::motion::control_context::{ControlContext, TrackingDivergenceState};
 use crate::motion::maneuvers::ManeuverManager;
 use crate::motion::params::controller_params::{
     EncLagMode, BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_LINEAR, BODY_VEL_CLAMP_ANGULAR,
@@ -65,6 +65,13 @@ impl BodyController {
         self.control_context.wheels_disabled
     }
 
+    /// True while recovering from a trajectory divergence (e.g. a collision); the
+    /// control task should command the active brake. Reset happens automatically
+    /// once the wheels stop.
+    pub fn tracking_divergence_recovery_active(&self) -> bool {
+        self.control_context.tracking_divergence_state == TrackingDivergenceState::Recovering
+    }
+
     pub fn control_update(
         &mut self,
         last_command: BasicControl,
@@ -92,6 +99,11 @@ impl BodyController {
         let (setpoints, maneuver_telem) = self
             .maneuver_manager
             .tick(last_command, &mut self.control_context)?;
+
+        // Trajectory-divergence recovery: a large unexpected tracking error (e.g.
+        // a collision) trips into a braking recovery; the controller resets only
+        // after braking finishes, then tracking replans from the fresh estimate.
+        self.control_context.update_tracking_divergence_recovery(wheel_vel_meas);
 
         self.body_twist_out = setpoints.body_twist;
         self.body_accel_out = setpoints.body_accel;
