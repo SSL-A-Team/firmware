@@ -1,4 +1,4 @@
-use crate::motion::control_context::{ControlContext, TrackingDivergenceState};
+use crate::motion::control_context::{ControlContext, ManeuverSetpoints, TrackingDivergenceState};
 use crate::motion::maneuvers::ManeuverManager;
 use crate::motion::params::controller_params::{
     EncLagMode, BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_LINEAR, BODY_VEL_CLAMP_ANGULAR,
@@ -9,6 +9,7 @@ use ateam_common_packets::bindings::{
     BasicControl, BodyControlExtendedTelemetry, BodyControlTelemetry, ParameterCommand,
     ParameterCommandCode::*, ParameterName,
 };
+use ateam_common_packets::radio::ManeuverExtendedTelemetry;
 use ateam_controls::trajectory::Trajectory;
 use ateam_controls::{ControlsError, Vector3f, Vector4f};
 use embassy_time::Instant;
@@ -96,9 +97,29 @@ impl BodyController {
 
         let t_after_kf_update = Instant::now();
 
-        let (setpoints, maneuver_telem) = self
-            .maneuver_manager
-            .tick(last_command, &mut self.control_context)?;
+        // While the robot is halted (SSL HALT game state) or recovering from a
+        // trajectory divergence (e.g. a collision), the control task ignores the
+        // maneuver outputs and commands the active brake instead. Progressing the
+        // maneuver anyway would keep advancing its trajectory clock and publish
+        // telemetry (trajectory pose/vel, commanded twist/accel, maneuver state)
+        // implying motion the robot is not performing, which is confusing to
+        // observe. Hold the maneuver in a reset state and emit zero setpoints;
+        // when the state clears, the maneuver re-enters and replans from the
+        // current state estimate.
+        //
+        // The divergence-recovery state is read before running its state machine
+        // below, so it reflects the decision made on the previous tick.
+        let hold_maneuvers = last_command.game_state_in_halt() != 0
+            || self.control_context.tracking_divergence_state == TrackingDivergenceState::Recovering;
+
+        let (setpoints, maneuver_telem) = if hold_maneuvers {
+            self.maneuver_manager.reset();
+            self.control_context.reset_trajectory();
+            (ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off)
+        } else {
+            self.maneuver_manager
+                .tick(last_command, &mut self.control_context)?
+        };
 
         // Trajectory-divergence recovery: a large unexpected tracking error (e.g.
         // a collision) trips into a braking recovery; the controller resets only
