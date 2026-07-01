@@ -8,22 +8,28 @@ use nalgebra::Matrix3x5;
 //  current feedback gains  //
 //////////////////////////////
 
-const LINEAR_POSE_PID_GAINS: Vector5f = Vector5f::new(300.0, 0.0, 7.0, 0.0, 0.0);
+// The pose PID feedback runs in the robot's LOCAL (body) frame: row 0 is the
+// local x axis (forward/back), row 1 is the local y axis (strafe), row 2 is
+// angular. This lets the linear feedback be tuned independently per body axis,
+// e.g. a stiffer strafe (y) response to counter higher y-direction friction.
+// With equal x and y gains the behavior is identical to a global-frame PID.
+const LINEAR_X_POSE_PID_GAINS: Vector5f = Vector5f::new(300.0, 0.0, 7.0, 0.0, 0.0);
+const LINEAR_Y_POSE_PID_GAINS: Vector5f = Vector5f::new(300.0, 0.0, 7.0, 0.0, 0.0);
 const ANGULAR_POSE_PID_GAINS: Vector5f = Vector5f::new(400.0, 0.0, 30.0, 0.0, 0.0);
 
 pub fn pose_pid_gains() -> Matrix3x5<f32> {
     Matrix3x5::from_rows(&[
-        LINEAR_POSE_PID_GAINS.transpose(),
-        LINEAR_POSE_PID_GAINS.transpose(),
+        LINEAR_X_POSE_PID_GAINS.transpose(),
+        LINEAR_Y_POSE_PID_GAINS.transpose(),
         ANGULAR_POSE_PID_GAINS.transpose(),
     ])
 }
 
 /// Per-axis anti-jitter thresholds for the body pose PID controller, in the
-/// same units as the pose error: [x (m), y (m), theta (rad)]. When the
-/// absolute pose error on an axis is below the threshold, the PID output for
-/// that axis is linearly scaled toward zero, matching the fixed-point PI
-/// anti-jitter behavior on the motor controllers.
+/// same units as the (local-frame) pose error: [x (m), y (m), theta (rad)].
+/// When the absolute pose error on an axis is below the threshold, the PID
+/// output for that axis is linearly scaled toward zero, matching the
+/// fixed-point PI anti-jitter behavior on the motor controllers.
 pub const POSE_PID_ANTI_JITTER_THRESH: Vector3f = Vector3f::new(0.001, 0.001, 0.01);
 
 /// Acceleration (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].

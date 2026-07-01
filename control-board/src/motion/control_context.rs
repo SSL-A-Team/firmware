@@ -653,13 +653,28 @@ impl ControlContext {
         // Wrap θ to avoid PID over-rotation at the ±π discontinuity.
         traj_pos.z = pose_estimate.z + remainderf(traj_pos.z - pose_estimate.z, 2.0 * PI);
 
-        let twist_error = traj_vel - twist_estimate;
-        let pos_pid_feedback = self.pose_pid_controller.calculate_with_derivative(
-            &traj_pos,
-            &pose_estimate,
-            &twist_error,
-            self.dt,
-        );
+        // Run the pose PID in the robot's LOCAL (body) frame so the linear x/y
+        // gains map to forward/strafe rather than field axes. This lets the
+        // strafe (y) feedback be tuned independently of forward (x), e.g. to
+        // counter higher y-direction friction. The pose and twist errors are
+        // rotated global→local, the PID (with its per-local-axis gains and
+        // anti-jitter) runs on those, and the resulting feedback is rotated
+        // local→global for the downstream (global-frame) accel/vel outputs.
+        // With equal x/y gains this is mathematically identical to the previous
+        // global-frame PID (a rotation commutes with an isotropic gain).
+        let r_glob_to_loc = z_rotation_mat(-pose_estimate.z);
+        let r_loc_to_glob = z_rotation_mat(pose_estimate.z);
+
+        let pose_error_local: Vector3f = r_glob_to_loc * (traj_pos - pose_estimate);
+        let twist_error_local: Vector3f = r_glob_to_loc * (traj_vel - twist_estimate);
+
+        let pos_pid_feedback = r_loc_to_glob
+            * self.pose_pid_controller.calculate_with_derivative(
+                &pose_error_local,
+                &Vector3f::zeros(),
+                &twist_error_local,
+                self.dt,
+            );
 
         let accel_out: Vector3f = {
             let accel_ff_term = if matches!(
