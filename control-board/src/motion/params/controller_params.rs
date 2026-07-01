@@ -71,7 +71,7 @@ pub const POSE_ACCEL_MODE: PoseAccelMode = PoseAccelMode::FeedbackOnly;
 
 /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
 /// Thresholds for when to recompute the trajectory
-pub const TRACKING_ERROR_THRESHOLD: Vector4f = Vector4f::new(0.25, 0.75, 2.0, 4.0);
+pub const TRACKING_ERROR_THRESHOLD: Vector4f = Vector4f::new(1.0, 1.57, 5.0, 10.0);
 
 /// Only applies friction compensation when the absolute value of the
 /// velocity/acceleration is above the corresponding threshold in
