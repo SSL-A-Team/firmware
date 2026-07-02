@@ -14,10 +14,17 @@
 //!   4. hold  at 0°      (1 s)   — robot stationary, held at start
 //!
 //! Button controls (take effect on the next command tick):
-//!   Down  — increase orbit radius (+1 cm)
-//!   Up    — decrease orbit radius (-1 cm)
-//!   Right — increase dribbler speed (+10 rpm)
-//!   Left  — decrease dribbler speed (-10 rpm)
+//!   Down  — increase orbit radius (+5 mm)
+//!   Up    — decrease orbit radius (-5 mm)
+//!   Right — increase inset angle (+0.1 rad)
+//!   Left  — decrease inset angle (-0.1 rad)
+//!   Enter — increase max angular velocity (+0.5 rad/s)
+//!   Back  — decrease max angular velocity (-0.5 rad/s)
+//!
+//! The robot ID knob sets the dribbler current setpoint (ID × 0.01); ID 0 stops
+//! all motion. Max angular acceleration is fixed at 2.0 rad/s². The tuned values
+//! [orbit_radius, inset_angle, max_angular_vel, max_angular_acc] can be read back
+//! over the radio via a parameter read of KF_PROCESS_STD (parameter 0).
 //!
 //! The ball is placed at the field origin (0, 0).
 
@@ -129,18 +136,21 @@ const INSET_ANGLE_STEP: f32 = 0.1;
 const INSET_ANGLE_MIN: f32 = -core::f32::consts::PI;
 const INSET_ANGLE_MAX: f32 = core::f32::consts::PI;
 
-/// Angular acceleration adjustment per button press (rad/s²).
-const ACCEL_STEP: f32 = 0.5;
-const ACCEL_MIN: f32 = 0.5;
-const ACCEL_MAX: f32 = 20.0 * core::f32::consts::PI;
+/// Fixed max angular acceleration for the pivot (rad/s²).
+const FIXED_MAX_ANGULAR_ACC: f32 = 2.0;
 
-/// Default max angular velocity — set high so the trajectory stays in the
-/// triangular (acceleration-limited) regime regardless of accel setting.
-const DEFAULT_MAX_ANGULAR_VEL: f32 = 4.0 * core::f32::consts::PI; // rad/s
+/// Max angular velocity adjustment per button press (rad/s).
+/// Enter increases, Back decreases.
+const ACC_STEP: f32 = 0.1;
+const ACC_MIN: f32 = 0.5;
+const ACC_MAX: f32 = 8.0 * core::f32::consts::PI;
+
+/// Initial max angular velocity (rad/s), tunable at runtime via Enter/Back.
+const DEFAULT_MAX_ANGULAR_ACC: f32 = 4.0 * core::f32::consts::PI; // rad/s
 
 /// Existing robot parameter reused to read back the tuned pivot values over the
-/// radio. A `PCC_READ` of this name is answered with a VEC2 payload carrying
-/// `[orbit_radius, inset_angle]`.
+/// radio. A `PCC_READ` of this name is answered with a VEC4 payload carrying
+/// `[orbit_radius, inset_angle, max_angular_vel, max_angular_acc]`.
 const PIVOT_READBACK_PARAM: ParameterName::Type = ParameterName::KF_PROCESS_STD;
 
 // ============================================================================
@@ -206,8 +216,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let btn_down = Input::new(p.PE15, Pull::Up);
     let btn_left = Input::new(p.PE12, Pull::Up);
     let btn_right = Input::new(p.PE13, Pull::Up);
-    let btn_enter = Input::new(p.PE11, Pull::Up); // lower acceleration
-    let btn_back = Input::new(p.PE10, Pull::Up); // unused (accel set in code)
+    let btn_enter = Input::new(p.PE11, Pull::Up); // increase max angular velocity
+    let btn_back = Input::new(p.PE10, Pull::Up); // decrease max angular velocity
 
     // ── inter-task channels ──────────────────────────────────────────────────
 
@@ -297,10 +307,12 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     let mut orbit_radius: f32 = PivotParams::default().orbit_radius;
     let mut inset_angle: f32 = PivotParams::default().inset_angle;
-    let mut max_angular_acc: f32 = PivotParams::default().max_accel_angular;
+    // Max angular velocity is tuned at runtime via Enter/Back; accel is fixed.
+    // let mut max_angular_acc: f32 = PivotParams::default().max_accel_angular;
+    let mut max_angular_acc: f32 = 7.0;
 
     defmt::info!(
-        "hwtest-pivot: orbit_radius = {} m, inset_angle = {} rad, max_angular_acc = {} rad/s²",
+        "hwtest-pivot: orbit_radius = {} m, inset_angle = {} rad, max_angular_acc = {} rad/s/s",
         orbit_radius,
         inset_angle,
         max_angular_acc,
@@ -348,16 +360,21 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 {
                     let resp = ParameterCommand {
                         command_code: ParameterCommandCode::PCC_ACK,
-                        data_format: ParameterDataFormat::VEC2_F32,
+                        data_format: ParameterDataFormat::VEC4_F32,
                         parameter_name: PIVOT_READBACK_PARAM,
                         data: ParameterCommand_ParameterData {
-                            vec2_f32: [orbit_radius, inset_angle],
+                            vec3_f32: [
+                                orbit_radius,
+                                inset_angle,
+                                max_angular_acc,
+                            ],
                         },
                     };
                     defmt::info!(
-                        "hwtest-pivot: param read → orbit_radius {} m, inset_angle {} rad",
+                        "hwtest-pivot: param read → orbit_radius {} m, inset_angle {} rad, max_angular_acc {} rad/s",
                         orbit_radius,
                         inset_angle,
+                        max_angular_acc,
                     );
                     pivot_telemetry_publisher
                         .publish_immediate(TelemetryPacket::ParameterCommandResponse(resp));
@@ -391,12 +408,12 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             defmt::info!("hwtest-pivot: inset_angle → {} rad", inset_angle);
         }
         if prev_enter && !cur_enter {
-            max_angular_acc = (max_angular_acc + ACCEL_STEP).min(ACCEL_MAX);
-            defmt::info!("hwtest-pivot: max_angular_acc → {} rad/s²", max_angular_acc);
+            max_angular_acc = (max_angular_acc + ACC_STEP).min(ACC_MAX);
+            defmt::info!("hwtest-pivot: max_angular_acc → {} rad/s", max_angular_acc);
         }
         if prev_back && !cur_back {
-            max_angular_acc = (max_angular_acc - ACCEL_STEP).max(ACCEL_MIN);
-            defmt::info!("hwtest-pivot: max_angular_acc → {} rad/s²", max_angular_acc);
+            max_angular_acc = (max_angular_acc - ACC_STEP).max(ACC_MIN);
+            defmt::info!("hwtest-pivot: max_angular_acc → {} rad/s", max_angular_acc);
         }
 
         prev_up = cur_up;
@@ -440,9 +457,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         if print_tick >= 100 {
             print_tick = 0;
             defmt::info!(
-                "hwtest-pivot params: motion_stopped={} target={} deg orbit_radius={} m inset_angle={} rad max_angular_acc={} rad/s² dribbler_setpoint={}",
-                motion_stopped,
-                target_theta * 180.0 / core::f32::consts::PI,
+                "\n\nhwtest-pivot params:\norbit_radius={} m\ninset_angle={} rad\nmax_angular_acc={} rad/s²\ndribbler_setpoint={}",
                 orbit_radius,
                 inset_angle,
                 max_angular_acc,
@@ -488,7 +503,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             cmd: BodyControlCommand {
                 heading_pivot: HeadingPivotCommand {
                     global_theta: target_theta,
-                    max_angular_vel: DEFAULT_MAX_ANGULAR_VEL,
+                    max_angular_vel: 20.0,
                     max_angular_acc: max_angular_acc,
                     orbit_radius,
                     inset_angle: inset_angle,
