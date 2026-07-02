@@ -48,7 +48,6 @@ use ateam_control_board::{
     robot_state::SharedRobotState,
 };
 use ateam_controls::pivot_trajectory::PivotParams;
-use libm::roundf;
 
 use embassy_time::Timer;
 use panic_probe as _;
@@ -92,17 +91,9 @@ unsafe fn CORDIC() {
 // Pivot sequencer constants
 // ============================================================================
 
-/// Pivot interval range mapped from the robot ID dial (0–15).
-/// Dial = 0  → MIN_PIVOT_DEG, Dial = 15 → MAX_PIVOT_DEG, linearly interpolated.
-const MIN_PIVOT_DEG: f32 = 5.0;
-const MAX_PIVOT_DEG: f32 = 180.0;
-const ROTARY_MAX: f32 = 15.0;
-
-fn pivot_angle_from_robot_id(robot_id: u8) -> f32 {
-    let t = (robot_id as f32).clamp(0.0, ROTARY_MAX) / ROTARY_MAX;
-    let deg = MIN_PIVOT_DEG + t * (MAX_PIVOT_DEG - MIN_PIVOT_DEG);
-    deg * core::f32::consts::PI / 180.0
-}
+/// Pivot step per leg, in degrees. The robot pivots this much clockwise each
+/// leg, wrapping around and continuing in a circle forever. Configurable here.
+const PIVOT_STEP_DEG: f32 = 90.0;
 
 /// Main loop interval in milliseconds (100 Hz command rate).
 const LOOP_INTERVAL_MS: u64 = 10;
@@ -115,11 +106,11 @@ const HOLD_TICKS: u32 = 100;
 
 /// Orbit radius adjustment per button press (meters).
 const ORBIT_RADIUS_STEP: f32 = 0.005;
-const ORBIT_RADIUS_MIN: f32 = 0.001;
+const ORBIT_RADIUS_MIN: f32 = 0.0;
 const ORBIT_RADIUS_MAX: f32 = 0.5;
 
 /// Inset angle adjustment per button press (radians).
-const INSET_ANGLE_STEP: f32 = 0.05;
+const INSET_ANGLE_STEP: f32 = 0.1;
 const INSET_ANGLE_MIN: f32 = -core::f32::consts::PI;
 const INSET_ANGLE_MAX: f32 = core::f32::consts::PI;
 
@@ -132,47 +123,26 @@ const ACCEL_MAX: f32 = 20.0 * core::f32::consts::PI;
 /// triangular (acceleration-limited) regime regardless of accel setting.
 const DEFAULT_MAX_ANGULAR_VEL: f32 = 4.0 * core::f32::consts::PI; // rad/s
 
-/// Sequence mode — change this constant to switch between half and full circle.
-const SEQUENCE_MODE: SequenceMode = SequenceMode::FullCircle;
-
-// ============================================================================
-// Sequence mode
-// ============================================================================
-
-#[derive(Clone, Copy, PartialEq)]
-enum SequenceMode {
-    /// Alternates +interval → 0 → +interval repeatedly.
-    HalfCircle,
-    /// Sweeps CCW in `interval` steps until a full circle, then repeats.
-    FullCircle,
-}
-
-impl SequenceMode {
-    fn label(self) -> &'static str {
-        match self {
-            SequenceMode::HalfCircle => "half-circle",
-            SequenceMode::FullCircle => "full-circle",
-        }
-    }
-}
-
 // ============================================================================
 // Phase state machine
 // ============================================================================
 
-/// Number of pivot legs to complete one full circle at the given step angle.
-fn num_full_circle_legs(pivot_angle: f32) -> u32 {
-    use core::f32::consts::PI;
-    (roundf(2.0 * PI / pivot_angle) as u32).max(1)
+/// Pivot step per leg in radians (clockwise → negative).
+fn pivot_step_rad() -> f32 {
+    -PIVOT_STEP_DEG * core::f32::consts::PI / 180.0
 }
 
-/// Number of phase steps (pivot + hold pairs × 2) for the current mode and dial angle.
-fn phase_num_steps(mode: SequenceMode, pivot_angle: f32) -> u32 {
-    let legs = match mode {
-        SequenceMode::HalfCircle => 2,
-        SequenceMode::FullCircle => num_full_circle_legs(pivot_angle),
-    };
-    legs * 2
+/// Wrap an angle to (-π, π].
+fn wrap_pi(a: f32) -> f32 {
+    use core::f32::consts::PI;
+    let pi2 = 2.0 * PI;
+    let mut a = a % pi2;
+    if a > PI {
+        a -= pi2;
+    } else if a <= -PI {
+        a += pi2;
+    }
+    a
 }
 
 fn phase_duration_ticks(phase_idx: u32) -> u32 {
@@ -181,26 +151,6 @@ fn phase_duration_ticks(phase_idx: u32) -> u32 {
     } else {
         HOLD_TICKS
     }
-}
-
-/// Target heading for the given phase, in radians.
-fn phase_target(phase_idx: u32, mode: SequenceMode, pivot_angle: f32) -> f32 {
-    use core::f32::consts::PI;
-    let num_legs = match mode {
-        SequenceMode::HalfCircle => 2,
-        SequenceMode::FullCircle => num_full_circle_legs(pivot_angle),
-    };
-    let target_idx = (phase_idx / 2) % num_legs;
-    let raw = pivot_angle * (target_idx as f32 + 1.0);
-    // wrap to (-π, π]
-    let pi2 = 2.0 * PI;
-    let mut a = raw % pi2;
-    if a > PI {
-        a -= pi2;
-    } else if a <= -PI {
-        a += pi2;
-    }
-    a
 }
 
 // ============================================================================
@@ -324,6 +274,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut phase_idx: u32 = 0;
     let mut phase_tick: u32 = 0;
 
+    // Running pivot target, advanced one clockwise step at the start of each
+    // exec leg. Seeded one step ahead so the first leg pivots immediately.
+    let mut target_theta: f32 = wrap_pi(pivot_step_rad());
+
     // Previous button states for falling-edge detection (true = not pressed).
     let mut prev_up = true;
     let mut prev_down = true;
@@ -332,7 +286,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut prev_enter = true;
     let mut prev_back = true;
 
-    defmt::info!("hwtest-pivot: starting — mode: {}", SEQUENCE_MODE.label());
+    defmt::info!(
+        "hwtest-pivot: starting — clockwise {} deg steps",
+        PIVOT_STEP_DEG,
+    );
 
     loop {
         Timer::after_millis(LOOP_INTERVAL_MS).await;
@@ -381,19 +338,23 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
         // ── phase advance ────────────────────────────────────────────────────
 
-        let pivot_angle = pivot_angle_from_robot_id(robot_state.get_hw_robot_id());
+        // ── robot ID knob sets the 1e-2 digit of the dribbler setpoint ───────
+        // (robot ID 1 → 0.01, 2 → 0.02, …).
+        let dribbler_setpoint = robot_state.get_hw_robot_id() as f32 * 0.01;
 
         if phase_tick >= phase_duration_ticks(phase_idx) {
-            phase_idx = (phase_idx + 1) % phase_num_steps(SEQUENCE_MODE, pivot_angle);
+            phase_idx = (phase_idx + 1) % 2;
             phase_tick = 0;
+            // Entering a new exec leg → advance the target one step clockwise.
+            if phase_idx == 0 {
+                target_theta = wrap_pi(target_theta + pivot_step_rad());
+            }
             defmt::info!(
-                "hwtest-pivot: phase {} → pivot_angle {} deg",
+                "hwtest-pivot: phase {} → target {} deg",
                 phase_idx,
-                pivot_angle * 180.0 / core::f32::consts::PI,
+                target_theta * 180.0 / core::f32::consts::PI,
             );
         }
-
-        let target_theta = phase_target(phase_idx, SEQUENCE_MODE, pivot_angle);
 
         // ── publish command ──────────────────────────────────────────────────
 
@@ -420,7 +381,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             dribbler_mode: DribblerCommand::DC_CURRENT,
 
             kick_vel: 0.0,
-            dribbler_setpoint: 0.0,
+            dribbler_setpoint: dribbler_setpoint,
 
             cmd: BodyControlCommand {
                 heading_pivot: HeadingPivotCommand {
