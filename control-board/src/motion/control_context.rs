@@ -654,12 +654,26 @@ impl ControlContext {
         traj_pos.z = pose_estimate.z + remainderf(traj_pos.z - pose_estimate.z, 2.0 * PI);
 
         let twist_error = traj_vel - twist_estimate;
-        let pos_pid_feedback = self.pose_pid_controller.calculate_with_derivative(
+        let mut pos_pid_feedback = self.pose_pid_controller.calculate_with_derivative(
             &traj_pos,
             &pose_estimate,
             &twist_error,
             self.dt,
         );
+
+        // NOTE: comp 2026 hack, rarely there will be a theta lock up with a
+        // small X/Y error and a large theta error.  If this is the case, stop
+        // all X/Y feedback until theta is also small. Small X/Y compensation is
+        // causing motor lockup when trying to just rotate, most likely a
+        // friction problem.
+        const ALLOWABLE_ERROR_THRESH_LINEAR: f32 = 0.01;
+        const ALLOWABLE_ERROR_THRESH_ANGULAR: f32 = 0.2;
+        let pos_error = traj_pos - pose_estimate;
+        if pos_error.xy().magnitude() <  ALLOWABLE_ERROR_THRESH_LINEAR
+            && fabsf(pos_error.z) > ALLOWABLE_ERROR_THRESH_ANGULAR {
+            pos_pid_feedback[0] = 0.0;
+            pos_pid_feedback[1] = 0.0;
+        }
 
         let accel_out: Vector3f = {
             let accel_ff_term = if matches!(
