@@ -24,9 +24,10 @@
 use ateam_common_packets::{
     bindings::{
         BasicControl, BodyControlCommand, BodyControlMode, DribblerCommand, HeadingPivotCommand,
-        KickRequest,
+        KickRequest, ParameterCommand, ParameterCommandCode, ParameterCommand_ParameterData,
+        ParameterDataFormat, ParameterName,
     },
-    radio::DataPacket,
+    radio::{DataPacket, TelemetryPacket},
 };
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
@@ -40,7 +41,7 @@ use defmt_rtt as _;
 
 use ateam_control_board::{
     create_audio_task, create_control_task, create_dotstar_task, create_imu_task, create_io_task,
-    create_kicker_task, get_system_config,
+    create_kicker_task, create_radio_task, get_system_config,
     pins::{
         AccelDataPubSub, CommandsPubSub, GyroDataPubSub, KickerTelemetryPubSub, LedCommandPubSub,
         PowerTelemetryPubSub, TelemetryPubSub,
@@ -48,6 +49,12 @@ use ateam_control_board::{
     robot_state::SharedRobotState,
 };
 use ateam_controls::pivot_trajectory::PivotParams;
+
+// load credentials from correct crate
+#[cfg(not(feature = "no-private-credentials"))]
+use credentials::private_credentials::wifi::wifi_credentials;
+#[cfg(feature = "no-private-credentials")]
+use credentials::public_credentials::wifi::wifi_credentials;
 
 use embassy_time::Timer;
 use panic_probe as _;
@@ -61,7 +68,15 @@ static ROBOT_STATE: ConstStaticCell<SharedRobotState> =
     ConstStaticCell::new(SharedRobotState::new());
 
 static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
+// Commands received over the radio flow into their own channel so they don't
+// clash with the local pivot-sequencer commands on RADIO_C2_CHANNEL
+// (CommandsPubSub only permits a single publisher).
+static RADIO_C2_RX_CHANNEL: CommandsPubSub = PubSubChannel::new();
 static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
+// TelemetryPubSub only permits two publishers. The control task and the pivot
+// loop's parameter-response publisher take those two slots on the radio channel,
+// so IMU telemetry is routed to its own (unread) channel for this test.
+static IMU_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
 static GYRO_DATA_CHANNEL: GyroDataPubSub = PubSubChannel::new();
 static ACCEL_DATA_CHANNEL: AccelDataPubSub = PubSubChannel::new();
 static POWER_DATA_CHANNEL: PowerTelemetryPubSub = PubSubChannel::new();
@@ -122,6 +137,11 @@ const ACCEL_MAX: f32 = 20.0 * core::f32::consts::PI;
 /// Default max angular velocity — set high so the trajectory stays in the
 /// triangular (acceleration-limited) regime regardless of accel setting.
 const DEFAULT_MAX_ANGULAR_VEL: f32 = 4.0 * core::f32::consts::PI; // rad/s
+
+/// Existing robot parameter reused to read back the tuned pivot values over the
+/// radio. A `PCC_READ` of this name is answered with a VEC2 payload carrying
+/// `[orbit_radius, inset_angle]`.
+const PIVOT_READBACK_PARAM: ParameterName::Type = ParameterName::KF_PROCESS_STD;
 
 // ============================================================================
 // Phase state machine
@@ -198,7 +218,18 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let kicker_command_subscriber = RADIO_C2_CHANNEL.subscriber().unwrap();
 
     let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
-    let imu_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
+    // IMU telemetry goes to its own channel to leave a radio-telemetry publisher
+    // slot free for the pivot loop's parameter responses.
+    let imu_telemetry_publisher = IMU_TELEMETRY_CHANNEL.publisher().unwrap();
+    // Telemetry publisher used by the pivot loop to answer parameter reads.
+    let pivot_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
+    let radio_telemetry_subscriber = RADIO_TELEMETRY_CHANNEL.subscriber().unwrap();
+
+    // Radio receives commands into its own channel; the pivot loop consumes them
+    // to answer parameter reads without disturbing the control task.
+    let radio_command_publisher = RADIO_C2_RX_CHANNEL.publisher().unwrap();
+    let mut radio_command_subscriber = RADIO_C2_RX_CHANNEL.subscriber().unwrap();
+    let radio_led_cmd_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
 
     let imu_gyro_data_publisher = GYRO_DATA_CHANNEL.publisher().unwrap();
     let imu_accel_data_publisher = ACCEL_DATA_CHANNEL.publisher().unwrap();
@@ -250,7 +281,17 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p
     );
 
-    let _ = radio_uart_queue_spawner; // radio task not needed; suppress unused warning
+    create_radio_task!(
+        main_spawner,
+        radio_uart_queue_spawner,
+        radio_uart_queue_spawner,
+        robot_state,
+        radio_command_publisher,
+        radio_telemetry_subscriber,
+        radio_led_cmd_publisher,
+        wifi_credentials,
+        p
+    );
 
     // ── tunable parameters (adjusted via buttons) ────────────────────────────
 
@@ -278,6 +319,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     // exec leg. Seeded one step ahead so the first leg pivots immediately.
     let mut target_theta: f32 = wrap_pi(pivot_step_rad());
 
+    // Throttle counter for periodic parameter logging (1 Hz at 100 Hz loop).
+    let mut print_tick: u32 = 0;
+
     // Previous button states for falling-edge detection (true = not pressed).
     let mut prev_up = true;
     let mut prev_down = true;
@@ -294,6 +338,32 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     loop {
         Timer::after_millis(LOOP_INTERVAL_MS).await;
         phase_tick += 1;
+
+        // ── answer radio parameter reads with the tuned pivot values ─────────
+
+        while let Some(pkt) = radio_command_subscriber.try_next_message_pure() {
+            if let DataPacket::ParameterCommand(param_cmd) = pkt {
+                if param_cmd.command_code == ParameterCommandCode::PCC_READ
+                    && param_cmd.parameter_name == PIVOT_READBACK_PARAM
+                {
+                    let resp = ParameterCommand {
+                        command_code: ParameterCommandCode::PCC_ACK,
+                        data_format: ParameterDataFormat::VEC2_F32,
+                        parameter_name: PIVOT_READBACK_PARAM,
+                        data: ParameterCommand_ParameterData {
+                            vec2_f32: [orbit_radius, inset_angle],
+                        },
+                    };
+                    defmt::info!(
+                        "hwtest-pivot: param read → orbit_radius {} m, inset_angle {} rad",
+                        orbit_radius,
+                        inset_angle,
+                    );
+                    pivot_telemetry_publisher
+                        .publish_immediate(TelemetryPacket::ParameterCommandResponse(resp));
+                }
+            }
+        }
 
         // ── button edge detection (falling edge = press) ─────────────────────
 
@@ -338,9 +408,17 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
         // ── phase advance ────────────────────────────────────────────────────
 
+        // Robot ID 0 → stop all motion (wheels + dribbler off).
+        let robot_id = robot_state.get_hw_robot_id();
+        let motion_stopped = robot_id == 0;
+
         // ── robot ID knob sets the 1e-2 digit of the dribbler setpoint ───────
         // (robot ID 1 → 0.01, 2 → 0.02, …).
-        let dribbler_setpoint = robot_state.get_hw_robot_id() as f32 * 0.01;
+        let dribbler_setpoint = if motion_stopped {
+            0.0
+        } else {
+            robot_id as f32 * 0.01
+        };
 
         if phase_tick >= phase_duration_ticks(phase_idx) {
             phase_idx = (phase_idx + 1) % 2;
@@ -353,6 +431,22 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 "hwtest-pivot: phase {} → target {} deg",
                 phase_idx,
                 target_theta * 180.0 / core::f32::consts::PI,
+            );
+        }
+
+        // ── periodic log of the currently-used parameters (1 Hz) ─────────────
+
+        print_tick += 1;
+        if print_tick >= 100 {
+            print_tick = 0;
+            defmt::info!(
+                "hwtest-pivot params: motion_stopped={} target={} deg orbit_radius={} m inset_angle={} rad max_angular_acc={} rad/s² dribbler_setpoint={}",
+                motion_stopped,
+                target_theta * 180.0 / core::f32::consts::PI,
+                orbit_radius,
+                inset_angle,
+                max_angular_acc,
+                dribbler_setpoint,
             );
         }
 
@@ -375,10 +469,18 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
             vision_position_update: [0.0, 0.0, 0.0],
 
-            body_control_mode: BodyControlMode::BCM_HEADING_PIVOT,
+            body_control_mode: if motion_stopped {
+                BodyControlMode::BCM_OFF
+            } else {
+                BodyControlMode::BCM_HEADING_PIVOT
+            },
             kick_request: KickRequest::KR_DISABLE,
             play_song: 0,
-            dribbler_mode: DribblerCommand::DC_CURRENT,
+            dribbler_mode: if motion_stopped {
+                DribblerCommand::DC_DISABLE
+            } else {
+                DribblerCommand::DC_CURRENT
+            },
 
             kick_vel: 0.0,
             dribbler_setpoint: dribbler_setpoint,
