@@ -668,10 +668,8 @@ impl ControlContext {
         // friction problem.
         const ALLOWABLE_ERROR_THRESH_LINEAR: f32 = 0.01;
         const ALLOWABLE_ERROR_THRESH_ANGULAR: f32 = 0.2;
-        const LOW_VEL_THRESH_LINEAR: f32 = 0.2;
         let pos_error = traj_pos - pose_estimate;
-        if twist_estimate.xy().magnitude() < LOW_VEL_THRESH_LINEAR
-            && pos_error.xy().magnitude() <  ALLOWABLE_ERROR_THRESH_LINEAR
+        if pos_error.xy().magnitude() <  ALLOWABLE_ERROR_THRESH_LINEAR
             && fabsf(pos_error.z) > ALLOWABLE_ERROR_THRESH_ANGULAR {
             pos_pid_feedback[0] = 0.0;
             pos_pid_feedback[1] = 0.0;
