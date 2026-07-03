@@ -128,8 +128,8 @@ pub const BRAKE_MAX_CURRENT_A: f32 = 1.0; // A
 /// stay below it for active braking to be "finished" (1 kHz, 100 ticks = 100
 /// ms). Once stopped, the controller resets and resumes from the fresh state
 /// estimate.
-pub const TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL: f32 = 1.0; // rad/s
-pub const TRACKING_DIVERGENCE_RECOVERY_REST_TICKS: u32 = 100;
+pub const TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL: f32 = 50.0; // rad/s
+pub const TRACKING_DIVERGENCE_RECOVERY_REST_TICKS: u32 = 1;
 
 /// Encoder lag compensation operating mode.
 ///

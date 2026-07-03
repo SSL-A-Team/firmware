@@ -5,6 +5,7 @@ use crate::motion::params::controller_params::{
     BODY_VEL_CLAMP_LINEAR, ENC_LAG_MODE, STOP_STATE_LINEAR_SPEED_LIMIT,
 };
 use crate::parameter_interface::ParameterInterface;
+use ateam_common_packets::bindings::BodyControlMode::{BCM_ESTOP_BRAKE, BCM_OFF};
 use ateam_common_packets::bindings::{
     BasicControl, BodyControlExtendedTelemetry, BodyControlTelemetry, ParameterCommand,
     ParameterCommandCode::*, ParameterName,
@@ -110,7 +111,9 @@ impl BodyController {
         // The divergence-recovery state is read before running its state machine
         // below, so it reflects the decision made on the previous tick.
         let hold_maneuvers = last_command.game_state_in_halt() != 0
-            || self.control_context.tracking_divergence_state == TrackingDivergenceState::Recovering;
+            || self.control_context.tracking_divergence_state == TrackingDivergenceState::Recovering
+            || last_command.body_control_mode == BCM_OFF
+            || last_command.body_control_mode == BCM_ESTOP_BRAKE;
 
         let (setpoints, maneuver_telem) = if hold_maneuvers {
             self.maneuver_manager.reset();
@@ -121,10 +124,14 @@ impl BodyController {
                 .tick(last_command, &mut self.control_context)?
         };
 
+        let disabled = self.control_context.wheels_disabled;
         // Trajectory-divergence recovery: a large unexpected tracking error (e.g.
         // a collision) trips into a braking recovery; the controller resets only
         // after braking finishes, then tracking replans from the fresh estimate.
         self.control_context.update_tracking_divergence_recovery(wheel_vel_meas);
+        if !disabled {
+            self.control_context.wheels_disabled = false;
+        }
 
         self.body_twist_out = setpoints.body_twist;
         self.body_accel_out = setpoints.body_accel;
