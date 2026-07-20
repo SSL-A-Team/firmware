@@ -286,7 +286,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     // Throttle counter for periodic parameter logging (1 Hz at 100 Hz loop).
     let mut print_tick: u32 = 0;
 
-    defmt::info!("hwtest-capture: starting — driving forward {} m", DRIVE_DISTANCE_M);
+    defmt::info!(
+        "hwtest-capture: starting — driving forward {} m",
+        DRIVE_DISTANCE_M
+    );
 
     loop {
         Timer::after_millis(LOOP_INTERVAL_MS).await;
@@ -334,8 +337,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         match phase {
             Phase::Drive => {
                 let x = mock_vision_pose[0];
-                let reached =
-                    x >= target_x - POS_TOLERANCE_M && x <= target_x + POS_TOLERANCE_M;
+                let reached = x >= target_x - POS_TOLERANCE_M && x <= target_x + POS_TOLERANCE_M;
                 let settled = est_speed_sq <= VEL_TOLERANCE_MPS * VEL_TOLERANCE_MPS;
                 if reached && settled {
                     phase = Phase::Capture;
@@ -353,7 +355,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 if phase_tick >= CAPTURE_HOLD_TICKS {
                     phase = Phase::Wait;
                     phase_tick = 0;
-                    defmt::info!("hwtest-capture: capture hold done → waiting {} ms", POST_CAPTURE_WAIT_MS);
+                    defmt::info!(
+                        "hwtest-capture: capture hold done → waiting {} ms",
+                        POST_CAPTURE_WAIT_MS
+                    );
                 }
             }
             Phase::Wait => {
@@ -362,7 +367,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                     phase = Phase::Drive;
                     phase_tick = 0;
                     target_x += DRIVE_DISTANCE_M;
-                    defmt::info!("hwtest-capture: wait done → driving forward to x {} m", target_x);
+                    defmt::info!(
+                        "hwtest-capture: wait done → driving forward to x {} m",
+                        target_x
+                    );
                 }
             }
         }

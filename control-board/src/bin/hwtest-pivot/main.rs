@@ -363,11 +363,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                         data_format: ParameterDataFormat::VEC4_F32,
                         parameter_name: PIVOT_READBACK_PARAM,
                         data: ParameterCommand_ParameterData {
-                            vec3_f32: [
-                                orbit_radius,
-                                inset_angle,
-                                max_angular_acc,
-                            ],
+                            vec3_f32: [orbit_radius, inset_angle, max_angular_acc],
                         },
                     };
                     defmt::info!(

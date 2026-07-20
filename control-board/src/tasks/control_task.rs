@@ -20,8 +20,7 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 use crate::{
     include_external_cpp_bin,
     motion::{
-        active_brake::ActiveBrakeController,
-        body_controller::BodyController,
+        active_brake::ActiveBrakeController, body_controller::BodyController,
         control_context::VisionGateEvent,
     },
     motor::CurrentControlledMotor,
@@ -597,15 +596,21 @@ impl<
             } else if in_active_brake {
                 // Force current-only mode every tick while braking so the motion
                 // type cannot lag behind game state changes between command packets.
-                self.motor_fl.set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
-                self.motor_bl.set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
-                self.motor_br.set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
-                self.motor_fr.set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                self.motor_fl
+                    .set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                self.motor_bl
+                    .set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                self.motor_br
+                    .set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                self.motor_fr
+                    .set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
                 self.motor_fl.set_motion_enabled(true);
                 self.motor_bl.set_motion_enabled(true);
                 self.motor_br.set_motion_enabled(true);
                 self.motor_fr.set_motion_enabled(true);
-                let brake_a = self.active_brake_controller.compute(wheel_vel_meas, DEFAULT_CONTROL_DT);
+                let brake_a = self
+                    .active_brake_controller
+                    .compute(wheel_vel_meas, DEFAULT_CONTROL_DT);
                 (brake_a, Vector4f::default())
             } else {
                 self.active_brake_controller.reset();

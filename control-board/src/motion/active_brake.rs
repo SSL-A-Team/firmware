@@ -22,18 +22,15 @@ impl ActiveBrakeController {
     pub fn new() -> Self {
         // Gain rows: [Kp, Ki, Kd, Ki_err_min, Ki_err_max]
         let gains = SMatrix::<f32, 4, 5>::from_row_slice(&[
-            BRAKE_KP, 0.0, 0.0, 0.0, 0.0,
-            BRAKE_KP, 0.0, 0.0, 0.0, 0.0,
-            BRAKE_KP, 0.0, 0.0, 0.0, 0.0,
-            BRAKE_KP, 0.0, 0.0, 0.0, 0.0,
+            BRAKE_KP, 0.0, 0.0, 0.0, 0.0, BRAKE_KP, 0.0, 0.0, 0.0, 0.0, BRAKE_KP, 0.0, 0.0, 0.0,
+            0.0, BRAKE_KP, 0.0, 0.0, 0.0, 0.0,
         ]);
         let anti_jitter = Some(Vector4f::from_element(BRAKE_ANTI_JITTER_RADS));
         let limits = Some((
             Vector4f::from_element(-BRAKE_MAX_CURRENT_A),
             Vector4f::from_element(BRAKE_MAX_CURRENT_A),
         ));
-        let mut pid =
-            PidController::from_gains_matrix_with_anti_jitter(&gains, anti_jitter);
+        let mut pid = PidController::from_gains_matrix_with_anti_jitter(&gains, anti_jitter);
         pid.set_output_limits(limits);
         ActiveBrakeController { pid }
     }
@@ -43,7 +40,8 @@ impl ActiveBrakeController {
     /// Setpoint is zero (stop); process variable is raw encoder velocity.
     /// dt_s is the control loop period; only matters if Ki or Kd are non-zero.
     pub fn compute(&mut self, wheel_vel_meas: Vector4f, dt_s: f32) -> Vector4f {
-        self.pid.calculate(&Vector4f::zeros(), &wheel_vel_meas, dt_s)
+        self.pid
+            .calculate(&Vector4f::zeros(), &wheel_vel_meas, dt_s)
     }
 
     pub fn reset(&mut self) {
