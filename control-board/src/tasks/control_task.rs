@@ -19,7 +19,10 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 
 use crate::{
     include_external_cpp_bin,
-    motion::{body_controller::BodyController, control_context::VisionGateEvent},
+    motion::{
+        active_brake::ActiveBrakeController, body_controller::BodyController,
+        control_context::VisionGateEvent,
+    },
     motor::CurrentControlledMotor,
     parameter_interface::ParameterInterface,
     pins::*,
@@ -145,6 +148,7 @@ pub struct ControlTask<
     high_current_err_limiter: RateLimiter,
     loop_exec_err_limiter: RateLimiter,
     vision_gate_err_limiter: RateLimiter,
+    tracking_diverged_err_limiter: RateLimiter,
     body_vel_clamp_err_limiter: RateLimiter,
     body_accel_clamp_err_limiter: RateLimiter,
 
@@ -152,6 +156,8 @@ pub struct ControlTask<
     motor_bl: ControlWheelMotor,
     motor_br: ControlWheelMotor,
     motor_fr: ControlWheelMotor,
+
+    active_brake_controller: ActiveBrakeController,
 }
 
 impl<
@@ -205,6 +211,9 @@ impl<
             vision_gate_err_limiter: RateLimiter::new(Duration::from_millis(
                 ERROR_TELEM_RATE_LIMIT_MS,
             )),
+            tracking_diverged_err_limiter: RateLimiter::new(Duration::from_millis(
+                ERROR_TELEM_RATE_LIMIT_MS,
+            )),
             body_vel_clamp_err_limiter: RateLimiter::new(Duration::from_millis(
                 ERROR_TELEM_RATE_LIMIT_MS,
             )),
@@ -215,6 +224,7 @@ impl<
             motor_bl: motor_bl,
             motor_br: motor_br,
             motor_fr: motor_fr,
+            active_brake_controller: ActiveBrakeController::new(),
         }
     }
 
@@ -489,10 +499,6 @@ impl<
                 self.last_power_telemetry = power_telemetry;
             }
 
-            if self.last_command.game_state_in_stop() != 0 {
-                // TODO impl 1.5m/s clamping or something
-            }
-
             if self.last_command.reset_controller() != 0 {
                 robot_controller.reset();
             }
@@ -547,6 +553,15 @@ impl<
                             );
                         }
                     }
+                    if robot_controller.tracking_divergence_recovery_active()
+                        && self.tracking_diverged_err_limiter.is_allowed()
+                    {
+                        self.telemetry_publisher.publish_immediate(
+                            TelemetryPacket::ErrorTelemetry(create_error_telemetry_from_string(
+                                "tracking diverged (possible collision), braking before reset",
+                            )),
+                        );
+                    }
                 }
                 Err(e) => {
                     self.shared_robot_state.set_controls_err(true);
@@ -560,16 +575,45 @@ impl<
             }
             vision_update = false; // reset vision update flag after use
 
-            let (wheel_current_cmd, wheel_vel_cmd) = if self.stop_wheels()
+            let in_hard_stop = self.stop_wheels()
                 || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP
                 || _cmd_mode == BodyControlMode::BCM_OFF
-                || robot_controller.wheels_disabled()
-            {
+                || robot_controller.wheels_disabled();
+
+            let in_active_brake = !in_hard_stop
+                && (self.last_command.game_state_in_halt() != 0
+                    || self.last_command.emergency_stop() != 0
+                    || _cmd_mode == BodyControlMode::BCM_ESTOP_BRAKE
+                    || robot_controller.tracking_divergence_recovery_active());
+
+            // wheel_current_cmd in Amperes; converted to mA below.
+            let (wheel_current_cmd, wheel_vel_cmd) = if in_hard_stop {
                 if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS {
                     defmt::warn!("control task - motor commands locked out");
                 }
+                self.active_brake_controller.reset();
                 (Vector4f::default(), Vector4f::default())
+            } else if in_active_brake {
+                // Force current-only mode every tick while braking so the motion
+                // type cannot lag behind game state changes between command packets.
+                self.motor_fl
+                    .set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                self.motor_bl
+                    .set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                self.motor_br
+                    .set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                self.motor_fr
+                    .set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                self.motor_fl.set_motion_enabled(true);
+                self.motor_bl.set_motion_enabled(true);
+                self.motor_br.set_motion_enabled(true);
+                self.motor_fr.set_motion_enabled(true);
+                let brake_a = self
+                    .active_brake_controller
+                    .compute(wheel_vel_meas, DEFAULT_CONTROL_DT);
+                (brake_a, Vector4f::default())
             } else {
+                self.active_brake_controller.reset();
                 (
                     robot_controller.get_wheel_currents(),
                     robot_controller.get_wheel_velocities(),
@@ -842,7 +886,6 @@ impl<
         // self.last_power_telemetry.high_current_operations_allowed() == 0
         self.shared_robot_state.shutdown_requested()
             || self.shared_robot_state.get_controls_err()
-            || self.last_command.emergency_stop() != 0
             || self.last_command.reset_controller() != 0
     }
 }

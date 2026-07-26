@@ -85,12 +85,16 @@ class KickRequest(IntEnum):
 
 
 class BodyControlMode(IntEnum):
+    # Values must match software-communication basic_control.h BodyControlMode.
     BCM_OFF              = 0
-    BCM_GLOBAL_POSITION  = 1
-    BCM_GLOBAL_VELOCITY  = 2
-    BCM_LOCAL_VELOCITY   = 3
-    BCM_GLOBAL_ACCEL     = 4
-    BCM_LOCAL_ACCEL      = 5
+    BCM_ESTOP_BRAKE      = 1
+    BCM_GLOBAL_POSITION  = 10
+    BCM_GLOBAL_VELOCITY  = 11
+    BCM_LOCAL_VELOCITY   = 12
+    BCM_GLOBAL_ACCEL     = 13
+    BCM_LOCAL_ACCEL      = 14
+    BCM_HEADING_PIVOT    = 20
+    BCM_POINT_PIVOT      = 21
 
 
 # ---------------------------------------------------------------------------

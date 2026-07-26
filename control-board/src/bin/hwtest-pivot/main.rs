@@ -14,19 +14,27 @@
 //!   4. hold  at 0°      (1 s)   — robot stationary, held at start
 //!
 //! Button controls (take effect on the next command tick):
-//!   Down  — increase orbit radius (+1 cm)
-//!   Up    — decrease orbit radius (-1 cm)
-//!   Right — increase dribbler speed (+10 rpm)
-//!   Left  — decrease dribbler speed (-10 rpm)
+//!   Down  — increase orbit radius (+5 mm)
+//!   Up    — decrease orbit radius (-5 mm)
+//!   Right — increase inset angle (+0.1 rad)
+//!   Left  — decrease inset angle (-0.1 rad)
+//!   Enter — increase max angular velocity (+0.5 rad/s)
+//!   Back  — decrease max angular velocity (-0.5 rad/s)
+//!
+//! The robot ID knob sets the dribbler current setpoint (ID × 0.01); ID 0 stops
+//! all motion. Max angular acceleration is fixed at 2.0 rad/s². The tuned values
+//! [orbit_radius, inset_angle, max_angular_vel, max_angular_acc] can be read back
+//! over the radio via a parameter read of KF_PROCESS_STD (parameter 0).
 //!
 //! The ball is placed at the field origin (0, 0).
 
 use ateam_common_packets::{
     bindings::{
         BasicControl, BodyControlCommand, BodyControlMode, DribblerCommand, HeadingPivotCommand,
-        KickRequest,
+        KickRequest, ParameterCommand, ParameterCommandCode, ParameterCommand_ParameterData,
+        ParameterDataFormat, ParameterName,
     },
-    radio::DataPacket,
+    radio::{DataPacket, TelemetryPacket},
 };
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
@@ -40,7 +48,7 @@ use defmt_rtt as _;
 
 use ateam_control_board::{
     create_audio_task, create_control_task, create_dotstar_task, create_imu_task, create_io_task,
-    create_kicker_task, get_system_config,
+    create_kicker_task, create_radio_task, get_system_config,
     pins::{
         AccelDataPubSub, CommandsPubSub, GyroDataPubSub, KickerTelemetryPubSub, LedCommandPubSub,
         PowerTelemetryPubSub, TelemetryPubSub,
@@ -48,7 +56,12 @@ use ateam_control_board::{
     robot_state::SharedRobotState,
 };
 use ateam_controls::pivot_trajectory::PivotParams;
-use libm::roundf;
+
+// load credentials from correct crate
+#[cfg(not(feature = "no-private-credentials"))]
+use credentials::private_credentials::wifi::wifi_credentials;
+#[cfg(feature = "no-private-credentials")]
+use credentials::public_credentials::wifi::wifi_credentials;
 
 use embassy_time::Timer;
 use panic_probe as _;
@@ -62,7 +75,15 @@ static ROBOT_STATE: ConstStaticCell<SharedRobotState> =
     ConstStaticCell::new(SharedRobotState::new());
 
 static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
+// Commands received over the radio flow into their own channel so they don't
+// clash with the local pivot-sequencer commands on RADIO_C2_CHANNEL
+// (CommandsPubSub only permits a single publisher).
+static RADIO_C2_RX_CHANNEL: CommandsPubSub = PubSubChannel::new();
 static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
+// TelemetryPubSub only permits two publishers. The control task and the pivot
+// loop's parameter-response publisher take those two slots on the radio channel,
+// so IMU telemetry is routed to its own (unread) channel for this test.
+static IMU_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
 static GYRO_DATA_CHANNEL: GyroDataPubSub = PubSubChannel::new();
 static ACCEL_DATA_CHANNEL: AccelDataPubSub = PubSubChannel::new();
 static POWER_DATA_CHANNEL: PowerTelemetryPubSub = PubSubChannel::new();
@@ -92,17 +113,9 @@ unsafe fn CORDIC() {
 // Pivot sequencer constants
 // ============================================================================
 
-/// Pivot interval range mapped from the robot ID dial (0–15).
-/// Dial = 0  → MIN_PIVOT_DEG, Dial = 15 → MAX_PIVOT_DEG, linearly interpolated.
-const MIN_PIVOT_DEG: f32 = 5.0;
-const MAX_PIVOT_DEG: f32 = 180.0;
-const ROTARY_MAX: f32 = 15.0;
-
-fn pivot_angle_from_robot_id(robot_id: u8) -> f32 {
-    let t = (robot_id as f32).clamp(0.0, ROTARY_MAX) / ROTARY_MAX;
-    let deg = MIN_PIVOT_DEG + t * (MAX_PIVOT_DEG - MIN_PIVOT_DEG);
-    deg * core::f32::consts::PI / 180.0
-}
+/// Pivot step per leg, in degrees. The robot pivots this much clockwise each
+/// leg, wrapping around and continuing in a circle forever. Configurable here.
+const PIVOT_STEP_DEG: f32 = 90.0;
 
 /// Main loop interval in milliseconds (100 Hz command rate).
 const LOOP_INTERVAL_MS: u64 = 10;
@@ -115,64 +128,51 @@ const HOLD_TICKS: u32 = 100;
 
 /// Orbit radius adjustment per button press (meters).
 const ORBIT_RADIUS_STEP: f32 = 0.005;
-const ORBIT_RADIUS_MIN: f32 = 0.001;
+const ORBIT_RADIUS_MIN: f32 = 0.0;
 const ORBIT_RADIUS_MAX: f32 = 0.5;
 
 /// Inset angle adjustment per button press (radians).
-const INSET_ANGLE_STEP: f32 = 0.05;
+const INSET_ANGLE_STEP: f32 = 0.1;
 const INSET_ANGLE_MIN: f32 = -core::f32::consts::PI;
 const INSET_ANGLE_MAX: f32 = core::f32::consts::PI;
 
-/// Angular acceleration adjustment per button press (rad/s²).
-const ACCEL_STEP: f32 = 0.5;
-const ACCEL_MIN: f32 = 0.5;
-const ACCEL_MAX: f32 = 20.0 * core::f32::consts::PI;
+/// Fixed max angular acceleration for the pivot (rad/s²).
+const FIXED_MAX_ANGULAR_ACC: f32 = 2.0;
 
-/// Default max angular velocity — set high so the trajectory stays in the
-/// triangular (acceleration-limited) regime regardless of accel setting.
-const DEFAULT_MAX_ANGULAR_VEL: f32 = 4.0 * core::f32::consts::PI; // rad/s
+/// Max angular velocity adjustment per button press (rad/s).
+/// Enter increases, Back decreases.
+const ACC_STEP: f32 = 0.1;
+const ACC_MIN: f32 = 0.5;
+const ACC_MAX: f32 = 8.0 * core::f32::consts::PI;
 
-/// Sequence mode — change this constant to switch between half and full circle.
-const SEQUENCE_MODE: SequenceMode = SequenceMode::FullCircle;
+/// Initial max angular velocity (rad/s), tunable at runtime via Enter/Back.
+const DEFAULT_MAX_ANGULAR_ACC: f32 = 4.0 * core::f32::consts::PI; // rad/s
 
-// ============================================================================
-// Sequence mode
-// ============================================================================
-
-#[derive(Clone, Copy, PartialEq)]
-enum SequenceMode {
-    /// Alternates +interval → 0 → +interval repeatedly.
-    HalfCircle,
-    /// Sweeps CCW in `interval` steps until a full circle, then repeats.
-    FullCircle,
-}
-
-impl SequenceMode {
-    fn label(self) -> &'static str {
-        match self {
-            SequenceMode::HalfCircle => "half-circle",
-            SequenceMode::FullCircle => "full-circle",
-        }
-    }
-}
+/// Existing robot parameter reused to read back the tuned pivot values over the
+/// radio. A `PCC_READ` of this name is answered with a VEC4 payload carrying
+/// `[orbit_radius, inset_angle, max_angular_vel, max_angular_acc]`.
+const PIVOT_READBACK_PARAM: ParameterName::Type = ParameterName::KF_PROCESS_STD;
 
 // ============================================================================
 // Phase state machine
 // ============================================================================
 
-/// Number of pivot legs to complete one full circle at the given step angle.
-fn num_full_circle_legs(pivot_angle: f32) -> u32 {
-    use core::f32::consts::PI;
-    (roundf(2.0 * PI / pivot_angle) as u32).max(1)
+/// Pivot step per leg in radians (clockwise → negative).
+fn pivot_step_rad() -> f32 {
+    -PIVOT_STEP_DEG * core::f32::consts::PI / 180.0
 }
 
-/// Number of phase steps (pivot + hold pairs × 2) for the current mode and dial angle.
-fn phase_num_steps(mode: SequenceMode, pivot_angle: f32) -> u32 {
-    let legs = match mode {
-        SequenceMode::HalfCircle => 2,
-        SequenceMode::FullCircle => num_full_circle_legs(pivot_angle),
-    };
-    legs * 2
+/// Wrap an angle to (-π, π].
+fn wrap_pi(a: f32) -> f32 {
+    use core::f32::consts::PI;
+    let pi2 = 2.0 * PI;
+    let mut a = a % pi2;
+    if a > PI {
+        a -= pi2;
+    } else if a <= -PI {
+        a += pi2;
+    }
+    a
 }
 
 fn phase_duration_ticks(phase_idx: u32) -> u32 {
@@ -181,26 +181,6 @@ fn phase_duration_ticks(phase_idx: u32) -> u32 {
     } else {
         HOLD_TICKS
     }
-}
-
-/// Target heading for the given phase, in radians.
-fn phase_target(phase_idx: u32, mode: SequenceMode, pivot_angle: f32) -> f32 {
-    use core::f32::consts::PI;
-    let num_legs = match mode {
-        SequenceMode::HalfCircle => 2,
-        SequenceMode::FullCircle => num_full_circle_legs(pivot_angle),
-    };
-    let target_idx = (phase_idx / 2) % num_legs;
-    let raw = pivot_angle * (target_idx as f32 + 1.0);
-    // wrap to (-π, π]
-    let pi2 = 2.0 * PI;
-    let mut a = raw % pi2;
-    if a > PI {
-        a -= pi2;
-    } else if a <= -PI {
-        a += pi2;
-    }
-    a
 }
 
 // ============================================================================
@@ -236,8 +216,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let btn_down = Input::new(p.PE15, Pull::Up);
     let btn_left = Input::new(p.PE12, Pull::Up);
     let btn_right = Input::new(p.PE13, Pull::Up);
-    let btn_enter = Input::new(p.PE11, Pull::Up); // lower acceleration
-    let btn_back = Input::new(p.PE10, Pull::Up); // unused (accel set in code)
+    let btn_enter = Input::new(p.PE11, Pull::Up); // increase max angular velocity
+    let btn_back = Input::new(p.PE10, Pull::Up); // decrease max angular velocity
 
     // ── inter-task channels ──────────────────────────────────────────────────
 
@@ -248,7 +228,18 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let kicker_command_subscriber = RADIO_C2_CHANNEL.subscriber().unwrap();
 
     let control_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
-    let imu_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
+    // IMU telemetry goes to its own channel to leave a radio-telemetry publisher
+    // slot free for the pivot loop's parameter responses.
+    let imu_telemetry_publisher = IMU_TELEMETRY_CHANNEL.publisher().unwrap();
+    // Telemetry publisher used by the pivot loop to answer parameter reads.
+    let pivot_telemetry_publisher = RADIO_TELEMETRY_CHANNEL.publisher().unwrap();
+    let radio_telemetry_subscriber = RADIO_TELEMETRY_CHANNEL.subscriber().unwrap();
+
+    // Radio receives commands into its own channel; the pivot loop consumes them
+    // to answer parameter reads without disturbing the control task.
+    let radio_command_publisher = RADIO_C2_RX_CHANNEL.publisher().unwrap();
+    let mut radio_command_subscriber = RADIO_C2_RX_CHANNEL.subscriber().unwrap();
+    let radio_led_cmd_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
 
     let imu_gyro_data_publisher = GYRO_DATA_CHANNEL.publisher().unwrap();
     let imu_accel_data_publisher = ACCEL_DATA_CHANNEL.publisher().unwrap();
@@ -300,16 +291,28 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p
     );
 
-    let _ = radio_uart_queue_spawner; // radio task not needed; suppress unused warning
+    create_radio_task!(
+        main_spawner,
+        radio_uart_queue_spawner,
+        radio_uart_queue_spawner,
+        robot_state,
+        radio_command_publisher,
+        radio_telemetry_subscriber,
+        radio_led_cmd_publisher,
+        wifi_credentials,
+        p
+    );
 
     // ── tunable parameters (adjusted via buttons) ────────────────────────────
 
     let mut orbit_radius: f32 = PivotParams::default().orbit_radius;
     let mut inset_angle: f32 = PivotParams::default().inset_angle;
-    let mut max_angular_acc: f32 = PivotParams::default().max_accel_angular;
+    // Max angular velocity is tuned at runtime via Enter/Back; accel is fixed.
+    // let mut max_angular_acc: f32 = PivotParams::default().max_accel_angular;
+    let mut max_angular_acc: f32 = 7.0;
 
     defmt::info!(
-        "hwtest-pivot: orbit_radius = {} m, inset_angle = {} rad, max_angular_acc = {} rad/s²",
+        "hwtest-pivot: orbit_radius = {} m, inset_angle = {} rad, max_angular_acc = {} rad/s/s",
         orbit_radius,
         inset_angle,
         max_angular_acc,
@@ -324,6 +327,13 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut phase_idx: u32 = 0;
     let mut phase_tick: u32 = 0;
 
+    // Running pivot target, advanced one clockwise step at the start of each
+    // exec leg. Seeded one step ahead so the first leg pivots immediately.
+    let mut target_theta: f32 = wrap_pi(pivot_step_rad());
+
+    // Throttle counter for periodic parameter logging (1 Hz at 100 Hz loop).
+    let mut print_tick: u32 = 0;
+
     // Previous button states for falling-edge detection (true = not pressed).
     let mut prev_up = true;
     let mut prev_down = true;
@@ -332,11 +342,41 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut prev_enter = true;
     let mut prev_back = true;
 
-    defmt::info!("hwtest-pivot: starting — mode: {}", SEQUENCE_MODE.label());
+    defmt::info!(
+        "hwtest-pivot: starting — clockwise {} deg steps",
+        PIVOT_STEP_DEG,
+    );
 
     loop {
         Timer::after_millis(LOOP_INTERVAL_MS).await;
         phase_tick += 1;
+
+        // ── answer radio parameter reads with the tuned pivot values ─────────
+
+        while let Some(pkt) = radio_command_subscriber.try_next_message_pure() {
+            if let DataPacket::ParameterCommand(param_cmd) = pkt {
+                if param_cmd.command_code == ParameterCommandCode::PCC_READ
+                    && param_cmd.parameter_name == PIVOT_READBACK_PARAM
+                {
+                    let resp = ParameterCommand {
+                        command_code: ParameterCommandCode::PCC_ACK,
+                        data_format: ParameterDataFormat::VEC4_F32,
+                        parameter_name: PIVOT_READBACK_PARAM,
+                        data: ParameterCommand_ParameterData {
+                            vec3_f32: [orbit_radius, inset_angle, max_angular_acc],
+                        },
+                    };
+                    defmt::info!(
+                        "hwtest-pivot: param read → orbit_radius {} m, inset_angle {} rad, max_angular_acc {} rad/s",
+                        orbit_radius,
+                        inset_angle,
+                        max_angular_acc,
+                    );
+                    pivot_telemetry_publisher
+                        .publish_immediate(TelemetryPacket::ParameterCommandResponse(resp));
+                }
+            }
+        }
 
         // ── button edge detection (falling edge = press) ─────────────────────
 
@@ -364,12 +404,12 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             defmt::info!("hwtest-pivot: inset_angle → {} rad", inset_angle);
         }
         if prev_enter && !cur_enter {
-            max_angular_acc = (max_angular_acc + ACCEL_STEP).min(ACCEL_MAX);
-            defmt::info!("hwtest-pivot: max_angular_acc → {} rad/s²", max_angular_acc);
+            max_angular_acc = (max_angular_acc + ACC_STEP).min(ACC_MAX);
+            defmt::info!("hwtest-pivot: max_angular_acc → {} rad/s", max_angular_acc);
         }
         if prev_back && !cur_back {
-            max_angular_acc = (max_angular_acc - ACCEL_STEP).max(ACCEL_MIN);
-            defmt::info!("hwtest-pivot: max_angular_acc → {} rad/s²", max_angular_acc);
+            max_angular_acc = (max_angular_acc - ACC_STEP).max(ACC_MIN);
+            defmt::info!("hwtest-pivot: max_angular_acc → {} rad/s", max_angular_acc);
         }
 
         prev_up = cur_up;
@@ -381,19 +421,45 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
         // ── phase advance ────────────────────────────────────────────────────
 
-        let pivot_angle = pivot_angle_from_robot_id(robot_state.get_hw_robot_id());
+        // Robot ID 0 → stop all motion (wheels + dribbler off).
+        let robot_id = robot_state.get_hw_robot_id();
+        let motion_stopped = robot_id == 0;
+
+        // ── robot ID knob sets the 1e-2 digit of the dribbler setpoint ───────
+        // (robot ID 1 → 0.01, 2 → 0.02, …).
+        let dribbler_setpoint = if motion_stopped {
+            0.0
+        } else {
+            robot_id as f32 * 0.01
+        };
 
         if phase_tick >= phase_duration_ticks(phase_idx) {
-            phase_idx = (phase_idx + 1) % phase_num_steps(SEQUENCE_MODE, pivot_angle);
+            phase_idx = (phase_idx + 1) % 2;
             phase_tick = 0;
+            // Entering a new exec leg → advance the target one step clockwise.
+            if phase_idx == 0 {
+                target_theta = wrap_pi(target_theta + pivot_step_rad());
+            }
             defmt::info!(
-                "hwtest-pivot: phase {} → pivot_angle {} deg",
+                "hwtest-pivot: phase {} → target {} deg",
                 phase_idx,
-                pivot_angle * 180.0 / core::f32::consts::PI,
+                target_theta * 180.0 / core::f32::consts::PI,
             );
         }
 
-        let target_theta = phase_target(phase_idx, SEQUENCE_MODE, pivot_angle);
+        // ── periodic log of the currently-used parameters (1 Hz) ─────────────
+
+        print_tick += 1;
+        if print_tick >= 100 {
+            print_tick = 0;
+            defmt::info!(
+                "\n\nhwtest-pivot params:\norbit_radius={} m\ninset_angle={} rad\nmax_angular_acc={} rad/s²\ndribbler_setpoint={}",
+                orbit_radius,
+                inset_angle,
+                max_angular_acc,
+                dribbler_setpoint,
+            );
+        }
 
         // ── publish command ──────────────────────────────────────────────────
 
@@ -402,6 +468,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 0, // request_shutdown
                 0, // reboot_robot
                 0, // game_state_in_stop
+                0, // game_state_in_halt
                 0, // emergency_stop
                 1, // wheel_vel_control_enabled
                 1, // wheel_torque_control_enabled
@@ -413,18 +480,26 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
             vision_position_update: [0.0, 0.0, 0.0],
 
-            body_control_mode: BodyControlMode::BCM_HEADING_PIVOT,
+            body_control_mode: if motion_stopped {
+                BodyControlMode::BCM_OFF
+            } else {
+                BodyControlMode::BCM_HEADING_PIVOT
+            },
             kick_request: KickRequest::KR_DISABLE,
             play_song: 0,
-            dribbler_mode: DribblerCommand::DC_CURRENT,
+            dribbler_mode: if motion_stopped {
+                DribblerCommand::DC_DISABLE
+            } else {
+                DribblerCommand::DC_CURRENT
+            },
 
             kick_vel: 0.0,
-            dribbler_setpoint: 0.0,
+            dribbler_setpoint: dribbler_setpoint,
 
             cmd: BodyControlCommand {
                 heading_pivot: HeadingPivotCommand {
                     global_theta: target_theta,
-                    max_angular_vel: DEFAULT_MAX_ANGULAR_VEL,
+                    max_angular_vel: 20.0,
                     max_angular_acc: max_angular_acc,
                     orbit_radius,
                     inset_angle: inset_angle,

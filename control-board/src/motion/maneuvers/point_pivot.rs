@@ -1,5 +1,5 @@
 use crate::motion::control_context::{ControlContext, ManeuverSetpoints, TrackedTrajectory};
-use crate::motion::maneuvers::pivot::build_pivot_params;
+use crate::motion::maneuvers::build_pivot_params;
 use crate::motion::maneuvers::MotionManeuver;
 use ateam_common_packets::bindings::ExtendedPointPivotTelemetry;
 use ateam_common_packets::radio::{ManeuverCommand, ManeuverExtendedTelemetry};

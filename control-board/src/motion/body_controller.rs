@@ -1,14 +1,16 @@
-use crate::motion::control_context::ControlContext;
+use crate::motion::control_context::{ControlContext, ManeuverSetpoints, TrackingDivergenceState};
 use crate::motion::maneuvers::ManeuverManager;
 use crate::motion::params::controller_params::{
     EncLagMode, BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_LINEAR, BODY_VEL_CLAMP_ANGULAR,
-    BODY_VEL_CLAMP_LINEAR, ENC_LAG_MODE,
+    BODY_VEL_CLAMP_LINEAR, ENC_LAG_MODE, STOP_STATE_LINEAR_SPEED_LIMIT,
 };
 use crate::parameter_interface::ParameterInterface;
+use ateam_common_packets::bindings::BodyControlMode::{BCM_ESTOP_BRAKE, BCM_OFF};
 use ateam_common_packets::bindings::{
     BasicControl, BodyControlExtendedTelemetry, BodyControlTelemetry, ParameterCommand,
     ParameterCommandCode::*, ParameterName,
 };
+use ateam_common_packets::radio::ManeuverExtendedTelemetry;
 use ateam_controls::trajectory::Trajectory;
 use ateam_controls::{ControlsError, Vector3f, Vector4f};
 use embassy_time::Instant;
@@ -65,6 +67,13 @@ impl BodyController {
         self.control_context.wheels_disabled
     }
 
+    /// True while recovering from a trajectory divergence (e.g. a collision); the
+    /// control task should command the active brake. Reset happens automatically
+    /// once the wheels stop.
+    pub fn tracking_divergence_recovery_active(&self) -> bool {
+        self.control_context.tracking_divergence_state == TrackingDivergenceState::Recovering
+    }
+
     pub fn control_update(
         &mut self,
         last_command: BasicControl,
@@ -89,12 +98,56 @@ impl BodyController {
 
         let t_after_kf_update = Instant::now();
 
-        let (setpoints, maneuver_telem) = self
-            .maneuver_manager
-            .tick(last_command, &mut self.control_context)?;
+        // While the robot is halted (SSL HALT game state) or recovering from a
+        // trajectory divergence (e.g. a collision), the control task ignores the
+        // maneuver outputs and commands the active brake instead. Progressing the
+        // maneuver anyway would keep advancing its trajectory clock and publish
+        // telemetry (trajectory pose/vel, commanded twist/accel, maneuver state)
+        // implying motion the robot is not performing, which is confusing to
+        // observe. Hold the maneuver in a reset state and emit zero setpoints;
+        // when the state clears, the maneuver re-enters and replans from the
+        // current state estimate.
+        //
+        // The divergence-recovery state is read before running its state machine
+        // below, so it reflects the decision made on the previous tick.
+        let hold_maneuvers = last_command.game_state_in_halt() != 0
+            || self.control_context.tracking_divergence_state
+                == TrackingDivergenceState::Recovering
+            || last_command.body_control_mode == BCM_OFF
+            || last_command.body_control_mode == BCM_ESTOP_BRAKE;
+
+        let (setpoints, maneuver_telem) = if hold_maneuvers {
+            self.maneuver_manager.reset();
+            self.control_context.reset_trajectory();
+            (ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off)
+        } else {
+            self.maneuver_manager
+                .tick(last_command, &mut self.control_context)?
+        };
+
+        let disabled = self.control_context.wheels_disabled;
+        // Trajectory-divergence recovery: a large unexpected tracking error (e.g.
+        // a collision) trips into a braking recovery; the controller resets only
+        // after braking finishes, then tracking replans from the fresh estimate.
+        self.control_context
+            .update_tracking_divergence_recovery(wheel_vel_meas);
+        if !disabled {
+            self.control_context.wheels_disabled = false;
+        }
 
         self.body_twist_out = setpoints.body_twist;
         self.body_accel_out = setpoints.body_accel;
+
+        // SSL stop state: clamp linear speed after control policy output so feedback
+        // loops cannot overshoot to recover trajectory error.
+        if last_command.game_state_in_stop() != 0 {
+            let linear_speed = self.body_twist_out.xy().norm();
+            if linear_speed > STOP_STATE_LINEAR_SPEED_LIMIT {
+                let scale = STOP_STATE_LINEAR_SPEED_LIMIT / linear_speed;
+                self.body_twist_out.x *= scale;
+                self.body_twist_out.y *= scale;
+            }
+        }
 
         // Clamp body-level velocity before converting to wheel velocity setpoints.
         let twist_clamped_x = self
