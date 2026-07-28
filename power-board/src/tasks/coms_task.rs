@@ -201,22 +201,23 @@ pub async fn start_coms_task(
         uart,
         uart_rx_pin,
         uart_tx_pin,
-        SystemIrqs,
         uart_tx_dma,
         uart_rx_dma,
+        SystemIrqs,
         uart_config,
     )
     .unwrap();
     COMS_IDLE_BUFFERED_UART.init();
     idle_buffered_uart_spawn_tasks!(uart_queue_spawner, COMS, coms_uart);
-    spawner
-        .spawn(coms_task_entry(
+    spawner.spawn(
+        coms_task_entry(
             &COMS_IDLE_BUFFERED_UART,
             &COMS_IDLE_BUFFERED_UART.get_uart_read_queue(),
             &COMS_IDLE_BUFFERED_UART.get_uart_write_queue(),
             shared_power_state,
             telemetry_subscriber,
             _audio_publisher,
-        ))
-        .expect("failed to spawn coms task");
+        )
+        .expect("failed to spawn coms task"),
+    );
 }

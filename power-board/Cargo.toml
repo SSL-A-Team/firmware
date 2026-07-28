@@ -9,26 +9,27 @@ repository = "https://github.com/SSL-A-Team/firmware"
 cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7.5"
 
-embassy-executor = { version = "0.8.0", features = [
-    "arch-cortex-m",
+embassy-executor = { version = "0.10.0", features = [
+    "platform-cortex-m",
     "executor-thread",
     "executor-interrupt",
     "defmt",
+    "nightly",
 ] }
-embassy-time = { version = "0.4.0", features = [
+embassy-time = { version = "0.5.1", features = [
     "defmt",
     "defmt-timestamp-uptime",
     "tick-hz-32_768",
 ] }
-embassy-stm32 = { version = "0.3.0", features = [
+embassy-stm32 = { version = "0.6.0", features = [
     "defmt",
     "stm32g030c8",
-    "unstable-pac", 
+    "unstable-pac",
     "time-driver-tim1",
     "exti",
 ] }
-embassy-futures = { version = "0.1.0" }
-embassy-sync = { version = "0.7.1" }
+embassy-futures = { version = "0.1.2" }
+embassy-sync = { version = "0.8.0" }
 
 defmt = "1.0.1"
 defmt-rtt = "1.0.0"
@@ -63,10 +64,3 @@ harness = false
 name = "power"
 test = false
 harness = false
-
-[patch.crates-io]
-embassy-executor = { git = "https://github.com/embassy-rs/embassy"}
-embassy-sync = { git = "https://github.com/embassy-rs/embassy"}
-embassy-time = { git = "https://github.com/embassy-rs/embassy"}
-embassy-stm32 = { git = "https://github.com/embassy-rs/embassy"}
-embassy-futures = { git = "https://github.com/embassy-rs/embassy"}

@@ -12,28 +12,29 @@ cortex-m-rt = "0.7.5"
 defmt = "1.0.1"
 defmt-rtt = "1.0.0"
 
-embassy-executor = { version = "0.8.0", features = [
-    "arch-cortex-m",
+embassy-executor = { version = "0.10.0", features = [
+    "platform-cortex-m",
     "executor-thread",
     "executor-interrupt",
     "defmt",
+    "nightly",
 ] }
-embassy-time = { version = "0.4.0", features = [
+embassy-time = { version = "0.5.1", features = [
     "defmt",
     "defmt-timestamp-uptime",
     "tick-hz-32_768",
 ] }
-embassy-usb = { version = "0.5.0", features = ["defmt"] }
-embassy-stm32 = { version = "0.3.0", features = [
+embassy-usb = { version = "0.6.0", features = ["defmt"] }
+embassy-stm32 = { version = "0.6.0", features = [
     "defmt",
     "stm32h723zg",
-    "unstable-pac", 
+    "unstable-pac",
     "time-driver-tim1",
     "exti",
     "chrono"
 ] }
-embassy-futures = { version = "0.1.0" }
-embassy-sync = { version = "0.7.1" }
+embassy-futures = { version = "0.1.2" }
+embassy-sync = { version = "0.8.0" }
 
 static_cell = "2.1.1"
 futures-util = { version = "0.3.31", default-features = false }
@@ -150,11 +151,4 @@ harness = false
 [[test]]
 name = "drivetrain-test"
 harness = false
-
-[patch.crates-io]
-embassy-executor = { git = "https://github.com/embassy-rs/embassy"}
-embassy-sync = { git = "https://github.com/embassy-rs/embassy"}
-embassy-time = { git = "https://github.com/embassy-rs/embassy"}
-embassy-stm32 = { git = "https://github.com/embassy-rs/embassy"}
-embassy-futures = { git = "https://github.com/embassy-rs/embassy"}
 

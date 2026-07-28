@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 
 use defmt::*;
 use tasks::{get_system_config, ClkSource};
@@ -10,7 +11,7 @@ use cortex_m_rt::entry;
 
 use embassy_executor::Executor;
 use embassy_stm32::{
-    adc::{Adc, SampleTime},
+    adc::{Adc, AdcConfig, SampleTime},
     gpio::{Level, Output, Speed},
     Peri,
 };
@@ -20,6 +21,8 @@ use static_cell::StaticCell;
 
 use ateam_kicker_board::pins::*;
 use ateam_kicker_board::*;
+
+const ADC_SAMPLE_TIME: SampleTime = SampleTime::CYCLES247_5;
 
 #[embassy_executor::task]
 async fn run_kick(
@@ -45,10 +48,10 @@ async fn run_kick(
     Timer::after(Duration::from_millis(500)).await;
 
     let mut vrefint = adc.enable_vrefint();
-    let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
+    let vrefint_sample = adc.blocking_read(&mut vrefint, ADC_SAMPLE_TIME) as f32;
 
-    let mut hv = adc.blocking_read(&mut hv_pin) as f32;
-    let mut regv = adc.blocking_read(&mut rail_vsw_pin) as f32;
+    let mut hv = adc.blocking_read(&mut hv_pin, ADC_SAMPLE_TIME) as f32;
+    let mut regv = adc.blocking_read(&mut rail_vsw_pin, ADC_SAMPLE_TIME) as f32;
     info!(
         "hv V: {}, vsw reg mv: {}",
         adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)),
@@ -79,10 +82,10 @@ async fn run_kick(
     reg_charge.set_low();
 
     let mut vrefint = adc.enable_vrefint();
-    let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
+    let vrefint_sample = adc.blocking_read(&mut vrefint, ADC_SAMPLE_TIME) as f32;
 
-    hv = adc.blocking_read(&mut hv_pin) as f32;
-    regv = adc.blocking_read(&mut rail_vsw_pin) as f32;
+    hv = adc.blocking_read(&mut hv_pin, ADC_SAMPLE_TIME) as f32;
+    regv = adc.blocking_read(&mut rail_vsw_pin, ADC_SAMPLE_TIME) as f32;
     info!(
         "hv V: {}, batt mv: {}",
         adc_200v_to_rail_voltage(adc_raw_to_v(hv, vrefint_sample)),
@@ -93,10 +96,10 @@ async fn run_kick(
 
     loop {
         let mut vrefint = adc.enable_vrefint();
-        let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
+        let vrefint_sample = adc.blocking_read(&mut vrefint, ADC_SAMPLE_TIME) as f32;
 
-        hv = adc.blocking_read(&mut hv_pin) as f32;
-        regv = adc.blocking_read(&mut rail_vsw_pin) as f32;
+        hv = adc.blocking_read(&mut hv_pin, ADC_SAMPLE_TIME) as f32;
+        regv = adc.blocking_read(&mut rail_vsw_pin, ADC_SAMPLE_TIME) as f32;
 
         info!(
             "hv V: {}, batt mv: {}",
@@ -120,13 +123,19 @@ fn main() -> ! {
 
     info!("kicker startup!");
 
-    let mut adc = Adc::new(p.ADC1);
-    adc.set_resolution(embassy_stm32::adc::Resolution::BITS12);
-    adc.set_sample_time(SampleTime::CYCLES247_5);
+    let adc = Adc::new(
+        p.ADC1,
+        AdcConfig {
+            resolution: Some(embassy_stm32::adc::Resolution::BITS12),
+            ..Default::default()
+        },
+    );
 
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        unwrap!(spawner.spawn(run_kick(adc, p.PC3, p.PA1, p.PB15, p.PE0, p.PB9, p.PD9)));
+        spawner.spawn(unwrap!(run_kick(
+            adc, p.PC3, p.PA1, p.PB15, p.PE0, p.PB9, p.PD9
+        )));
     });
 }

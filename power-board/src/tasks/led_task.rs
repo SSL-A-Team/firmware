@@ -24,7 +24,5 @@ async fn led_task_entry() {
 pub async fn start_power_task(spawner: &Spawner) {
     // init Apa102 animation stuff
 
-    spawner
-        .spawn(led_task_entry())
-        .expect("failed to spawn led task");
+    spawner.spawn(led_task_entry().expect("failed to spawn led task"));
 }

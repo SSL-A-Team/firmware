@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(impl_trait_in_assoc_type)]
 
 use ateam_common_packets::{
     bindings::ParameterCommandCode,

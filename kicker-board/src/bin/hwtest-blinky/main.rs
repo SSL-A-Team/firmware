@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 
 use defmt::*;
 use {defmt_rtt as _, panic_probe as _};
@@ -8,13 +9,21 @@ use {defmt_rtt as _, panic_probe as _};
 use embassy_executor::Executor;
 use embassy_executor::Spawner;
 use embassy_stm32::{
-    adc::{Adc, SampleTime},
+    adc::{Adc, AdcConfig, SampleTime},
+    bind_interrupts,
     gpio::{Input, Level, Output, Pull, Speed},
+    peripherals,
     spi::{Config, Spi},
     time::mhz,
     Peri,
 };
 use embassy_time::{Duration, Timer};
+
+const ADC_SAMPLE_TIME: SampleTime = SampleTime::CYCLES247_5;
+
+bind_interrupts!(struct Irqs {
+    DMA2_CHANNEL8 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH8>;
+});
 
 use static_cell::StaticCell;
 
@@ -44,10 +53,6 @@ async fn blink(
 
     let usr_btn = Input::new(usr_btn_pin, Pull::None);
 
-    // let mut temp = adc.enable_temperature();
-    adc.set_resolution(embassy_stm32::adc::Resolution::BITS12);
-    adc.set_sample_time(SampleTime::CYCLES247_5);
-
     'outer: while usr_btn.is_low() {
         while usr_btn.is_high() {
             defmt::info!("btn pressed! - cycle");
@@ -71,12 +76,12 @@ async fn blink(
         Timer::after(Duration::from_millis(500)).await;
 
         let mut vrefint = adc.enable_vrefint();
-        let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
+        let vrefint_sample = adc.blocking_read(&mut vrefint, ADC_SAMPLE_TIME) as f32;
 
-        let raw_200v = adc.blocking_read(&mut rail_200v_pin) as f32;
-        let raw_12v = adc.blocking_read(&mut rail_12v0_pin) as f32;
-        let raw_5v0 = adc.blocking_read(&mut rail_5v0_pin) as f32;
-        let raw_3v3 = adc.blocking_read(&mut rail_3v3_pin) as f32;
+        let raw_200v = adc.blocking_read(&mut rail_200v_pin, ADC_SAMPLE_TIME) as f32;
+        let raw_12v = adc.blocking_read(&mut rail_12v0_pin, ADC_SAMPLE_TIME) as f32;
+        let raw_5v0 = adc.blocking_read(&mut rail_5v0_pin, ADC_SAMPLE_TIME) as f32;
+        let raw_3v3 = adc.blocking_read(&mut rail_3v3_pin, ADC_SAMPLE_TIME) as f32;
 
         // defmt::info!("voltages - 200v ({}), Vsw ({}), 5v0 ({}), 3v3 ({})",
         // adc_200v_to_rail_voltage(raw_200v),
@@ -108,6 +113,7 @@ async fn dotstar_lerp_task(
         dotstar_sck_pin,
         dotstar_mosi_pin,
         dotstar_tx_dma,
+        Irqs,
         dotstar_spi_config,
     );
 
@@ -158,17 +164,23 @@ async fn main(_spawner: Spawner) -> ! {
 
     info!("kicker startup 1.5!");
 
-    let adc = Adc::new(p.ADC1);
+    let adc = Adc::new(
+        p.ADC1,
+        AdcConfig {
+            resolution: Some(embassy_stm32::adc::Resolution::BITS12),
+            ..Default::default()
+        },
+    );
 
     info!("kicker startup 2!");
 
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        // unwrap!(spawner.spawn(shutdown_int(p.PD5, p.EXTI5, p.PD6)));
-        unwrap!(spawner.spawn(blink(
+        // spawner.spawn(unwrap!(shutdown_int(p.PD5, p.EXTI5, p.PD6)));
+        spawner.spawn(unwrap!(blink(
             p.PB15, p.PE0, p.PB9, p.PE1, p.PB5, adc, p.PC3, p.PA1, p.PA2, p.PA3
         )));
-        unwrap!(spawner.spawn(dotstar_lerp_task(p.SPI4, p.PE6, p.PE2, p.DMA2_CH8)));
+        spawner.spawn(unwrap!(dotstar_lerp_task(p.SPI4, p.PE6, p.PE2, p.DMA2_CH8)));
     });
 }

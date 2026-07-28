@@ -9,6 +9,7 @@ use core::{cmp::min, f32::consts::PI};
 
 use embassy_stm32::{
     gpio::{AnyPin, Level, Output, Speed},
+    interrupt::typelevel::Binding,
     mode::Async,
     spi::{self, MisoPin, MosiPin, SckPin},
     time::hz,
@@ -22,7 +23,7 @@ pub const SPI_MIN_BUF_LEN: usize = 8;
 
 /// SPI driver for the Bosch BMI085 IMU: Accel + Gyro
 pub struct Bmi085<'a, 'buf> {
-    spi: spi::Spi<'a, Async>,
+    spi: spi::Spi<'a, Async, spi::mode::Master>,
     accel_cs: Output<'a>,
     gyro_cs: Output<'a>,
     spi_buf: &'buf mut [u8; SPI_MIN_BUF_LEN],
@@ -202,7 +203,7 @@ const READ_BIT: u8 = 0x80;
 impl<'a, 'buf> Bmi085<'a, 'buf> {
     /// creates a new BMI085 instance from a pre-existing Spi peripheral
     pub fn new_from_spi(
-        spi: spi::Spi<'a, Async>,
+        spi: spi::Spi<'a, Async, spi::mode::Master>,
         accel_cs: Output<'a>,
         gyro_cs: Output<'a>,
         spi_buf: &'buf mut [u8; SPI_MIN_BUF_LEN],
@@ -218,13 +219,20 @@ impl<'a, 'buf> Bmi085<'a, 'buf> {
     }
 
     ///t creates a new BMI085 instance from uninitialized pins
-    pub fn new_from_pins<SpiPeri: spi::Instance>(
+    pub fn new_from_pins<
+        SpiPeri: spi::Instance,
+        TxDma: spi::TxDma<SpiPeri>,
+        RxDma: spi::RxDma<SpiPeri>,
+    >(
         peri: Peri<'a, SpiPeri>,
         sck: Peri<'a, impl SckPin<SpiPeri>>,
         mosi: Peri<'a, impl MosiPin<SpiPeri>>,
         miso: Peri<'a, impl MisoPin<SpiPeri>>,
-        txdma: Peri<'a, impl spi::TxDma<SpiPeri>>,
-        rxdma: Peri<'a, impl spi::RxDma<SpiPeri>>,
+        txdma: Peri<'a, TxDma>,
+        rxdma: Peri<'a, RxDma>,
+        spi_dma_irq: impl Binding<TxDma::Interrupt, embassy_stm32::dma::InterruptHandler<TxDma>>
+            + Binding<RxDma::Interrupt, embassy_stm32::dma::InterruptHandler<RxDma>>
+            + 'a,
         accel_cs: Peri<'a, AnyPin>,
         gyro_cs: Peri<'a, AnyPin>,
         spi_buf: &'buf mut [u8; SPI_MIN_BUF_LEN],
@@ -232,7 +240,7 @@ impl<'a, 'buf> Bmi085<'a, 'buf> {
         let mut spi_config = spi::Config::default();
         spi_config.frequency = hz(1_000_000);
 
-        let imu_spi = spi::Spi::new(peri, sck, mosi, miso, txdma, rxdma, spi_config);
+        let imu_spi = spi::Spi::new(peri, sck, mosi, miso, txdma, rxdma, spi_dma_irq, spi_config);
 
         let accel_cs = Output::new(accel_cs, Level::High, Speed::VeryHigh);
         let imu_cs = Output::new(gyro_cs, Level::High, Speed::VeryHigh);

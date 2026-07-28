@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(impl_trait_in_assoc_type)]
 #![feature(sync_unsafe_cell)]
 
 use ateam_common_packets::bindings::{CcmMotionControlType, CcmTelemetry};
@@ -110,9 +111,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p.UART7,
         p.PF6,
         p.PF7,
-        SystemIrqs,
         p.DMA1_CH0,
         p.DMA1_CH1,
+        SystemIrqs,
         initial_motor_controller_uart_conifg,
     )
     .unwrap();
@@ -121,9 +122,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p.USART10,
         p.PE2,
         p.PE3,
-        SystemIrqs,
         p.DMA1_CH2,
         p.DMA1_CH3,
+        SystemIrqs,
         initial_motor_controller_uart_conifg,
     )
     .unwrap();
@@ -132,9 +133,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p.USART6,
         p.PC7,
         p.PC6,
-        SystemIrqs,
         p.DMA1_CH4,
         p.DMA1_CH5,
+        SystemIrqs,
         initial_motor_controller_uart_conifg,
     )
     .unwrap();
@@ -143,9 +144,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p.USART3,
         p.PD9,
         p.PD8,
-        SystemIrqs,
         p.DMA1_CH6,
         p.DMA1_CH7,
+        SystemIrqs,
         initial_motor_controller_uart_conifg,
     )
     .unwrap();
@@ -253,11 +254,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let usb_device_driver = usb_builder.build();
 
     main_spawner
-        .spawn(usb_ll_driver_task(usb_device_driver))
-        .expect("failed to spawn USB driver task");
+        .spawn(usb_ll_driver_task(usb_device_driver).expect("failed to spawn USB driver task"));
     main_spawner
-        .spawn(usb_writer_task(cdc_usb_class, usb_subscriber))
-        .expect("failed to spawn USB task");
+        .spawn(usb_writer_task(cdc_usb_class, usb_subscriber).expect("failed to spawn USB task"));
 
     /////////////////////////////
     //  main task motor logic  //

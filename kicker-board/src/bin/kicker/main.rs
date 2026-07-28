@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 #![feature(sync_unsafe_cell)]
 
 use core::sync::atomic::Ordering::Relaxed;
@@ -29,7 +30,7 @@ use libm::{fmaxf, fminf};
 
 use embassy_executor::{InterruptExecutor, Spawner};
 use embassy_stm32::{
-    adc::{Adc, SampleTime},
+    adc::{Adc, AdcConfig, SampleTime},
     bind_interrupts,
     gpio::{Level, Output, Pull, Speed},
     interrupt::{self, InterruptExt},
@@ -102,6 +103,7 @@ const DRIB_MAX_RX_PACKET_SIZE: usize = core::mem::size_of::<CcmResponse>();
 const DRIB_RX_BUF_DEPTH: usize = 20;
 
 const DRIB_BALL_DETECT_THRESH_MA: u16 = 500;
+const ADC_SAMPLE_TIME: SampleTime = SampleTime::CYCLES247_5;
 static_idle_buffered_uart_nl!(
     DRIB,
     DRIB_MAX_RX_PACKET_SIZE,
@@ -188,10 +190,10 @@ async fn high_pri_kick_task(
 
     loop {
         let mut vrefint = adc.enable_vrefint();
-        let vrefint_sample = adc.blocking_read(&mut vrefint);
+        let vrefint_sample = adc.blocking_read(&mut vrefint, ADC_SAMPLE_TIME);
 
         let rail_voltage_cur = adc_200v_to_rail_voltage(adc_raw_to_v(
-            adc.blocking_read(&mut rail_pin) as f32,
+            adc.blocking_read(&mut rail_pin, ADC_SAMPLE_TIME) as f32,
             vrefint_sample as f32,
         ));
 
@@ -624,6 +626,10 @@ unsafe fn SPI3() {
 bind_interrupts!(struct Irqs {
     USART1 => usart::InterruptHandler<peripherals::USART1>;
     USART3 => usart::InterruptHandler<peripherals::USART3>;
+    DMA1_CHANNEL1 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH1>;
+    DMA1_CHANNEL2 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH2>;
+    DMA2_CHANNEL2 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH2>;
+    DMA2_CHANNEL7 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH7>;
 });
 
 #[embassy_executor::main]
@@ -641,9 +647,13 @@ async fn main(spawner: Spawner) -> ! {
     let _hv_opamp = hv_opamp_inst.pga_ext(p.PB0, p.PB1, OpAmpGain::Mul2);
 
     // config ADC
-    let mut adc = Adc::new(p.ADC1);
-    adc.set_resolution(embassy_stm32::adc::Resolution::BITS12);
-    adc.set_sample_time(SampleTime::CYCLES247_5);
+    let adc = Adc::new(
+        p.ADC1,
+        AdcConfig {
+            resolution: Some(embassy_stm32::adc::Resolution::BITS12),
+            ..Default::default()
+        },
+    );
 
     ///////////////////////
     //  Kick Task Setup  //
@@ -659,7 +669,7 @@ async fn main(spawner: Spawner) -> ! {
     let mp_spawner = EXECUTOR_MID.start(Interrupt::SPI3);
 
     // spawn the task at the highest prio
-    unwrap!(hp_spawner.spawn(high_pri_kick_task(
+    hp_spawner.spawn(unwrap!(high_pri_kick_task(
         COMS_IDLE_BUFFERED_UART.get_uart_read_queue(),
         COMS_IDLE_BUFFERED_UART.get_uart_write_queue(),
         adc,
@@ -693,9 +703,9 @@ async fn main(spawner: Spawner) -> ! {
         p.USART1,
         p.PA10,
         p.PA9,
-        Irqs,
         p.DMA2_CH7,
         p.DMA2_CH2,
+        Irqs,
         coms_uart_config,
     )
     .unwrap();
@@ -712,9 +722,9 @@ async fn main(spawner: Spawner) -> ! {
         p.USART3,
         p.PE15,
         p.PB10,
-        Irqs,
         p.DMA1_CH1,
         p.DMA1_CH2,
+        Irqs,
         initial_motor_controller_uart_config,
     )
     .unwrap();
@@ -732,8 +742,8 @@ async fn main(spawner: Spawner) -> ! {
         true,
     );
 
-    spawner
-        .spawn(low_pri_dribble_task(
+    spawner.spawn(
+        low_pri_dribble_task(
             drib_motor_interface,
             DRIB_CMD_PUBSUB
                 .subscriber()
@@ -741,8 +751,9 @@ async fn main(spawner: Spawner) -> ! {
             DRIB_TELEM_PUBSUB
                 .publisher()
                 .expect("failed to get drib telem pub for dribble task"),
-        ))
-        .expect("failed to spawn dribble task");
+        )
+        .expect("failed to spawn dribble task"),
+    );
 
     /////////////////////////////////////////
     //  spin and allow other tasks to run  //

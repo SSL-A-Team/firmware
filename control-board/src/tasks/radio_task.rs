@@ -716,11 +716,11 @@ pub async fn start_radio_task(
             radio_uart,
             radio_uart_rx_pin,
             radio_uart_tx_pin,
-            SystemIrqs,
             _radio_uart_rts_pin,
             _radio_uart_cts_pin,
             radio_uart_tx_dma,
             radio_uart_rx_dma,
+            SystemIrqs,
             uart_conifg,
         )
         .unwrap()
@@ -730,9 +730,9 @@ pub async fn start_radio_task(
             radio_uart,
             radio_uart_rx_pin,
             radio_uart_tx_pin,
-            SystemIrqs,
             radio_uart_tx_dma,
             radio_uart_rx_dma,
+            SystemIrqs,
             uart_conifg,
         )
         .unwrap()
@@ -744,13 +744,9 @@ pub async fn start_radio_task(
 
     defmt::info!("uart queue init");
 
-    rx_queue_spawner
-        .spawn(idle_buffered_uart_read_task!(RADIO, radio_uart_rx))
-        .unwrap();
+    rx_queue_spawner.spawn(idle_buffered_uart_read_task!(RADIO, radio_uart_rx).unwrap());
     defmt::info!("radio uart read task online");
-    tx_queue_spawner
-        .spawn(idle_buffered_uart_write_task!(RADIO, radio_uart_tx))
-        .unwrap();
+    tx_queue_spawner.spawn(idle_buffered_uart_write_task!(RADIO, radio_uart_tx).unwrap());
     defmt::info!("radio uart write task online");
 
     let radio_task = RadioTask::new_from_pins(
@@ -766,8 +762,6 @@ pub async fn start_radio_task(
         wifi_credentials,
     );
 
-    radio_task_spawner
-        .spawn(radio_task_entry(radio_task))
-        .unwrap();
+    radio_task_spawner.spawn(defmt::unwrap!(radio_task_entry(radio_task)));
     defmt::info!("radio task online");
 }

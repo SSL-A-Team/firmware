@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
-#![allow(incomplete_features)]
-#![feature(generic_const_exprs)]
+#![feature(impl_trait_in_assoc_type)]
 
 use defmt::*;
 use embassy_executor::Spawner;
@@ -73,8 +72,14 @@ async fn main(_spawner: Spawner) {
     // Get the pins from the schematic
     let dotstar_spi_buf: &'static mut [u8; 16] = unsafe { &mut DOTSTAR_SPI_BUFFER_CELL };
     // Dotstar SPI, SCK, MOSI, and TX_DMA
-    let mut dotstars =
-        Apa102::<2>::new_from_pins(p.SPI1, p.PB3, p.PB5, p.DMA1_CH2, dotstar_spi_buf.into());
+    let mut dotstars = Apa102::<2>::new_from_pins(
+        p.SPI1,
+        p.PB3,
+        p.PB5,
+        p.DMA1_CH2,
+        ateam_power_board::SystemIrqs,
+        dotstar_spi_buf,
+    );
     dotstars.set_drv_str_all(32);
 
     let mut adc_buf: [u16; 7] = [0; 7];
@@ -98,6 +103,7 @@ async fn main(_spawner: Spawner) {
     loop {
         adc.read(
             adc_dma.reborrow(),
+            ateam_power_board::SystemIrqs,
             [
                 (&mut cell0_adc_pin, SampleTime::CYCLES160_5),
                 (&mut cell1_adc_pin, SampleTime::CYCLES160_5),

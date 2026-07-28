@@ -78,7 +78,5 @@ pub fn start_audio_task(
     let audio_driver = Buzzer::new(pwm, Channel::Ch2);
     let tone_player = TonePlayer::new(audio_driver);
 
-    task_spawner
-        .spawn(audio_task_entry(robot_state, tone_player))
-        .unwrap();
+    task_spawner.spawn(defmt::unwrap!(audio_task_entry(robot_state, tone_player)));
 }

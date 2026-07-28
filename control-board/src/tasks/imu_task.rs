@@ -85,8 +85,8 @@ async fn imu_task_entry(
     led_command_pub: LedCommandPublisher,
     telemetry_pub: TelemetryPublisher,
     mut imu: Bmi323<'static, 'static>,
-    mut _accel_int: ExtiInput<'static>,
-    mut gyro_int: ExtiInput<'static>,
+    mut _accel_int: ExtiInput<'static, embassy_stm32::mode::Async>,
+    mut gyro_int: ExtiInput<'static, embassy_stm32::mode::Async>,
 ) {
     defmt::info!("imu start startup.");
     let mut first_tipped_check_time = Instant::now();
@@ -250,8 +250,8 @@ pub fn start_imu_task(
     _ext_nss2_pin: Peri<'static, ExtImuSpiNss2Pin>,
     accel_int_pin: Peri<'static, ImuSpiInt1Pin>,
     gyro_int_pin: Peri<'static, ImuSpiInt2Pin>,
-    accel_int: Peri<'static, <ImuSpiInt1Pin as embassy_stm32::gpio::Pin>::ExtiChannel>,
-    gyro_int: Peri<'static, <ImuSpiInt2Pin as embassy_stm32::gpio::Pin>::ExtiChannel>,
+    accel_int: Peri<'static, <ImuSpiInt1Pin as embassy_stm32::gpio::ExtiPin>::ExtiChannel>,
+    gyro_int: Peri<'static, <ImuSpiInt2Pin as embassy_stm32::gpio::ExtiPin>::ExtiChannel>,
     _ext_imu_det_pin: Peri<'static, ExtImuNDetPin>,
 ) {
     defmt::debug!("starting imu task...");
@@ -267,27 +267,26 @@ pub fn start_imu_task(
         miso,
         txdma,
         rxdma,
+        crate::SystemIrqs,
         bmi323_nss.into(),
         imu_buf,
     );
 
     // IMU breakout INT2 is directly connected to the MCU with no hardware PU/PD. Select software Pull::Up and
     // imu open drain
-    let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::None);
-    let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::None);
+    let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::None, crate::SystemIrqs);
+    let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::None, crate::SystemIrqs);
 
-    imu_task_spawner
-        .spawn(imu_task_entry(
-            robot_state,
-            gyro_data_publisher,
-            accel_data_publisher,
-            led_cmd_publisher,
-            telemetry_publisher,
-            imu,
-            accel_int,
-            gyro_int,
-        ))
-        .unwrap();
+    imu_task_spawner.spawn(defmt::unwrap!(imu_task_entry(
+        robot_state,
+        gyro_data_publisher,
+        accel_data_publisher,
+        led_cmd_publisher,
+        telemetry_publisher,
+        imu,
+        accel_int,
+        gyro_int,
+    )));
 }
 
 pub fn start_imu_task_via_ie(
@@ -308,8 +307,8 @@ pub fn start_imu_task_via_ie(
     _ext_nss2_pin: Peri<'static, ExtImuSpiNss2Pin>,
     accel_int_pin: Peri<'static, ImuSpiInt1Pin>,
     gyro_int_pin: Peri<'static, ImuSpiInt2Pin>,
-    accel_int: Peri<'static, <ImuSpiInt1Pin as embassy_stm32::gpio::Pin>::ExtiChannel>,
-    gyro_int: Peri<'static, <ImuSpiInt2Pin as embassy_stm32::gpio::Pin>::ExtiChannel>,
+    accel_int: Peri<'static, <ImuSpiInt1Pin as embassy_stm32::gpio::ExtiPin>::ExtiChannel>,
+    gyro_int: Peri<'static, <ImuSpiInt2Pin as embassy_stm32::gpio::ExtiPin>::ExtiChannel>,
     _ext_imu_det_pin: Peri<'static, ExtImuNDetPin>,
 ) {
     defmt::debug!("starting imu task...");
@@ -325,25 +324,24 @@ pub fn start_imu_task_via_ie(
         miso,
         txdma,
         rxdma,
+        crate::SystemIrqs,
         bmi323_nss.into(),
         imu_buf,
     );
 
     // IMU breakout INT2 is directly connected to the MCU with no hardware PU/PD. Select software Pull::Up and
     // imu open drain
-    let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::None);
-    let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::None);
+    let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::None, crate::SystemIrqs);
+    let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::None, crate::SystemIrqs);
 
-    imu_task_spawner
-        .spawn(imu_task_entry(
-            robot_state,
-            gyro_data_publisher,
-            accel_data_publisher,
-            led_cmd_publisher,
-            telemetry_publisher,
-            imu,
-            accel_int,
-            gyro_int,
-        ))
-        .unwrap();
+    imu_task_spawner.spawn(defmt::unwrap!(imu_task_entry(
+        robot_state,
+        gyro_data_publisher,
+        accel_data_publisher,
+        led_cmd_publisher,
+        telemetry_publisher,
+        imu,
+        accel_int,
+        gyro_int,
+    )));
 }

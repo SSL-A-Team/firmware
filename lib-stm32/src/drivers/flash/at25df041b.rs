@@ -6,7 +6,7 @@ use embassy_stm32::{
 };
 
 pub struct AT25DF041B<'buf, const CS_POL_N: bool> {
-    spi: spi::Spi<'static, Async>,
+    spi: spi::Spi<'static, Async, spi::mode::Master>,
     chip_select: Output<'static>,
     tx_buf: &'buf mut [u8; 256],
     rx_buf: &'buf mut [u8; 256],
@@ -14,7 +14,7 @@ pub struct AT25DF041B<'buf, const CS_POL_N: bool> {
 
 impl<'buf, const CS_POL_N: bool> AT25DF041B<'buf, CS_POL_N> {
     pub fn new(
-        spi: spi::Spi<'static, Async>,
+        spi: spi::Spi<'static, Async, spi::mode::Master>,
         chip_select: Peri<'static, AnyPin>,
         tx_buf: &'buf mut [u8; 256],
         rx_buf: &'buf mut [u8; 256],

@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(impl_trait_in_assoc_type)]
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 #![feature(sync_unsafe_cell)]

@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(impl_trait_in_assoc_type)]
 
 use defmt::*;
 use embassy_executor::Spawner;
@@ -46,14 +47,14 @@ async fn main(_spawner: Spawner) {
 
     let mut adc = Adc::new(p.ADC3);
 
-    adc.set_sample_time(SampleTime::CYCLES32_5);
+    const ADC_SAMPLE_TIME: SampleTime = SampleTime::CYCLES32_5;
 
     let mut vrefint_channel = adc.enable_vrefint();
 
     loop {
-        let vrefint = adc.blocking_read(&mut vrefint_channel);
+        let vrefint = adc.blocking_read(&mut vrefint_channel, ADC_SAMPLE_TIME);
         info!("vrefint: {}", vrefint);
-        let measured = adc.blocking_read(&mut p.PC0);
+        let measured = adc.blocking_read(&mut p.PC0, ADC_SAMPLE_TIME);
         info!("measured: {}", measured);
         Timer::after_millis(500).await;
     }

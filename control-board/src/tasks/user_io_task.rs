@@ -319,32 +319,41 @@ pub async fn start_io_task(
         Some(robot_id_indicator_isblue.into()),
     );
 
-    let battery_volt_adc = AdcHelper::new(
+    let battery_adc_inst = Adc::new_with_config(
         battery_adc_peri,
+        embassy_stm32::adc::AdcConfig {
+            resolution: Some(Resolution::BITS12),
+            ..Default::default()
+        },
+    );
+    let battery_volt_adc = AdcHelper::new(
+        battery_adc_inst,
         battery_adc_pin,
         SampleTime::CYCLES32_5,
         Resolution::BITS12,
     );
-    let mut vref_int_adc = Adc::new(vref_int_adc_peri);
     // Set the Vref_int ADC settings to the same as the battery.
-    vref_int_adc.set_resolution(Resolution::BITS12);
-    vref_int_adc.set_sample_time(SampleTime::CYCLES32_5);
+    let vref_int_adc = Adc::new_with_config(
+        vref_int_adc_peri,
+        embassy_stm32::adc::AdcConfig {
+            resolution: Some(Resolution::BITS12),
+            ..Default::default()
+        },
+    );
 
-    spawner
-        .spawn(user_io_task_entry(
-            robot_state,
-            battery_volt_adc,
-            vref_int_adc,
-            dip_switch,
-            debug_mode_dip,
-            team_color_dip,
-            robot_id_rotary,
-            debug_led0,
-            debug_led1,
-            debug_led2,
-            debug_led3,
-            robot_id_src_disagree_led,
-            robot_id_indicator,
-        ))
-        .unwrap();
+    spawner.spawn(defmt::unwrap!(user_io_task_entry(
+        robot_state,
+        battery_volt_adc,
+        vref_int_adc,
+        dip_switch,
+        debug_mode_dip,
+        team_color_dip,
+        robot_id_rotary,
+        debug_led0,
+        debug_led1,
+        debug_led2,
+        debug_led3,
+        robot_id_src_disagree_led,
+        robot_id_indicator,
+    )));
 }

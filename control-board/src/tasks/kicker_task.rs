@@ -373,9 +373,9 @@ pub async fn start_kicker_task(
         kicker_uart,
         kicker_uart_rx_pin,
         kicker_uart_tx_pin,
-        SystemIrqs,
         kicker_uart_tx_dma,
         kicker_uart_rx_dma,
+        SystemIrqs,
         initial_kicker_uart_conifg,
     )
     .unwrap();
@@ -394,7 +394,5 @@ pub async fn start_kicker_task(
         command_subscriber,
         kicker_telemetry_publisher,
     );
-    kicker_task_spawner
-        .spawn(kicker_task_entry(kicker_task))
-        .unwrap();
+    kicker_task_spawner.spawn(defmt::unwrap!(kicker_task_entry(kicker_task)));
 }
