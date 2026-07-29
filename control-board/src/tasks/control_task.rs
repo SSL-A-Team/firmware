@@ -954,9 +954,9 @@ pub async fn start_control_task(
         motor_fl_uart,
         motor_fl_rx_pin,
         motor_fl_tx_pin,
-        SystemIrqs,
         motor_fl_tx_dma,
         motor_fl_rx_dma,
+        SystemIrqs,
         initial_motor_controller_uart_conifg,
     )
     .unwrap();
@@ -964,9 +964,9 @@ pub async fn start_control_task(
         motor_bl_uart,
         motor_bl_rx_pin,
         motor_bl_tx_pin,
-        SystemIrqs,
         motor_bl_tx_dma,
         motor_bl_rx_dma,
+        SystemIrqs,
         initial_motor_controller_uart_conifg,
     )
     .unwrap();
@@ -974,9 +974,9 @@ pub async fn start_control_task(
         motor_br_uart,
         motor_br_rx_pin,
         motor_br_tx_pin,
-        SystemIrqs,
         motor_br_tx_dma,
         motor_br_rx_dma,
+        SystemIrqs,
         initial_motor_controller_uart_conifg,
     )
     .unwrap();
@@ -984,9 +984,9 @@ pub async fn start_control_task(
         motor_fr_uart,
         motor_fr_rx_pin,
         motor_fr_tx_pin,
-        SystemIrqs,
         motor_fr_tx_dma,
         motor_fr_rx_dma,
+        SystemIrqs,
         initial_motor_controller_uart_conifg,
     )
     .unwrap();
@@ -1056,7 +1056,5 @@ pub async fn start_control_task(
         motor_fr,
     );
 
-    control_task_spawner
-        .spawn(control_task_entry(control_task))
-        .unwrap();
+    control_task_spawner.spawn(defmt::unwrap!(control_task_entry(control_task)));
 }

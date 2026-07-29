@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 #![feature(sync_unsafe_cell)]
 
 use static_cell::StaticCell;
@@ -10,7 +11,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 use embassy_executor::{Executor, InterruptExecutor, Spawner};
 use embassy_stm32::{
-    adc::{Adc, Resolution, SampleTime},
+    adc::{Adc, AdcConfig, Resolution, SampleTime},
     gpio::{Level, Output, Speed},
     interrupt::{self, InterruptExt},
     pac::Interrupt,
@@ -40,6 +41,8 @@ const MAX_TX_PACKET_SIZE: usize = 16;
 const TX_BUF_DEPTH: usize = 3;
 const MAX_RX_PACKET_SIZE: usize = 16;
 const RX_BUF_DEPTH: usize = 3;
+
+const ADC_SAMPLE_TIME: SampleTime = SampleTime::CYCLES247_5;
 
 static_idle_buffered_uart_nl!(
     COMS,
@@ -88,10 +91,10 @@ async fn high_pri_kick_task(
 
     loop {
         let mut vrefint = adc.enable_vrefint();
-        let vrefint_sample = adc.blocking_read(&mut vrefint) as f32;
+        let vrefint_sample = adc.blocking_read(&mut vrefint, ADC_SAMPLE_TIME) as f32;
 
         let rail_voltage = adc_200v_to_rail_voltage(adc_raw_to_v(
-            adc.blocking_read(&mut rail_pin) as f32,
+            adc.blocking_read(&mut rail_pin, ADC_SAMPLE_TIME) as f32,
             vrefint_sample,
         ));
         // optionally pre-flag errors?
@@ -210,6 +213,8 @@ unsafe fn TIM2() {
 
 bind_interrupts!(struct Irqs {
     USART1 => usart::InterruptHandler<peripherals::USART1>;
+    DMA2_CHANNEL2 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH2>;
+    DMA2_CHANNEL7 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH7>;
 });
 
 #[embassy_executor::main]
@@ -221,9 +226,13 @@ async fn main(spawner: Spawner) -> ! {
 
     let _status_led = Output::new(p.PA11, Level::High, Speed::Low);
 
-    let mut adc = Adc::new(p.ADC1);
-    adc.set_resolution(Resolution::BITS12);
-    adc.set_sample_time(SampleTime::CYCLES247_5);
+    let adc = Adc::new(
+        p.ADC1,
+        AdcConfig {
+            resolution: Some(Resolution::BITS12),
+            ..Default::default()
+        },
+    );
 
     // high priority executor handles kicking system
     // High-priority executor: I2C1, priority level 6
@@ -244,9 +253,9 @@ async fn main(spawner: Spawner) -> ! {
         p.USART1,
         p.PA10,
         p.PA9,
-        Irqs,
         p.DMA2_CH7,
         p.DMA2_CH2,
+        Irqs,
         coms_uart_config,
     )
     .unwrap();
@@ -254,20 +263,18 @@ async fn main(spawner: Spawner) -> ! {
     COMS_IDLE_BUFFERED_UART.init();
     idle_buffered_uart_spawn_tasks!(spawner, COMS, coms_usart);
 
-    hp_spawner
-        .spawn(high_pri_kick_task(
-            COMS_IDLE_BUFFERED_UART.get_uart_read_queue(),
-            COMS_IDLE_BUFFERED_UART.get_uart_write_queue(),
-            adc,
-            p.PB15,
-            p.PD9,
-            p.PD8,
-            p.PC3,
-            p.PB9,
-            p.PE0,
-            p.PE1,
-        ))
-        .unwrap();
+    hp_spawner.spawn(unwrap!(high_pri_kick_task(
+        COMS_IDLE_BUFFERED_UART.get_uart_read_queue(),
+        COMS_IDLE_BUFFERED_UART.get_uart_write_queue(),
+        adc,
+        p.PB15,
+        p.PD9,
+        p.PD8,
+        p.PC3,
+        p.PB9,
+        p.PE0,
+        p.PE1,
+    )));
 
     loop {
         Timer::after_millis(1000).await;

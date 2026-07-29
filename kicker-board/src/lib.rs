@@ -1,7 +1,4 @@
 #![no_std]
-#![feature(type_alias_impl_trait)]
-#![feature(maybe_uninit_slice)]
-#![feature(sync_unsafe_cell)]
 
 pub mod drivers;
 pub mod tasks;

@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(sync_unsafe_cell)]
 #![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 
 use defmt::*;
 use {defmt_rtt as _, panic_probe as _};
@@ -35,6 +36,8 @@ static_idle_buffered_uart!(DRIB, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET
 
 bind_interrupts!(struct Irqs {
     USART3 => usart::InterruptHandler<peripherals::USART3>;
+    DMA1_CHANNEL1 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH1>;
+    DMA1_CHANNEL2 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH2>;
 });
 
 static UART_QUEUE_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
@@ -63,9 +66,9 @@ async fn main(_spawner: Spawner) -> ! {
         p.USART3,
         p.PE15,
         p.PB10,
-        Irqs,
         p.DMA1_CH1,
         p.DMA1_CH2,
+        Irqs,
         initial_motor_controller_uart_conifg,
     )
     .unwrap();

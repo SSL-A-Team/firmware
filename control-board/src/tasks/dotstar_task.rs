@@ -222,10 +222,12 @@ pub async fn start_dotstar_task(
         dotstar_sck_pin,
         dotstar_mosi_pin,
         dotstar_tx_dma,
-        dotstar_spi_buf.into(),
+        crate::SystemIrqs,
+        dotstar_spi_buf,
     );
 
-    spawner
-        .spawn(dotstar_task_entry(led_command_subscriber, dotstars))
-        .unwrap();
+    spawner.spawn(defmt::unwrap!(dotstar_task_entry(
+        led_command_subscriber,
+        dotstars
+    )));
 }

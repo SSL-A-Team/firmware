@@ -123,7 +123,7 @@ pub fn start_audio_task(
     let audio_driver = Buzzer::new(pwm, Channel::Ch1);
     let tone_player = TonePlayer::new(audio_driver);
 
-    spawner
-        .spawn(audio_task_entry(tone_player, audio_subscriber))
-        .expect("failed to spawn audio task");
+    spawner.spawn(
+        audio_task_entry(tone_player, audio_subscriber).expect("failed to spawn audio task"),
+    );
 }

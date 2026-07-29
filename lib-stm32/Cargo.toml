@@ -8,11 +8,11 @@ repository = "https://github.com/SSL-A-Team/firmware"
 
 [dependencies]
 ateam-lib-crossarch = { path = "../lib-crossarch", features = ["defmt", "smart-leds"] }
-embassy-stm32 = { version = "0.3.0", default-features = false, features = ["exti"]}
-embassy-executor = { version = "0.8.0", default-features = false }
-embassy-sync = { version = "0.7.1" }
-embassy-futures = { version = "0.1.0" }
-embassy-time = { version = "0.4.0" }
+embassy-stm32 = { version = "0.6.0", default-features = false, features = ["exti"]}
+embassy-executor = { version = "0.10.0", default-features = false }
+embassy-sync = { version = "0.8.0" }
+embassy-futures = { version = "0.1.2" }
+embassy-time = { version = "0.5.1" }
 paste = { version = "1.0.15" }
 
 defmt = "1.0.1"
@@ -30,13 +30,6 @@ smart-leds = "0.4.0"
 default = ["embassy-stm32/stm32h723zg"]
 strict = ["embassy-stm32/stm32h723zg"]
 # stm32h723zg = []
-
-[patch.crates-io]
-embassy-executor = { git = "https://github.com/embassy-rs/embassy"}
-embassy-sync = { git = "https://github.com/embassy-rs/embassy"}
-embassy-time = { git = "https://github.com/embassy-rs/embassy"}
-embassy-stm32 = { git = "https://github.com/embassy-rs/embassy"}
-embassy-futures = { git = "https://github.com/embassy-rs/embassy"}
 
 [dev-dependencies]
 defmt-test = "0.4.0"

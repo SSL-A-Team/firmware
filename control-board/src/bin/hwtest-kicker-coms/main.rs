@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(impl_trait_in_assoc_type)]
 #![feature(sync_unsafe_cell)]
 #![feature(generic_const_exprs)]
 
@@ -54,9 +55,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.USART6,
         p.PC7,
         p.PC6,
-        ateam_control_board::SystemIrqs,
         p.DMA2_CH4,
         p.DMA2_CH5,
+        ateam_control_board::SystemIrqs,
         stm32_interface::get_bootloader_uart_config(),
     )
     .unwrap();

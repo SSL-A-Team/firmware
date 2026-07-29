@@ -255,9 +255,9 @@ pub fn start_power_task(
         power_uart,
         power_uart_rx_pin,
         power_uart_tx_pin,
-        SystemIrqs,
         power_uart_tx_dma,
         power_uart_rx_dma,
+        SystemIrqs,
         uart_config,
     )
     .unwrap();
@@ -281,8 +281,6 @@ pub fn start_power_task(
         last_power_status: unsafe { MaybeUninit::zeroed().assume_init() },
     };
 
-    power_task_spawner
-        .spawn(power_task_entry(power_task))
-        .unwrap();
+    power_task_spawner.spawn(defmt::unwrap!(power_task_entry(power_task)));
     defmt::info!("power task online");
 }

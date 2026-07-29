@@ -1,6 +1,7 @@
 use core::ops::Range;
 
 use embassy_stm32::{
+    interrupt::typelevel::Binding,
     mode::Async,
     spi::{self, Config, MosiPin, SckPin, Spi},
     time::mhz,
@@ -21,23 +22,16 @@ pub const fn apa102_buf_len(num_leds: usize) -> usize {
     8 + (num_leds * 4)
 }
 
-pub struct Apa102<'a, 'buf, const NUM_LEDS: usize>
-where
-    [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]:,
-{
-    spi: spi::Spi<'a, Async>,
-    spi_buf: &'buf mut [u8; (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE],
+pub struct Apa102<'a, 'buf, const NUM_LEDS: usize> {
+    spi: spi::Spi<'a, Async, spi::mode::Master>,
+    spi_buf: &'buf mut [u8],
     needs_update: bool,
 }
 
-impl<'a, 'buf, const NUM_LEDS: usize> Apa102<'a, 'buf, NUM_LEDS>
-where
-    [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]:,
-{
-    pub fn new(
-        spi: spi::Spi<'a, Async>,
-        spi_buf: &'buf mut [u8; (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE],
-    ) -> Self {
+impl<'a, 'buf, const NUM_LEDS: usize> Apa102<'a, 'buf, NUM_LEDS> {
+    pub fn new(spi: spi::Spi<'a, Async, spi::mode::Master>, spi_buf: &'buf mut [u8]) -> Self {
+        assert_eq!(spi_buf.len(), apa102_buf_len(NUM_LEDS));
+
         // set start frame
         spi_buf[0] = 0x00;
         spi_buf[1] = 0x00;
@@ -57,17 +51,26 @@ where
         }
     }
 
-    pub fn new_from_pins<SpiPeri: spi::Instance>(
+    pub fn new_from_pins<SpiPeri: spi::Instance, TxDma: spi::TxDma<SpiPeri>>(
         peri: Peri<'static, SpiPeri>,
         sck_pin: Peri<'static, impl SckPin<SpiPeri>>,
         mosi_pin: Peri<'static, impl MosiPin<SpiPeri>>,
-        tx_dma: Peri<'static, impl spi::TxDma<SpiPeri>>,
-        spi_buf: &'buf mut [u8; (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE],
+        tx_dma: Peri<'static, TxDma>,
+        tx_dma_irq: impl Binding<TxDma::Interrupt, embassy_stm32::dma::InterruptHandler<TxDma>>
+            + 'static,
+        spi_buf: &'buf mut [u8],
     ) -> Self {
         let mut dotstar_spi_config = Config::default();
         dotstar_spi_config.frequency = mhz(1);
 
-        let spi = Spi::new_txonly(peri, sck_pin, mosi_pin, tx_dma, dotstar_spi_config);
+        let spi = Spi::new_txonly(
+            peri,
+            sck_pin,
+            mosi_pin,
+            tx_dma,
+            tx_dma_irq,
+            dotstar_spi_config,
+        );
 
         Self::new(spi, spi_buf)
     }
@@ -142,10 +145,7 @@ where
     }
 }
 
-pub struct Apa102Anim<'a, 'buf, 'ca, const NUM_LEDS: usize>
-where
-    [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]:,
-{
+pub struct Apa102Anim<'a, 'buf, 'ca, const NUM_LEDS: usize> {
     apa102_driver: Apa102<'a, 'buf, NUM_LEDS>,
     active_animation: [usize; NUM_LEDS],
     animation_playbook_buf: [Option<&'ca mut [CompositeAnimation<'ca, u8, RGB8>]>; NUM_LEDS],
@@ -153,10 +153,7 @@ where
     // animation_buf: [Option<&'ca mut CompositeAnimation<'ca, u8, RGB8>>; NUM_LEDS],
 }
 
-impl<'a, 'buf, 'ca, const NUM_LEDS: usize> Apa102Anim<'a, 'buf, 'ca, NUM_LEDS>
-where
-    [(); (NUM_LEDS * COLOR_FRAME_SIZE) + HEADER_FRAME_SIZE]:,
-{
+impl<'a, 'buf, 'ca, const NUM_LEDS: usize> Apa102Anim<'a, 'buf, 'ca, NUM_LEDS> {
     pub fn new(
         apa102: Apa102<'a, 'buf, NUM_LEDS>,
         anim_playbook_buf: [Option<&'ca mut [CompositeAnimation<'ca, u8, RGB8>]>; NUM_LEDS],

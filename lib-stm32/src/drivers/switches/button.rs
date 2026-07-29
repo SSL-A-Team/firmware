@@ -1,8 +1,10 @@
 use defmt::Format;
 use embassy_futures::select;
 use embassy_stm32::{
-    exti::ExtiInput,
-    gpio::{Pin, Pull},
+    exti::{Channel, ExtiInput, InterruptHandler as ExtiInterruptHandler},
+    gpio::{ExtiPin, Pin, Pull},
+    interrupt::typelevel::Binding,
+    mode::Async,
     Peri,
 };
 use embassy_time::{Instant, Timer};
@@ -33,7 +35,7 @@ pub struct AdvExtiButton<
     const HOLD_PRESS_TIME_MS: u64 = 1200,
     const PRESS_TO_MS: u64 = 400,
 > {
-    input: ExtiInput<'static>,
+    input: ExtiInput<'static, Async>,
     input_inverted: bool,
 
     prev_btn_state: BtnState,
@@ -48,7 +50,7 @@ impl<
         const PRESS_TO_MS: u64,
     > AdvExtiButton<SHORT_PRESS_TIME_MS, LONG_PRESS_TIME_MS, HOLD_PRESS_TIME_MS, PRESS_TO_MS>
 {
-    pub fn new(input: ExtiInput<'static>, input_inverted: bool) -> Self {
+    pub fn new(input: ExtiInput<'static, Async>, input_inverted: bool) -> Self {
         Self {
             input,
             input_inverted,
@@ -58,12 +60,16 @@ impl<
         }
     }
 
-    pub fn new_from_pins<PIN: Pin>(
+    pub fn new_from_pins<PIN: Pin + ExtiPin>(
         input_pin: Peri<'static, PIN>,
-        input_pin_exti: Peri<'static, <PIN as Pin>::ExtiChannel>,
+        input_pin_exti: Peri<'static, <PIN as ExtiPin>::ExtiChannel>,
+        exti_irq: impl Binding<
+            <<PIN as ExtiPin>::ExtiChannel as Channel>::IRQ,
+            ExtiInterruptHandler<<<PIN as ExtiPin>::ExtiChannel as Channel>::IRQ>,
+        >,
         input_inverted: bool,
     ) -> Self {
-        let input = ExtiInput::new(input_pin, input_pin_exti, Pull::None);
+        let input = ExtiInput::new(input_pin, input_pin_exti, Pull::None, exti_irq);
         Self::new(input, input_inverted)
     }
 

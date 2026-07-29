@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(impl_trait_in_assoc_type)]
 
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{interrupt, pac::Interrupt, wdg::IndependentWatchdog};

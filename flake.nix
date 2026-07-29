@@ -59,7 +59,7 @@
         virtualRootOverlay = _final: prev: {
           ateam-firmware-scripts = prev.ateam-firmware-scripts.overrideAttrs (_old: {
             dontBuild   = true;
-            installPhase = "true";
+            installPhase = "mkdir -p $out";
           });
         };
 
@@ -95,7 +95,7 @@
             # programmers
             dfu-util
             openocd
-            probe-rs
+            probe-rs-tools
 
             # userpsace clang and link vars for bindgen subtargets
             clang

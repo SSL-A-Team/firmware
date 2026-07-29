@@ -95,8 +95,8 @@ macro_rules! idle_buffered_uart_spawn_tasks {
     ($spawner:ident, $name:ident, $uart:ident) => {
         $crate::paste::item! {
             let ([<$name:lower _uart_tx>], [<$name:lower _uart_rx>]) = Uart::split($uart);
-            $spawner.spawn($crate::idle_buffered_uart_read_task!($name, [<$name:lower _uart_rx>])).unwrap();
-            $spawner.spawn($crate::idle_buffered_uart_write_task!($name, [<$name:lower _uart_tx>])).unwrap();
+            $spawner.spawn($crate::idle_buffered_uart_read_task!($name, [<$name:lower _uart_rx>]).unwrap());
+            $spawner.spawn($crate::idle_buffered_uart_write_task!($name, [<$name:lower _uart_tx>]).unwrap());
         }
     };
 }

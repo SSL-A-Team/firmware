@@ -176,6 +176,7 @@ async fn power_task_entry(
         .into_iter();
         adc.read(
             adc_dma.reborrow(),
+            crate::SystemIrqs,
             power_rail_read_seq,
             &mut power_rail_adc_raw_samples,
         )
@@ -243,6 +244,7 @@ async fn power_task_entry(
             .into_iter();
             adc.read(
                 adc_dma.reborrow(),
+                crate::SystemIrqs,
                 battery_cell_read_seq,
                 &mut battery_cell_adc_raw_samples,
             )
@@ -410,8 +412,8 @@ pub async fn start_power_task(
     power_rail_vbatt_before_lsw_adc_pin: Peri<'static, BatteryPreLoadSwitchVoltageMonitorPin>,
     power_rail_vbatt_adc_pin: Peri<'static, BatteryVoltageMonitorPin>,
 ) {
-    spawner
-        .spawn(power_task_entry(
+    spawner.spawn(
+        power_task_entry(
             shared_power_state,
             telemetry_publisher,
             audio_publisher,
@@ -428,6 +430,7 @@ pub async fn start_power_task(
             power_rail_3v3_adc_pin,
             power_rail_vbatt_before_lsw_adc_pin,
             power_rail_vbatt_adc_pin,
-        ))
-        .expect("failed to spawn power task");
+        )
+        .expect("failed to spawn power task"),
+    );
 }

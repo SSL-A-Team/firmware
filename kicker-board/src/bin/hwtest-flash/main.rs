@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 
 use defmt::*;
 use static_cell::StaticCell;
@@ -8,6 +9,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 use embassy_executor::Spawner;
 use embassy_stm32::{
+    bind_interrupts, peripherals,
     spi::{Config, Spi},
     time::Hertz,
 };
@@ -18,6 +20,11 @@ use ateam_kicker_board::{tasks::get_system_config, *};
 
 use panic_probe as _;
 // use panic_halt as _;
+
+bind_interrupts!(struct Irqs {
+    DMA1_CHANNEL3 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH3>;
+    DMA1_CHANNEL4 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH4>;
+});
 
 #[link_section = ".bss"]
 static FLASH_RX_BUF: StaticCell<[u8; 256]> = StaticCell::new();
@@ -35,7 +42,7 @@ async fn main(_spawner: Spawner) -> ! {
     spi_config.frequency = Hertz(1_000_000);
 
     let spi = Spi::new(
-        p.SPI2, p.PB13, p.PB15, p.PB14, p.DMA1_CH4, p.DMA1_CH3, spi_config,
+        p.SPI2, p.PB13, p.PB15, p.PB14, p.DMA1_CH4, p.DMA1_CH3, Irqs, spi_config,
     );
 
     let rx_buf = FLASH_RX_BUF.init([0; 256]);

@@ -4,6 +4,7 @@
 #![feature(inherent_associated_types)]
 #![feature(generic_const_exprs)]
 #![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 #![feature(maybe_uninit_slice, maybe_uninit_write_slice)]
 #![feature(ptr_metadata)]
 #![feature(sync_unsafe_cell)]
@@ -45,6 +46,31 @@ bind_interrupts!(pub struct SystemIrqs {
     UART9 => usart::InterruptHandler<peripherals::UART9>;
     UART4 => usart::InterruptHandler<peripherals::UART4>;
     USART1 => usart::InterruptHandler<peripherals::USART1>;
+
+    // DMA channel interrupts required by embassy-stm32 0.6.0's Uart/Spi ::new()
+    // (every DMA1/DMA2 channel used by any UART or SPI peripheral across this crate)
+    DMA1_STREAM0 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH0>;
+    DMA1_STREAM1 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH1>;
+    DMA1_STREAM2 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH2>;
+    DMA1_STREAM3 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH3>;
+    DMA1_STREAM4 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH4>;
+    DMA1_STREAM5 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH5>;
+    DMA1_STREAM6 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH6>;
+    DMA1_STREAM7 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH7>;
+    DMA2_STREAM0 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH0>;
+    DMA2_STREAM1 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH1>;
+    DMA2_STREAM2 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH2>;
+    DMA2_STREAM3 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH3>;
+    DMA2_STREAM4 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH4>;
+    DMA2_STREAM5 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH5>;
+    DMA2_STREAM6 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH6>;
+    DMA2_STREAM7 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH7>;
+
+    // EXTI channel interrupts required by embassy-stm32 0.6.0's ExtiInput::new()
+    EXTI0 => embassy_stm32::exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI0>;
+    EXTI1 => embassy_stm32::exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI1>;
+
+    BDMA_CHANNEL0 => embassy_stm32::dma::InterruptHandler<peripherals::BDMA_CH0>;
 });
 
 pub const DEBUG_RADIO_UART_QUEUES: bool = false;

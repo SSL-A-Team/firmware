@@ -147,7 +147,7 @@ async fn handle_btn_press(
         DEBUG_QUEUE,
     >,
 ) {
-    let mut usr_btn = ExtiInput::new(usr_btn_pin, usr_btn_exti, Pull::Down);
+    let mut usr_btn = ExtiInput::new(usr_btn_pin, usr_btn_exti, Pull::Down, Irqs);
 
     let mut green_led = Output::new(led_green_pin, Level::High, Speed::Medium);
     let mut yellow_led = Output::new(led_yellow_pin, Level::Low, Speed::Medium);
@@ -202,6 +202,9 @@ unsafe fn TIM2() {
 
 bind_interrupts!(struct Irqs {
     USART6 => usart::InterruptHandler<peripherals::USART6>;
+    DMA1_STREAM1 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH1>;
+    DMA1_STREAM2 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH2>;
+    EXTI15_10 => embassy_stm32::exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI15_10>;
 });
 
 #[embassy_executor::main]
@@ -231,10 +234,10 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
     let coms_usart = Uart::new(
         p.USART6,
         p.PC7, // rx
-        p.PC6, // tx
-        Irqs,
+        p.PC6,
         p.DMA1_CH1,
-        p.DMA1_CH2,
+        p.DMA1_CH2, // tx
+        Irqs,
         coms_uart_config,
     )
     .unwrap();
@@ -249,7 +252,7 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        unwrap!(spawner.spawn(handle_btn_press(
+        spawner.spawn(unwrap!(handle_btn_press(
             p.PC13,
             p.EXTI13,
             p.PB0,
@@ -257,13 +260,13 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
             p.PB14,
             &COMS_IDLE_BUFFERED_UART
         )));
-        unwrap!(spawner.spawn(rx_task(COMS_IDLE_BUFFERED_UART.get_uart_read_queue())));
-        unwrap!(spawner.spawn(tx_task(COMS_IDLE_BUFFERED_UART.get_uart_write_queue())));
-        spawner
-            .spawn(idle_buffered_uart_read_task!(coms, coms_uart_rx))
-            .unwrap();
-        spawner
-            .spawn(idle_buffered_uart_write_task!(coms, coms_uart_tx))
-            .unwrap();
+        spawner.spawn(unwrap!(rx_task(
+            COMS_IDLE_BUFFERED_UART.get_uart_read_queue()
+        )));
+        spawner.spawn(unwrap!(tx_task(
+            COMS_IDLE_BUFFERED_UART.get_uart_write_queue()
+        )));
+        spawner.spawn(idle_buffered_uart_read_task!(coms, coms_uart_rx).unwrap());
+        spawner.spawn(idle_buffered_uart_write_task!(coms, coms_uart_tx).unwrap());
     });
 }

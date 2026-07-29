@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(impl_trait_in_assoc_type)]
 #![feature(type_alias_impl_trait)]
 #![feature(sync_unsafe_cell)]
 #![feature(generic_const_exprs)]
@@ -95,9 +96,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
         p.UART8,
         p.PE0,
         p.PE1,
-        SystemIrqs,
         p.DMA2_CH2,
         p.DMA2_CH3,
+        SystemIrqs,
         stm32_interface::get_bootloader_uart_config(),
     )
     .unwrap();
