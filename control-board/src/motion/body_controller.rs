@@ -5,12 +5,12 @@ use crate::motion::params::controller_params::{
     BODY_VEL_CLAMP_LINEAR, ENC_LAG_MODE, STOP_STATE_LINEAR_SPEED_LIMIT,
 };
 use crate::parameter_interface::ParameterInterface;
-use ateam_common_packets::bindings::BodyControlMode::{BCM_ESTOP_BRAKE, BCM_OFF};
-use ateam_common_packets::bindings::{
-    BasicControl, BodyControlExtendedTelemetry, BodyControlTelemetry, ParameterCommand,
-    ParameterCommandCode::*, ParameterName,
+use ateam_common_packets::{
+    BasicControl, BodyControlCommand, BodyControlExtendedTelemetry,
+    BodyControlManeuverExtendedTelemetry, BodyControlTelemetry, ParameterCommand,
+    ParameterCommandCode, ParameterName,
 };
-use ateam_common_packets::radio::ManeuverExtendedTelemetry;
+use ateam_common_packets::bitfields::BodyControlExtTelemetryFlags;
 use ateam_controls::trajectory::Trajectory;
 use ateam_controls::{ControlsError, Vector3f, Vector4f};
 use embassy_time::Instant;
@@ -110,16 +110,15 @@ impl BodyController {
         //
         // The divergence-recovery state is read before running its state machine
         // below, so it reflects the decision made on the previous tick.
-        let hold_maneuvers = last_command.game_state_in_halt() != 0
+        let hold_maneuvers = last_command.flags.game_state_in_halt()
             || self.control_context.tracking_divergence_state
                 == TrackingDivergenceState::Recovering
-            || last_command.body_control_mode == BCM_OFF
-            || last_command.body_control_mode == BCM_ESTOP_BRAKE;
+            || matches!(last_command.cmd, BodyControlCommand::Off | BodyControlCommand::EstopBrake);
 
         let (setpoints, maneuver_telem) = if hold_maneuvers {
             self.maneuver_manager.reset();
             self.control_context.reset_trajectory();
-            (ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off)
+            (ManeuverSetpoints::zero(), BodyControlManeuverExtendedTelemetry::Off)
         } else {
             self.maneuver_manager
                 .tick(last_command, &mut self.control_context)?
@@ -140,7 +139,7 @@ impl BodyController {
 
         // SSL stop state: clamp linear speed after control policy output so feedback
         // loops cannot overshoot to recover trajectory error.
-        if last_command.game_state_in_stop() != 0 {
+        if last_command.flags.game_state_in_stop() {
             let linear_speed = self.body_twist_out.xy().norm();
             if linear_speed > STOP_STATE_LINEAR_SPEED_LIMIT {
                 let scale = STOP_STATE_LINEAR_SPEED_LIMIT / linear_speed;
@@ -216,50 +215,50 @@ impl BodyController {
 
         let t_after_effort = Instant::now();
 
+        let traj_pos: [f32; 3] = self
+            .control_context
+            .trajectory
+            .as_ref()
+            .map(|t| {
+                let sample = t.sample();
+                let p = sample.0.fixed_rows::<3>(0);
+                [p[0], p[1], p[2]]
+            })
+            .unwrap_or_default();
+        let traj_vel: [f32; 3] = self
+            .control_context
+            .trajectory
+            .as_ref()
+            .map(|t| {
+                let sample = t.sample();
+                let v = sample.0.fixed_rows::<3>(3);
+                [v[0], v[1], v[2]]
+            })
+            .unwrap_or_default();
+        let kf_pos_pred = state_prediction.fixed_rows::<3>(0);
+        let kf_vel_pred = state_prediction.fixed_rows::<3>(3);
+        let kf_pos_est = self.control_context.state_estimate.fixed_rows::<3>(0);
+        let kf_vel_est = self.control_context.state_estimate.fixed_rows::<3>(3);
         self.debug_telemetry = BodyControlExtendedTelemetry {
-            _bitfield_align_1: Default::default(),
-            _bitfield_1: BodyControlExtendedTelemetry::new_bitfield_1(
-                vision_update as u8,
-                Default::default(),
-            ),
-            _reserved2: Default::default(),
+            flags: BodyControlExtTelemetryFlags::default().with_vision_update(vision_update),
+            _reserved: [0u8; 3],
+            maneuver: self.debug_telemetry.maneuver,
             imu_gyro: [0.0, 0.0, imu_gyro_theta_meas],
             imu_accel: [imu_accel_x_meas, imu_accel_y_meas, 0.0],
-            vision_pose: vision_pose_meas.into(),
-            body_traj_pos: self
-                .control_context
-                .trajectory
-                .as_ref()
-                .map(|t| {
-                    let pos: Vector3f = t.sample().0.fixed_rows::<3>(0).into();
-                    pos.into()
-                })
-                .unwrap_or_default(),
-            body_traj_vel: self
-                .control_context
-                .trajectory
-                .as_ref()
-                .map(|t| {
-                    let vel: Vector3f = t.sample().0.fixed_rows::<3>(3).into();
-                    vel.into()
-                })
-                .unwrap_or_default(),
-            kf_body_pos_prediction: state_prediction.fixed_rows::<3>(0).into(),
-            kf_body_vel_prediction: state_prediction.fixed_rows::<3>(3).into(),
-            kf_body_pos_estimate: self
-                .control_context
-                .state_estimate
-                .fixed_rows::<3>(0)
-                .into(),
-            kf_body_vel_estimate: self
-                .control_context
-                .state_estimate
-                .fixed_rows::<3>(3)
-                .into(),
-            body_vel_u: self.body_twist_out.into(),
-            body_accel_u: self.body_accel_out.into(),
-            body_accel_u_fric_comp: self.body_accel_out_fric_comp.into(),
-            ..self.debug_telemetry
+            vision_pose: [vision_pose_meas.x, vision_pose_meas.y, vision_pose_meas.z],
+            body_traj_pos: traj_pos,
+            body_traj_vel: traj_vel,
+            kf_body_pos_prediction: [kf_pos_pred[0], kf_pos_pred[1], kf_pos_pred[2]],
+            kf_body_vel_prediction: [kf_vel_pred[0], kf_vel_pred[1], kf_vel_pred[2]],
+            kf_body_pos_estimate: [kf_pos_est[0], kf_pos_est[1], kf_pos_est[2]],
+            kf_body_vel_estimate: [kf_vel_est[0], kf_vel_est[1], kf_vel_est[2]],
+            body_vel_u: [self.body_twist_out.x, self.body_twist_out.y, self.body_twist_out.z],
+            body_accel_u: [self.body_accel_out.x, self.body_accel_out.y, self.body_accel_out.z],
+            body_accel_u_fric_comp: [
+                self.body_accel_out_fric_comp.x,
+                self.body_accel_out_fric_comp.y,
+                self.body_accel_out_fric_comp.z,
+            ],
         };
         self.debug_telemetry.set_maneuver_telemetry(maneuver_telem);
 
@@ -311,7 +310,7 @@ impl ParameterInterface for BodyController {
         self.has_name(param_cmd.parameter_name)
     }
 
-    fn has_name(&self, param_name: ParameterName::Type) -> bool {
+    fn has_name(&self, param_name: ParameterName) -> bool {
         ControlContext::expected_format(param_name).is_some()
     }
 
@@ -321,7 +320,9 @@ impl ParameterInterface for BodyController {
     ) -> Result<ParameterCommand, ParameterCommand> {
         let mut reply = *param_cmd;
 
-        if param_cmd.command_code != PCC_READ && param_cmd.command_code != PCC_WRITE {
+        if param_cmd.command_code != ParameterCommandCode::Read
+            && param_cmd.command_code != ParameterCommandCode::Write
+        {
             defmt::warn!("asked to apply a command without an actionable command code");
             return Err(reply);
         }
@@ -330,30 +331,28 @@ impl ParameterInterface for BodyController {
             Some(f) => f,
             None => {
                 defmt::warn!(
-                    "unexpected parameter name {}, cannot apply command",
-                    param_cmd.parameter_name
+                    "unexpected parameter name, cannot apply command"
                 );
-                reply.command_code = PCC_NACK_INVALID_NAME;
+                reply.command_code = ParameterCommandCode::NackInvalidName;
                 return Err(reply);
             }
         };
 
-        if param_cmd.command_code == PCC_READ {
-            defmt::info!("Reading parameter {}", param_cmd.parameter_name);
-            reply.data_format = fmt;
+        if param_cmd.command_code == ParameterCommandCode::Read {
+            defmt::info!("Reading parameter");
             self.control_context
                 .read_param(param_cmd.parameter_name, &mut reply);
         } else {
-            defmt::info!("Writing parameter {}", param_cmd.parameter_name);
-            if param_cmd.data_format != fmt {
-                reply.command_code = PCC_NACK_INVALID_TYPE_FOR_NAME;
+            defmt::info!("Writing parameter");
+            if core::mem::discriminant(&param_cmd.data) != core::mem::discriminant(&fmt) {
+                reply.command_code = ParameterCommandCode::NackInvalidTypeForName;
                 return Err(reply);
             }
             self.control_context.write_param(param_cmd);
             self.reset();
         }
 
-        reply.command_code = PCC_ACK;
+        reply.command_code = ParameterCommandCode::Ack;
         Ok(reply)
     }
 }

@@ -1,7 +1,9 @@
-use ateam_common_packets::bindings::{
-    self, BasicControl, BasicTelemetry, CommandCode, ErrorTelemetry, ExtendedTelemetry,
+use ateam_common_packets::{
+    BasicControl, BasicTelemetry, ErrorTelemetry, ExtendedTelemetry,
     HelloRequest, HelloResponse, ParameterCommand, RadioData, RadioHeader, RadioPacket,
+    TeamColor as PacketTeamColor,
 };
+use ateam_common_packets::bitfields::DiscoveryFlags;
 use ateam_common_packets::radio::DataPacket;
 use ateam_lib_stm32::drivers::radio::nora_w36x::{
     NoraRadioError, NoraW36x, SocketConnection, WifiAuth,
@@ -26,6 +28,9 @@ const MULTICAST_IP: &str = "224.4.20.69";
 const MULTICAST_PORT: u16 = 42069;
 #[allow(dead_code)]
 const LOCAL_PORT: u16 = 42069;
+
+// See radio_robot.rs for explanation of this constant.
+const RADIO_DATA_TAG_PAD: usize = 4;
 
 #[derive(Clone, Copy, PartialEq, Debug, Format)]
 pub enum RobotRadioNoraError {
@@ -418,41 +423,33 @@ impl<
         }
     }
 
+    // ACK/NACK are encoded in _reserved[1] matching the old command_code byte position.
+    // CC_ACK=1, CC_NACK=2.
     pub async fn send_ack(&self, nack: bool) -> Result<(), RobotRadioNoraError> {
-        let packet = RadioPacket {
-            header: RadioHeader {
-                crc32: 0,
-                _reserved: 0,
-                command_code: if nack {
-                    CommandCode::CC_NACK
-                } else {
-                    CommandCode::CC_ACK
-                },
-                data_length: 0,
-            },
-            data: unsafe { core::mem::zeroed() },
+        let header = RadioHeader {
+            crc32: 0,
+            _reserved: [0, if nack { 2 } else { 1 }],
+            data_length: 0,
         };
-        let packet_bytes = unsafe {
+        let header_bytes = unsafe {
             core::slice::from_raw_parts(
-                &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>(),
+                &header as *const _ as *const u8,
+                size_of::<RadioHeader>(),
             )
         };
-        self.send_data(packet_bytes).await?;
-
+        self.send_data(header_bytes).await?;
         Ok(())
     }
 
     pub async fn wait_ack(&self, timeout: Duration) -> Result<bool, RobotRadioNoraError> {
         let read_fut = self.read_data(|data| {
-            if data.len() != size_of::<RadioPacket>() - size_of::<RadioData>() {
+            if data.len() != size_of::<RadioHeader>() {
                 return Err(RobotRadioNoraError::SoftwareConnectAckHeaderInvalid);
             }
-            let packet = unsafe { &*(data as *const _ as *const RadioPacket) };
-
-            match packet.header.command_code {
-                CommandCode::CC_ACK => Ok(true),
-                CommandCode::CC_NACK => Ok(false),
+            let packet = unsafe { &*(data as *const _ as *const RadioHeader) };
+            match packet._reserved[1] {
+                1 => Ok(true),
+                2 => Ok(false),
                 _ => Err(RobotRadioNoraError::SoftwareConnectAckHeaderInvalid),
             }
         });
@@ -468,39 +465,32 @@ impl<
         let packet = RadioPacket {
             header: RadioHeader {
                 crc32: 0,
-                command_code: CommandCode::CC_HELLO_REQ,
-                _reserved: 0,
-                data_length: size_of::<HelloRequest>() as u16,
+                _reserved: [0u8; 2],
+                data_length: (RADIO_DATA_TAG_PAD + size_of::<HelloRequest>()) as u16,
             },
-            data: RadioData {
-                hello_request: HelloRequest {
-                    robot_id: id,
-                    color: match team {
-                        TeamColor::Yellow => bindings::TeamColor::TC_YELLOW,
-                        TeamColor::Blue => bindings::TeamColor::TC_BLUE,
-                    },
-                    _bitfield_1: HelloRequest::new_bitfield_1(
-                        git_version::COMS_DIRTY.into(),
-                        git_version::CONTROLS_DIRTY.into(),
-                        git_version::FIRMWARE_DIRTY.into(),
-                        0,
-                    ),
-                    _bitfield_align_1: Default::default(),
-                    reserved: Default::default(),
-                    coms_hash: git_version::COMS_HASH,
-                    controls_hash: git_version::CONTROLS_HASH,
-                    firmware_hash: git_version::FIRMWARE_HASH,
+            data: RadioData::HelloRequest(HelloRequest {
+                robot_id: id,
+                color: match team {
+                    TeamColor::Yellow => PacketTeamColor::Yellow,
+                    TeamColor::Blue => PacketTeamColor::Blue,
                 },
-            },
+                flags: DiscoveryFlags::default()
+                    .with_coms_repo_dirty(git_version::COMS_DIRTY)
+                    .with_controls_repo_dirty(git_version::CONTROLS_DIRTY)
+                    .with_firmware_repo_dirty(git_version::FIRMWARE_DIRTY),
+                _reserved: [0u8; 1],
+                coms_hash: git_version::COMS_HASH,
+                controls_hash: git_version::CONTROLS_HASH,
+                firmware_hash: git_version::FIRMWARE_HASH,
+            }),
         };
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloRequest>(),
+                size_of::<RadioHeader>() + RADIO_DATA_TAG_PAD + size_of::<HelloRequest>(),
             )
         };
         self.send_data(packet_bytes).await?;
-
         Ok(())
     }
 
@@ -511,22 +501,18 @@ impl<
         let packet = RadioPacket {
             header: RadioHeader {
                 crc32: 0,
-                _reserved: 0,
-                command_code: CommandCode::CC_TELEMETRY,
-                data_length: size_of::<BasicTelemetry>() as u16,
+                _reserved: [0u8; 2],
+                data_length: (RADIO_DATA_TAG_PAD + size_of::<BasicTelemetry>()) as u16,
             },
-            data: RadioData {
-                telemetry: telemetry,
-            },
+            data: RadioData::Telemetry(telemetry),
         };
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<BasicTelemetry>(),
+                size_of::<RadioHeader>() + RADIO_DATA_TAG_PAD + size_of::<BasicTelemetry>(),
             )
         };
         self.send_data(packet_bytes).await?;
-
         Ok(())
     }
 
@@ -537,22 +523,18 @@ impl<
         let packet = RadioPacket {
             header: RadioHeader {
                 crc32: 0,
-                _reserved: 0,
-                command_code: CommandCode::CC_CONTROL_DEBUG_TELEMETRY,
-                data_length: size_of::<ExtendedTelemetry>() as u16,
+                _reserved: [0u8; 2],
+                data_length: (RADIO_DATA_TAG_PAD + size_of::<ExtendedTelemetry>()) as u16,
             },
-            data: RadioData {
-                extended_telemetry: telemetry,
-            },
+            data: RadioData::ControlDebugTelemetry(telemetry),
         };
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<ExtendedTelemetry>(),
+                size_of::<RadioHeader>() + RADIO_DATA_TAG_PAD + size_of::<ExtendedTelemetry>(),
             )
         };
         self.send_data(packet_bytes).await?;
-
         Ok(())
     }
 
@@ -563,22 +545,18 @@ impl<
         let packet = RadioPacket {
             header: RadioHeader {
                 crc32: 0,
-                _reserved: 0,
-                command_code: CommandCode::CC_ROBOT_PARAMETER_COMMAND,
-                data_length: size_of::<ParameterCommand>() as u16,
+                _reserved: [0u8; 2],
+                data_length: (RADIO_DATA_TAG_PAD + size_of::<ParameterCommand>()) as u16,
             },
-            data: RadioData {
-                robot_parameter_command: parameter_cmd,
-            },
+            data: RadioData::RobotParameterCommand(parameter_cmd),
         };
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<ParameterCommand>(),
+                size_of::<RadioHeader>() + RADIO_DATA_TAG_PAD + size_of::<ParameterCommand>(),
             )
         };
         self.send_data(packet_bytes).await?;
-
         Ok(())
     }
 
@@ -589,20 +567,18 @@ impl<
         let packet = RadioPacket {
             header: RadioHeader {
                 crc32: 0,
-                _reserved: 0,
-                command_code: CommandCode::CC_ERROR_TELEMETRY,
-                data_length: size_of::<ParameterCommand>() as u16,
+                _reserved: [0u8; 2],
+                data_length: (RADIO_DATA_TAG_PAD + size_of::<ErrorTelemetry>()) as u16,
             },
-            data: RadioData { error_telemetry },
+            data: RadioData::ErrorTelemetry(error_telemetry),
         };
         let packet_bytes = unsafe {
             core::slice::from_raw_parts(
                 &packet as *const _ as *const u8,
-                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<ErrorTelemetry>(),
+                size_of::<RadioHeader>() + RADIO_DATA_TAG_PAD + size_of::<ErrorTelemetry>(),
             )
         };
         self.send_data(packet_bytes).await?;
-
         Ok(())
     }
 
@@ -625,21 +601,24 @@ impl<
             match self.nora_driver.try_read_data_binary(|data| {
                 defmt::trace!("wait_hello read data: {:?}", data);
                 const PACKET_SIZE: usize =
-                    size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloResponse>();
+                    size_of::<RadioHeader>() + RADIO_DATA_TAG_PAD + size_of::<HelloResponse>();
                 if data.len() != PACKET_SIZE {
+                    return Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid);
+                }
+
+                let tag_byte = data[size_of::<RadioHeader>()];
+                if tag_byte != 22 {  // RadioData::HelloResponse discriminant
                     return Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid);
                 }
 
                 let mut data_copy = [0u8; size_of::<RadioPacket>()];
                 data_copy[0..PACKET_SIZE].clone_from_slice(&data[0..PACKET_SIZE]);
 
-                let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
-
-                if packet.header.command_code != CommandCode::CC_HELLO_RESP {
+                let packet = unsafe { &*(data_copy.as_ptr() as *const RadioPacket) };
+                let RadioData::HelloResponse(resp) = packet.data else {
                     return Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid);
-                }
-
-                Ok(unsafe { packet.data.hello_response })
+                };
+                Ok(resp)
             }) {
                 Ok(Some(result)) => return result,
                 Ok(None) => {
@@ -660,35 +639,46 @@ impl<
     }
 
     pub fn parse_data_packet(&self, data: &[u8]) -> Result<DataPacket, RobotRadioNoraError> {
+        const HEADER_SIZE: usize = size_of::<RadioHeader>();
         const CONTROL_PACKET_SIZE: usize =
-            size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<BasicControl>();
-        const PARAMERTER_PACKET_SIZE: usize =
-            size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<ParameterCommand>();
+            HEADER_SIZE + RADIO_DATA_TAG_PAD + size_of::<BasicControl>();
+        const PARAMETER_PACKET_SIZE: usize =
+            HEADER_SIZE + RADIO_DATA_TAG_PAD + size_of::<ParameterCommand>();
 
-        if data.len() == CONTROL_PACKET_SIZE {
-            let mut data_copy = [0u8; size_of::<RadioPacket>()];
-            data_copy[0..CONTROL_PACKET_SIZE].clone_from_slice(&data[0..CONTROL_PACKET_SIZE]);
-
-            let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
-
-            if packet.header.command_code != CommandCode::CC_CONTROL {
-                return Err(RobotRadioNoraError::ControlPacketDecodeInvalid);
-            }
-
-            Ok(unsafe { DataPacket::BasicControl(packet.data.control) })
-        } else if data.len() == PARAMERTER_PACKET_SIZE {
-            let mut data_copy = [0u8; size_of::<RadioPacket>()];
-            data_copy[0..PARAMERTER_PACKET_SIZE].clone_from_slice(&data[0..PARAMERTER_PACKET_SIZE]);
-
-            let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
-
-            if packet.header.command_code != CommandCode::CC_ROBOT_PARAMETER_COMMAND {
-                return Err(RobotRadioNoraError::ParameterPacketDecodeInvalid);
-            }
-
-            Ok(unsafe { DataPacket::ParameterCommand(packet.data.robot_parameter_command) })
-        } else {
+        if data.len() < HEADER_SIZE + RADIO_DATA_TAG_PAD {
             return Err(RobotRadioNoraError::PacketTypeUnknown);
+        }
+
+        let tag_byte = data[HEADER_SIZE];
+
+        match tag_byte {
+            61 => {  // RadioData::Control discriminant
+                if data.len() != CONTROL_PACKET_SIZE {
+                    return Err(RobotRadioNoraError::ControlPacketDecodeInvalid);
+                }
+                let mut data_copy = [0u8; size_of::<RadioPacket>()];
+                data_copy[0..CONTROL_PACKET_SIZE].clone_from_slice(&data[0..CONTROL_PACKET_SIZE]);
+                let packet = unsafe { &*(data_copy.as_ptr() as *const RadioPacket) };
+                let RadioData::Control(ctrl) = packet.data else {
+                    return Err(RobotRadioNoraError::ControlPacketDecodeInvalid);
+                };
+                Ok(DataPacket::BasicControl(ctrl))
+            }
+            43 => {  // RadioData::RobotParameterCommand discriminant
+                if data.len() != PARAMETER_PACKET_SIZE {
+                    return Err(RobotRadioNoraError::ParameterPacketDecodeInvalid);
+                }
+                let mut data_copy = [0u8; size_of::<RadioPacket>()];
+                data_copy[0..PARAMETER_PACKET_SIZE].clone_from_slice(&data[0..PARAMETER_PACKET_SIZE]);
+                let packet = unsafe { &*(data_copy.as_ptr() as *const RadioPacket) };
+                let RadioData::RobotParameterCommand(param) = packet.data else {
+                    return Err(RobotRadioNoraError::ParameterPacketDecodeInvalid);
+                };
+                Ok(DataPacket::ParameterCommand(param))
+            }
+            _ => {
+                Err(RobotRadioNoraError::PacketTypeUnknown)
+            }
         }
     }
 

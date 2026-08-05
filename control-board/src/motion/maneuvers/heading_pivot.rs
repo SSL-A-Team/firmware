@@ -1,8 +1,7 @@
 use crate::motion::control_context::{ControlContext, ManeuverSetpoints, TrackedTrajectory};
 use crate::motion::maneuvers::build_pivot_params;
 use crate::motion::maneuvers::MotionManeuver;
-use ateam_common_packets::bindings::ExtendedHeadingPivotTelemetry;
-use ateam_common_packets::radio::{ManeuverCommand, ManeuverExtendedTelemetry};
+use ateam_common_packets::{BodyControlCommand, BodyControlManeuverExtendedTelemetry, ExtendedHeadingPivotTelemetry};
 use ateam_controls::pivot_trajectory::PivotTrajectory;
 use ateam_controls::ControlsError;
 
@@ -15,15 +14,15 @@ impl HeadingPivotManeuver {
 }
 
 impl MotionManeuver for HeadingPivotManeuver {
-    fn entry(&mut self, _cmd: ManeuverCommand, _ctx: &mut ControlContext) {}
+    fn entry(&mut self, _cmd: BodyControlCommand, _ctx: &mut ControlContext) {}
 
     fn update(
         &mut self,
-        cmd: ManeuverCommand,
+        cmd: BodyControlCommand,
         ctx: &mut ControlContext,
-    ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError> {
-        let ManeuverCommand::HeadingPivot(c) = cmd else {
-            return Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off));
+    ) -> Result<(ManeuverSetpoints, BodyControlManeuverExtendedTelemetry), ControlsError> {
+        let BodyControlCommand::HeadingPivot(c) = cmd else {
+            return Ok((ManeuverSetpoints::zero(), BodyControlManeuverExtendedTelemetry::Off));
         };
 
         let traj_params = build_pivot_params(
@@ -40,7 +39,7 @@ impl MotionManeuver for HeadingPivotManeuver {
         })?;
 
         let telem =
-            ManeuverExtendedTelemetry::HeadingPivot(ExtendedHeadingPivotTelemetry { cmd_echo: c });
+            BodyControlManeuverExtendedTelemetry::HeadingPivot(ExtendedHeadingPivotTelemetry { cmd_echo: c });
         Ok((setpoints, telem))
     }
 

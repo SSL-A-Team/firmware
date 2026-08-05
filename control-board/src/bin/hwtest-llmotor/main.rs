@@ -3,7 +3,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(sync_unsafe_cell)]
 
-use ateam_common_packets::bindings::{CcmMotionControlType, CcmTelemetry};
+use ateam_common_packets::{CcmMotionControlType, CcmTelemetry};
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
 };
@@ -255,7 +255,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     }
 
     for motor in motors.iter_mut() {
-        motor.set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+        motor.set_motion_type(CcmMotionControlType::Current);
         motor.set_current_setpoint(0);
         motor.set_telemetry_enabled(true);
         motor.set_motion_enabled(true);

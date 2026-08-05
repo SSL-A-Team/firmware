@@ -10,7 +10,7 @@
 #![feature(sync_unsafe_cell)]
 #![feature(variant_count)]
 
-use ateam_common_packets::bindings::ErrorTelemetry;
+use ateam_common_packets::ErrorTelemetry;
 use embassy_stm32::{
     bind_interrupts, peripherals,
     rcc::{

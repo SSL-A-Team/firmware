@@ -1,5 +1,5 @@
 use ateam_common_packets::{
-    bindings::{DribblerCommand, KickRequest, KickerTelemetry},
+    DribblerCommand, KickRequest, KickerTelemetry,
     radio::DataPacket,
 };
 use ateam_lib_stm32::{
@@ -278,10 +278,9 @@ impl<
                 // Avoid spamming logs while the system starts up
                 defmt::error!("Kicker Interface - Kicker task has stopped receiving commands from the radio task and will de-arm the kicker board");
                 self.kicker_driver.set_kick_strength(0.0);
+                self.kicker_driver.request_kick(KickRequest::Disable);
                 self.kicker_driver
-                    .request_kick(KickRequest::KR_DISABLE as u32);
-                self.kicker_driver
-                    .set_drib_command(DribblerCommand::DC_DISABLE, 0.0);
+                    .set_drib_command(DribblerCommand::Disable, 0.0);
             }
 
             // if we are in any substate of connected, then send
@@ -323,7 +322,7 @@ impl<
                             self.last_command_received_time = Some(Instant::now());
 
                             self.kicker_driver.set_kick_strength(bc_pkt.kick_vel);
-                            self.kicker_driver.request_kick(bc_pkt.kick_request as u32);
+                            self.kicker_driver.request_kick(bc_pkt.kick_request);
                             self.kicker_driver
                                 .set_drib_command(bc_pkt.dribbler_mode, bc_pkt.dribbler_setpoint);
                         }

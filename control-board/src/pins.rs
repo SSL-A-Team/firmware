@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use ateam_common_packets::{
-    bindings::{KickerTelemetry, PowerTelemetry},
+    KickerTelemetry, PowerTelemetry,
     radio::{DataPacket, TelemetryPacket},
 };
 use embassy_stm32::{mode::Blocking, peripherals::*};

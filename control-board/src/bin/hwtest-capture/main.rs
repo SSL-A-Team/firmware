@@ -30,12 +30,10 @@
 //! dribbler setpoint drops to 0.01 regardless of the ID knob (unless ID 0).
 
 use ateam_common_packets::{
-    bindings::{
-        BasicControl, BodyControlCommand, BodyControlMode, DribblerCommand, GlobalPositionCommand,
-        KickRequest,
-    },
+    BasicControl, BodyControlCommand, DribblerCommand, GlobalPositionCommand, KickRequest,
     radio::{DataPacket, TelemetryPacket},
 };
+use ateam_common_packets::bitfields::BasicControlFlags;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
     gpio::{Input, Pull},
@@ -411,46 +409,31 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         // ── publish command ──────────────────────────────────────────────────
 
         command_publisher.publish_immediate(DataPacket::BasicControl(BasicControl {
-            _bitfield_1: BasicControl::new_bitfield_1(
-                0, // request_shutdown
-                0, // reboot_robot
-                0, // game_state_in_stop
-                0, // game_state_in_halt
-                0, // emergency_stop
-                1, // wheel_vel_control_enabled
-                1, // wheel_torque_control_enabled
-                1, // vision_update (mocked from KF estimate — position mode requires vision)
-                0, // reset_controller
-                0, // reserved1
-            ),
-            _bitfield_align_1: Default::default(),
-
+            flags: BasicControlFlags::default()
+                .with_wheel_vel_control_enabled(true)
+                .with_wheel_torque_control_enabled(true)
+                .with_vision_update(true),
             vision_position_update: mock_vision_pose,
-
-            body_control_mode: if motion_stopped {
-                BodyControlMode::BCM_OFF
-            } else {
-                BodyControlMode::BCM_GLOBAL_POSITION
-            },
-            kick_request: KickRequest::KR_DISABLE,
+            kick_request: KickRequest::Disable,
             play_song: 0,
             dribbler_mode: if motion_stopped {
-                DribblerCommand::DC_DISABLE
+                DribblerCommand::Disable
             } else {
-                DribblerCommand::DC_CURRENT
+                DribblerCommand::Current
             },
-
+            _pad: 0,
             kick_vel: 0.0,
             dribbler_setpoint,
-
-            cmd: BodyControlCommand {
-                global_pos: GlobalPositionCommand {
+            cmd: if motion_stopped {
+                BodyControlCommand::Off
+            } else {
+                BodyControlCommand::GlobalPosition(GlobalPositionCommand {
                     global_x: target_x,
                     global_y: 0.0,
                     global_theta: 0.0,
                     max_linear_vel,
                     ..Default::default()
-                },
+                })
             },
         }));
     }

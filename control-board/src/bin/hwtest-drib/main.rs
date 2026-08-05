@@ -5,12 +5,7 @@
 #![feature(sync_unsafe_cell)]
 #![feature(generic_const_exprs)]
 
-use ateam_common_packets::bindings::{
-    DribblerCommand::{
-        self, DC_CURRENT, DC_DISABLE, DC_DRIBBLE, DC_HARD_RECEIVE, DC_SOFT_RECEIVE, DC_VELOCITY,
-    },
-    KickerTelemetry,
-};
+use ateam_common_packets::{DribblerCommand, KickerTelemetry};
 use ateam_control_board::{
     drivers::kicker::Kicker, get_system_config, include_kicker_bin, SystemIrqs,
     DEBUG_KICKER_UART_QUEUES,
@@ -47,12 +42,12 @@ unsafe fn CEC() {
 
 // Mode table. DC_DISABLE is not cycled — reached via the back action (DOWN at setpoint=0).
 const MODE_COUNT: usize = 5;
-const MODES: [DribblerCommand::Type; MODE_COUNT] = [
-    DC_HARD_RECEIVE,
-    DC_SOFT_RECEIVE,
-    DC_DRIBBLE,
-    DC_VELOCITY,
-    DC_CURRENT,
+const MODES: [DribblerCommand; MODE_COUNT] = [
+    DribblerCommand::HardReceive,
+    DribblerCommand::SoftReceive,
+    DribblerCommand::Dribble,
+    DribblerCommand::Velocity,
+    DribblerCommand::Current,
 ];
 const MODE_NAMES: [&str; MODE_COUNT] = [
     "HARD_RECEIVE",
@@ -133,7 +128,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     loop {
         kicker.process_telemetry();
         kicker.send_command();
-        if kicker.get_lastest_state().dribbler_fw_loaded() != 0 {
+        if kicker.get_lastest_state().status.dribbler_fw_loaded() {
             break;
         }
         wait_ticks += 1;
@@ -310,7 +305,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
                 let samples = &ct.current_samples_ma;
                 let sum: u32 = samples[..20].iter().map(|&s| s as u32).sum();
                 let avg_ma = (sum / 20) as u16;
-                let ball = telem.ball_detected() != 0;
+                let ball = telem.status.ball_detected();
                 defmt::info!(
                     "TELEM | vel={} rad/s ({} RPM) | curr_avg={} mA | ball={}",
                     vel_rads,
@@ -327,7 +322,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         if enabled {
             kicker.set_drib_command(MODES[mode_idx], setpoints[mode_idx]);
         } else {
-            kicker.set_drib_command(DC_DISABLE, 0.0);
+            kicker.set_drib_command(DribblerCommand::Disable, 0.0);
         }
         kicker.send_command();
 

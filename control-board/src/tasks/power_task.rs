@@ -1,6 +1,5 @@
-use core::mem::MaybeUninit;
-
-use ateam_common_packets::bindings::{PowerCommand, PowerTelemetry};
+use ateam_common_packets::{PowerCommand, PowerTelemetry};
+use ateam_common_packets::bitfields::PowerCommandFlags;
 use ateam_lib_stm32::{
     idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
     uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue},
@@ -108,14 +107,16 @@ impl<
             }
 
             if (self.last_power_status_time.is_some()
-                && self.last_power_status.shutdown_requested() == 1)
+                && self.last_power_status.status.shutdown_requested())
                 || self.shared_robot_state.shutdown_requested()
             {
                 self.try_shutdown().await;
             }
 
-            let mut cmd: PowerCommand = Default::default();
-            cmd.set_request_shutdown(self.shared_robot_state.shutdown_requested() as u32);
+            let cmd = PowerCommand {
+                flags: PowerCommandFlags::default()
+                    .with_request_shutdown(self.shared_robot_state.shutdown_requested()),
+            };
 
             // load any items into command
             self.send_command(cmd).await;
@@ -138,8 +139,9 @@ impl<
         // wait for tasks to flag shutdown complete, power board will
         // hard temrinate after hard after 30s shutdown time
         loop {
-            let mut cmd: PowerCommand = Default::default();
-            cmd.set_request_shutdown(true as u32);
+            let cmd = PowerCommand {
+                flags: PowerCommandFlags::default().with_request_shutdown(true),
+            };
 
             // load any items into command
             self.send_command(cmd).await;
@@ -157,11 +159,9 @@ impl<
         Timer::after_millis(100).await;
 
         loop {
-            let mut cmd: PowerCommand;
-            unsafe {
-                cmd = MaybeUninit::zeroed().assume_init();
-            }
-            cmd.set_ready_shutdown(1);
+            let cmd = PowerCommand {
+                flags: PowerCommandFlags::default().with_ready_shutdown(true),
+            };
             defmt::info!("Sending shutdown ready acknowldgement to power board");
             Timer::after_millis(100).await;
             self.send_command(cmd).await;
@@ -278,7 +278,7 @@ pub fn start_power_task(
         power_rx_uart_queue: POWER_IDLE_BUFFERED_UART.get_uart_read_queue(),
         power_tx_uart_queue: POWER_IDLE_BUFFERED_UART.get_uart_write_queue(),
         last_power_status_time: None,
-        last_power_status: unsafe { MaybeUninit::zeroed().assume_init() },
+        last_power_status: Default::default(),
     };
 
     power_task_spawner.spawn(defmt::unwrap!(power_task_entry(power_task)));

@@ -11,8 +11,8 @@ use embassy_time::{with_timeout, Duration, Timer};
 
 use core::mem::MaybeUninit;
 
-use ateam_common_packets::bindings::{
-    DribblerCommand, ErrorTelemetry, KickRequest::KR_DISABLE, KickerControl, KickerTelemetry,
+use ateam_common_packets::{
+    DribblerCommand, ErrorTelemetry, KickRequest, KickerControl, KickerTelemetry,
 };
 
 use crate::{image_hash, DEBUG_KICKER_UART_QUEUES};
@@ -78,14 +78,11 @@ impl<
         >,
         firmware_image: &'a [u8],
     ) -> Kicker<'a, LEN_RX, LEN_TX, DEPTH_RX, DEPTH_TX> {
-        let mut command_state: KickerControl = Default::default();
-        command_state.kick_request = KR_DISABLE;
-
         Self {
             stm32_uart_interface: stm32_interface,
             firmware_image,
 
-            command_state: command_state,
+            command_state: KickerControl::default(),
             telemetry_state: Default::default(),
 
             telemetry_enabled: false,
@@ -175,25 +172,25 @@ impl<
 
     pub fn set_telemetry_enabled(&mut self, telemetry_enabled: bool) {
         self.telemetry_enabled = telemetry_enabled;
-        self.command_state
-            .set_telemetry_enabled(telemetry_enabled as u16);
+        self.command_state.flags =
+            self.command_state.flags.with_telemetry_enabled(telemetry_enabled);
     }
 
-    pub fn request_kick(&mut self, request: u32) {
-        self.command_state.kick_request = request as u8;
+    pub fn request_kick(&mut self, request: KickRequest) {
+        self.command_state.kick_request = request;
     }
 
     pub fn set_kick_strength(&mut self, kick_str: f32) {
         self.command_state.kick_speed = kick_str;
     }
 
-    pub fn set_drib_command(&mut self, mode: DribblerCommand::Type, setpoint: f32) {
+    pub fn set_drib_command(&mut self, mode: DribblerCommand, setpoint: f32) {
         self.command_state.dribbler_mode = mode;
         self.command_state.drib_setpoint = setpoint;
     }
 
     pub fn ball_detected(&self) -> bool {
-        self.telemetry_state.ball_detected() != 0
+        self.telemetry_state.status.ball_detected()
     }
 
     ///////////////////////////
@@ -201,15 +198,15 @@ impl<
     ///////////////////////////
 
     pub fn request_shutdown(&mut self) {
-        self.command_state.set_request_power_down(1);
+        self.command_state.flags = self.command_state.flags.with_request_power_down(true);
     }
 
     pub fn shutdown_acknowledge(&self) -> bool {
-        self.telemetry_state.power_down_requested() != 0
+        self.telemetry_state.status.power_down_requested()
     }
 
     pub fn shutdown_completed(&self) -> bool {
-        self.telemetry_state.power_down_complete() != 0
+        self.telemetry_state.status.power_down_complete()
     }
 
     ///////////////////////
@@ -217,7 +214,7 @@ impl<
     ///////////////////////
 
     pub fn error_reported(&self) -> bool {
-        self.telemetry_state.error_detected() != 0
+        self.telemetry_state.status.error_detected()
     }
 
     pub fn hv_rail_voltage(&self) -> f32 {

@@ -1,10 +1,9 @@
 use ateam_common_packets::{
-    bindings::{
-        BasicControl, BasicTelemetry, BodyControlCommand, BodyControlMode, CcmMotionControlType,
-        ExtendedTelemetry, KickerTelemetry, PowerTelemetry,
-    },
+    BasicControl, BasicTelemetry, BodyControlCommand, CcmMotionControlType,
+    ExtendedTelemetry, KickerTelemetry, PowerTelemetry,
     radio::TelemetryPacket,
 };
+use ateam_common_packets::bitfields::BasicTelemetryErrors;
 use ateam_controls::defaults::DEFAULT_CONTROL_DT;
 use ateam_controls::{Vector3f, Vector4f};
 
@@ -244,7 +243,7 @@ impl<
         let back_left_motor_error = self.motor_bl.read_is_error() as u32;
         let back_right_motor_error = self.motor_br.read_is_error() as u32;
         let front_right_motor_error = self.motor_fr.read_is_error() as u32;
-        let dribbler_motor_error = self.last_kicker_telemetry.dribbler_motor.master_error() as u32;
+        let dribbler_motor_error = self.last_kicker_telemetry.dribbler_motor.status.master_error() as u32;
 
         let front_left_hall_error = self.motor_fl.check_hall_error() as u32;
         let back_left_hall_error = self.motor_bl.check_hall_error() as u32;
@@ -253,46 +252,44 @@ impl<
         let dribbler_motor_hall_error = self
             .last_kicker_telemetry
             .dribbler_motor
+            .status
             .hall_disconnected_error() as u32;
 
         let state_est = robot_controller.control_context.state_estimate;
 
+        let kicker_error = self.last_kicker_telemetry.status.error_detected();
         let basic_telem = TelemetryPacket::Basic(BasicTelemetry {
             transmission_sequence_number: 0,
             control_data_sequence_number: seq_number as u8,
-            body_control_mode: self.last_command.body_control_mode,
-            reserved1: Default::default(),
-            _bitfield_align_1: Default::default(),
-            _bitfield_1: BasicTelemetry::new_bitfield_1(
-                !self.last_power_telemetry.power_ok() as u32, // power error
-                cur_state.power_inop as u32,                  // power board error
-                !self.last_power_telemetry.battery_info.battery_ok() as u32, // battery error
-                self.last_power_telemetry.battery_info.battery_low() as u32, // battery low
-                self.last_power_telemetry.battery_info.battery_critical() as u32, // battery crit
-                self.last_power_telemetry.shutdown_requested() as u32, // shutdown pending
-                cur_state.robot_tipped as u32,                // tipped error
-                self.last_kicker_telemetry.error_detected() as u32, // breakbeam error
-                self.last_kicker_telemetry.ball_detected() as u32, // ball detected
-                cur_state.imu_inop as u32,                    // accel 0 error
-                false as u32,                                 // accel 1 error, uninstalled
-                cur_state.imu_inop as u32,                    // gyro 0 error
-                false as u32,                                 // gyro 1 error, uninstalled
-                front_left_motor_error,
-                front_left_hall_error,
-                back_left_motor_error,
-                back_left_hall_error,
-                back_right_motor_error,
-                back_right_hall_error,
-                front_right_motor_error,
-                front_right_hall_error,
-                dribbler_motor_error,
-                dribbler_motor_hall_error,
-                self.last_kicker_telemetry.error_detected() as u32,
-                false as u32, // chipper available
-                (!cur_state.kicker_inop && self.last_kicker_telemetry.error_detected() == 0) as u32,
-                (self.last_command.reset_controller() != 0) as u32,
-                Default::default(),
-            ),
+            _reserved: [0u8; 2],
+            errors: BasicTelemetryErrors::default()
+                .with_power_error(!self.last_power_telemetry.status.power_ok())
+                .with_power_board_error(cur_state.power_inop)
+                .with_battery_error(!self.last_power_telemetry.battery_info.status.battery_ok())
+                .with_battery_low(self.last_power_telemetry.battery_info.status.battery_low())
+                .with_battery_crit(self.last_power_telemetry.battery_info.status.battery_critical())
+                .with_shutdown_pending(self.last_power_telemetry.status.shutdown_requested())
+                .with_tipped_error(cur_state.robot_tipped)
+                .with_breakbeam_error(kicker_error)
+                .with_breakbeam_ball_detected(self.last_kicker_telemetry.status.ball_detected())
+                .with_accelerometer_0_error(cur_state.imu_inop)
+                .with_accelerometer_1_error(false)
+                .with_gyroscope_0_error(cur_state.imu_inop)
+                .with_gyroscope_1_error(false)
+                .with_motor_fl_general_error(front_left_motor_error != 0)
+                .with_motor_fl_hall_error(front_left_hall_error != 0)
+                .with_motor_bl_general_error(back_left_motor_error != 0)
+                .with_motor_bl_hall_error(back_left_hall_error != 0)
+                .with_motor_br_general_error(back_right_motor_error != 0)
+                .with_motor_br_hall_error(back_right_hall_error != 0)
+                .with_motor_fr_general_error(front_right_motor_error != 0)
+                .with_motor_fr_hall_error(front_right_hall_error != 0)
+                .with_motor_drib_general_error(dribbler_motor_error != 0)
+                .with_motor_drib_hall_error(dribbler_motor_hall_error != 0)
+                .with_kicker_board_error(kicker_error)
+                .with_chipper_available(false)
+                .with_kicker_available(!cur_state.kicker_inop && !kicker_error)
+                .with_controller_reset(self.last_command.flags.reset_controller()),
             battery_percent: self.last_power_telemetry.battery_info.battery_pct as u16,
             kicker_charge_percent: self.last_kicker_telemetry.charge_pct,
             control_telem: robot_controller.get_control_telem(),
@@ -327,7 +324,7 @@ impl<
         };
 
         // Send extended telemetry if vision update was received, or if the extended telemetry interval has elapsed
-        let vision_update = debug_telem.body_control_telemetry.vision_update() != 0;
+        let vision_update = debug_telem.body_control_telemetry.flags.vision_update();
         let debug_telem_packet = TelemetryPacket::Extended(debug_telem);
         self.ticks_since_extended_telem += 1;
         if cur_state.radio_bridge_ok
@@ -371,8 +368,7 @@ impl<
 
         let mut robot_controller = BodyController::new(DEFAULT_CONTROL_DT);
 
-        let mut _cmd_mode = BodyControlMode::BCM_OFF;
-        let mut _cmd = BodyControlCommand::default();
+        let mut _cmd = BodyControlCommand::Off;
         let mut last_vision_pose_meas = Vector3f::default();
         let mut vision_update = false;
         let mut ticks_since_control_packet = 0;
@@ -412,29 +408,28 @@ impl<
             while let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
                 match latest_packet {
                     ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
-                        if latest_control.reboot_robot() != 0 {
+                        if latest_control.flags.reboot_robot() {
                             loop {
                                 cortex_m::peripheral::SCB::sys_reset();
                             }
                         }
 
-                        if latest_control.request_shutdown() != 0 {
+                        if latest_control.flags.request_shutdown() {
                             self.shared_robot_state.flag_shutdown_requested();
                         }
 
-                        _cmd_mode = latest_control.body_control_mode;
                         _cmd = latest_control.cmd;
                         last_vision_pose_meas = latest_control.vision_position_update.into();
-                        vision_update = latest_control.vision_update() != 0;
+                        vision_update = latest_control.flags.vision_update();
 
                         let wheel_motion_type = match (
-                            latest_control.wheel_vel_control_enabled() != 0,
-                            latest_control.wheel_torque_control_enabled() != 0,
+                            latest_control.flags.wheel_vel_control_enabled(),
+                            latest_control.flags.wheel_torque_control_enabled(),
                         ) {
-                            (true, true) => CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT,
-                            (true, false) => CcmMotionControlType::CCM_MCT_VELOCITY,
-                            (false, true) => CcmMotionControlType::CCM_MCT_CURRENT,
-                            (false, false) => CcmMotionControlType::CCM_MCT_MOTOR_OFF,
+                            (true, true) => CcmMotionControlType::VelocityCurrent,
+                            (true, false) => CcmMotionControlType::Velocity,
+                            (false, true) => CcmMotionControlType::Current,
+                            (false, false) => CcmMotionControlType::MotorOff,
                         };
 
                         self.motor_fl.set_motion_type(wheel_motion_type);
@@ -443,7 +438,7 @@ impl<
                         self.motor_fr.set_motion_type(wheel_motion_type);
 
                         let motion_enabled =
-                            wheel_motion_type != CcmMotionControlType::CCM_MCT_MOTOR_OFF;
+                            wheel_motion_type != CcmMotionControlType::MotorOff;
                         self.motor_fl.set_motion_enabled(motion_enabled);
                         self.motor_bl.set_motion_enabled(motion_enabled);
                         self.motor_br.set_motion_enabled(motion_enabled);
@@ -499,7 +494,7 @@ impl<
                 self.last_power_telemetry = power_telemetry;
             }
 
-            if self.last_command.reset_controller() != 0 {
+            if self.last_command.flags.reset_controller() {
                 robot_controller.reset();
             }
 
@@ -577,13 +572,13 @@ impl<
 
             let in_hard_stop = self.stop_wheels()
                 || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP
-                || _cmd_mode == BodyControlMode::BCM_OFF
+                || matches!(_cmd, BodyControlCommand::Off)
                 || robot_controller.wheels_disabled();
 
             let in_active_brake = !in_hard_stop
-                && (self.last_command.game_state_in_halt() != 0
-                    || self.last_command.emergency_stop() != 0
-                    || _cmd_mode == BodyControlMode::BCM_ESTOP_BRAKE
+                && (self.last_command.flags.game_state_in_halt()
+                    || self.last_command.flags.emergency_stop()
+                    || matches!(_cmd, BodyControlCommand::EstopBrake)
                     || robot_controller.tracking_divergence_recovery_active());
 
             // wheel_current_cmd in Amperes; converted to mA below.
@@ -597,13 +592,13 @@ impl<
                 // Force current-only mode every tick while braking so the motion
                 // type cannot lag behind game state changes between command packets.
                 self.motor_fl
-                    .set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                    .set_motion_type(CcmMotionControlType::Current);
                 self.motor_bl
-                    .set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                    .set_motion_type(CcmMotionControlType::Current);
                 self.motor_br
-                    .set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                    .set_motion_type(CcmMotionControlType::Current);
                 self.motor_fr
-                    .set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
+                    .set_motion_type(CcmMotionControlType::Current);
                 self.motor_fl.set_motion_enabled(true);
                 self.motor_bl.set_motion_enabled(true);
                 self.motor_br.set_motion_enabled(true);
@@ -886,7 +881,7 @@ impl<
         // self.last_power_telemetry.high_current_operations_allowed() == 0
         self.shared_robot_state.shutdown_requested()
             || self.shared_robot_state.get_controls_err()
-            || self.last_command.reset_controller() != 0
+            || self.last_command.flags.reset_controller()
     }
 }
 

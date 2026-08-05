@@ -10,8 +10,9 @@ pub mod point_pivot;
 
 use crate::motion::control_context::ControlContext;
 pub use crate::motion::control_context::ManeuverSetpoints;
-use ateam_common_packets::bindings::{BasicControl, BodyControlMode, PivotDirection};
-use ateam_common_packets::radio::{ManeuverCommand, ManeuverExtendedTelemetry};
+use ateam_common_packets::{
+    BasicControl, BodyControlCommand, BodyControlManeuverExtendedTelemetry, PivotDirection,
+};
 use ateam_controls::linear_trajectory::LinearParams;
 use ateam_controls::pivot_trajectory::{PivotDirection as TrajPivotDirection, PivotParams};
 use ateam_controls::ControlsError;
@@ -33,11 +34,11 @@ pub(crate) fn build_pivot_params(
     max_angular_acc: f32,
     orbit_radius: f32,
     inset_angle: f32,
-    direction: PivotDirection::Type,
+    direction: PivotDirection,
     compute_inset_angle: u8,
 ) -> PivotParams {
     let default_params = PivotParams::default();
-    let direction = if direction == PivotDirection::PIVOT_DIRECTION_BACKWARD {
+    let direction = if direction == PivotDirection::Backward {
         TrajPivotDirection::Backward
     } else {
         TrajPivotDirection::Forward
@@ -116,13 +117,13 @@ pub(crate) fn build_linear_params(
 }
 
 pub trait MotionManeuver {
-    fn entry(&mut self, cmd: ManeuverCommand, ctx: &mut ControlContext);
+    fn entry(&mut self, cmd: BodyControlCommand, ctx: &mut ControlContext);
 
     fn update(
         &mut self,
-        cmd: ManeuverCommand,
+        cmd: BodyControlCommand,
         ctx: &mut ControlContext,
-    ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError>;
+    ) -> Result<(ManeuverSetpoints, BodyControlManeuverExtendedTelemetry), ControlsError>;
 
     fn reset(&mut self);
 }
@@ -141,26 +142,26 @@ enum ActiveManeuver {
 }
 
 impl ActiveManeuver {
-    fn from_maneuver_command(cmd: &ManeuverCommand) -> Self {
+    fn from_command(cmd: &BodyControlCommand) -> Self {
         match cmd {
-            ManeuverCommand::GlobalPosition(_) => {
+            BodyControlCommand::GlobalPosition(_) => {
                 Self::GlobalPosition(GlobalPositionManeuver::new())
             }
-            ManeuverCommand::GlobalVelocity(_) => {
+            BodyControlCommand::GlobalVelocity(_) => {
                 Self::GlobalVelocity(GlobalVelocityManeuver::new())
             }
-            ManeuverCommand::LocalVelocity(_) => Self::LocalVelocity(LocalVelocityManeuver::new()),
-            ManeuverCommand::GlobalAcceleration(_) => {
+            BodyControlCommand::LocalVelocity(_) => Self::LocalVelocity(LocalVelocityManeuver::new()),
+            BodyControlCommand::GlobalAcceleration(_) => {
                 Self::GlobalAcceleration(GlobalAccelerationManeuver::new())
             }
-            ManeuverCommand::LocalAcceleration(_) => {
+            BodyControlCommand::LocalAcceleration(_) => {
                 Self::LocalAcceleration(LocalAccelerationManeuver::new())
             }
-            ManeuverCommand::HeadingPivot(_) => Self::HeadingPivot(HeadingPivotManeuver::new()),
-            ManeuverCommand::PointPivot(_) => Self::PointPivot(PointPivotManeuver::new()),
-            ManeuverCommand::HeadingLine(_) => Self::HeadingLine(HeadingLineManeuver::new()),
-            ManeuverCommand::PointLine(_) => Self::PointLine(PointLineManeuver::new()),
-            ManeuverCommand::Off => Self::Off,
+            BodyControlCommand::HeadingPivot(_) => Self::HeadingPivot(HeadingPivotManeuver::new()),
+            BodyControlCommand::PointPivot(_) => Self::PointPivot(PointPivotManeuver::new()),
+            BodyControlCommand::HeadingLine(_) => Self::HeadingLine(HeadingLineManeuver::new()),
+            BodyControlCommand::PointLine(_) => Self::PointLine(PointLineManeuver::new()),
+            BodyControlCommand::Off | BodyControlCommand::EstopBrake => Self::Off,
         }
     }
 
@@ -179,7 +180,7 @@ impl ActiveManeuver {
         }
     }
 
-    fn entry_cmd(&mut self, cmd: ManeuverCommand, ctx: &mut ControlContext) {
+    fn entry_cmd(&mut self, cmd: BodyControlCommand, ctx: &mut ControlContext) {
         match self {
             Self::Off => {}
             Self::GlobalPosition(s) => s.entry(cmd, ctx),
@@ -196,11 +197,11 @@ impl ActiveManeuver {
 
     fn update_cmd(
         &mut self,
-        cmd: ManeuverCommand,
+        cmd: BodyControlCommand,
         ctx: &mut ControlContext,
-    ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError> {
+    ) -> Result<(ManeuverSetpoints, BodyControlManeuverExtendedTelemetry), ControlsError> {
         match self {
-            Self::Off => Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off)),
+            Self::Off => Ok((ManeuverSetpoints::zero(), BodyControlManeuverExtendedTelemetry::Off)),
             Self::GlobalPosition(s) => s.update(cmd, ctx),
             Self::GlobalVelocity(s) => s.update(cmd, ctx),
             Self::LocalVelocity(s) => s.update(cmd, ctx),
@@ -216,37 +217,37 @@ impl ActiveManeuver {
 
 pub struct ManeuverManager {
     active: ActiveManeuver,
-    prev_mode: BodyControlMode::Type,
+    prev_cmd_discriminant: core::mem::Discriminant<BodyControlCommand>,
 }
 
 impl ManeuverManager {
     pub fn new() -> Self {
         Self {
             active: ActiveManeuver::Off,
-            prev_mode: BodyControlMode::BCM_OFF,
+            prev_cmd_discriminant: core::mem::discriminant(&BodyControlCommand::Off),
         }
     }
 
     pub fn reset(&mut self) {
         self.active.reset();
         self.active = ActiveManeuver::Off;
-        self.prev_mode = BodyControlMode::BCM_OFF;
+        self.prev_cmd_discriminant = core::mem::discriminant(&BodyControlCommand::Off);
     }
 
     pub fn tick(
         &mut self,
         cmd: BasicControl,
         ctx: &mut ControlContext,
-    ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError> {
-        let maneuver_cmd = cmd.get_maneuver_command();
-        if cmd.body_control_mode != self.prev_mode {
-            self.prev_mode = cmd.body_control_mode;
+    ) -> Result<(ManeuverSetpoints, BodyControlManeuverExtendedTelemetry), ControlsError> {
+        let current_discriminant = core::mem::discriminant(&cmd.cmd);
+        if current_discriminant != self.prev_cmd_discriminant {
+            self.prev_cmd_discriminant = current_discriminant;
             self.active.reset();
             ctx.reset_trajectory();
-            self.active = ActiveManeuver::from_maneuver_command(&maneuver_cmd);
-            self.active.entry_cmd(maneuver_cmd, ctx);
+            self.active = ActiveManeuver::from_command(&cmd.cmd);
+            self.active.entry_cmd(cmd.cmd, ctx);
         }
-        self.active.update_cmd(maneuver_cmd, ctx)
+        self.active.update_cmd(cmd.cmd, ctx)
     }
 }
 

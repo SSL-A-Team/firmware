@@ -5,8 +5,7 @@ use crate::motion::params::controller_params::{
     VISION_GATE_EXPAND_RATE_M_PER_S, VISION_SEED_POS_STD_THRESH_M, VISION_SEED_SAMPLES,
 };
 use crate::motion::pid::PidController;
-use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
-use ateam_common_packets::radio::ManeuverCommand;
+use ateam_common_packets::{BodyControlCommand, ParameterCommand, ParameterData, ParameterName};
 use ateam_controls::bangbang_trajectory::BangBangTraj3D;
 use ateam_controls::linear_trajectory::LinearTrajectory;
 use ateam_controls::pivot_trajectory::PivotTrajectory;
@@ -172,7 +171,7 @@ pub struct ControlContext {
     /// Active trajectory. t=0 is always "now" (updated via tick each control tick).
     pub trajectory: Option<TrackedTrajectory>,
     /// Last command stored by `run_traj_track`, used to detect command changes.
-    pub prev_cmd: Option<ManeuverCommand>,
+    pub prev_cmd: Option<BodyControlCommand>,
     pub enc_lag: FirstOrderLag<2>,
     pub dt: f32,
     /// Cached KF state estimate — updated each tick before maneuver dispatch.
@@ -557,7 +556,7 @@ impl ControlContext {
     ///
     /// Always returns `true` when no previous command has been stored, ensuring
     /// a replan on the first tick.
-    pub fn command_changed(&self, cmd: &ManeuverCommand) -> bool {
+    pub fn command_changed(&self, cmd: &BodyControlCommand) -> bool {
         match &self.prev_cmd {
             None => true,
             Some(prev) => prev != cmd,
@@ -583,7 +582,7 @@ impl ControlContext {
     /// - No trajectory          → seed from `state_estimate` (snap to reality).
     pub fn run_traj_track<F>(
         &mut self,
-        cmd: ManeuverCommand,
+        cmd: BodyControlCommand,
         make_traj: F,
     ) -> Result<ManeuverSetpoints, ControlsError>
     where
@@ -738,93 +737,101 @@ impl ControlContext {
     // Parameter read/write (data operations only — reset is caller's concern)
     // -----------------------------------------------------------------------
 
-    pub fn expected_format(name: ParameterName::Type) -> Option<ParameterDataFormat::Type> {
+    /// Returns the expected ParameterData variant (with zero payload) for each
+    /// known parameter name, so callers can validate incoming data format.
+    pub fn expected_format(name: ParameterName) -> Option<ParameterData> {
         match name {
-            ParameterName::KF_PROCESS_STD => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::KF_MEASUREMENT_STD => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::KF_MAX_STATE => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::PHYS_WHEEL => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::PHYS_INERTIA => Some(ParameterDataFormat::VEC2_F32),
-            ParameterName::PHYS_MOTOR_MODEL => Some(ParameterDataFormat::VEC2_F32),
-            ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC6_F32),
-            ParameterName::FRICTION_COMP_GATING => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::POSE_CONTROL_GAIN => Some(ParameterDataFormat::VEC2_F32),
-            ParameterName::TRAJ_RECOMPUTE_ERROR => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
-            ParameterName::POSE_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::KfProcessStd        => Some(ParameterData::Vec4F32([0.0; 4])),
+            ParameterName::KfMeasurementStd    => Some(ParameterData::Vec4F32([0.0; 4])),
+            ParameterName::KfMaxState          => Some(ParameterData::Vec4F32([0.0; 4])),
+            ParameterName::PhysWheel           => Some(ParameterData::Vec4F32([0.0; 4])),
+            ParameterName::PhysInertia         => Some(ParameterData::Vec2F32([0.0; 2])),
+            ParameterName::PhysMotorModel      => Some(ParameterData::Vec2F32([0.0; 2])),
+            ParameterName::PhysFrictionModel   => Some(ParameterData::Vec6F32([0.0; 6])),
+            ParameterName::FrictionCompGating  => Some(ParameterData::Vec4F32([0.0; 4])),
+            ParameterName::PoseControlGain     => Some(ParameterData::Vec2F32([0.0; 2])),
+            ParameterName::TrajRecomputeError  => Some(ParameterData::Vec4F32([0.0; 4])),
+            ParameterName::PoseFbPidiiLinear   => Some(ParameterData::Vec5F32([0.0; 5])),
+            ParameterName::PoseFbPidiiAngular  => Some(ParameterData::Vec5F32([0.0; 5])),
             _ => None,
         }
     }
 
-    pub fn read_param(&self, name: ParameterName::Type, reply: &mut ParameterCommand) {
+    pub fn read_param(&self, name: ParameterName, reply: &mut ParameterCommand) {
         let kf = &self.robot_model.kf_params;
         let phys = &self.robot_model.physical_params;
         match name {
-            ParameterName::KF_PROCESS_STD => {
-                reply.data.vec4_f32 = [
+            ParameterName::KfProcessStd => {
+                reply.data = ParameterData::Vec4F32([
                     kf.process_noise_std_pos_linear,
                     kf.process_noise_std_pos_angular,
                     kf.process_noise_std_vel_linear,
                     kf.process_noise_std_vel_angular,
-                ];
+                ]);
             }
-            ParameterName::KF_MEASUREMENT_STD => {
-                reply.data.vec4_f32 = [
+            ParameterName::KfMeasurementStd => {
+                reply.data = ParameterData::Vec4F32([
                     kf.measurement_noise_std_vision_pos_linear,
                     kf.measurement_noise_std_vision_pos_angular,
                     kf.measurement_noise_std_encoder_vel_angular,
                     kf.measurement_noise_std_gyro_vel_angular,
-                ];
+                ]);
             }
-            ParameterName::KF_MAX_STATE => {
-                reply.data.vec4_f32 = [
+            ParameterName::KfMaxState => {
+                reply.data = ParameterData::Vec4F32([
                     kf.max_pos_linear,
                     kf.max_pos_angular,
                     kf.max_vel_linear,
                     kf.max_vel_angular,
-                ];
+                ]);
             }
-            ParameterName::PHYS_WHEEL => {
-                reply.data.vec4_f32 = [phys.alpha, phys.beta, phys.l, phys.r];
+            ParameterName::PhysWheel => {
+                reply.data = ParameterData::Vec4F32([phys.alpha, phys.beta, phys.l, phys.r]);
             }
-            ParameterName::PHYS_INERTIA => {
-                reply.data.vec2_f32 = [phys.mass, phys.iz];
+            ParameterName::PhysInertia => {
+                reply.data = ParameterData::Vec2F32([phys.mass, phys.iz]);
             }
-            ParameterName::PHYS_MOTOR_MODEL => {
-                reply.data.vec2_f32 = [phys.motor_torque_constant, phys.motor_efficiency_factor];
+            ParameterName::PhysMotorModel => {
+                reply.data = ParameterData::Vec2F32([
+                    phys.motor_torque_constant,
+                    phys.motor_efficiency_factor,
+                ]);
             }
-            ParameterName::PHYS_FRICTION_MODEL => {
-                reply.data.vec6_f32 = [
+            ParameterName::PhysFrictionModel => {
+                reply.data = ParameterData::Vec6F32([
                     phys.coulomb_friction_coefficient_linear_x,
                     phys.coulomb_friction_coefficient_linear_y,
                     phys.coulomb_friction_coefficient_angular,
                     phys.viscous_friction_coefficient_linear_x,
                     phys.viscous_friction_coefficient_linear_y,
                     phys.viscous_friction_coefficient_angular,
-                ];
+                ]);
             }
-            ParameterName::FRICTION_COMP_GATING => {
-                reply.data.vec4_f32 = self.friction_comp_gating.into();
+            ParameterName::FrictionCompGating => {
+                let v = self.friction_comp_gating;
+                reply.data = ParameterData::Vec4F32([v.x, v.y, v.z, v.w]);
             }
-            ParameterName::POSE_CONTROL_GAIN => {
-                reply.data.vec2_f32 = self.pose_accel_gain.into();
+            ParameterName::PoseControlGain => {
+                let v = self.pose_accel_gain;
+                reply.data = ParameterData::Vec2F32([v.x, v.y]);
             }
-            ParameterName::TRAJ_RECOMPUTE_ERROR => {
-                reply.data.vec4_f32 = self.tracking_error_thresh.into();
+            ParameterName::TrajRecomputeError => {
+                let v = self.tracking_error_thresh;
+                reply.data = ParameterData::Vec4F32([v.x, v.y, v.z, v.w]);
             }
-            ParameterName::POSE_FB_PIDII_LINEAR | ParameterName::POSE_FB_PIDII_ANGULAR => {
+            ParameterName::PoseFbPidiiLinear | ParameterName::PoseFbPidiiAngular => {
                 let gain = self.pose_pid_controller.get_gain();
                 let row = match name {
-                    ParameterName::POSE_FB_PIDII_LINEAR => 0,
+                    ParameterName::PoseFbPidiiLinear => 0,
                     _ => 2,
                 };
-                reply.data.vec5_f32 = [
+                reply.data = ParameterData::Vec5F32([
                     gain[(row, 0)],
                     gain[(row, 1)],
                     gain[(row, 2)],
                     gain[(row, 3)],
                     gain[(row, 4)],
-                ];
+                ]);
             }
             _ => unreachable!(),
         }
@@ -832,8 +839,8 @@ impl ControlContext {
 
     pub fn write_param(&mut self, cmd: &ParameterCommand) {
         match cmd.parameter_name {
-            ParameterName::KF_PROCESS_STD => {
-                let v = unsafe { cmd.data.vec4_f32 };
+            ParameterName::KfProcessStd => {
+                let ParameterData::Vec4F32(v) = cmd.data else { return; };
                 let mut kf = self.robot_model.kf_params;
                 kf.process_noise_std_pos_linear = v[0];
                 kf.process_noise_std_pos_angular = v[1];
@@ -841,8 +848,8 @@ impl ControlContext {
                 kf.process_noise_std_vel_angular = v[3];
                 self.robot_model.update_kf_params(kf);
             }
-            ParameterName::KF_MEASUREMENT_STD => {
-                let v = unsafe { cmd.data.vec4_f32 };
+            ParameterName::KfMeasurementStd => {
+                let ParameterData::Vec4F32(v) = cmd.data else { return; };
                 let mut kf = self.robot_model.kf_params;
                 kf.measurement_noise_std_vision_pos_linear = v[0];
                 kf.measurement_noise_std_vision_pos_angular = v[1];
@@ -850,8 +857,8 @@ impl ControlContext {
                 kf.measurement_noise_std_gyro_vel_angular = v[3];
                 self.robot_model.update_kf_params(kf);
             }
-            ParameterName::KF_MAX_STATE => {
-                let v = unsafe { cmd.data.vec4_f32 };
+            ParameterName::KfMaxState => {
+                let ParameterData::Vec4F32(v) = cmd.data else { return; };
                 let mut kf = self.robot_model.kf_params;
                 kf.max_pos_linear = v[0];
                 kf.max_pos_angular = v[1];
@@ -859,8 +866,8 @@ impl ControlContext {
                 kf.max_vel_angular = v[3];
                 self.robot_model.update_kf_params(kf);
             }
-            ParameterName::PHYS_WHEEL => {
-                let v = unsafe { cmd.data.vec4_f32 };
+            ParameterName::PhysWheel => {
+                let ParameterData::Vec4F32(v) = cmd.data else { return; };
                 let mut p = self.robot_model.physical_params;
                 p.alpha = v[0];
                 p.beta = v[1];
@@ -868,22 +875,22 @@ impl ControlContext {
                 p.r = v[3];
                 let _ = self.robot_model.update_physical_params(p);
             }
-            ParameterName::PHYS_INERTIA => {
-                let v = unsafe { cmd.data.vec2_f32 };
+            ParameterName::PhysInertia => {
+                let ParameterData::Vec2F32(v) = cmd.data else { return; };
                 let mut p = self.robot_model.physical_params;
                 p.mass = v[0];
                 p.iz = v[1];
                 let _ = self.robot_model.update_physical_params(p);
             }
-            ParameterName::PHYS_MOTOR_MODEL => {
-                let v = unsafe { cmd.data.vec2_f32 };
+            ParameterName::PhysMotorModel => {
+                let ParameterData::Vec2F32(v) = cmd.data else { return; };
                 let mut p = self.robot_model.physical_params;
                 p.motor_torque_constant = v[0];
                 p.motor_efficiency_factor = v[1];
                 let _ = self.robot_model.update_physical_params(p);
             }
-            ParameterName::PHYS_FRICTION_MODEL => {
-                let v = unsafe { cmd.data.vec6_f32 };
+            ParameterName::PhysFrictionModel => {
+                let ParameterData::Vec6F32(v) = cmd.data else { return; };
                 let mut p = self.robot_model.physical_params;
                 p.coulomb_friction_coefficient_linear_x = v[0];
                 p.coulomb_friction_coefficient_linear_y = v[1];
@@ -893,22 +900,22 @@ impl ControlContext {
                 p.viscous_friction_coefficient_angular = v[5];
                 let _ = self.robot_model.update_physical_params(p);
             }
-            ParameterName::FRICTION_COMP_GATING => {
-                let v = unsafe { cmd.data.vec4_f32 };
+            ParameterName::FrictionCompGating => {
+                let ParameterData::Vec4F32(v) = cmd.data else { return; };
                 self.friction_comp_gating = Vector4f::new(v[0], v[1], v[2], v[3]);
             }
-            ParameterName::POSE_CONTROL_GAIN => {
-                let v = unsafe { cmd.data.vec2_f32 };
+            ParameterName::PoseControlGain => {
+                let ParameterData::Vec2F32(v) = cmd.data else { return; };
                 self.pose_accel_gain = Vector2f::new(v[0], v[1]);
             }
-            ParameterName::TRAJ_RECOMPUTE_ERROR => {
-                let v = unsafe { cmd.data.vec4_f32 };
+            ParameterName::TrajRecomputeError => {
+                let ParameterData::Vec4F32(v) = cmd.data else { return; };
                 self.tracking_error_thresh = Vector4f::new(v[0], v[1], v[2], v[3]);
             }
-            ParameterName::POSE_FB_PIDII_LINEAR | ParameterName::POSE_FB_PIDII_ANGULAR => {
-                let v = unsafe { cmd.data.vec5_f32 };
+            ParameterName::PoseFbPidiiLinear | ParameterName::PoseFbPidiiAngular => {
+                let ParameterData::Vec5F32(v) = cmd.data else { return; };
                 let mut gain = self.pose_pid_controller.get_gain();
-                if cmd.parameter_name == ParameterName::POSE_FB_PIDII_LINEAR {
+                if cmd.parameter_name == ParameterName::PoseFbPidiiLinear {
                     for col in 0..5 {
                         gain[(0, col)] = v[col];
                         gain[(1, col)] = v[col];

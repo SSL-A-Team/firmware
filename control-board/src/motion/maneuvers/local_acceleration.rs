@@ -1,7 +1,6 @@
 use crate::motion::control_context::{ControlContext, ManeuverSetpoints};
 use crate::motion::maneuvers::MotionManeuver;
-use ateam_common_packets::bindings::ExtendedLocalAccelerationTelemetry;
-use ateam_common_packets::radio::{ManeuverCommand, ManeuverExtendedTelemetry};
+use ateam_common_packets::{BodyControlCommand, BodyControlManeuverExtendedTelemetry, ExtendedLocalAccelerationTelemetry};
 use ateam_controls::{z_rotation_mat, ControlsError, Vector3f};
 
 pub struct LocalAccelerationManeuver;
@@ -13,15 +12,15 @@ impl LocalAccelerationManeuver {
 }
 
 impl MotionManeuver for LocalAccelerationManeuver {
-    fn entry(&mut self, _cmd: ManeuverCommand, _ctx: &mut ControlContext) {}
+    fn entry(&mut self, _cmd: BodyControlCommand, _ctx: &mut ControlContext) {}
 
     fn update(
         &mut self,
-        cmd: ManeuverCommand,
+        cmd: BodyControlCommand,
         ctx: &mut ControlContext,
-    ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError> {
-        let ManeuverCommand::LocalAcceleration(c) = cmd else {
-            return Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off));
+    ) -> Result<(ManeuverSetpoints, BodyControlManeuverExtendedTelemetry), ControlsError> {
+        let BodyControlCommand::LocalAcceleration(c) = cmd else {
+            return Ok((ManeuverSetpoints::zero(), BodyControlManeuverExtendedTelemetry::Off));
         };
 
         let state_estimate = ctx.state_estimate;
@@ -30,7 +29,7 @@ impl MotionManeuver for LocalAccelerationManeuver {
         let body_twist: Vector3f = next_state.fixed_rows::<3>(3).into();
 
         let telem =
-            ManeuverExtendedTelemetry::LocalAcceleration(ExtendedLocalAccelerationTelemetry {
+            BodyControlManeuverExtendedTelemetry::LocalAcceleration(ExtendedLocalAccelerationTelemetry {
                 cmd_echo: c,
             });
 

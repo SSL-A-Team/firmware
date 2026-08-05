@@ -22,12 +22,10 @@
 //! `ActiveBrakeController` instead of the normal body controller.
 
 use ateam_common_packets::{
-    bindings::{
-        BasicControl, BodyControlCommand, BodyControlMode, DribblerCommand, KickRequest,
-        LocalVelocityCommand,
-    },
+    BasicControl, BodyControlCommand, DribblerCommand, KickRequest, LocalVelocityCommand,
     radio::DataPacket,
 };
+use ateam_common_packets::bitfields::BasicControlFlags;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{interrupt, pac::Interrupt};
 use embassy_sync::pubsub::PubSubChannel;
@@ -240,41 +238,26 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         // ── publish command ──────────────────────────────────────────────────
 
         command_publisher.publish_immediate(DataPacket::BasicControl(BasicControl {
-            _bitfield_1: BasicControl::new_bitfield_1(
-                0,             // request_shutdown
-                0,             // reboot_robot
-                0,             // game_state_in_stop
-                0,             // game_state_in_halt
-                ebrake as u32, // emergency_stop — engages ActiveBrakeController
-                1,             // wheel_vel_control_enabled
-                1,             // wheel_torque_control_enabled
-                0,             // vision_update (local velocity needs no vision)
-                0,             // reset_controller
-                0,             // reserved1
-            ),
-            _bitfield_align_1: Default::default(),
-
+            flags: BasicControlFlags::default()
+                .with_emergency_stop(ebrake)
+                .with_wheel_vel_control_enabled(true)
+                .with_wheel_torque_control_enabled(true),
             vision_position_update: [0.0, 0.0, 0.0],
-
-            // Keep a non-OFF mode with motion enabled so the control task routes
-            // through the active brake rather than the packet-timeout hard stop.
-            body_control_mode: BodyControlMode::BCM_LOCAL_VELOCITY,
-            kick_request: KickRequest::KR_DISABLE,
+            // Keep a non-OFF mode so the control task routes through the active
+            // brake rather than the packet-timeout hard stop.
+            kick_request: KickRequest::Disable,
             play_song: 0,
-            dribbler_mode: DribblerCommand::DC_CURRENT,
-
+            dribbler_mode: DribblerCommand::Current,
+            _pad: 0,
             kick_vel: 0.0,
             dribbler_setpoint: 0.0,
-
-            cmd: BodyControlCommand {
-                local_vel: LocalVelocityCommand {
-                    local_xd,
-                    local_yd: 0.0,
-                    local_omega: 0.0,
-                    max_linear_acc: 0.0,  // use default limits
-                    max_angular_acc: 0.0, // use default limits
-                },
-            },
+            cmd: BodyControlCommand::LocalVelocity(LocalVelocityCommand {
+                local_xd,
+                local_yd: 0.0,
+                local_omega: 0.0,
+                max_linear_acc: 0.0,
+                max_angular_acc: 0.0,
+            }),
         }));
     }
 }

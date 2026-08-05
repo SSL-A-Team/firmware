@@ -3,10 +3,7 @@
 #![feature(impl_trait_in_assoc_type)]
 
 use ateam_common_packets::{
-    bindings::{
-        BasicControl, BodyControlCommand, BodyControlMode, DribblerCommand, GlobalVelocityCommand,
-        KickRequest, LocalVelocityCommand,
-    },
+    BasicControl, BodyControlCommand, DribblerCommand, KickRequest, LocalVelocityCommand,
     radio::DataPacket,
 };
 use embassy_executor::InterruptExecutor;
@@ -193,28 +190,21 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         defmt::info!("main loop");
 
         radio_command_publisher.publish_immediate(DataPacket::BasicControl(BasicControl {
-            _bitfield_1: Default::default(),
-            _bitfield_align_1: Default::default(),
-
-            vision_position_update: [0.0, 0.0, 0.0], // No vision updates
-
-            body_control_mode: BodyControlMode::BCM_LOCAL_VELOCITY,
-            kick_request: KickRequest::KR_ARM,
+            flags: Default::default(),
+            vision_position_update: [0.0, 0.0, 0.0],
+            kick_request: KickRequest::Arm,
             play_song: 0,
-            dribbler_mode: DribblerCommand::DC_CURRENT,
-
+            dribbler_mode: DribblerCommand::Current,
+            _pad: 0,
             kick_vel: 0.0,
             dribbler_setpoint: 0.1,
-
-            cmd: BodyControlCommand {
-                local_vel: LocalVelocityCommand {
-                    local_xd: 1.0, // Move forward at 1 m/s
-                    local_yd: 0.0,
-                    local_omega: 0.0,
-                    max_linear_acc: 0.0,  // Use default limits
-                    max_angular_acc: 0.0, // Use default limits
-                },
-            },
+            cmd: BodyControlCommand::LocalVelocity(LocalVelocityCommand {
+                local_xd: 1.0,
+                local_yd: 0.0,
+                local_omega: 0.0,
+                max_linear_acc: 0.0,
+                max_angular_acc: 0.0,
+            }),
         }));
     }
 }

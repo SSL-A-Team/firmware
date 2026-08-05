@@ -24,12 +24,11 @@
 //!   Back  — decrease colinear accel      (-0.5 m/s²)
 
 use ateam_common_packets::{
-    bindings::{
-        BasicControl, BodyControlCommand, BodyControlMode, DribblerCommand, HeadingLineCommand,
-        KickRequest, PointLineCommand,
-    },
+    BasicControl, BodyControlCommand, DribblerCommand, HeadingLineCommand, KickRequest,
+    PointLineCommand,
     radio::{DataPacket, TelemetryPacket},
 };
+use ateam_common_packets::bitfields::BasicControlFlags;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
     gpio::{Input, Pull},
@@ -339,66 +338,43 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
         // ── publish command ──────────────────────────────────────────────────
 
-        let (body_control_mode, cmd) = if face_point_mode {
-            (
-                BodyControlMode::BCM_POINT_LINE,
-                BodyControlCommand {
-                    point_line: PointLineCommand {
-                        start_x: 0.0,
-                        start_y: 0.0,
-                        dir_x: 1.0,
-                        dir_y: 0.0,
-                        line_velocity,
-                        target_x: FACE_POINT_X,
-                        target_y: FACE_POINT_Y,
-                        max_accel_colinear,
-                        ..Default::default()
-                    },
-                },
-            )
+        let cmd = if face_point_mode {
+            BodyControlCommand::PointLine(PointLineCommand {
+                start_x: 0.0,
+                start_y: 0.0,
+                dir_x: 1.0,
+                dir_y: 0.0,
+                line_velocity,
+                target_x: FACE_POINT_X,
+                target_y: FACE_POINT_Y,
+                max_accel_colinear,
+                ..Default::default()
+            })
         } else {
-            (
-                BodyControlMode::BCM_HEADING_LINE,
-                BodyControlCommand {
-                    heading_line: HeadingLineCommand {
-                        start_x: 0.0,
-                        start_y: 0.0,
-                        dir_x: 1.0,
-                        dir_y: 0.0,
-                        line_velocity,
-                        global_theta: TARGET_THETA,
-                        max_accel_colinear,
-                        ..Default::default()
-                    },
-                },
-            )
+            BodyControlCommand::HeadingLine(HeadingLineCommand {
+                start_x: 0.0,
+                start_y: 0.0,
+                dir_x: 1.0,
+                dir_y: 0.0,
+                line_velocity,
+                global_theta: TARGET_THETA,
+                max_accel_colinear,
+                ..Default::default()
+            })
         };
 
         command_publisher.publish_immediate(DataPacket::BasicControl(BasicControl {
-            _bitfield_1: BasicControl::new_bitfield_1(
-                0, // request_shutdown
-                0, // reboot_robot
-                0, // game_state_in_stop
-                0, // game_state_in_halt
-                0, // emergency_stop
-                1, // wheel_vel_control_enabled
-                1, // wheel_torque_control_enabled
-                1, // vision_update (mocked from KF estimate — line following requires vision)
-                0, // reset_controller
-                0, // reserved1
-            ),
-            _bitfield_align_1: Default::default(),
-
+            flags: BasicControlFlags::default()
+                .with_wheel_vel_control_enabled(true)
+                .with_wheel_torque_control_enabled(true)
+                .with_vision_update(true),
             vision_position_update: mock_vision_pose,
-
-            body_control_mode,
-            kick_request: KickRequest::KR_DISABLE,
+            kick_request: KickRequest::Disable,
             play_song: 0,
-            dribbler_mode: DribblerCommand::DC_CURRENT,
-
+            dribbler_mode: DribblerCommand::Current,
+            _pad: 0,
             kick_vel: 0.0,
             dribbler_setpoint: 0.0,
-
             cmd,
         }));
     }

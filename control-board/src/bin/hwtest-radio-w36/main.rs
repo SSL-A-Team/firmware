@@ -3,7 +3,7 @@
 #![feature(impl_trait_in_assoc_type)]
 
 use ateam_common_packets::{
-    bindings::ParameterCommandCode,
+    ParameterCommandCode,
     radio::{DataPacket, TelemetryPacket},
 };
 use embassy_executor::InterruptExecutor;
@@ -141,7 +141,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                         defmt::info!("got parameter packet");
 
                         let mut param_resp = pc;
-                        param_resp.command_code = ParameterCommandCode::PCC_ACK;
+                        param_resp.command_code = ParameterCommandCode::Ack;
 
                         let wrapped_pkt = TelemetryPacket::ParameterCommandResponse(param_resp);
                         control_telemetry_publisher.publish(wrapped_pkt).await;

@@ -3,12 +3,10 @@
 #![feature(impl_trait_in_assoc_type)]
 
 use ateam_common_packets::{
-    bindings::{
-        BasicControl, BodyControlCommand, BodyControlMode, DribblerCommand, KickRequest,
-        LocalVelocityCommand,
-    },
+    BasicControl, BodyControlCommand, DribblerCommand, KickRequest, LocalVelocityCommand,
     radio::DataPacket,
 };
+use ateam_common_packets::bitfields::BasicControlFlags;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{interrupt, pac::Interrupt};
 use embassy_sync::pubsub::PubSubChannel;
@@ -150,39 +148,23 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         }
 
         test_command_publisher.publish_immediate(DataPacket::BasicControl(BasicControl {
-            _bitfield_1: BasicControl::new_bitfield_1(
-                0,
-                0,
-                0,
-                0, // game_state_in_halt
-                0,
-                WHEEL_VEL_CONTROL_ENABLED.into(),
-                WHEEL_TORQUE_CONTROL_ENABLED.into(),
-                0,
-                0,
-                0,
-            ),
-            _bitfield_align_1: Default::default(),
-
+            flags: BasicControlFlags::default()
+                .with_wheel_vel_control_enabled(WHEEL_VEL_CONTROL_ENABLED)
+                .with_wheel_torque_control_enabled(WHEEL_TORQUE_CONTROL_ENABLED),
             vision_position_update: [0.0, 0.0, 0.0],
-
-            body_control_mode: BodyControlMode::BCM_LOCAL_VELOCITY,
-            kick_request: KickRequest::KR_DISABLE,
+            kick_request: KickRequest::Disable,
             play_song: 0,
-            dribbler_mode: DribblerCommand::DC_CURRENT,
-
+            dribbler_mode: DribblerCommand::Current,
+            _pad: 0,
             kick_vel: 0.0,
             dribbler_setpoint: 0.1,
-
-            cmd: BodyControlCommand {
-                local_vel: LocalVelocityCommand {
-                    local_xd: 0.0,
-                    local_yd: 0.0,
-                    local_omega: vel * 10.0,
-                    max_linear_acc: 0.0,
-                    max_angular_acc: 0.0,
-                },
-            },
+            cmd: BodyControlCommand::LocalVelocity(LocalVelocityCommand {
+                local_xd: 0.0,
+                local_yd: 0.0,
+                local_omega: vel * 10.0,
+                max_linear_acc: 0.0,
+                max_angular_acc: 0.0,
+            }),
         }));
     }
 }

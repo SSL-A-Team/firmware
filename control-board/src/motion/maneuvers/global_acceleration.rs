@@ -1,7 +1,6 @@
 use crate::motion::control_context::{ControlContext, ManeuverSetpoints};
 use crate::motion::maneuvers::MotionManeuver;
-use ateam_common_packets::bindings::ExtendedGlobalAccelerationTelemetry;
-use ateam_common_packets::radio::{ManeuverCommand, ManeuverExtendedTelemetry};
+use ateam_common_packets::{BodyControlCommand, BodyControlManeuverExtendedTelemetry, ExtendedGlobalAccelerationTelemetry};
 use ateam_controls::{ControlsError, Vector3f};
 
 pub struct GlobalAccelerationManeuver;
@@ -13,15 +12,15 @@ impl GlobalAccelerationManeuver {
 }
 
 impl MotionManeuver for GlobalAccelerationManeuver {
-    fn entry(&mut self, _cmd: ManeuverCommand, _ctx: &mut ControlContext) {}
+    fn entry(&mut self, _cmd: BodyControlCommand, _ctx: &mut ControlContext) {}
 
     fn update(
         &mut self,
-        cmd: ManeuverCommand,
+        cmd: BodyControlCommand,
         ctx: &mut ControlContext,
-    ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError> {
-        let ManeuverCommand::GlobalAcceleration(c) = cmd else {
-            return Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off));
+    ) -> Result<(ManeuverSetpoints, BodyControlManeuverExtendedTelemetry), ControlsError> {
+        let BodyControlCommand::GlobalAcceleration(c) = cmd else {
+            return Ok((ManeuverSetpoints::zero(), BodyControlManeuverExtendedTelemetry::Off));
         };
 
         let target_accel = c.as_vec3f();
@@ -30,7 +29,7 @@ impl MotionManeuver for GlobalAccelerationManeuver {
         let body_twist: Vector3f = next_state.fixed_rows::<3>(3).into();
 
         let telem =
-            ManeuverExtendedTelemetry::GlobalAcceleration(ExtendedGlobalAccelerationTelemetry {
+            BodyControlManeuverExtendedTelemetry::GlobalAcceleration(ExtendedGlobalAccelerationTelemetry {
                 cmd_echo: c,
             });
 

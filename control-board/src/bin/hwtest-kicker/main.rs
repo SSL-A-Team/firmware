@@ -5,13 +5,10 @@
 #![feature(sync_unsafe_cell)]
 #![feature(generic_const_exprs)]
 
-use core::mem::MaybeUninit;
-
-use ateam_common_packets::bindings::{
-    DribblerCommand::DC_CURRENT,
-    KickRequest::{KR_ARM, KR_DISABLE, KR_KICK_NOW},
-    KickerTelemetry, PowerCommand, PowerTelemetry,
+use ateam_common_packets::{
+    DribblerCommand, KickRequest, KickerTelemetry, PowerCommand, PowerTelemetry,
 };
+use ateam_common_packets::bitfields::PowerCommandFlags;
 use ateam_control_board::{
     drivers::kicker::Kicker, get_system_config, include_kicker_bin, SystemIrqs,
     DEBUG_KICKER_UART_QUEUES, DEBUG_POWER_UART_QUEUES,
@@ -143,7 +140,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     loop {
         kicker.process_telemetry();
         kicker.send_command();
-        if kicker.get_lastest_state().dribbler_fw_loaded() != 0 {
+        if kicker.get_lastest_state().status.dribbler_fw_loaded() {
             break;
         }
         wait_ticks += 1;
@@ -201,14 +198,14 @@ async fn main(_spawner: embassy_executor::Spawner) {
         while let Ok(res) = power_rx.try_dequeue() {
             let buf = res.data();
             if buf.len() == core::mem::size_of::<PowerTelemetry>() {
-                let mut pkt: PowerTelemetry = unsafe { MaybeUninit::zeroed().assume_init() };
+                let mut pkt = PowerTelemetry::default();
                 unsafe {
                     let dst = &mut pkt as *mut _ as *mut u8;
                     for i in 0..core::mem::size_of::<PowerTelemetry>() {
                         *dst.offset(i as isize) = buf[i];
                     }
                 }
-                if pkt.shutdown_requested() != 0 && !power_shutdown_requested {
+                if pkt.status.shutdown_requested() && !power_shutdown_requested {
                     power_shutdown_requested = true;
                     defmt::warn!("power board requested shutdown — beginning kicker discharge");
                 }
@@ -225,12 +222,11 @@ async fn main(_spawner: embassy_executor::Spawner) {
         power_tick += 1;
         if power_tick >= POWER_TICK_PERIOD {
             power_tick = 0;
-            let mut cmd: PowerCommand = unsafe { MaybeUninit::zeroed().assume_init() };
-            if kicker_discharge_complete {
-                cmd.set_ready_shutdown(1);
-            } else if power_shutdown_requested {
-                cmd.set_request_shutdown(1);
-            }
+            let cmd = PowerCommand {
+                flags: PowerCommandFlags::default()
+                    .with_ready_shutdown(kicker_discharge_complete)
+                    .with_request_shutdown(power_shutdown_requested && !kicker_discharge_complete),
+            };
             let cmd_bytes = unsafe {
                 core::slice::from_raw_parts(
                     (&cmd as *const PowerCommand) as *const u8,
@@ -342,7 +338,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
                     "TELEM | hv={} V | batt={} V | ball={} | error={} | shutdown={}",
                     telem.rail_voltage,
                     telem.battery_voltage,
-                    telem.ball_detected() != 0,
+                    telem.status.ball_detected(),
                     kicker.error_reported(),
                     power_shutdown_requested,
                 );
@@ -354,21 +350,21 @@ async fn main(_spawner: embassy_executor::Spawner) {
         // Kicker command: during shutdown, request_shutdown drives kicker discharge.
         // Buttons suppressed during shutdown; kick_now_remaining won't be set.
         kicker.set_kick_strength(kick_speed);
-        kicker.set_drib_command(DC_CURRENT, drib_current);
+        kicker.set_drib_command(DribblerCommand::Current, drib_current);
         if power_shutdown_requested {
             kicker.request_shutdown();
-            kicker.request_kick(KR_ARM as u32);
+            kicker.request_kick(KickRequest::Arm);
         } else if kick_now_remaining > 0 {
-            kicker.request_kick(KR_KICK_NOW as u32);
+            kicker.request_kick(KickRequest::KickNow);
             kick_now_remaining -= 1;
             if kick_now_remaining == 0 {
                 kick_clear_remaining = 20;
             }
         } else if kick_clear_remaining > 0 {
-            kicker.request_kick(KR_DISABLE as u32);
+            kicker.request_kick(KickRequest::Disable);
             kick_clear_remaining -= 1;
         } else {
-            kicker.request_kick(KR_ARM as u32);
+            kicker.request_kick(KickRequest::Arm);
         }
         kicker.send_command();
 

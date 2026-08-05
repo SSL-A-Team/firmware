@@ -3,7 +3,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(sync_unsafe_cell)]
 
-use ateam_common_packets::bindings::{CcmMotionControlType, CcmTelemetry};
+use ateam_common_packets::{CcmMotionControlType, CcmTelemetry};
 use ateam_lib_stm32::{
     drivers::boot::stm32_interface, idle_buffered_uart_spawn_tasks, static_idle_buffered_uart,
 };
@@ -293,15 +293,15 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         defmt::error!("fr motor failed to flash!");
     }
 
-    // ccm.set_motion_type(CcmMotionControlType::CCM_MCT_VOLTAGE_OPENLOOP);
+    // ccm.set_motion_type(CcmMotionControlType::VoltageOpenloop);
     // ccm.set_setpoint(2500.0);
-    fl_ccm.set_motion_type(CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT);
+    fl_ccm.set_motion_type(CcmMotionControlType::VelocityCurrent);
     fl_ccm.set_current_setpoint(0);
-    bl_ccm.set_motion_type(CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT);
+    bl_ccm.set_motion_type(CcmMotionControlType::VelocityCurrent);
     bl_ccm.set_current_setpoint(0);
-    br_ccm.set_motion_type(CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT);
+    br_ccm.set_motion_type(CcmMotionControlType::VelocityCurrent);
     br_ccm.set_current_setpoint(0);
-    fr_ccm.set_motion_type(CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT);
+    fr_ccm.set_motion_type(CcmMotionControlType::VelocityCurrent);
     fr_ccm.set_current_setpoint(0);
 
     fl_ccm.set_telemetry_enabled(true);
@@ -354,7 +354,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         if ctr > 19 {
             defmt::info!(
                 "motion control type: {}",
-                fl_ccm.get_latest_state().motion_control_type
+                fl_ccm.get_latest_state().motion_control_type as u8
             );
             defmt::info!(
                 "vrail: {}, Isp: {}, Iref: {}, vel: {}, Vmv: {}",

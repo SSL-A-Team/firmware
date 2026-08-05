@@ -1,7 +1,6 @@
 use crate::motion::control_context::{ControlContext, ManeuverSetpoints, TrackedTrajectory};
 use crate::motion::maneuvers::MotionManeuver;
-use ateam_common_packets::bindings::ExtendedGlobalPositionTelemetry;
-use ateam_common_packets::radio::{ManeuverCommand, ManeuverExtendedTelemetry};
+use ateam_common_packets::{BodyControlCommand, BodyControlManeuverExtendedTelemetry, ExtendedGlobalPositionTelemetry};
 use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
 use ateam_controls::ControlsError;
 
@@ -14,22 +13,22 @@ impl GlobalPositionManeuver {
 }
 
 impl MotionManeuver for GlobalPositionManeuver {
-    fn entry(&mut self, _cmd: ManeuverCommand, _ctx: &mut ControlContext) {}
+    fn entry(&mut self, _cmd: BodyControlCommand, _ctx: &mut ControlContext) {}
 
     fn update(
         &mut self,
-        cmd: ManeuverCommand,
+        cmd: BodyControlCommand,
         ctx: &mut ControlContext,
-    ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError> {
-        let ManeuverCommand::GlobalPosition(c) = cmd else {
-            return Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off));
+    ) -> Result<(ManeuverSetpoints, BodyControlManeuverExtendedTelemetry), ControlsError> {
+        let BodyControlCommand::GlobalPosition(c) = cmd else {
+            return Ok((ManeuverSetpoints::zero(), BodyControlManeuverExtendedTelemetry::Off));
         };
 
         // Vision required: disable wheels and return zero setpoints until a
         // fresh vision sample arrives.
         if !ctx.vision_active() {
             ctx.wheels_disabled = true;
-            return Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off));
+            return Ok((ManeuverSetpoints::zero(), BodyControlManeuverExtendedTelemetry::Off));
         }
 
         let default_params = TrajectoryParams::default();
@@ -62,7 +61,7 @@ impl MotionManeuver for GlobalPositionManeuver {
             Ok(TrackedTrajectory::BangBang(traj))
         })?;
 
-        let telem = ManeuverExtendedTelemetry::GlobalPosition(ExtendedGlobalPositionTelemetry {
+        let telem = BodyControlManeuverExtendedTelemetry::GlobalPosition(ExtendedGlobalPositionTelemetry {
             cmd_echo: c,
         });
         Ok((setpoints, telem))

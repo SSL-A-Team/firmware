@@ -1,5 +1,5 @@
 use ateam_common_packets::{
-    bindings::BasicTelemetry,
+    BasicTelemetry,
     radio::{is_data_packet_safe, TelemetryPacket},
 };
 use ateam_lib_stm32::{

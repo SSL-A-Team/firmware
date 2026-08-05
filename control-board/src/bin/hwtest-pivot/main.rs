@@ -30,13 +30,11 @@
 //! The ball is placed at the field origin (0, 0).
 
 use ateam_common_packets::{
-    bindings::{
-        BasicControl, BodyControlCommand, BodyControlMode, DribblerCommand, HeadingPivotCommand,
-        KickRequest, ParameterCommand, ParameterCommandCode, ParameterCommand_ParameterData,
-        ParameterDataFormat, ParameterName,
-    },
+    BasicControl, BodyControlCommand, DribblerCommand, HeadingPivotCommand, KickRequest,
+    ParameterCommand, ParameterCommandCode, ParameterData, ParameterName,
     radio::{DataPacket, TelemetryPacket},
 };
+use ateam_common_packets::bitfields::BasicControlFlags;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::{
     gpio::{Input, Pull},
@@ -152,7 +150,7 @@ const DEFAULT_MAX_ANGULAR_ACC: f32 = 4.0 * core::f32::consts::PI; // rad/s
 /// Existing robot parameter reused to read back the tuned pivot values over the
 /// radio. A `PCC_READ` of this name is answered with a VEC4 payload carrying
 /// `[orbit_radius, inset_angle, max_angular_vel, max_angular_acc]`.
-const PIVOT_READBACK_PARAM: ParameterName::Type = ParameterName::KF_PROCESS_STD;
+const PIVOT_READBACK_PARAM: ParameterName = ParameterName::KfProcessStd;
 
 // ============================================================================
 // Phase state machine
@@ -356,16 +354,14 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
         while let Some(pkt) = radio_command_subscriber.try_next_message_pure() {
             if let DataPacket::ParameterCommand(param_cmd) = pkt {
-                if param_cmd.command_code == ParameterCommandCode::PCC_READ
+                if param_cmd.command_code == ParameterCommandCode::Read
                     && param_cmd.parameter_name == PIVOT_READBACK_PARAM
                 {
                     let resp = ParameterCommand {
-                        command_code: ParameterCommandCode::PCC_ACK,
-                        data_format: ParameterDataFormat::VEC4_F32,
+                        command_code: ParameterCommandCode::Ack,
                         parameter_name: PIVOT_READBACK_PARAM,
-                        data: ParameterCommand_ParameterData {
-                            vec3_f32: [orbit_radius, inset_angle, max_angular_acc],
-                        },
+                        _pad: [0u8; 2],
+                        data: ParameterData::Vec3F32([orbit_radius, inset_angle, max_angular_acc]),
                     };
                     defmt::info!(
                         "hwtest-pivot: param read → orbit_radius {} m, inset_angle {} rad, max_angular_acc {} rad/s",
@@ -465,47 +461,31 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         // ── publish command ──────────────────────────────────────────────────
 
         command_publisher.publish_immediate(DataPacket::BasicControl(BasicControl {
-            _bitfield_1: BasicControl::new_bitfield_1(
-                0, // request_shutdown
-                0, // reboot_robot
-                0, // game_state_in_stop
-                0, // game_state_in_halt
-                0, // emergency_stop
-                1, // wheel_vel_control_enabled
-                1, // wheel_torque_control_enabled
-                0, // vision_update
-                0, // reset_controller
-                0, // reserved1
-            ),
-            _bitfield_align_1: Default::default(),
-
+            flags: BasicControlFlags::default()
+                .with_wheel_vel_control_enabled(true)
+                .with_wheel_torque_control_enabled(true),
             vision_position_update: [0.0, 0.0, 0.0],
-
-            body_control_mode: if motion_stopped {
-                BodyControlMode::BCM_OFF
-            } else {
-                BodyControlMode::BCM_HEADING_PIVOT
-            },
-            kick_request: KickRequest::KR_DISABLE,
+            kick_request: KickRequest::Disable,
             play_song: 0,
             dribbler_mode: if motion_stopped {
-                DribblerCommand::DC_DISABLE
+                DribblerCommand::Disable
             } else {
-                DribblerCommand::DC_CURRENT
+                DribblerCommand::Current
             },
-
+            _pad: 0,
             kick_vel: 0.0,
-            dribbler_setpoint: dribbler_setpoint,
-
-            cmd: BodyControlCommand {
-                heading_pivot: HeadingPivotCommand {
+            dribbler_setpoint,
+            cmd: if motion_stopped {
+                BodyControlCommand::Off
+            } else {
+                BodyControlCommand::HeadingPivot(HeadingPivotCommand {
                     global_theta: target_theta,
                     max_angular_vel: 20.0,
-                    max_angular_acc: max_angular_acc,
+                    max_angular_acc,
                     orbit_radius,
-                    inset_angle: inset_angle,
+                    inset_angle,
                     ..Default::default()
-                },
+                })
             },
         }));
     }

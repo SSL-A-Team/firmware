@@ -13,14 +13,10 @@ use embassy_stm32::{
 use embassy_time::{with_timeout, Duration, Timer};
 
 use crate::image_hash;
-use ateam_common_packets::bindings::{
-    CcmCommand,
-    CcmCommandType::{CCM_CMD_MOTION, CCM_CMD_PARAMS},
-    CcmMotionControlType,
-    CcmMotionControlType::CCM_MCT_MOTOR_OFF,
+use ateam_common_packets::{
+    CcmCommand, CcmCommandData, CcmCommandType, CcmMotionCommandFlags, CcmMotionControlType,
     CcmParameter, CcmParameterDirection, CcmParameterOperation, CcmParameterPacket, CcmResponse,
-    CcmResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM},
-    CcmTelemetry,
+    CcmResponseType, CcmTelemetry,
 };
 
 pub struct CurrentControlledMotor<
@@ -43,7 +39,7 @@ pub struct CurrentControlledMotor<
 
     setpoint: f32,
     current_setpoint_ma: i16,
-    motion_type: CcmMotionControlType::Type,
+    motion_type: CcmMotionControlType,
     reset_flagged: bool,
     telemetry_enabled: bool,
     motion_enabled: bool,
@@ -84,7 +80,7 @@ impl<
 
             setpoint: 0.0,
             current_setpoint_ma: 0,
-            motion_type: CCM_MCT_MOTOR_OFF,
+            motion_type: CcmMotionControlType::MotorOff,
             reset_flagged: false,
             telemetry_enabled: false,
             motion_enabled: false,
@@ -125,7 +121,7 @@ impl<
 
             setpoint: 0.0,
             current_setpoint_ma: 0,
-            motion_type: CCM_MCT_MOTOR_OFF,
+            motion_type: CcmMotionControlType::MotorOff,
             reset_flagged: false,
             telemetry_enabled: false,
             motion_enabled: false,
@@ -159,11 +155,11 @@ impl<
             self.process_packets();
 
             // Check if current_params_state has updated with a firmware image hash reply
-            if self.current_params_state.parameter == CcmParameter::CCM_PARAM_FIRMWARE_IMAGE_HASH
+            if self.current_params_state.parameter == CcmParameter::FirmwareImageHash
                 && self.current_params_state.parameter_direction
-                    == CcmParameterDirection::CCM_PARAMDIR_REPLY
+                    == CcmParameterDirection::Reply
             {
-                let current_img_hash = unsafe { self.current_params_state.value.val_u8x4 };
+                let current_img_hash = self.current_params_state.value.0;
                 defmt::debug!("Wheel Interface - Received parameter response");
                 defmt::trace!(
                     "Wheel Interface - Current device image hash {:x}",
@@ -312,40 +308,14 @@ impl<
                 // TODO probably do some checksum stuff eventually
 
                 // decode union type, and reinterpret subtype
-                if mrp.type_ == CCM_RESP_TELEM {
+                if mrp.resp_type == CcmResponseType::Telem {
                     self.current_state = mrp.data.motion;
                     self.current_state_seq_num = mrp.seq_num;
 
-                    // defmt::info!("got a telem packet!");
-
-                    // // // info!("{:?}", defmt::Debug2Format(&mrp.data.motion));
-                    // // info!("\n");
-                    // // // info!("vel set {:?}", mrp.data.motion.vel_setpoint + 0.);
-                    // info!("vel enc {:?}", mrp.data.motion.vel_enc_estimate + 0.);
-                    // // // info!("vel hall {:?}", mrp.data.motion.vel_hall_estimate + 0.);
-                    if mrp.data.motion.master_error() != 0 {
-                        // error!(
-                        //     "Drive Motor - Error: {:?}",
-                        //     &mrp.data.motion._bitfield_1.get(0, 16)
-                        // );
+                    if mrp.data.motion.status.master_error() {
+                        // error!("Drive Motor - Error detected");
                     }
-                    // info!("hall_power_error {:?}", mrp.data.motion.hall_power_error());
-                    // info!("hall_disconnected_error {:?}", mrp.data.motion.hall_disconnected_error());
-                    // info!("bldc_transition_error {:?}", mrp.data.motion.bldc_transition_error());
-                    // info!("bldc_commutation_watchdog_error {:?}", mrp.data.motion.bldc_commutation_watchdog_error());
-                    // info!("enc_disconnected_error {:?}", mrp.data.motion.enc_disconnected_error());
-                    // info!("enc_decoding_error {:?}", mrp.data.motion.enc_decoding_error());
-                    // info!("hall_enc_vel_disagreement_error {:?}", mrp.data.motion.hall_enc_vel_disagreement_error());
-                    // info!("overcurrent_error {:?}", mrp.data.motion.overcurrent_error());
-                    // info!("undervoltage_error {:?}", mrp.data.motion.undervoltage_error());
-                    // info!("overvoltage_error {:?}", mrp.data.motion.overvoltage_error());
-                    // info!("torque_limited {:?}", mrp.data.motion.torque_limited());
-                    // info!("control_loop_time_error {:?}", mrp.data.motion.control_loop_time_error());
-                    // info!("reset_watchdog_independent {:?}", mrp.data.motion.reset_watchdog_independent());
-                    // info!("reset_watchdog_window {:?}", mrp.data.motion.reset_watchdog_window());
-                    // info!("reset_low_power {:?}", mrp.data.motion.reset_low_power());
-                    // info!("reset_software {:?}", mrp.data.motion.reset_software());
-                } else if mrp.type_ == CCM_RESP_PARAMS {
+                } else if mrp.resp_type == CcmResponseType::Params {
                     trace!("Received parameter response packet");
                     debug!("Parameter response data: {:?}", buf);
                     self.current_params_state = mrp.data.params;
@@ -355,19 +325,19 @@ impl<
     }
 
     pub fn log_reset(&self, motor_id: &str) {
-        if self.current_state.reset_watchdog_independent() != 0 {
+        if self.current_state.status.reset_watchdog_independent() {
             defmt::warn!("Drive Motor {} Reset: Watchdog Independent", motor_id);
         }
-        if self.current_state.reset_watchdog_window() != 0 {
+        if self.current_state.status.reset_watchdog_window() {
             defmt::warn!("Drive Motor {} Reset: Watchdog Window", motor_id);
         }
-        if self.current_state.reset_low_power() != 0 {
+        if self.current_state.status.reset_low_power() {
             defmt::warn!("Drive Motor {} Reset: Low Power", motor_id);
         }
-        if self.current_state.reset_software() != 0 {
+        if self.current_state.status.reset_software() {
             defmt::warn!("Drive Motor {} Reset: Software", motor_id);
         }
-        if self.current_state.reset_pin() != 0 {
+        if self.current_state.status.reset_pin() {
             defmt::warn!("Drive Motor {} Reset: Pin", motor_id);
         }
     }
@@ -376,11 +346,11 @@ impl<
         unsafe {
             let mut cmd: CcmCommand = { MaybeUninit::zeroed().assume_init() };
 
-            cmd.type_ = CCM_CMD_PARAMS;
+            cmd.cmd_type = CcmCommandType::Params;
             cmd.crc32 = 0;
-            cmd.data.param.parameter = CcmParameter::CCM_PARAM_FIRMWARE_IMAGE_HASH;
-            cmd.data.param.parameter_operation = CcmParameterOperation::CCM_PARAMOP_READ;
-            cmd.data.param.parameter_direction = CcmParameterDirection::CCM_PARAMDIR_COMMAND;
+            cmd.data.param.parameter = CcmParameter::FirmwareImageHash;
+            cmd.data.param.parameter_operation = CcmParameterOperation::Read;
+            cmd.data.param.parameter_direction = CcmParameterDirection::Command;
 
             let struct_bytes = core::slice::from_raw_parts(
                 (&cmd as *const CcmCommand) as *const u8,
@@ -395,12 +365,11 @@ impl<
         unsafe {
             let mut cmd: CcmCommand = { MaybeUninit::zeroed().assume_init() };
 
-            cmd.type_ = CCM_CMD_MOTION;
+            cmd.cmd_type = CcmCommandType::Motion;
             cmd.crc32 = 0;
-            cmd.data.motion.set_reset(self.reset_flagged as u32);
-            cmd.data
-                .motion
-                .set_enable_telemetry(self.telemetry_enabled as u32);
+            cmd.data.motion.flags = CcmMotionCommandFlags::default()
+                .with_reset(self.reset_flagged)
+                .with_enable_telemetry(self.telemetry_enabled);
             cmd.data.motion.motion_control_type = self.motion_type;
             cmd.data.motion.setpoint = self.setpoint;
 
@@ -426,7 +395,7 @@ impl<
         self.current_state_seq_num
     }
 
-    pub fn set_motion_type(&mut self, motion_type: CcmMotionControlType::Type) {
+    pub fn set_motion_type(&mut self, motion_type: CcmMotionControlType) {
         self.motion_type = motion_type;
     }
 
@@ -455,12 +424,12 @@ impl<
     }
 
     pub fn read_is_error(&self) -> bool {
-        return self.current_state.master_error() != 0;
+        return self.current_state.status.master_error();
     }
 
     pub fn check_hall_error(&self) -> bool {
-        return self.current_state.hall_power_error() != 0
-            || self.current_state.hall_disconnected_error() != 0;
+        return self.current_state.status.hall_power_error()
+            || self.current_state.status.hall_disconnected_error();
     }
 
     pub fn read_rads(&self) -> f32 {
