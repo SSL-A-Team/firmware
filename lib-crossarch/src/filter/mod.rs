@@ -23,6 +23,22 @@ impl IirFilter {
         }
     }
 
+    /// Constructs a single-pole low-pass IIR from a target -3 dB cutoff frequency and the
+    /// sample rate at which the filter will be updated. Uses the standard first-order RC
+    /// approximation `alpha = a / (a + 1)` with `a = 2*pi*fc/fs`, which needs no
+    /// transcendental functions and is accurate for cutoffs well below Nyquist.
+    pub fn from_cutoff(cutoff_hz: f32, sample_rate_hz: f32) -> Self {
+        if sample_rate_hz <= 0.0 || cutoff_hz <= 0.0 {
+            // Degenerate configuration: pass the signal through unfiltered.
+            return Self::new(1.0);
+        }
+
+        let a = core::f32::consts::TAU * cutoff_hz / sample_rate_hz;
+        let alpha = (a / (a + 1.0)).clamp(0.0, 1.0);
+
+        Self::new(alpha)
+    }
+
     pub fn set_alpha(&mut self, alpha: f32) {
         self.alpha = alpha
     }

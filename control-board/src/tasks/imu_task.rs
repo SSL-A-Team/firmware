@@ -10,6 +10,7 @@ use nalgebra::Vector3;
 
 use ateam_common_packets::radio::TelemetryPacket;
 use ateam_lib_stm32::drivers::imu::bmi323::{self, *};
+use ateam_lib_stm32::filter::{Filter, IirFilter};
 
 use crate::create_error_telemetry_from_string;
 use crate::pins::*;
@@ -17,6 +18,18 @@ use crate::robot_state::SharedRobotState;
 use crate::tasks::dotstar_task::{ControlBoardLedCommand, ImuStatusLedCommand};
 
 const TIPPED_MIN_DURATION_MS: u64 = 1000;
+
+/// Shared output data rate for both the accelerometer and gyroscope. Defined once so the
+/// two sensors always run at the same rate (the accel is sampled on the gyro data-ready
+/// interrupt, so they must match) and so the accel filter sample rate below stays in sync.
+const IMU_ODR: OutputDataRate = OutputDataRate::Odr1600p0;
+
+/// The accelerometer is sampled on the gyro data-ready interrupt, so the effective sample
+/// rate of the firmware accel filter is the shared IMU ODR.
+const ACCEL_FILTER_SAMPLE_RATE_HZ: f32 = IMU_ODR.to_hz();
+/// -3 dB cutoff of the firmware low-pass filter applied to the X and Y accelerations to
+/// reject motor/wheel vibration before the data is consumed by the state estimator.
+const ACCEL_FILTER_CUTOFF_HZ: f32 = 40.0;
 
 #[macro_export]
 macro_rules! create_imu_task {
@@ -92,6 +105,15 @@ async fn imu_task_entry(
     let mut first_tipped_check_time = Instant::now();
     let mut first_tipped_seen = false;
 
+    // Firmware low-pass filters for the X and Y accelerations. The BMI323's on-chip filter
+    // can't reach a low enough cutoff without sacrificing sample freshness, so the final
+    // vibration rejection is done here. Z is left unfiltered so tipped detection stays
+    // responsive.
+    let mut accel_x_filter =
+        IirFilter::from_cutoff(ACCEL_FILTER_CUTOFF_HZ, ACCEL_FILTER_SAMPLE_RATE_HZ);
+    let mut accel_y_filter =
+        IirFilter::from_cutoff(ACCEL_FILTER_CUTOFF_HZ, ACCEL_FILTER_SAMPLE_RATE_HZ);
+
     'imu_configuration_loop: loop {
         led_command_pub
             .publish(ControlBoardLedCommand::Imu(
@@ -154,7 +176,7 @@ async fn imu_task_entry(
                 GyroMode::ContinuousHighPerformance,
                 GyroRange::PlusMinus2000DegPerSec,
                 Bandwidth3DbCutoffFreq::AccOdrOver4,
-                OutputDataRate::Odr800p0,
+                IMU_ODR,
                 DataAveragingWindow::NoFiltering,
             )
             .await;
@@ -177,7 +199,7 @@ async fn imu_task_entry(
                 AccelMode::ContinuousHighPerformance,
                 AccelRange::Range4g,
                 Bandwidth3DbCutoffFreq::AccOdrOver4,
-                OutputDataRate::Odr800p0,
+                IMU_ODR,
                 DataAveragingWindow::NoFiltering,
             )
             .await;
@@ -207,6 +229,10 @@ async fn imu_task_entry(
             .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Ok))
             .await;
 
+        // Clear any stale/transient filter state before starting to publish fresh samples.
+        accel_x_filter.reset();
+        accel_y_filter.reset();
+
         'imu_data_loop: loop {
             // block on gyro interrupt, active low
             match select(gyro_int.wait_for_falling_edge(), Timer::after_millis(1000)).await {
@@ -221,9 +247,21 @@ async fn imu_task_entry(
                     // read accel data
                     // TODO: don't use raw data, impl conversion
                     let accel_data = imu.accel_get_data_mps().await;
+
+                    // Low-pass filter the X and Y accelerations to reject motor/wheel
+                    // vibration. Z is published raw for responsive tipped detection below.
+                    accel_x_filter.add_sample(accel_data[0] as f32);
+                    accel_y_filter.add_sample(accel_data[1] as f32);
+                    let accel_x_filtered = accel_x_filter
+                        .filtered_value()
+                        .unwrap_or(accel_data[0] as f32);
+                    let accel_y_filtered = accel_y_filter
+                        .filtered_value()
+                        .unwrap_or(accel_data[1] as f32);
+
                     accel_pub.publish_immediate(Vector3::new(
-                        accel_data[0] as f32,
-                        accel_data[1] as f32,
+                        accel_x_filtered,
+                        accel_y_filtered,
                         accel_data[2] as f32,
                     ));
 

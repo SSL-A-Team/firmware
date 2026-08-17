@@ -135,6 +135,28 @@ pub enum OutputDataRate {
     Odr6400p0 = 0x0E,
 }
 
+impl OutputDataRate {
+    /// The output data rate expressed in Hz.
+    pub const fn to_hz(self) -> f32 {
+        match self {
+            OutputDataRate::Odr0p78125 => 0.78125,
+            OutputDataRate::Odr1p5625 => 1.5625,
+            OutputDataRate::Odr3p125 => 3.125,
+            OutputDataRate::Odr6p25 => 6.25,
+            OutputDataRate::Odr12p5 => 12.5,
+            OutputDataRate::Odr25p0 => 25.0,
+            OutputDataRate::Odr50p0 => 50.0,
+            OutputDataRate::Odr100p0 => 100.0,
+            OutputDataRate::Odr200p0 => 200.0,
+            OutputDataRate::Odr400p0 => 400.0,
+            OutputDataRate::Odr800p0 => 800.0,
+            OutputDataRate::Odr1600p0 => 1600.0,
+            OutputDataRate::Odr3200p0 => 3200.0,
+            OutputDataRate::Odr6400p0 => 6400.0,
+        }
+    }
+}
+
 #[repr(u8)]
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
