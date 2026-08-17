@@ -115,6 +115,39 @@ async fn imu_task_entry(
             continue 'imu_configuration_loop;
         }
 
+        // The IMU is mounted rotated 180 degrees about the board Z axis. Correct for this
+        // on-chip via the feature engine so both accel and gyro report in the robot frame at
+        // zero runtime cost. A 180 degree rotation about Z is X -> -X, Y -> -Y, Z -> Z, i.e.
+        // pure sign inversion of the X and Y axes. This must be done while the sensors are
+        // inactive (before the accel/gyro config below) and re-applied on every (re)config,
+        // since the mapping is cleared by the soft reset performed in imu.init().
+        if imu.enable_feature_engine().await.is_err() {
+            defmt::error!("IMU feature engine enable failed");
+            telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
+                create_error_telemetry_from_string("IMU feature engine enable failed"),
+            ));
+            led_command_pub
+                .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
+                .await;
+            Timer::after_millis(1000).await;
+            continue 'imu_configuration_loop;
+        }
+        if imu
+            .set_axis_remap(AxisMap::XyzToXyz, true, true, false)
+            .await
+            .is_err()
+        {
+            defmt::error!("IMU axis remap failed");
+            telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
+                create_error_telemetry_from_string("IMU axis remap failed"),
+            ));
+            led_command_pub
+                .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
+                .await;
+            Timer::after_millis(1000).await;
+            continue 'imu_configuration_loop;
+        }
+
         // configure the gyro, map int to int pin 2
         let gyro_config_res = imu
             .set_gyro_config(

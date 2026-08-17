@@ -14,6 +14,7 @@ use embassy_stm32::{
     time::hz,
     Peri,
 };
+use embassy_time::Timer;
 
 pub const SPI_MIN_BUF_LEN: usize = 14;
 
@@ -181,6 +182,27 @@ pub enum AccelRange {
     Range16g = 0x03,
 }
 
+/// Axis re-mapping applied on-chip via the feature engine (datasheet section 5.11).
+/// Values match the `EXT.AXIS_MAP_1.axis_map` field. The comment describes how the
+/// device axes are mapped to the output (user) axes.
+#[repr(u8)]
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+pub enum AxisMap {
+    /// x=x; y=y; z=z (default, no re-mapping)
+    XyzToXyz = 0x0,
+    /// x=y; y=x; z=z
+    XyzToYxz = 0x1,
+    /// x=x; y=z; z=y
+    XyzToXzy = 0x2,
+    /// x=z; y=x; z=y
+    XyzToZxy = 0x3,
+    /// x=y; y=z; z=x
+    XyzToYzx = 0x4,
+    /// x=z; y=y; z=x
+    XyzToZyx = 0x5,
+}
+
 #[repr(u8)]
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
@@ -225,6 +247,15 @@ pub enum GyroMode {
 
 const BMI323_CHIP_ID: u16 = 0x0043;
 const READ_BIT: u8 = 0x80;
+
+/// CMD register (0x7E) command codes.
+const CMD_SOFT_RESET: u16 = 0xDEAF;
+const CMD_AXIS_MAP_UPDATE: u16 = 0x0300;
+
+/// Feature engine enable magic written to FEATURE_IO2 (datasheet section 5.4).
+const FEATURE_ENGINE_ENABLE_MAGIC: u16 = 0x012C;
+/// Extended register address of AXIS_MAP_1 (datasheet section 6.2.1).
+const EXT_ADDR_AXIS_MAP_1: u16 = 0x03;
 
 impl<'a, 'buf> Bmi323<'a, 'buf> {
     /// creates a new BMI323 instance from a pre-existing Spi peripheral
@@ -381,11 +412,118 @@ impl<'a, 'buf> Bmi323<'a, 'buf> {
     }
 
     pub async fn init(&mut self) {
-        // device needs at least one dummy read to set the data mode to SPI from POn I2C
-        // second read should be valid here for sanity purposes
+        // The device powers up in an interface auto-detect state. At least one dummy
+        // read is required to latch the interface to SPI (from the power-on I2C default).
+        let _ = self.read(ImuRegisters::CHIP_ID).await;
 
+        // Issue a soft reset so every (re)configuration starts from a clean, deterministic
+        // state. This is a documented precondition for (re-)enabling the feature engine and
+        // for performing axis re-mapping (both require the sensors to be inactive, which is
+        // the reset default), and it makes reconfiguration after a data timeout deterministic.
+        self.write(ImuRegisters::CMD, CMD_SOFT_RESET).await;
+        // After a soft reset the same start-up timing as power-on applies (datasheet 5.17).
+        Timer::after_millis(5).await;
+
+        // Soft reset reverts to interface auto-detect; dummy reads re-latch SPI mode.
         let _ = self.read(ImuRegisters::CHIP_ID).await;
         let _ = self.read(ImuRegisters::CHIP_ID).await;
+    }
+
+    /// Enables the on-chip feature engine (datasheet section 5.4). Must be called while the
+    /// sensors are still disabled (i.e. directly after power-on/soft reset). Required before
+    /// any feature-engine operation such as axis re-mapping.
+    pub async fn enable_feature_engine(&mut self) -> Result<(), ()> {
+        self.write(ImuRegisters::FEATURE_IO2, FEATURE_ENGINE_ENABLE_MAGIC)
+            .await;
+        self.write(ImuRegisters::FEATURE_IO_STATUS, 0x0001).await;
+        // FEATURE_CTRL.engine_en (bit 0) = 1
+        self.write(ImuRegisters::FEATURE_CTRL, 0x0001).await;
+
+        // Poll FEATURE_IO1.error_status (bits [3:0]) for 0x1 (feature engine activated).
+        for _ in 0..50 {
+            Timer::after_millis(1).await;
+            let io1 = self.read(ImuRegisters::FEATURE_IO1).await;
+            if (io1 & 0x000F) == 0x0001 {
+                defmt::debug!("BMI323 feature engine activated");
+                return Ok(());
+            }
+        }
+
+        defmt::error!("BMI323 feature engine failed to initialize");
+        Err(())
+    }
+
+    /// Writes a single 16-bit word to the extended register map through the feature engine
+    /// data interface (datasheet section 6.2). No other register access may be interleaved
+    /// between setting the address and writing the data.
+    async fn write_ext_register(&mut self, ext_addr: u16, value: u16) -> Result<(), ()> {
+        // Wait for FEATURE_DATA_STATUS.data_tx_ready (bit 1).
+        let mut ready = false;
+        for _ in 0..50 {
+            let status = self.read(ImuRegisters::FEATURE_DATA_STATUS).await;
+            if (status & 0x0002) != 0 {
+                ready = true;
+                break;
+            }
+            Timer::after_millis(1).await;
+        }
+        if !ready {
+            defmt::error!("BMI323 feature engine data interface not ready");
+            return Err(());
+        }
+
+        self.write(ImuRegisters::FEATURE_DATA_ADDR, ext_addr).await;
+        self.write(ImuRegisters::FEATURE_DATA_TX, value).await;
+
+        Ok(())
+    }
+
+    /// Applies an on-chip axis re-mapping and/or per-axis sign inversion (datasheet section
+    /// 5.11). This affects both the accelerometer and gyroscope data path at zero runtime
+    /// cost. Must be performed while the sensors are inactive (i.e. before configuring/
+    /// enabling the accel and gyro) and after enabling the feature engine. The mapping is
+    /// volatile and must be re-applied after every power-on/soft reset.
+    pub async fn set_axis_remap(
+        &mut self,
+        axis_map: AxisMap,
+        invert_x: bool,
+        invert_y: bool,
+        invert_z: bool,
+    ) -> Result<(), ()> {
+        // AXIS_MAP_1: axis_map[2:0], invert_x bit 3, invert_y bit 4, invert_z bit 5.
+        let mut val: u16 = (axis_map as u16) & 0x0007;
+        if invert_x {
+            val |= 1 << 3;
+        }
+        if invert_y {
+            val |= 1 << 4;
+        }
+        if invert_z {
+            val |= 1 << 5;
+        }
+
+        self.write_ext_register(EXT_ADDR_AXIS_MAP_1, val).await?;
+
+        // Activate the new mapping.
+        self.write(ImuRegisters::CMD, CMD_AXIS_MAP_UPDATE).await;
+
+        // Poll FEATURE_IO1.axis_map_complete (bit 10).
+        for _ in 0..50 {
+            Timer::after_millis(1).await;
+            let io1 = self.read(ImuRegisters::FEATURE_IO1).await;
+            if (io1 & (1 << 10)) != 0 {
+                // error_status 0x6 => axis map command not processed (sensor was active).
+                if (io1 & 0x000F) == 0x0006 {
+                    defmt::error!("BMI323 axis remap rejected (a sensor was active)");
+                    return Err(());
+                }
+                defmt::debug!("BMI323 axis remap applied");
+                return Ok(());
+            }
+        }
+
+        defmt::error!("BMI323 axis remap did not complete");
+        Err(())
     }
 
     async fn accel_self_test(&mut self) -> Result<(), ()> {
