@@ -5,7 +5,29 @@ ENTRY(Reset_Handler)
 _estack = ORIGIN(RAM) + LENGTH(RAM); /* end of "RAM" Ram type memory */
 
 _Min_Heap_Size = 0x0; /* required amount of heap */
-_Min_Stack_Size = 0xA00 ; /* required amount of stack */
+/* Required amount of stack. This is a link-time reservation only - the stack
+ * actually starts at _estack and grows down into all RAM left above .bss, so
+ * this number sets how much headroom the link is required to prove, not how
+ * much stack exists at runtime.
+ *
+ * Measured worst case via -fstack-usage plus a call-graph walk of the linked
+ * image (see the stack depth analysis in the current sense work), taking main's
+ * deepest path plus four nested interrupt activations and their exception
+ * frames:
+ *
+ *   wheel             1272 B   <- global worst, deep float velocity control
+ *   wheel-test        1048 B
+ *   dribbler           580 B
+ *   wheel-torque       488 B
+ *   wheel-torque-test  476 B
+ *   dribbler-torque    476 B
+ *
+ * 0x700 leaves ~40% margin over the worst image. The bound is already
+ * pessimistic: it assumes all four interrupts nest, which the configured
+ * priorities do not permit. It does not cover indirect calls through function
+ * pointers, of which this firmware currently has none.
+ */
+_Min_Stack_Size = 0x700 ;
 
 /* Memories definition */
 MEMORY

@@ -8,6 +8,7 @@ use ateam_common_packets::bindings::{
     CcmParameterDirection::CCM_PARAMDIR_COMMAND,
     CcmParameterOperation::CCM_PARAMOP_READ,
     CcmResponse,
+    CcmCurrentSenseTelemetry,
     CcmResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM},
     CcmTelemetry,
     DribblerCommand::{
@@ -57,6 +58,7 @@ pub struct CurrentControlledDribblerMotor<
     firmware_image: &'a [u8],
 
     current_state: CcmTelemetry,
+    current_sense_state: CcmCurrentSenseTelemetry,
     current_params_hash: [u8; 4],
 
     // outbound command state
@@ -97,6 +99,7 @@ impl<
             firmware_image,
 
             current_state,
+            current_sense_state: Default::default(),
             current_params_hash: [0u8; 4],
 
             motion_control_type: CCM_MCT_MOTOR_OFF,
@@ -209,7 +212,8 @@ impl<
                 }
 
                 if resp.type_ == CCM_RESP_TELEM {
-                    self.current_state = resp.data.motion;
+                    self.current_state = resp.data.motion.telemetry;
+                    self.current_sense_state = resp.data.motion.current_sense;
                 } else if resp.type_ == CCM_RESP_PARAMS {
                     // extract first 4 bytes of firmware image hash
                     self.current_params_hash
@@ -259,6 +263,14 @@ impl<
 
             self.stm32_uart_interface.send_or_discard_data(struct_bytes);
         }
+    }
+
+    /// Current sense investigation instrumentation for the dribbler.
+    /// See CURRENT_SENSING_INVESTIGATION.md. Note the dribbler motor's observer
+    /// constants are uncharacterized placeholders, so `current_model_ma` here is
+    /// not calibrated.
+    pub fn get_latest_current_sense_state(&self) -> CcmCurrentSenseTelemetry {
+        self.current_sense_state
     }
 
     pub fn get_latest_state(&self) -> CcmTelemetry {

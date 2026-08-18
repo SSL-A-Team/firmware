@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <stm32f031x6.h>
 
+#include "ateam-common-packets/include/stspin_current.h"
+
 #include "6step_current.h"
 #include "current_sensing.h"
 #include "pid.h"
@@ -62,6 +64,40 @@ static volatile uint16_t measured_current = 0;
 static volatile uint16_t measured_vbus_voltage = 0;
 static volatile uint16_t last_voltage_command_mv = 0;
 static volatile int32_t dvdt_limited_voltage_command_mv = 0;
+
+//////////////////////////////////
+//  current sense instrumentation //
+//////////////////////////////////
+
+// See CURRENT_SENSING_INVESTIGATION.md. Three estimates of phase current are
+// produced concurrently from the same 1ms frame so they can be compared at the
+// control board.
+
+// externally supplied velocity estimate (quadrature encoder), deci-rad/s
+static volatile int16_t external_vel_est_drads = 0;
+static volatile bool external_vel_est_valid = false;
+static volatile bool use_external_vel_est = false;
+
+// estimator outputs, republished once per 1ms telemetry frame
+static volatile uint16_t cs_est_filt_ma = 0;
+static volatile uint16_t cs_est_unfilt_ma = 0;
+static volatile uint16_t cs_est_duty_corrected_ma = 0;
+static volatile int16_t cs_est_model_ma = 0;
+static volatile int16_t cs_vel_est_used_drads = 0;
+static volatile uint16_t cs_mean_duty_arr = 0;
+static volatile uint8_t cs_flags = 0;
+
+// Frame accumulator for the tap the control loop does not run on. The control
+// path tap is already averaged by current_filter[], but both taps have to be
+// averaged over the same window for the comparison to mean anything.
+static uint32_t cs_alt_tap_accu = 0;
+static uint16_t cs_alt_tap_samples = 0;
+
+// duty accumulator over the frame. The current estimate is an average over the
+// frame, so the duty it gets divided by has to be an average over the same
+// window rather than whatever duty happens to be commanded at frame close.
+static uint32_t cs_duty_arr_accu = 0;
+static uint16_t cs_duty_arr_samples = 0;
 
 ////////////////////////////////
 //  local data and functions  //
@@ -217,6 +253,8 @@ static void apply_voltage(uint16_t voltage_mv);
 static void set_voltage(uint16_t voltage_mv);
 static void set_current(uint16_t current_ma);
 
+static void cs_update_estimates(uint16_t avg_control_tap_ma);
+
 
 /**
  * @brief sets up the hall sensor timer
@@ -304,7 +342,15 @@ static void pwm6step_setup_hall_timer() {
 #define  CCER_PHASE3_PWM_BRAKE (TIM_CCER_CC3NE)
 
 // #define CCMR2_TIM4_ADC_TRIG (TIM_CCMR2_OC4PE | TIM_CCMR2_OC4M_2 | TIM_CCMR2_OC4M_1 | TIM_CCMR2_OC4CE);
+#ifdef CS_SYNC_SAMPLING
+// CCR4 is rewritten every time duty changes, and duty is written from the ADC
+// callback mid-period. Without preload that write can land between the compare
+// match and the end of the period, producing a spurious or missing trigger.
+// CCR1/2/3 already preload via OCxPE; CH4 has to opt in the same way.
+#define CCMR2_TIM4_ADC_TRIG (TIM_CCMR2_OC4M_2 | TIM_CCMR2_OC4M_1 | TIM_CCMR2_OC4PE);
+#else
 #define CCMR2_TIM4_ADC_TRIG (TIM_CCMR2_OC4M_2 | TIM_CCMR2_OC4M_1);
+#endif
 #define CCER_TIM4_ADC_TRIG (TIM_CCER_CC4E)
 
 /**
@@ -358,7 +404,17 @@ static void pwm6step_setup_commutation_timer() {
     // set PWM period relative to the scaled sysclk
     TIM1->ARR = NUM_RAW_DC_STEPS - 1;
 
+#ifdef CS_SYNC_SAMPLING
+    // CMS = 0b10 flags capture/compare on up-count only. In CMS = 0b11 the CC4
+    // event fires on both ramps, and at low duty the two triggers land close
+    // enough together that the second arrives with the ADC still busy, while the
+    // down-ramp trigger's sample aperture overruns the trailing switching edge.
+    // Counting and the OCxREF waveforms are identical across CMS 01/10/11, so
+    // the PWM output is unaffected. Side effect: TIM1_CC_IRQHandler rate halves.
+    TIM1->CR1 = (TIM_CR1_ARPE | TIM_CR1_CMS_1);
+#else
     TIM1->CR1 = (TIM_CR1_ARPE | TIM_CR1_CMS);
+#endif
     TIM1->CR2 = (TIM_CR2_CCPC);
 	TIM1->SMCR = TIM_SMCR_OCCS | TIM_SMCR_ETF | TIM_SMCR_TS_0;
 
@@ -369,7 +425,14 @@ static void pwm6step_setup_commutation_timer() {
     // enable the channel
     TIM1->CCER |= CCER_PHASE1_OFF | CCER_PHASE2_OFF | CCER_PHASE3_OFF | CCER_TIM4_ADC_TRIG;
     // set adc trigger offset
+#ifdef CS_SYNC_SAMPLING
+    // duty starts at zero, so there is no on-window to sample yet. Park the
+    // trigger at the last value that can still match; set_duty_cycle() moves it
+    // as soon as the motor is commanded.
+    TIM1->CCR4 = ARR_REG_VALUE - 1;
+#else
     TIM1->CCR4 = 22;
+#endif
 
     // generate an update event to reload the PSC
     TIM1->EGR |= (TIM_EGR_UG | TIM_EGR_COMG);
@@ -396,11 +459,16 @@ void TIM2_IRQHandler()
     perform_commutation_cycle();
 }
 
-static uint32_t voltage_filter[4];
+// Both filters hold quantities that fit a u16 (bus mV, and current clamped to
+// 9000 mA), and RAM on this part is scarce. Accumulate into a u32 local.
+static uint16_t voltage_filter[4];
 static size_t voltage_filter_index = 0;
 
-static uint32_t current_filter[32];
+static uint16_t current_filter[32];
 static size_t current_filter_ind = 0;
+
+#define CURRENT_FILTER_LEN (sizeof(current_filter) / sizeof(current_filter[0]))
+#define VOLTAGE_FILTER_LEN (sizeof(voltage_filter) / sizeof(voltage_filter[0]))
 
 static volatile size_t double_buffer_ind = 0;
 static uint16_t current_data_buffer[2][20];
@@ -409,6 +477,134 @@ static uint32_t logging_2frame_avg_cur = 0;
 static uint16_t adc_callback_ctr = 0;
 
 static volatile bool flag_1ms = false;
+
+/**
+ * @brief recompute the concurrent phase current estimates for a telemetry frame
+ *
+ * Called once per 1ms from the ADC/DMA callback rather than at the 40kHz sample
+ * rate: every branch here contains a divide, which is a software routine on the
+ * M0 and has no business running 40k times a second.
+ *
+ * @param avg_control_tap_ma frame-averaged reading from the tap the control
+ *                           loop runs on, in mA
+ */
+static void cs_update_estimates(uint16_t avg_control_tap_ma) {
+    uint8_t flags = 0;
+
+    uint16_t avg_alt_tap_ma = 0;
+    if (cs_alt_tap_samples > 0) {
+        avg_alt_tap_ma = (uint16_t) (cs_alt_tap_accu / cs_alt_tap_samples);
+    }
+    cs_alt_tap_accu = 0;
+    cs_alt_tap_samples = 0;
+
+    // Mean effective on-time over the frame. The current estimate is an average
+    // over the frame, so the duty it gets divided by has to be an average over
+    // the same window, not whatever duty happens to be commanded at frame close.
+    uint16_t mean_d_arr = 0;
+    if (cs_duty_arr_samples > 0) {
+        mean_d_arr = (uint16_t) (cs_duty_arr_accu / cs_duty_arr_samples);
+    }
+    cs_duty_arr_accu = 0;
+    cs_duty_arr_samples = 0;
+
+#ifdef CS_SYNC_SAMPLING
+    // the control loop runs on the pre-filter tap
+    cs_est_unfilt_ma = avg_control_tap_ma;
+    cs_est_filt_ma = avg_alt_tap_ma;
+#else
+    cs_est_filt_ma = avg_control_tap_ma;
+    cs_est_unfilt_ma = avg_alt_tap_ma;
+#endif
+
+    cs_mean_duty_arr = mean_d_arr;
+
+    ////////////////////////////////////////
+    //  Phase 0: invert the duty weighting //
+    ////////////////////////////////////////
+
+#ifdef CS_SYNC_SAMPLING
+    flags |= CCM_CS_FLAG_SYNC_SAMPLING;
+#endif
+
+    // Always derived from the filtered tap: that is the one carrying
+    // D * I_phase, which is what the correction inverts. Under synchronous
+    // sampling it is still computed, so the arithmetic estimate can be checked
+    // against the directly measured phase current sitting next to it.
+    if (mean_d_arr >= CS_DUTY_CORRECTION_MIN_ARR) {
+        uint32_t corrected = ((uint32_t) cs_est_filt_ma * ARR_VALUE) / mean_d_arr;
+        if (corrected > CS_MAX_REPORTABLE_MA) {
+            corrected = CS_MAX_REPORTABLE_MA;
+        }
+
+        cs_est_duty_corrected_ma = (uint16_t) corrected;
+        flags |= CCM_CS_FLAG_DUTY_CORR_VALID;
+    } else {
+        // duty is too small for the reciprocal to carry information, pass the
+        // filtered value through and let the consumer see the cleared valid flag
+        cs_est_duty_corrected_ma = cs_est_filt_ma;
+    }
+
+    ///////////////////////////////////////
+    //  Phase 3: voltage model observer   //
+    ///////////////////////////////////////
+
+    // I = (D * V_bus - Ke * w) / R_loop
+    int16_t vel_drads;
+    bool vel_valid;
+    if (use_external_vel_est) {
+        vel_drads = external_vel_est_drads;
+        vel_valid = external_vel_est_valid;
+        flags |= CCM_CS_FLAG_VEL_SRC_EXT;
+    } else {
+        vel_drads = pwm6step_hall_get_rps_estimate();
+        vel_valid = pwm6step_hall_rps_estimate_valid();
+    }
+
+    if (vel_valid) {
+        flags |= CCM_CS_FLAG_VEL_EST_VALID;
+    }
+
+    cs_vel_est_used_drads = vel_drads;
+
+    if (motor_output_enabled) {
+        // applied motor voltage, derived from the duty actually programmed into
+        // the timer rather than the commanded voltage
+        int32_t applied_mv = ((int32_t) mean_d_arr * (int32_t) measured_vbus_voltage) / ARR_VALUE;
+
+        // Only the magnitude of the velocity estimate is consumed. Whether the
+        // back-EMF opposes or aids the applied voltage is decided by the halls,
+        // which are the authority on which way the rotor is actually turning,
+        // and which keeps this independent of the external estimate's sign
+        // convention.
+        int32_t bemf_mv = 0;
+        if (vel_valid) {
+            int32_t vel_mag = (vel_drads < 0) ? -((int32_t) vel_drads) : (int32_t) vel_drads;
+            bemf_mv = ((int32_t) MOTOR_KE_MV_PER_DRAD_Q8 * vel_mag) >> 8;
+
+            if (hall_detected_direction != commanded_motor_direction) {
+                // plugging: the rotor is turning against the commanded direction,
+                // so the back-EMF adds to the applied voltage instead of opposing it
+                bemf_mv = -bemf_mv;
+            }
+        }
+
+        // R is in milliohms, so mV / mohm needs a factor of 1000 to land in mA
+        int32_t model_ma = ((applied_mv - bemf_mv) * 1000) / (int32_t) MOTOR_R_LOOP_MOHM;
+        if (model_ma > CS_MAX_REPORTABLE_MA) {
+            model_ma = CS_MAX_REPORTABLE_MA;
+        } else if (model_ma < -CS_MAX_REPORTABLE_MA) {
+            model_ma = -CS_MAX_REPORTABLE_MA;
+        }
+
+        cs_est_model_ma = (int16_t) model_ma;
+        flags |= CCM_CS_FLAG_MODEL_VALID;
+    } else {
+        cs_est_model_ma = 0;
+    }
+
+    cs_flags = flags;
+}
 
 /**
  * should be called at 40Khz
@@ -433,17 +629,14 @@ void DMA1_Channel1_IRQHandler() {
     // this is a 2.2kHz bandwidth filter with sampling freq of 40kHz
 
     // filter current
-    current_filter[current_filter_ind++] = current_measurement;
-    // current_filter_ind &= 0x7;
-    // current_filter_ind &= 0xF;
-    current_filter_ind &= 0x1F;
-
+    current_filter[current_filter_ind++] = (uint16_t) current_measurement;
+    current_filter_ind &= (CURRENT_FILTER_LEN - 1);
 
     Uint32FixedPoint_t avg_current = 0;
-    for (int i = 0; i < sizeof(current_filter) / 4; i++) {
+    for (size_t i = 0; i < CURRENT_FILTER_LEN; i++) {
         avg_current += current_filter[i];
     }
-    avg_current >>= 5;  // div 16
+    avg_current /= CURRENT_FILTER_LEN;
 
     measured_current = avg_current;
 
@@ -453,13 +646,13 @@ void DMA1_Channel1_IRQHandler() {
     // measured_vbus_voltage = vbus_mv;
 
     voltage_filter[voltage_filter_index++] = vbus_mv;
-    voltage_filter_index &= 0x3;
+    voltage_filter_index &= (VOLTAGE_FILTER_LEN - 1);
 
     uint32_t average_bus_voltage = 0;
-    for (int i = 0; i < sizeof(voltage_filter) / 4; i++) {
+    for (size_t i = 0; i < VOLTAGE_FILTER_LEN; i++) {
         average_bus_voltage += voltage_filter[i];
     }
-    average_bus_voltage >>= 2;
+    average_bus_voltage /= VOLTAGE_FILTER_LEN;
 
     measured_vbus_voltage = average_bus_voltage;
 
@@ -516,9 +709,24 @@ void DMA1_Channel1_IRQHandler() {
         current_data_buffer[double_buffer_ind][adc_callback_ctr / 2] = (uint16_t) ((logging_2frame_avg_cur + (uint32_t) avg_current) >> 1);
     }
 
+    // accumulate the effective on-time so the estimators can divide the frame
+    // average by the duty that was actually applied across the frame
+    cs_duty_arr_accu += (uint32_t) (ARR_VALUE - current_duty_cycle);
+    cs_duty_arr_samples++;
+
+    // accumulate the tap the control loop is not running on
+#ifdef CS_SYNC_SAMPLING
+    cs_alt_tap_accu += (uint32_t) currsen_get_shunt_current_filt_ma();
+#else
+    cs_alt_tap_accu += (uint32_t) currsen_get_shunt_current_unfilt_ma();
+#endif
+    cs_alt_tap_samples++;
+
     adc_callback_ctr++;
     if (adc_callback_ctr == PWM_FREQ_HZ / 1000) {
         flag_1ms = true;
+
+        cs_update_estimates((uint16_t) avg_current);
 
         adc_callback_ctr = 0;
         double_buffer_ind = (double_buffer_ind + 1) & 0x1;
@@ -746,6 +954,24 @@ static void set_duty_cycle(uint16_t duty_cycle) {
     TIM1->CCR1 = current_duty_cycle;
     TIM1->CCR2 = current_duty_cycle;
     TIM1->CCR3 = current_duty_cycle;
+
+#ifdef CS_SYNC_SAMPLING
+    // Move the ADC trigger with duty so it lands inside the on-window. PWM mode
+    // 2 puts the on-time around the counter peak, spanning (CCR, ARR] on the
+    // up-ramp, so the sample point is CCR + (ARR - CCR) * NUM / DEN. The fixed
+    // trigger used without this gate sits near the counter trough, which is deep
+    // in freewheel where the shunt carries nothing.
+    uint32_t ccr4 = (((uint32_t) current_duty_cycle * (CS_SYNC_TRIGGER_DEN - CS_SYNC_TRIGGER_NUM))
+            + ((uint32_t) ARR_REG_VALUE * CS_SYNC_TRIGGER_NUM)) / CS_SYNC_TRIGGER_DEN;
+
+    // a compare value at or above ARR_REG_VALUE never matches, so the trigger
+    // would stop firing entirely
+    if (ccr4 >= ARR_REG_VALUE) {
+        ccr4 = ARR_REG_VALUE - 1;
+    }
+
+    TIM1->CCR4 = (uint16_t) ccr4;
+#endif
 }
 
 /**
@@ -880,9 +1106,50 @@ int16_t pwm6step_hall_get_rps_estimate() {
     return (int16_t)drads;
 }
 
+void pwm6step_set_external_vel_est(int16_t vel_drads, bool valid) {
+    external_vel_est_drads = vel_drads;
+    external_vel_est_valid = valid;
+}
+
+void pwm6step_set_vel_est_source_external(bool use_external) {
+    use_external_vel_est = use_external;
+}
+
+bool pwm6step_get_vel_est_source_external() {
+    return use_external_vel_est;
+}
+
+const uint16_t pwm6step_get_current_est_filt_ma() {
+    return cs_est_filt_ma;
+}
+
+const uint16_t pwm6step_get_current_est_unfilt_ma() {
+    return cs_est_unfilt_ma;
+}
+
+const uint16_t pwm6step_get_current_est_duty_corrected_ma() {
+    return cs_est_duty_corrected_ma;
+}
+
+const int16_t pwm6step_get_current_est_model_ma() {
+    return cs_est_model_ma;
+}
+
+const int16_t pwm6step_get_vel_est_used_drads() {
+    return cs_vel_est_used_drads;
+}
+
+const uint16_t pwm6step_get_mean_duty_arr() {
+    return cs_mean_duty_arr;
+}
+
+const uint8_t pwm6step_get_current_sense_flags() {
+    return cs_flags;
+}
+
 const MotorErrors_t pwm6step_get_motor_errors() {
     return motor_errors;
-} 
+}
 
 const uint16_t pwm6step_get_current_measurement() {
     return measured_current;

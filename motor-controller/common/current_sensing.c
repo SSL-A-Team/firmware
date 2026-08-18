@@ -13,6 +13,8 @@
 
 #include "current_sensing.h"
 #include "fixedarith.h"
+// per-binary config, provides the CS_SYNC_SAMPLING gate
+#include "system.h"
 #include "time.h"
 
 ////////////////////////////
@@ -26,7 +28,11 @@ static bool m_adc_calibrated = false;
 static bool m_motor_adc_offset_set = false;
 static size_t m_motor_adc_offset_ctr = 0;
 static float m_motor_adc_offset = 0.0f;
-static Uint32FixedPoint_t m_motor_adc_offset_mv_fxpt = 0;
+// The two current sense taps come off the same amplifier but sit on different
+// nodes, so they do not share a zero offset and are calibrated separately.
+static Uint32FixedPoint_t m_motor_adc_offset_filt_mv_fxpt = 0;
+static Uint32FixedPoint_t m_motor_adc_offset_unfilt_mv_fxpt = 0;
+static float m_motor_adc_offset_unfilt_accu = 0.0f;
 
 void currsen_enable_ht() {
     ADC1->CR |= ADC_CR_ADSTART;
@@ -49,6 +55,18 @@ void currsen_read_dma() {
 CS_Status_t currsen_setup(uint16_t motor_adc_ch)
 {
     memset(&m_adc_result, 0, sizeof(ADC_Result_t));
+
+    // Put both current sense taps in analog mode. RM0091 requires it for ADC
+    // inputs; leaving them in the reset input mode keeps the Schmitt trigger
+    // enabled, which loads the node and costs accuracy. This matters more now
+    // that PA3 and PA4 are compared against each other - they need matched pin
+    // configuration or the comparison picks up a pin-config artifact.
+    //   PA3 -> ADC_IN3, current sense pre-filter
+    //   PA4 -> ADC_IN4, current sense post external RC LPF
+    GPIOA->MODER |= (GPIO_MODER_MODER3_0 | GPIO_MODER_MODER3_1
+            | GPIO_MODER_MODER4_0 | GPIO_MODER_MODER4_1);
+    GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR3_0 | GPIO_PUPDR_PUPDR3_1
+            | GPIO_PUPDR_PUPDR4_0 | GPIO_PUPDR_PUPDR4_1);
 
     // Assume ADC has not been set up yet
     CS_Status_t status = CS_OK;
@@ -90,9 +108,9 @@ CS_Status_t currsen_setup(uint16_t motor_adc_ch)
     // Set DMA Channel 1 Memory Address to the result struct.
     DMA1_Channel1->CMAR = (uint32_t) (&m_adc_result);
     // Set DMA Channel 1 Number of Data to Transfer to the number of transfers.
-    // Motor and Vbus, so 2 transfers.
-    // Since in circular mode, this will reset.
-    DMA1_Channel1->CNDTR = 2;
+    // Must match the channel count in ADC_CH_MASK. Since in circular mode, this
+    // will reset.
+    DMA1_Channel1->CNDTR = ADC_DMA_NUM_TRANSFERS;
     // Enable DMA1 Channel 1.
     DMA1_Channel1->CCR |= DMA_CCR_EN;
 
@@ -193,14 +211,23 @@ CS_Status_t currsen_setup(uint16_t motor_adc_ch)
     ADC1->CHSELR = motor_adc_ch | ADC_CHSELR_CHSEL16;
     */
 
+#ifdef CS_SYNC_SAMPLING
+    // Synchronous sampling has to fit the whole aperture inside the PWM
+    // on-window. At 300 rpm / 200 mA the up-ramp on-segment is ~604 ns, which is
+    // shorter than SMP_0's 625 ns, so the aperture would straddle a switching
+    // edge. SMP = 000 is 1.5 ADC clock cycles = 125 ns at the 12 MHz ADC clock;
+    // the op-amp output impedance supports charging the sample cap that fast.
+    ADC1->SMPR = 0;
+#else
     // 7.5 ADC clock cycles (0.625 us) is the minimum sampling time for the motor.
     // T_settling > ((Imax * Rs * G_real) / SR) = ((10.0 * 0.05 * 4.94) / 10V/us) = 0.247us
     ADC1->SMPR = ADC_SMPR_SMP_0;
-    // ADC1->SMPR = 0;
+#endif
 
 
-    // Set ADC channel selection. Ch9 is the Vbus.
-    ADC1->CHSELR = motor_adc_ch | ADC_CHSELR_CHSEL9;
+    // Set ADC channel selection. The caller's mask is authoritative and has to
+    // agree with ADC_DMA_NUM_TRANSFERS and the ADC_Result_t field order.
+    ADC1->CHSELR = motor_adc_ch;
 
     // Enable
     status = currsen_adc_en();
@@ -375,31 +402,45 @@ CS_Status_t currsen_adc_dis()
     return CS_OK;
 }
 
+// The tap the control loop runs on. Without synchronous sampling the pre-filter
+// tap is sampled near the counter trough, deep in freewheel where the shunt
+// carries nothing, so the filtered tap is the only usable one.
+#ifdef CS_SYNC_SAMPLING
+#define CS_CONTROL_PATH_RAW (m_adc_result.Motor_current_unfilt_raw)
+#define CS_CONTROL_PATH_OFFSET_FXPT (m_motor_adc_offset_unfilt_mv_fxpt)
+#else
+#define CS_CONTROL_PATH_RAW (m_adc_result.Motor_current_filt_raw)
+#define CS_CONTROL_PATH_OFFSET_FXPT (m_motor_adc_offset_filt_mv_fxpt)
+#endif
+
 uint16_t currsen_get_shunt_raw_adc() {
-    return m_adc_result.Motor_current_raw;
+    return CS_CONTROL_PATH_RAW;
+}
+uint16_t currsen_get_shunt_filt_raw_adc() {
+    return m_adc_result.Motor_current_filt_raw;
+}
+uint16_t currsen_get_shunt_unfilt_raw_adc() {
+    return m_adc_result.Motor_current_unfilt_raw;
 }
 uint16_t currsen_get_bus_raw_adc() {
     return m_adc_result.Vbus_raw;
 }
 
-Uint32FixedPoint_t currsen_get_shunt_voltage_fxpt() {
+static Uint32FixedPoint_t shunt_voltage_fxpt_from_raw(uint16_t raw) {
     const Int32FixedPoint_t ADC_RAW_TO_MV_S0F16 = 48012;  // S0F16
-    
+
     // S12F16 = S12F0 * S0F16;
-    Uint32FixedPoint_t v_adc_raw = (Uint32FixedPoint_t) m_adc_result.Motor_current_raw * ADC_RAW_TO_MV_S0F16;
+    Uint32FixedPoint_t v_adc_raw = (Uint32FixedPoint_t) raw * ADC_RAW_TO_MV_S0F16;
 
     // S12F16
     return (Uint32FixedPoint_t) v_adc_raw;
 }
 
-Uint32FixedPoint_t currsen_get_shunt_voltage_no_bias_fxpt() {
-    const Int32FixedPoint_t ADC_CALIB_OFFSET_S10F16 = 16384000;  // S10F16A
-    
-    Int32FixedPoint_t v_adc_raw = (Int32FixedPoint_t) currsen_get_shunt_voltage_fxpt();
+static Uint32FixedPoint_t shunt_voltage_no_bias_fxpt_from_raw(uint16_t raw, Uint32FixedPoint_t offset_fxpt) {
+    Int32FixedPoint_t v_adc_raw = (Int32FixedPoint_t) shunt_voltage_fxpt_from_raw(raw);
 
     // S13F16 = S12F16 - S12F16
-    // Int32FixedPoint_t v_adc_no_bias = v_adc_raw - ADC_CALIB_OFFSET_S10F16;
-    Int32FixedPoint_t v_adc_no_bias = v_adc_raw - (Int32FixedPoint_t) m_motor_adc_offset_mv_fxpt;
+    Int32FixedPoint_t v_adc_no_bias = v_adc_raw - (Int32FixedPoint_t) offset_fxpt;
 
     if (v_adc_no_bias < 0) {
         v_adc_no_bias = 0;
@@ -409,23 +450,13 @@ Uint32FixedPoint_t currsen_get_shunt_voltage_no_bias_fxpt() {
     return (Uint32FixedPoint_t) v_adc_no_bias;
 }
 
-Uint32FixedPoint_t currsen_get_shunt_current_fxpt() {
-    const Int32FixedPoint_t AMP_INV_GAIN_S0F10 = 186;  // 0.18181818: S0F10
-    const Int32FixedPoint_t R_SHUNT_INV_S6F0 = 20;  // 20: S6F0
+static Uint32FixedPoint_t shunt_current_fxpt_from_raw(uint16_t raw, Uint32FixedPoint_t offset_fxpt) {
     const Uint32FixedPoint_t AMP_R_SHUNT_INV_S2F12 = 14894;  // 3.6363: S2F12
 
     // S13F16
-    Uint32FixedPoint_t v_adc_no_bias = currsen_get_shunt_voltage_no_bias_fxpt();
+    Uint32FixedPoint_t v_adc_no_bias = shunt_voltage_no_bias_fxpt_from_raw(raw, offset_fxpt);
 
     // I = v_adc_no_bias * (1 / GAIN) * (1 / R_shunt)
-
-    // v_shunt = v_adc_no_bias / AMP_GAIN
-    // S13F18 = S13F8 * S0F10
-    // Int32FixedPoint_t v_shunt = (v_adc_no_bias >> 8) * AMP_INV_GAIN_S0F10;
-
-    // S19F12 = S13F12 * S6F0
-    // Int32FixedPoint_t i_shunt = (v_shunt >> 6) * R_SHUNT_INV_S6F0;
-
     // S15F12 = S13F16 * S2F12
     // S15F16 = S13F4 * S2F12
     Uint32FixedPoint_t i_shunt = ((Uint32FixedPoint_t) v_adc_no_bias >> 12) * AMP_R_SHUNT_INV_S2F12;
@@ -434,22 +465,51 @@ Uint32FixedPoint_t currsen_get_shunt_current_fxpt() {
     return i_shunt;
 }
 
+Uint32FixedPoint_t currsen_get_shunt_voltage_fxpt() {
+    return shunt_voltage_fxpt_from_raw(CS_CONTROL_PATH_RAW);
+}
+
+Uint32FixedPoint_t currsen_get_shunt_voltage_no_bias_fxpt() {
+    return shunt_voltage_no_bias_fxpt_from_raw(CS_CONTROL_PATH_RAW, CS_CONTROL_PATH_OFFSET_FXPT);
+}
+
+Uint32FixedPoint_t currsen_get_shunt_current_fxpt() {
+    return shunt_current_fxpt_from_raw(CS_CONTROL_PATH_RAW, CS_CONTROL_PATH_OFFSET_FXPT);
+}
+
 uint16_t currsen_get_calibrated_bias_mv() {
-    return (uint16_t) (m_motor_adc_offset_mv_fxpt >> 16);
+    return (uint16_t) (CS_CONTROL_PATH_OFFSET_FXPT >> 16);
 }
 
 uint16_t currsen_get_shunt_current_ma() {
     return currsen_get_shunt_current_fxpt() >> 16;
 }
 
+uint16_t currsen_get_shunt_current_filt_ma() {
+    return shunt_current_fxpt_from_raw(
+            m_adc_result.Motor_current_filt_raw, m_motor_adc_offset_filt_mv_fxpt) >> 16;
+}
+
+uint16_t currsen_get_shunt_current_unfilt_ma() {
+    return shunt_current_fxpt_from_raw(
+            m_adc_result.Motor_current_unfilt_raw, m_motor_adc_offset_unfilt_mv_fxpt) >> 16;
+}
+
 uint16_t currsen_get_vbus_voltage_mv() {
     return (uint16_t) ((((uint32_t) m_adc_result.Vbus_raw) * 37500U) >> 12U);
 }
 
+// The legacy float path is used by the velocity-control images and reads the
+// filtered tap, matching what those images sampled before the pre-filter tap
+// was added to the conversion sequence.
 float currsen_get_shunt_voltage_raw() {
-    float v_adc = ((float) (m_adc_result.Motor_current_raw)) * V_ADC_SCALE_V;
+    float v_adc = ((float) (m_adc_result.Motor_current_filt_raw)) * V_ADC_SCALE_V;
 
     return v_adc;
+}
+
+static float currsen_get_shunt_voltage_unfilt_raw() {
+    return ((float) (m_adc_result.Motor_current_unfilt_raw)) * V_ADC_SCALE_V;
 }
 
 float currsen_get_shunt_voltage() {
@@ -502,15 +562,19 @@ bool currsen_calibrate_sense()
         m_motor_adc_offset_set = false;
         m_motor_adc_offset_ctr = 0;
         m_motor_adc_offset = 0.0f;
+        m_motor_adc_offset_unfilt_accu = 0.0f;
     }
 
     m_motor_adc_offset += currsen_get_shunt_voltage_raw();
+    m_motor_adc_offset_unfilt_accu += currsen_get_shunt_voltage_unfilt_raw();
     m_motor_adc_offset_ctr++;
 
     if (m_motor_adc_offset_ctr >= 10) {
         m_motor_adc_offset /= 10.0f;
+        m_motor_adc_offset_unfilt_accu /= 10.0f;
 
-        m_motor_adc_offset_mv_fxpt = ((Uint32FixedPoint_t) (m_motor_adc_offset * 1000.0f)) << 16;
+        m_motor_adc_offset_filt_mv_fxpt = ((Uint32FixedPoint_t) (m_motor_adc_offset * 1000.0f)) << 16;
+        m_motor_adc_offset_unfilt_mv_fxpt = ((Uint32FixedPoint_t) (m_motor_adc_offset_unfilt_accu * 1000.0f)) << 16;
         m_motor_adc_offset_set = true;
     }
 

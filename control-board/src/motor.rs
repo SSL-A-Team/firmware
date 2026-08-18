@@ -20,7 +20,9 @@ use ateam_common_packets::bindings::{
     CcmMotionControlType::CCM_MCT_MOTOR_OFF,
     CcmParameter, CcmParameterDirection, CcmParameterOperation, CcmParameterPacket, CcmResponse,
     CcmResponseType::{CCM_RESP_PARAMS, CCM_RESP_TELEM},
-    CcmTelemetry,
+    CcmCurrentSenseTelemetry, CcmTelemetry, CCM_CS_DUTY_ARR_FULL_SCALE, CCM_CS_FLAG_DUTY_CORR_VALID,
+    CCM_CS_FLAG_MODEL_VALID, CCM_CS_FLAG_SYNC_SAMPLING, CCM_CS_FLAG_VEL_EST_VALID,
+    CCM_CS_FLAG_VEL_SRC_EXT,
 };
 
 pub struct CurrentControlledMotor<
@@ -36,6 +38,7 @@ pub struct CurrentControlledMotor<
     firmware_image: &'a [u8],
     current_timestamp_ms: u32,
     current_state: CcmTelemetry,
+    current_sense_state: CcmCurrentSenseTelemetry,
     current_params_state: CcmParameterPacket,
     current_state_seq_num: u8,
     #[allow(dead_code)]
@@ -47,6 +50,7 @@ pub struct CurrentControlledMotor<
     reset_flagged: bool,
     telemetry_enabled: bool,
     motion_enabled: bool,
+    cs_vel_source_encoder: bool,
 }
 
 impl<
@@ -78,6 +82,7 @@ impl<
 
             current_timestamp_ms: 0,
             current_state: start_state,
+            current_sense_state: Default::default(),
             current_params_state: Default::default(),
             current_state_seq_num: 0,
             torque_limit: 0.0,
@@ -88,6 +93,7 @@ impl<
             reset_flagged: false,
             telemetry_enabled: false,
             motion_enabled: false,
+            cs_vel_source_encoder: false,
         }
     }
 
@@ -119,6 +125,7 @@ impl<
 
             current_timestamp_ms: 0,
             current_state: start_state,
+            current_sense_state: Default::default(),
             current_params_state: Default::default(),
             current_state_seq_num: 0,
             torque_limit: 0.0,
@@ -129,6 +136,7 @@ impl<
             reset_flagged: false,
             telemetry_enabled: false,
             motion_enabled: false,
+            cs_vel_source_encoder: false,
         }
     }
 
@@ -313,7 +321,8 @@ impl<
 
                 // decode union type, and reinterpret subtype
                 if mrp.type_ == CCM_RESP_TELEM {
-                    self.current_state = mrp.data.motion;
+                    self.current_state = mrp.data.motion.telemetry;
+                    self.current_sense_state = mrp.data.motion.current_sense;
                     self.current_state_seq_num = mrp.seq_num;
 
                     // defmt::info!("got a telem packet!");
@@ -323,7 +332,7 @@ impl<
                     // // // info!("vel set {:?}", mrp.data.motion.vel_setpoint + 0.);
                     // info!("vel enc {:?}", mrp.data.motion.vel_enc_estimate + 0.);
                     // // // info!("vel hall {:?}", mrp.data.motion.vel_hall_estimate + 0.);
-                    if mrp.data.motion.master_error() != 0 {
+                    if mrp.data.motion.telemetry.master_error() != 0 {
                         // error!(
                         //     "Drive Motor - Error: {:?}",
                         //     &mrp.data.motion._bitfield_1.get(0, 16)
@@ -401,6 +410,9 @@ impl<
             cmd.data
                 .motion
                 .set_enable_telemetry(self.telemetry_enabled as u32);
+            cmd.data
+                .motion
+                .set_cs_vel_source_encoder(self.cs_vel_source_encoder as u32);
             cmd.data.motion.motion_control_type = self.motion_type;
             cmd.data.motion.setpoint = self.setpoint;
 
@@ -420,6 +432,12 @@ impl<
 
     pub fn get_latest_state(&self) -> CcmTelemetry {
         self.current_state
+    }
+
+    /// Current sense investigation instrumentation. See
+    /// CURRENT_SENSING_INVESTIGATION.md.
+    pub fn get_latest_current_sense_state(&self) -> CcmCurrentSenseTelemetry {
+        self.current_sense_state
     }
 
     pub fn get_latest_state_seqnum(&self) -> u8 {
@@ -448,6 +466,13 @@ impl<
 
     pub fn set_motion_enabled(&mut self, enabled: bool) {
         self.motion_enabled = enabled;
+    }
+
+    /// Selects the velocity source the STSPIN's model-based current observer
+    /// runs on. false (default) is the internal hall estimate, true is the
+    /// quadrature encoder. Ignored by images without an encoder.
+    pub fn set_cs_vel_source_encoder(&mut self, use_encoder: bool) {
+        self.cs_vel_source_encoder = use_encoder;
     }
 
     pub fn read_current_timestamp_ms(&self) -> u32 {
@@ -507,5 +532,85 @@ impl<
 
     pub fn read_hall_rads(&self) -> f32 {
         return self.current_state.current_telemetry.hall_vel_est_drads as f32 / 10.0;
+    }
+
+    ////////////////////////////////////
+    //  current sense estimators      //
+    ////////////////////////////////////
+
+    // Three concurrent estimates of the same physical quantity. See
+    // CURRENT_SENSING_INVESTIGATION.md in the firmware repo root.
+
+    /// ADC CH4 / PA4: the current sense amplifier through the external ~2 kHz
+    /// RC low pass. Its time average is bus current, `D * I_phase`, not phase
+    /// current, because the shunt only conducts during the active vector.
+    pub fn read_current_filt_ma(&self) -> u16 {
+        return self.current_sense_state.current_filt_ma;
+    }
+
+    /// ADC CH3 / PA3: the same amplifier with no external filter, sampled at
+    /// the ADC trigger instant. Real phase current only when
+    /// `read_cs_sync_sampling_enabled` is true; otherwise the trigger fires in
+    /// freewheel and this reads noise around zero.
+    pub fn read_current_unfilt_ma(&self) -> u16 {
+        return self.current_sense_state.current_unfilt_ma;
+    }
+
+    /// Phase 0 estimate: the filtered (bus current) reading with the duty
+    /// weighting divided back out. Check `read_cs_duty_correction_valid` first -
+    /// at very low duty the reciprocal carries no information and the filtered
+    /// value is passed through unchanged.
+    pub fn read_current_duty_corrected_ma(&self) -> u16 {
+        return self.current_sense_state.current_duty_corrected_ma;
+    }
+
+    /// Phase 3 estimate: `(D * V_bus - Ke * w) / R_loop`. Signed, because
+    /// plugging the motor yields a negative value.
+    pub fn read_current_model_ma(&self) -> i16 {
+        return self.current_sense_state.current_model_ma;
+    }
+
+    /// Velocity the model observer actually used, deci-rad/s at the motor shaft.
+    pub fn read_cs_vel_est_used_drads(&self) -> i16 {
+        return self.current_sense_state.vel_est_used_drads;
+    }
+
+    /// Mean effective PWM on-time over the telemetry frame, in ARR counts.
+    pub fn read_cs_duty_arr(&self) -> u16 {
+        return self.current_sense_state.duty_arr;
+    }
+
+    /// Mean applied duty cycle over the telemetry frame, 0.0 to 1.0.
+    pub fn read_cs_duty(&self) -> f32 {
+        return self.current_sense_state.duty_arr as f32
+            / CCM_CS_DUTY_ARR_FULL_SCALE as f32;
+    }
+
+    pub fn read_cs_flags(&self) -> u8 {
+        return self.current_sense_state.cs_flags;
+    }
+
+    /// True if the firmware was built with synchronous shunt sampling, in which
+    /// case the pre-filter tap is sampled inside the PWM on-window and the
+    /// control loop runs on it.
+    pub fn read_cs_sync_sampling_enabled(&self) -> bool {
+        return self.read_cs_flags() & CCM_CS_FLAG_SYNC_SAMPLING as u8 != 0;
+    }
+
+    pub fn read_cs_duty_correction_valid(&self) -> bool {
+        return self.read_cs_flags() & CCM_CS_FLAG_DUTY_CORR_VALID as u8 != 0;
+    }
+
+    /// True if the model observer used the encoder rather than the halls.
+    pub fn read_cs_vel_source_is_encoder(&self) -> bool {
+        return self.read_cs_flags() & CCM_CS_FLAG_VEL_SRC_EXT as u8 != 0;
+    }
+
+    pub fn read_cs_vel_est_valid(&self) -> bool {
+        return self.read_cs_flags() & CCM_CS_FLAG_VEL_EST_VALID as u8 != 0;
+    }
+
+    pub fn read_cs_model_valid(&self) -> bool {
+        return self.read_cs_flags() & CCM_CS_FLAG_MODEL_VALID as u8 != 0;
     }
 }
