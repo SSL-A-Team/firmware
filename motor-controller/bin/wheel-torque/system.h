@@ -62,7 +62,7 @@
 //
 // Not viable below roughly 10 ARR counts of on-time (~1.7% duty): the trigger
 // sits too close to the switching edge for ringing to settle.
-// #define CS_SYNC_SAMPLING
+#define CS_SYNC_SAMPLING
 
 ////////////////////
 //  TIME KEEPING  //

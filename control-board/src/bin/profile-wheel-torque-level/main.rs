@@ -3,61 +3,42 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(sync_unsafe_cell)]
 
-//! Bus power vs. current-sense estimate comparison bench.
+//! Lever arm torque profiling bench.
 //!
-//! Companion to profile-wheel-torque-level, which validates torque against a
-//! physical lever-and-scale fixture. This bench needs no fixture at all - it
-//! runs the wheel at a commanded current setpoint (stalled or free-spinning,
-//! either is fine) and compares three concurrent readings of the same current
-//! against each other and against the setpoint:
+//! Companion to profile-wheel-torque, which compares the firmware's current
+//! estimates against each other with no physical fixture. This bench instead
+//! validates against a physically measured reaction force. A lever arm is
+//! clamped to the motor shaft and rests on a kitchen scale; the rotor is
+//! therefore stalled. The
+//! board commands a current setpoint, the motor develops torque against the
+//! lever, and the scale reads the reaction force. The operator reads grams off
+//! the scale and compares against what each of the firmware's four concurrent
+//! current estimates predicts.
 //!
-//!   - bus power:      V_bus * I_filt, where I_filt is the filtered current
-//!                      sense tap. That tap's time average is bus current,
-//!                      `D * I_phase`, not phase current, so treating it as
-//!                      torque-producing current is the "naive"/uncorrected
-//!                      read - it undershoots by roughly a factor of duty.
-//!   - bus power corrected to torque: the duty-corrected estimate, which
-//!                      divides the duty weighting back out of the bus current
-//!                      to recover phase current. Check corr_valid; at very
-//!                      low duty (below D_arr ~10) the correction has no
-//!                      resolution and passes the uncorrected value through.
-//!   - sync sampling:   the pre-filter tap sampled inside the PWM on-window.
-//!                      Real phase current only when the firmware was built
-//!                      with synchronous shunt sampling (see the `sync` flag
-//!                      in each row); otherwise this channel is noise.
-//!
-//! All three are converted to torque and to an equivalent tangential force at
-//! the wheel's rolling radius, assuming WHEEL_DIAMETER_MM below. When sync
-//! sampling is enabled, its reading is the closest thing to ground truth
-//! here, so each row also reports how far the duty-corrected estimate sits
-//! from it.
-//!
-//! Two control modes, toggled from the board:
-//!
-//!   CURRENT  closes the STSPIN's current PI loop on the setpoint.
-//!   VOLTAGE  commands duty open loop, taking the PI out of the path entirely.
-//!            Duty is then steady period to period, which is the condition the
-//!            synchronous sample assumes - one sample per PWM period is only a
-//!            valid estimate of average phase current when duty is not moving.
-//!            Use this to tell a current loop limit cycle apart from a
-//!            commutation problem: if the whine and the uneven torque survive a
-//!            steady duty, the PI is not what is producing them.
-//!
-//! At stall, back-EMF is zero, so a voltage command maps to current through
-//! I = V / R_LOOP_OHMS. The predicted stall current is logged with each step.
+//! Set LEVER_ARM_MM below to the distance from the shaft centreline to the
+//! contact point on the scale before flashing.
 //!
 //! Controls:
 //!   LEFT / RIGHT  select active wheel (counter-clockwise / clockwise order)
-//!   UP / DOWN     setpoint +/- one step, auto-repeats when held. The setpoint
-//!                 is signed, so holding DOWN through zero reverses torque
-//!                 direction.
-//!   CENTER        short press arms / disarms; hold for BTN_LONG_PRESS switches
-//!                 control mode (and disarms)
+//!   UP / DOWN     current setpoint +/- CURRENT_STEP_MA, auto-repeats when held.
+//!                 The setpoint is signed, so holding DOWN through zero reverses
+//!                 torque direction.
+//!   CENTER        arm / disarm the output
 //!
 //! Nothing is driven until the output is armed. While armed a full data row is
 //! logged at ROW_LOG_HZ and streamed over USB CDC as a TorqueSample.
 //!
-//! The output auto-disarms after ARMED_TIMEOUT_S or on any motor error.
+//! Stall is a no-cooling condition, so the output auto-disarms after
+//! ARMED_TIMEOUT_S, on any motor error, and if the wheel is found to be turning
+//! (which means the lever slipped and every torque reading is invalid).
+//!
+//! Two things to keep in mind reading the numbers at stall:
+//!   - Duty is tiny (order 1%), which is exactly where the Phase 0 duty
+//!     correction runs out of resolution. Watch the corr_valid flag and D_arr;
+//!     below D_arr 10 the corrected value is not a measurement.
+//!   - Back-EMF is zero, so the Phase 3 model degenerates to D * Vbus / R_loop
+//!     and the velocity source selection has no effect here. It only starts to
+//!     matter once the shaft is turning.
 
 use ateam_common_packets::bindings::CcmMotionControlType;
 use ateam_lib_stm32::{
@@ -130,15 +111,16 @@ unsafe fn CEC() {
 //  bench config  //
 ////////////////////
 
-/// Wheel diameter, for converting torque to an equivalent tangential force at
-/// the wheel's rolling radius.
-const WHEEL_DIAMETER_MM: f32 = 60.0;
-const WHEEL_RADIUS_MM: f32 = WHEEL_DIAMETER_MM / 2.0;
+/// Distance from the shaft centreline to where the lever arm contacts the
+/// scale. This is the one number that has to match the physical fixture.
+const LEVER_ARM_MM: f32 = 20.0;
 
 /// Nanotec DF45M024053-A2 torque constant, N*m/A. Note the manufacturer's
 /// characterization does not extend below 500 mA, so anything this predicts
 /// under that is an extrapolation.
 const MOTOR_KT_NM_PER_A: f32 = 0.0335;
+
+const GRAVITY_M_PER_S2: f32 = 9.80665;
 
 /// Setpoint granularity, and the ceiling. The motor firmware independently
 /// clamps stall current to MAX_CURR_WHEEL_NOT_TURNING (2160 mA), so this stays
@@ -146,21 +128,12 @@ const MOTOR_KT_NM_PER_A: f32 = 0.0335;
 const CURRENT_STEP_MA: i16 = 50;
 const MAX_SETPOINT_MA: i16 = 2000;
 
-/// Voltage mode granularity and ceiling. One ARR count of duty is ~41.7 mV at a
-/// 25 V bus, so a 50 mV step is roughly the hardware resolution - anything finer
-/// just aliases onto the same duty. The ceiling is the voltage that would draw
-/// MAX_SETPOINT_MA at stall.
-const VOLTAGE_STEP_MV: i16 = 50;
-const MAX_SETPOINT_MV: i16 = 1800;
+/// Stall means no rotor cooling, so armed time is bounded.
+const ARMED_TIMEOUT_S: u64 = 20;
 
-/// Total series resistance during the active vector: 0.8 ohm of winding, two
-/// STL8N10F7 at 17 mohm, and the 50 mohm shunt. At stall there is no back-EMF,
-/// so a voltage command lands at I = V / R_loop. Dividing mV by ohms gives mA
-/// directly.
-const R_LOOP_OHMS: f32 = 0.88;
-
-/// Bound on armed time regardless of whether the shaft is stalled or turning.
-const ARMED_TIMEOUT_S: u64 = 60;
+/// A stalled shaft should read essentially zero. Anything above this while armed
+/// means the lever slipped off the scale and the torque reading is meaningless.
+const STALL_VIOLATION_RADS: f32 = 20.0;
 
 /// Data row logging rate while armed.
 const ROW_LOG_HZ: u32 = 2;
@@ -180,10 +153,6 @@ const BTN_COOLDOWN: u32 = 200;
 /// and how fast it repeats after that (50 ms, so 20 steps/s).
 const BTN_REPEAT_DELAY: u32 = 600;
 const BTN_REPEAT_PERIOD: u32 = 100;
-/// How long CENTER has to be held to mean "switch mode" rather than "arm" (1s).
-/// The switch fires on crossing the threshold rather than on release, so the
-/// operator gets the log line without having to guess how long to hold.
-const BTN_LONG_PRESS: u32 = 2000;
 
 type TorqueTestMotor = CurrentControlledMotor<
     'static,
@@ -194,34 +163,9 @@ type TorqueTestMotor = CurrentControlledMotor<
     false,
 >;
 
-/// Which firmware control path the bench drives. Cast to u8 into TorqueSample,
-/// so the discriminants are pinned rather than left to the compiler.
-#[derive(Clone, Copy, PartialEq)]
-#[repr(u8)]
-enum ControlMode {
-    Current = 0,
-    Voltage = 1,
-}
-
-impl ControlMode {
-    fn name(self) -> &'static str {
-        match self {
-            ControlMode::Current => "CURRENT",
-            ControlMode::Voltage => "VOLTAGE",
-        }
-    }
-
-    fn toggled(self) -> Self {
-        match self {
-            ControlMode::Current => ControlMode::Voltage,
-            ControlMode::Voltage => ControlMode::Current,
-        }
-    }
-}
-
 /// One bench sample, streamed over USB CDC. Deliberately carries the raw
 /// firmware values rather than derived torque so the host can recompute with a
-/// different Kt or wheel radius without reflashing.
+/// different Kt or lever length without reflashing.
 #[repr(C, packed)]
 #[derive(Clone, Copy, Default)]
 struct TorqueSample {
@@ -229,16 +173,17 @@ struct TorqueSample {
     wheel_index: u8,
     armed: u8,
     cs_flags: u8,
-    /// 0 = current mode, 1 = voltage open loop.
-    mode: u8,
+    _pad: u8,
     setpoint_ma: i16,
-    setpoint_mv: i16,
-    bus_current_ma: u16,
-    corrected_current_ma: u16,
-    sync_current_ma: u16,
+    current_filt_ma: u16,
+    current_unfilt_ma: u16,
+    current_duty_corrected_ma: u16,
+    current_model_ma: i16,
     duty_arr: u16,
+    vel_est_used_drads: i16,
     wheel_vel_drads: i16,
     bus_voltage_mv: u16,
+    motor_voltage_cmd_mv: u16,
 }
 
 static SAMPLE_PUBSUB: PubSubChannel<CriticalSectionRawMutex, TorqueSample, 3, 1, 1> =
@@ -249,17 +194,13 @@ fn current_ma_to_torque_mnm(current_ma: f32) -> f32 {
     (current_ma / 1000.0) * MOTOR_KT_NM_PER_A * 1000.0
 }
 
-/// Equivalent tangential force at the wheel's rolling radius for a given
-/// current, in Newtons.
-fn current_ma_to_wheel_force_n(current_ma: f32) -> f32 {
+/// What the scale should read for a given current, in grams.
+///
+/// F = tau / r, and the scale reports mass, so divide out g.
+fn current_ma_to_scale_grams(current_ma: f32) -> f32 {
     let torque_nm = (current_ma / 1000.0) * MOTOR_KT_NM_PER_A;
-    torque_nm / (WHEEL_RADIUS_MM / 1000.0)
-}
-
-/// Current a voltage command lands at with the rotor stalled, in mA. Only valid
-/// at stall - once the shaft turns, back-EMF subtracts and this reads high.
-fn voltage_mv_to_stall_current_ma(voltage_mv: f32) -> f32 {
-    voltage_mv / R_LOOP_OHMS
+    let force_n = torque_nm / (LEVER_ARM_MM / 1000.0);
+    (force_n / GRAVITY_M_PER_S2) * 1000.0
 }
 
 /// Estimate error against the commanded setpoint, in percent. Returns 0 at a
@@ -270,15 +211,6 @@ fn err_pct(estimate_ma: f32, setpoint_ma: f32) -> f32 {
         return 0.0;
     }
     (estimate_ma - setpoint_ma.abs()) / setpoint_ma.abs() * 100.0
-}
-
-/// a relative to b, in percent. Returns 0 when b is ~zero rather than an
-/// infinity, since that ratio carries no information at zero current.
-fn pct_diff(a_ma: f32, b_ma: f32) -> f32 {
-    if b_ma.abs() < 1.0 {
-        return 0.0;
-    }
-    (a_ma - b_ma) / b_ma.abs() * 100.0
 }
 
 #[embassy_executor::main]
@@ -463,11 +395,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     // Bench state
     let mut active_wheel: usize = 0;
-    let mut mode = ControlMode::Current;
-    // Kept separately so switching modes does not carry a current setpoint over
-    // into a voltage command, where the number would mean something else.
     let mut setpoint_ma: i16 = 0;
-    let mut setpoint_mv: i16 = 0;
     let mut armed = false;
     let mut armed_at = Instant::now();
     let mut last_seq_num: u8 = 0;
@@ -477,34 +405,27 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut ctr: usize = 0;
 
     // Button edge-detection and debounce state
+    let mut prev_enter = false;
     let mut prev_left = false;
     let mut prev_right = false;
+    let mut cd_enter: u32 = 0;
     let mut cd_left: u32 = 0;
     let mut cd_right: u32 = 0;
-
-    // CENTER is hold-sensitive rather than edge-triggered: short press arms,
-    // long press switches mode. `enter_consumed` suppresses the arm toggle on
-    // release once a long press has already fired.
-    let mut held_enter: u32 = 0;
-    let mut enter_consumed = false;
 
     // UP/DOWN use hold-to-repeat rather than plain edge detection
     let mut held_up: u32 = 0;
     let mut held_down: u32 = 0;
 
     defmt::info!(
-        "Torque bench ready. Wheel {}, diameter {}mm, Kt {}Nm/A, mode {}.",
+        "Torque bench ready. Wheel {}, lever arm {}mm, Kt {}Nm/A.",
         WHEEL_NAMES[active_wheel],
-        WHEEL_DIAMETER_MM,
-        MOTOR_KT_NM_PER_A,
-        mode.name()
+        LEVER_ARM_MM,
+        MOTOR_KT_NM_PER_A
     );
     defmt::info!(
-        "LEFT/RIGHT select wheel, UP/DOWN adjust setpoint ({}mA or {}mV per step, hold to repeat).",
-        CURRENT_STEP_MA,
-        VOLTAGE_STEP_MV
+        "LEFT/RIGHT select wheel, UP/DOWN adjust current by {}mA (hold to repeat), CENTER arms output.",
+        CURRENT_STEP_MA
     );
-    defmt::info!("CENTER: tap to arm/disarm, hold ~1s to switch CURRENT <-> VOLTAGE.");
 
     let mut ticker = Ticker::every(Duration::from_micros(TICK_US));
     loop {
@@ -528,8 +449,16 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 armed = false;
                 setpoint_ma = 0;
                 defmt::warn!(
-                    "Armed for {}s. Output disarmed, let the motor cool.",
+                    "Armed for {}s with a stalled rotor. Output disarmed, let the motor cool.",
                     ARMED_TIMEOUT_S
+                );
+            } else if libm::fabsf(motors[active_wheel].read_rads()) > STALL_VIOLATION_RADS {
+                armed = false;
+                setpoint_ma = 0;
+                defmt::error!(
+                    "{} is turning at {}rad/s - the rotor is not stalled, so the lever has slipped. Output disarmed; discard the last reading.",
+                    WHEEL_NAMES[active_wheel],
+                    motors[active_wheel].read_rads()
                 );
             }
         }
@@ -538,6 +467,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         //  inputs  //
         //////////////
 
+        if cd_enter > 0 {
+            cd_enter -= 1;
+        }
         if cd_left > 0 {
             cd_left -= 1;
         }
@@ -551,52 +483,25 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         let now_up = btn_up.is_low();
         let now_down = btn_down.is_low();
 
-        // CENTER: short press arms / disarms, long press switches control mode
-        if now_enter {
-            held_enter += 1;
-
-            if held_enter == BTN_LONG_PRESS && !enter_consumed {
-                enter_consumed = true;
-                armed = false;
-                setpoint_ma = 0;
-                setpoint_mv = 0;
-                mode = mode.toggled();
+        // CENTER: arm / disarm
+        if now_enter && !prev_enter && cd_enter == 0 {
+            cd_enter = BTN_COOLDOWN;
+            armed = !armed;
+            if armed {
+                armed_at = Instant::now();
                 defmt::info!(
-                    "Control mode: {}. Setpoints zeroed, output disarmed.",
-                    mode.name()
+                    "ARMED. {} at {}mA. Expected scale reading {}g.",
+                    WHEEL_NAMES[active_wheel],
+                    setpoint_ma,
+                    current_ma_to_scale_grams(setpoint_ma as f32)
                 );
+            } else {
+                defmt::info!("DISARMED.");
             }
-        } else {
-            if held_enter > 0 && !enter_consumed {
-                armed = !armed;
-                if armed {
-                    armed_at = Instant::now();
-                    match mode {
-                        ControlMode::Current => defmt::info!(
-                            "ARMED. {} CURRENT {}mA. Predicted torque {}mNm ({}N at wheel).",
-                            WHEEL_NAMES[active_wheel],
-                            setpoint_ma,
-                            current_ma_to_torque_mnm(setpoint_ma as f32),
-                            current_ma_to_wheel_force_n(setpoint_ma as f32)
-                        ),
-                        ControlMode::Voltage => defmt::info!(
-                            "ARMED. {} VOLTAGE {}mV open loop -> {}mA at stall.",
-                            WHEEL_NAMES[active_wheel],
-                            setpoint_mv,
-                            voltage_mv_to_stall_current_ma(setpoint_mv as f32)
-                        ),
-                    }
-                } else {
-                    defmt::info!("DISARMED.");
-                }
-            }
-
-            held_enter = 0;
-            enter_consumed = false;
         }
 
-        // RIGHT / LEFT: select active wheel. Always disarms - the setpoint
-        // should be re-confirmed for the newly selected wheel.
+        // RIGHT / LEFT: select active wheel. Always disarms - the lever has to be
+        // physically moved to the new wheel anyway.
         if now_right && !prev_right && cd_right == 0 {
             cd_right = BTN_COOLDOWN;
             active_wheel = CW_NEXT[active_wheel];
@@ -627,47 +532,26 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         let step_down = button_step(now_down, &mut held_down);
 
         if step_up || step_down {
-            let (step, limit, cur) = match mode {
-                ControlMode::Current => (CURRENT_STEP_MA, MAX_SETPOINT_MA, setpoint_ma),
-                ControlMode::Voltage => (VOLTAGE_STEP_MV, MAX_SETPOINT_MV, setpoint_mv),
-            };
-
-            let next = if step_up {
-                cur.saturating_add(step)
+            let prev = setpoint_ma;
+            if step_up {
+                setpoint_ma = setpoint_ma.saturating_add(CURRENT_STEP_MA);
             } else {
-                cur.saturating_sub(step)
+                setpoint_ma = setpoint_ma.saturating_sub(CURRENT_STEP_MA);
             }
-            .clamp(-limit, limit);
+            setpoint_ma = setpoint_ma.clamp(-MAX_SETPOINT_MA, MAX_SETPOINT_MA);
 
-            if next != cur {
-                let disarmed = if armed { "" } else { " (output disarmed)" };
-                match mode {
-                    ControlMode::Current => {
-                        setpoint_ma = next;
-                        defmt::info!(
-                            "Setpoint {}mA -> predicted torque {}mNm ({}N at wheel){}",
-                            next,
-                            current_ma_to_torque_mnm(next as f32),
-                            current_ma_to_wheel_force_n(next as f32),
-                            disarmed
-                        );
-                    }
-                    ControlMode::Voltage => {
-                        setpoint_mv = next;
-                        let stall_ma = voltage_mv_to_stall_current_ma(next as f32);
-                        defmt::info!(
-                            "Setpoint {}mV open loop -> {}mA at stall, torque {}mNm ({}N at wheel){}",
-                            next,
-                            stall_ma,
-                            current_ma_to_torque_mnm(stall_ma),
-                            current_ma_to_wheel_force_n(stall_ma),
-                            disarmed
-                        );
-                    }
-                }
+            if setpoint_ma != prev {
+                defmt::info!(
+                    "Setpoint {}mA -> predicted torque {}mNm, scale {}g{}",
+                    setpoint_ma,
+                    current_ma_to_torque_mnm(setpoint_ma as f32),
+                    current_ma_to_scale_grams(setpoint_ma as f32),
+                    if armed { "" } else { " (output disarmed)" }
+                );
             }
         }
 
+        prev_enter = now_enter;
         prev_left = now_left;
         prev_right = now_right;
 
@@ -685,50 +569,36 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 wheel_index: active_wheel as u8,
                 armed: armed as u8,
                 cs_flags: m.read_cs_flags(),
-                mode: mode as u8,
+                _pad: 0,
                 setpoint_ma,
-                setpoint_mv,
-                bus_current_ma: m.read_current_filt_ma(),
-                corrected_current_ma: m.read_current_duty_corrected_ma(),
-                sync_current_ma: m.read_current_unfilt_ma(),
+                current_filt_ma: m.read_current_filt_ma(),
+                current_unfilt_ma: m.read_current_unfilt_ma(),
+                current_duty_corrected_ma: m.read_current_duty_corrected_ma(),
+                current_model_ma: m.read_current_model_ma(),
                 duty_arr: m.read_cs_duty_arr(),
+                vel_est_used_drads: m.read_cs_vel_est_used_drads(),
                 wheel_vel_drads: (m.read_rads() * 10.0) as i16,
                 bus_voltage_mv: (m.read_vbus_voltage() * 1000.0) as u16,
+                motor_voltage_cmd_mv: m.read_vmotor_voltage_mv(),
             };
             sample_pub.publish_immediate(sample);
 
             row_log_ctr += 1;
             if row_log_ctr >= row_log_divisor {
                 row_log_ctr = 0;
-                log_row(
-                    &motors[active_wheel],
-                    active_wheel,
-                    mode,
-                    setpoint_ma,
-                    setpoint_mv,
-                    armed,
-                );
+                log_row(&motors[active_wheel], active_wheel, setpoint_ma, armed);
             }
         }
 
         // Apply setpoints: the active motor gets the setpoint only while armed,
-        // everything else is held at zero. The motion type is rewritten every
-        // tick so a mode switch takes effect on the next command without any
-        // separate handshake.
+        // everything else is held at zero.
         for (i, motor) in motors.iter_mut().enumerate() {
-            let live = i == active_wheel && armed;
-            match mode {
-                ControlMode::Current => {
-                    motor.set_motion_type(CcmMotionControlType::CCM_MCT_CURRENT);
-                    motor.set_current_setpoint(if live { setpoint_ma } else { 0 });
-                    motor.set_setpoint(0.0);
-                }
-                ControlMode::Voltage => {
-                    motor.set_motion_type(CcmMotionControlType::CCM_MCT_VOLTAGE_OPENLOOP);
-                    motor.set_setpoint(if live { setpoint_mv as f32 } else { 0.0 });
-                    motor.set_current_setpoint(0);
-                }
-            }
+            let sp = if i == active_wheel && armed {
+                setpoint_ma
+            } else {
+                0i16
+            };
+            motor.set_current_setpoint(sp);
         }
 
         if ctr % 2 == 0 {
@@ -763,81 +633,77 @@ fn button_step(pressed: bool, held_ticks: &mut u32) -> bool {
     (prev - BTN_REPEAT_DELAY) % BTN_REPEAT_PERIOD == 0
 }
 
-/// Bus power, duty-corrected, and sync-sampled current side by side, each
-/// converted to torque and to force at the wheel radius, plus how far the
-/// duty-corrected estimate sits from the sync-sampled ground truth.
-fn log_row(
-    m: &TorqueTestMotor,
-    wheel: usize,
-    mode: ControlMode,
-    setpoint_ma: i16,
-    setpoint_mv: i16,
-    armed: bool,
-) {
-    // In voltage mode there is no commanded current, so the err_sp columns are
-    // taken against what the voltage should draw at stall. That is only
-    // meaningful with the shaft held; once it turns, back-EMF makes the
-    // reference read high.
-    let sp = match mode {
-        ControlMode::Current => setpoint_ma as f32,
-        ControlMode::Voltage => voltage_mv_to_stall_current_ma(setpoint_mv as f32),
-    };
+/// Full comparison row: every current estimate, what torque and scale reading it
+/// implies, and how far each one sits from the commanded setpoint.
+fn log_row(m: &TorqueTestMotor, wheel: usize, setpoint_ma: i16, armed: bool) {
+    let sp = setpoint_ma as f32;
+    let sp_abs = libm::fabsf(sp);
 
-    let vbus = m.read_vbus_voltage();
-    let bus_current = m.read_current_filt_ma() as f32;
-    let corrected_current = m.read_current_duty_corrected_ma() as f32;
-    let sync_current = m.read_current_unfilt_ma() as f32;
-    let sync_valid = m.read_cs_sync_sampling_enabled();
+    let filt = m.read_current_filt_ma() as f32;
+    let unfilt = m.read_current_unfilt_ma() as f32;
+    let duty_corr = m.read_current_duty_corrected_ma() as f32;
+    let model = m.read_current_model_ma() as f32;
 
-    let bus_power_mw = vbus * bus_current;
+    let duty = m.read_cs_duty();
 
     defmt::info!(
-        "== {} {} {} sp {}mA / {}mV (ref {}mA)  duty {}% (D_arr {}, corr_valid {})  vbus {}V  vel {}rad/s  sync {}",
+        "== {} {} sp {}mA  duty {}% (D_arr {}, corr_valid {})  vbus {}V  vel {}rad/s  sync {}",
         WHEEL_NAMES[wheel],
-        mode.name(),
         if armed { "ARMED" } else { "idle" },
         setpoint_ma,
-        setpoint_mv,
-        sp,
-        m.read_cs_duty() * 100.0,
+        duty * 100.0,
         m.read_cs_duty_arr(),
         m.read_cs_duty_correction_valid(),
-        vbus,
+        m.read_vbus_voltage(),
         m.read_rads(),
-        sync_valid
+        m.read_cs_sync_sampling_enabled()
     );
 
     defmt::info!(
-        "   bus power     {}mW  I {}mA (naive, D*I_phase)  torque {}mNm  force {}N  err_sp {}%",
-        bus_power_mw,
-        bus_current,
-        current_ma_to_torque_mnm(bus_current),
-        current_ma_to_wheel_force_n(bus_current),
-        err_pct(bus_current, sp)
+        "   current mA   filt {} | unfilt {} | duty_corr {} | model {} (valid {})",
+        filt,
+        unfilt,
+        duty_corr,
+        model,
+        m.read_cs_model_valid()
     );
 
     defmt::info!(
-        "   corrected     I {}mA  torque {}mNm  force {}N  err_sp {}%",
-        corrected_current,
-        current_ma_to_torque_mnm(corrected_current),
-        current_ma_to_wheel_force_n(corrected_current),
-        err_pct(corrected_current, sp)
+        "   err vs sp %  filt {} | unfilt {} | duty_corr {} | model {}",
+        err_pct(filt, sp),
+        err_pct(unfilt, sp),
+        err_pct(duty_corr, sp),
+        err_pct(model, sp)
     );
 
-    defmt::info!(
-        "   sync sample   I {}mA  torque {}mNm  force {}N  err_sp {}%",
-        sync_current,
-        current_ma_to_torque_mnm(sync_current),
-        current_ma_to_wheel_force_n(sync_current),
-        err_pct(sync_current, sp)
-    );
-
-    if sync_valid {
+    // The investigation predicts filt/setpoint ~= duty, because the filtered tap
+    // reads D * I_phase. If that ratio tracks duty, the duty weighting is the
+    // whole story.
+    if sp_abs >= 1.0 {
         defmt::info!(
-            "   corrected vs sync  {}%  (duty-corrected relative to sync-sampled ground truth)",
-            pct_diff(corrected_current, sync_current)
+            "   filt/sp {} vs duty {}  (equal => filtered tap is reading bus current)",
+            filt / sp_abs,
+            duty
         );
     }
+
+    defmt::info!(
+        "   scale g      cmd {} | filt {} | unfilt {} | duty_corr {} | model {}",
+        current_ma_to_scale_grams(sp),
+        current_ma_to_scale_grams(filt),
+        current_ma_to_scale_grams(unfilt),
+        current_ma_to_scale_grams(duty_corr),
+        current_ma_to_scale_grams(model)
+    );
+
+    defmt::info!(
+        "   torque mNm   cmd {} | filt {} | unfilt {} | duty_corr {} | model {}",
+        current_ma_to_torque_mnm(sp),
+        current_ma_to_torque_mnm(filt),
+        current_ma_to_torque_mnm(unfilt),
+        current_ma_to_torque_mnm(duty_corr),
+        current_ma_to_torque_mnm(model)
+    );
 }
 
 #[embassy_executor::task]

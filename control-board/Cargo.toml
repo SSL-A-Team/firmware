@@ -143,6 +143,11 @@ test = false
 harness = false
 
 [[bin]]
+name = "profile-wheel-torque-level"
+test = false
+harness = false
+
+[[bin]]
 name = "profile-wheel-torque"
 test = false
 harness = false

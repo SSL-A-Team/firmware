@@ -79,10 +79,10 @@ static bool current_limited = false;
 //   = 6300 mA / (1.0 m/s / 0.030 m) = 6300 / 33.33 = 189.0 mA/(rad/s) saturates at 1.0 m/s body error
 const PidConstants_t vel_velcur_controller_constants = {
     .kP = 5.0f,
-    .kI = 0.0f,
+    .kI = 50.0f,
     .kD = 0.0f,
-    .kI_max = 100.0f,
-    .kI_min = -100.0f,
+    .kI_max = 500.0f,
+    .kI_min = -500.0f,
     .anti_jitter_thresh = (float) M_PI / 2.0f,
 };
 
@@ -241,11 +241,22 @@ int main() {
         // 1000 Hz bandwidth -> 6283 rads
         // .kP = 2123,
         // .kI = 910,
-        // KNOWN GOOD
-        .kP = 338 * 5,      // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
-        .kI = 145 * 5,      // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910
-        .kI_max = 4095,     // S12F0
-        .kI_min = -(4095),  // S12F0
+        // The *5 multiplier here was "KNOWN GOOD" against the pre-sync-sampling
+        // feedback, which was D * I_phase rather than I_phase. Small-signal
+        // sensor gain there is D, so at the low duty this runs at near stall the
+        // loop was executing at a small fraction of the gain it was tuned to.
+        // CS_SYNC_SAMPLING makes sensor gain unity and hands all of that back at
+        // once. Combined with the 32 tap moving average the PI is fed
+        // (~388us of group delay, 180 deg near 1.3kHz), *5 limit cycles in the
+        // audible band. *1 was sluggish; *3 is the bench compromise.
+        .kP = 338 * 3,     // S07F10, 6283 * 0.00033 H = 2.07339 => 2123
+        .kI = 145 * 3,     // S05F13, 6283 * (0.7ohm coil + 0.007 ohm wire) * (1 / 40000) = 0.11105 => 910
+        // Integrator authority was full scale, and the only anti-windup in the
+        // path is the output clamp in the ADC callback. That is what turns an
+        // overshoot into a latch-up, so keep a bounded budget - half scale still
+        // leaves plenty of authority to cover dead-time at low duty.
+        .kI_max = 4095,    // S12F0
+        .kI_min = -(4095), // S12F0
         .anti_jitter_thresh = 0,
         .anti_jitter_thresh_inv = 0,
         // .anti_jitter_thresh = 30,      // S12F0

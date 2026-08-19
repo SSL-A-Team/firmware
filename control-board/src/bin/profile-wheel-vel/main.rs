@@ -375,25 +375,25 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         if curr_ctr > 10000 {
             curr_ctr = 0
         } else if curr_ctr > 5000 {
-            fl_ccm.set_current_setpoint(50);
-            bl_ccm.set_current_setpoint(50);
-            br_ccm.set_current_setpoint(50);
-            fr_ccm.set_current_setpoint(50);
+            fl_ccm.set_current_setpoint(100);
+            bl_ccm.set_current_setpoint(100);
+            br_ccm.set_current_setpoint(100);
+            fr_ccm.set_current_setpoint(100);
 
-            fl_ccm.set_setpoint(160.0);
-            bl_ccm.set_setpoint(160.0);
-            br_ccm.set_setpoint(160.0);
-            fr_ccm.set_setpoint(160.0);
+            fl_ccm.set_setpoint(10.0);
+            bl_ccm.set_setpoint(10.0);
+            br_ccm.set_setpoint(10.0);
+            fr_ccm.set_setpoint(10.0);
         } else {
-            fl_ccm.set_current_setpoint(-50);
-            bl_ccm.set_current_setpoint(-50);
-            br_ccm.set_current_setpoint(-50);
-            fr_ccm.set_current_setpoint(-50);
+            fl_ccm.set_current_setpoint(-100);
+            bl_ccm.set_current_setpoint(-100);
+            br_ccm.set_current_setpoint(-100);
+            fr_ccm.set_current_setpoint(-100);
 
-            fl_ccm.set_setpoint(-120.0);
-            bl_ccm.set_setpoint(-160.0);
-            br_ccm.set_setpoint(-160.0);
-            fr_ccm.set_setpoint(-160.0);
+            fl_ccm.set_setpoint(-10.0);
+            bl_ccm.set_setpoint(-10.0);
+            br_ccm.set_setpoint(-10.0);
+            fr_ccm.set_setpoint(-10.0);
         }
 
         // curr_ctr += 1;

@@ -947,6 +947,16 @@ void pwm6step_set_direction(MotorDirection_t motor_direction) {
 }
 
 static void set_duty_cycle(uint16_t duty_cycle) {
+    // current_duty_cycle is unsigned, so an over-range command wraps the
+    // subtraction below to ~65k. That lands CCR1/2/3 far above ARR, and in PWM
+    // mode 2 the compare never matches, so the output goes dead and stays dead
+    // until something else rewrites duty. apply_voltage() can get here over
+    // range whenever the commanded voltage outruns measured_vbus_voltage, so
+    // clamp rather than trusting the caller.
+    if (duty_cycle > MAX_DUTYCYCLE_COMMAND) {
+        duty_cycle = MAX_DUTYCYCLE_COMMAND;
+    }
+
     current_duty_cycle = ARR_VALUE - MAP_MAX_DUTY_TO_ARR_DUTY(duty_cycle);
     // current_duty_cycle = MAP_MAX_DUTY_TO_ARR_DUTY(duty_cycle);
 
