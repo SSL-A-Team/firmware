@@ -1,12 +1,10 @@
 use crate::motion::params::controller_params::{
-    EncLagMode, PoseAccelMode, PoseVelMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON,
-    ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE, TRACKING_DIVERGENCE_RECOVERY_REST_TICKS,
-    TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL, VISION_GATE_BASE_RADIUS_M,
-    VISION_GATE_EXPAND_RATE_M_PER_S, VISION_SEED_POS_STD_THRESH_M, VISION_SEED_SAMPLES,
+    EKF_BUFFER_LEN, EKF_CORR_FACTOR, EKF_DELAY_US, EKF_Q, EKF_R, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE, EncLagMode, POSE_ACCEL_MODE, POSE_VEL_MODE, PoseAccelMode, PoseVelMode, TRACKING_DIVERGENCE_RECOVERY_REST_TICKS, TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL, VISION_GATE_BASE_RADIUS_M, VISION_GATE_EXPAND_RATE_M_PER_S, VISION_SEED_POS_STD_THRESH_M, VISION_SEED_SAMPLES,
 };
 use crate::motion::pid::PidController;
 use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
 use ateam_common_packets::radio::ManeuverCommand;
+use ateam_controls::state_estimation::{BufferedEKF}
 use ateam_controls::bangbang_trajectory::BangBangTraj3D;
 use ateam_controls::linear_trajectory::LinearTrajectory;
 use ateam_controls::pivot_trajectory::PivotTrajectory;
@@ -160,6 +158,7 @@ enum GateAction {
 /// tracking helpers.
 pub struct ControlContext {
     pub robot_model: RobotModel,
+    pub ekf: BufferedEKF<EKF_BUFFER_LEN>,
     pub pose_pid_controller: PidController<3>,
     /// Accel (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
     pub pose_accel_gain: Vector2f,
@@ -218,6 +217,13 @@ impl ControlContext {
                 RobotPhysicalParams::default(),
             )
             .expect("Failed to create RobotModel, check that parameters are valid"),
+            ekf: BufferedEKF::new(
+                (dt * 1e6) as u32, 
+                EKF_DELAY_US,
+                EKF_R,
+                EKF_Q,
+                EKF_CORR_FACTOR,
+            ),
             pose_pid_controller: PidController::<3>::from_gains_matrix_with_anti_jitter(
                 &controller_params::pose_pid_gains(),
                 Some(controller_params::POSE_PID_ANTI_JITTER_THRESH),
@@ -275,10 +281,12 @@ impl ControlContext {
         vision_update: bool,
         wheel_vel_meas: Vector4f,
         imu_gyro_theta_meas: f32,
+        imu_accel_x_meas: f32,
+        imu_accel_y_meas: f32,
     ) -> Result<Vector6f, ControlsError> {
         // Capture the KF's current predicted position before any snap so the gate
         // compares against dead-reckoned state, not a freshly-overwritten value.
-        let predicted_state = self.robot_model.get_state();
+        let predicted_state = self.ekf.get_state();
 
         // [1] Outlier gate: classify this vision tick.
         //

@@ -94,6 +94,8 @@ impl BodyController {
             vision_update,
             wheel_vel_meas,
             imu_gyro_theta_meas,
+            imu_accel_x_meas,
+            imu_accel_y_meas,
         )?;
 
         let t_after_kf_update = Instant::now();

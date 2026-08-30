@@ -1,8 +1,35 @@
 use ateam_controls::{Vector2f, Vector3f, Vector4f, Vector5f};
+use ateam_controls::state_estimation::{STATE_LEN, MEAS_LEN, INPUT_LEN}
 use embassy_time::Duration;
-use nalgebra::Matrix3x5;
+use nalgebra::{Matrix3x5, SMatrix};
 
 // PID gains per row: [Kp, Ki, Kd, Ki_err_min, Ki_err_max]
+
+//////////////////////////////
+//  state estimation params //
+//////////////////////////////
+
+pub const EKF_BUFFER_LEN: usize = 64;
+pub const EKF_DELAY_US: u32 = 35000;
+const VISION_VAR_M: f32 = 0.003*0.003;
+const VISION_VAR_RAD: f32 = 0.1*0.1;
+const PROC_VAR_M: f32 = 0.001*0.001;  // m
+const PROC_VAR_RAD: f32 = 0.01*0.01;  // rad
+const PROC_VAR_MPS: f32 = 0.01*0.01;  // m/s
+const PROC_VAR_RADPS: f32 = 0.1*0.1;  // rad/s
+pub const EKF_R: SMatrix<f32, MEAS_LEN, MEAS_LEN> = SMatrix::<f32, MEAS_LEN, MEAS_LEN>::new(
+    VISION_VAR_M, 0.,           0.,
+    0.,           VISION_VAR_M, 0.,
+    0.,           0.,           VISION_VAR_RAD,
+);
+pub const EKF_Q: SMatrix<f32, STATE_LEN, STATE_LEN> = SMatrix::<f32, STATE_LEN, STATE_LEN>::new(
+    PROC_VAR_M,   0.,         0.,           0.,           0.,
+    0.,           PROC_VAR_M, 0.,           0.,           0.,
+    0.,           0.,         PROC_VAR_RAD, 0.,           0.,
+    0.,           0.,         0.,           PROC_VAR_MPS, 0.,
+    0.,           0.,         0.,           0.,           PROC_VAR_MPS,
+);
+pub const EKF_CORR_FACTOR: f32 = 1.0;
 
 //////////////////////////////
 //  current feedback gains  //
