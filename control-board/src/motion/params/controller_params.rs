@@ -1,5 +1,5 @@
 use ateam_controls::{Vector2f, Vector3f, Vector4f, Vector5f};
-use ateam_controls::state_estimation::{STATE_LEN, MEAS_LEN, INPUT_LEN}
+use ateam_controls::state_estimation::{STATE_LEN, MEAS_LEN};
 use embassy_time::Duration;
 use nalgebra::{Matrix3x5, SMatrix};
 
@@ -11,6 +11,7 @@ use nalgebra::{Matrix3x5, SMatrix};
 
 pub const EKF_BUFFER_LEN: usize = 64;
 pub const EKF_DELAY_US: u32 = 35000;
+pub const VISION_DELAY_US: u32 = 35000;
 const VISION_VAR_M: f32 = 0.003*0.003;
 const VISION_VAR_RAD: f32 = 0.1*0.1;
 const PROC_VAR_M: f32 = 0.001*0.001;  // m

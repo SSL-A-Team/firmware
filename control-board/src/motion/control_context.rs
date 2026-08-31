@@ -1,10 +1,10 @@
 use crate::motion::params::controller_params::{
-    EKF_BUFFER_LEN, EKF_CORR_FACTOR, EKF_DELAY_US, EKF_Q, EKF_R, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE, EncLagMode, POSE_ACCEL_MODE, POSE_VEL_MODE, PoseAccelMode, PoseVelMode, TRACKING_DIVERGENCE_RECOVERY_REST_TICKS, TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL, VISION_GATE_BASE_RADIUS_M, VISION_GATE_EXPAND_RATE_M_PER_S, VISION_SEED_POS_STD_THRESH_M, VISION_SEED_SAMPLES,
+    EKF_BUFFER_LEN, EKF_CORR_FACTOR, EKF_DELAY_US, EKF_Q, EKF_R, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE, EncLagMode, POSE_ACCEL_MODE, POSE_VEL_MODE, PoseAccelMode, PoseVelMode, TRACKING_DIVERGENCE_RECOVERY_REST_TICKS, TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL, VISION_DELAY_US, VISION_GATE_BASE_RADIUS_M, VISION_GATE_EXPAND_RATE_M_PER_S, VISION_SEED_POS_STD_THRESH_M, VISION_SEED_SAMPLES,
 };
 use crate::motion::pid::PidController;
 use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
 use ateam_common_packets::radio::ManeuverCommand;
-use ateam_controls::state_estimation::{BufferedEKF}
+use ateam_controls::state_estimation::{BufferedEKF, INPUT_LEN, MEAS_LEN};
 use ateam_controls::bangbang_trajectory::BangBangTraj3D;
 use ateam_controls::linear_trajectory::LinearTrajectory;
 use ateam_controls::pivot_trajectory::PivotTrajectory;
@@ -158,7 +158,9 @@ enum GateAction {
 /// tracking helpers.
 pub struct ControlContext {
     pub robot_model: RobotModel,
+    //////////////// EKF ///////////////////
     pub ekf: BufferedEKF<EKF_BUFFER_LEN>,
+    //////////////// EKF ///////////////////
     pub pose_pid_controller: PidController<3>,
     /// Accel (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
     pub pose_accel_gain: Vector2f,
@@ -217,13 +219,17 @@ impl ControlContext {
                 RobotPhysicalParams::default(),
             )
             .expect("Failed to create RobotModel, check that parameters are valid"),
-            ekf: BufferedEKF::new(
+            //////////////// EKF ///////////////////
+            ekf: BufferedEKF::<EKF_BUFFER_LEN>::new(
                 (dt * 1e6) as u32, 
                 EKF_DELAY_US,
                 EKF_R,
                 EKF_Q,
                 EKF_CORR_FACTOR,
+                SVector::<f32, 3>::zeros(),
+                SVector::<f32, 3>::zeros(),
             ),
+            //////////////// EKF ///////////////////
             pose_pid_controller: PidController::<3>::from_gains_matrix_with_anti_jitter(
                 &controller_params::pose_pid_gains(),
                 Some(controller_params::POSE_PID_ANTI_JITTER_THRESH),
@@ -251,6 +257,7 @@ impl ControlContext {
     }
 
     pub fn reset(&mut self) {
+        self.ekf.init(SVector::<f32, 3>::zeros(), SVector::<f32, 3>::zeros());
         self.robot_model.reset();
         self.pose_pid_controller.reset();
         self.trajectory = None;
@@ -286,7 +293,7 @@ impl ControlContext {
     ) -> Result<Vector6f, ControlsError> {
         // Capture the KF's current predicted position before any snap so the gate
         // compares against dead-reckoned state, not a freshly-overwritten value.
-        let predicted_state = self.ekf.get_state();
+        let predicted_state = self.ekf.get_pos();
 
         // [1] Outlier gate: classify this vision tick.
         //
@@ -389,6 +396,11 @@ impl ControlContext {
                     self.robot_model.transform_wheel2twist(vision_pose_meas.z) * wheel_vel_meas;
                 vel_seed[2] = imu_gyro_theta_meas;
                 self.robot_model.kf_set_vel(vel_seed);
+
+                //////////////// EKF ///////////////////
+                self.ekf.init(vision_pose_meas, vel_seed);
+                //////////////// EKF ///////////////////
+
                 self.trajectory = None;
                 self.prev_cmd = None;
                 self.pose_pid_controller.reset();
@@ -430,41 +442,63 @@ impl ControlContext {
         }
 
         // Capture post-snap / pre-KF-update state for telemetry.
-        let state_prediction = self.robot_model.get_state();
+        //////////////// EKF ///////////////////
+        let mut state_prediction = SVector::<f32, 6>::zeros();
+        state_prediction.fixed_rows_mut::<3>(0).copy_from(&self.ekf.get_ekf_pos());
+        state_prediction.fixed_rows_mut::<3>(3).copy_from(&self.ekf.get_ekf_vel());
+        //////////////// EKF ///////////////////
 
-        let measurement: Vector8f = if matches!(
-            ENC_LAG_MODE,
-            EncLagMode::KfCorrectionOnly | EncLagMode::Full
-        ) {
-            let lag_state = self.enc_lag.state();
-            let lag_body = Vector3f::new(lag_state.x, lag_state.y, imu_gyro_theta_meas);
-            let lag_wheel = self.robot_model.transform_twist2wheel(state_prediction[2]) * lag_body;
-            nalgebra::vector![
-                vision_pose_meas.x,
-                vision_pose_meas.y,
-                vision_pose_meas.z,
-                lag_wheel.x,
-                lag_wheel.y,
-                lag_wheel.z,
-                lag_wheel.w,
-                imu_gyro_theta_meas,
-            ]
+        // let measurement: Vector8f = if matches!(
+        //     ENC_LAG_MODE,
+        //     EncLagMode::KfCorrectionOnly | EncLagMode::Full
+        // ) {
+        //     let lag_state = self.enc_lag.state();
+        //     let lag_body = Vector3f::new(lag_state.x, lag_state.y, imu_gyro_theta_meas);
+        //     let lag_wheel = self.robot_model.transform_twist2wheel(state_prediction[2]) * lag_body;
+        //     nalgebra::vector![
+        //         vision_pose_meas.x,
+        //         vision_pose_meas.y,
+        //         vision_pose_meas.z,
+        //         lag_wheel.x,
+        //         lag_wheel.y,
+        //         lag_wheel.z,
+        //         lag_wheel.w,
+        //         imu_gyro_theta_meas,
+        //     ]
+        // } else {
+        //     nalgebra::vector![
+        //         vision_pose_meas.x,
+        //         vision_pose_meas.y,
+        //         vision_pose_meas.z,
+        //         wheel_vel_meas.x,
+        //         wheel_vel_meas.y,
+        //         wheel_vel_meas.z,
+        //         wheel_vel_meas.w,
+        //         imu_gyro_theta_meas,
+        //     ]
+        // };
+
+        // self.robot_model
+        //     .kf_update(measurement, !effective_vision_update, false, false)?;
+        // self.state_estimate = self.robot_model.get_state();
+
+        //////////////// EKF ///////////////////
+        let u = SVector::<f32, INPUT_LEN>::new(imu_accel_x_meas, imu_accel_y_meas, imu_gyro_theta_meas);
+        let z = if effective_vision_update {
+            Some(vision_pose_meas)
         } else {
-            nalgebra::vector![
-                vision_pose_meas.x,
-                vision_pose_meas.y,
-                vision_pose_meas.z,
-                wheel_vel_meas.x,
-                wheel_vel_meas.y,
-                wheel_vel_meas.z,
-                wheel_vel_meas.w,
-                imu_gyro_theta_meas,
-            ]
+            None
         };
-
-        self.robot_model
-            .kf_update(measurement, !effective_vision_update, false, false)?;
-        self.state_estimate = self.robot_model.get_state();
+        self.ekf.tick(
+            u,
+            z,
+            VISION_DELAY_US,
+        ).map_err(|_| ControlsError::SingularMatrix)?;
+        let mut state_est = SVector::<f32, 6>::zeros();
+        state_est.fixed_rows_mut::<3>(0).copy_from(&self.ekf.get_pos());
+        state_est.fixed_rows_mut::<3>(3).copy_from(&self.ekf.get_vel());
+        self.state_estimate = state_est;
+        //////////////// EKF ///////////////////
 
         Ok(state_prediction)
     }
