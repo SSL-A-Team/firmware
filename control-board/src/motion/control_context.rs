@@ -398,7 +398,7 @@ impl ControlContext {
                 self.robot_model.kf_set_vel(vel_seed);
 
                 //////////////// EKF ///////////////////
-                self.ekf.init(vision_pose_meas, vel_seed);
+                self.ekf.init(vision_pose_meas, SVector::<f32, 3>::zeros());
                 //////////////// EKF ///////////////////
 
                 self.trajectory = None;
