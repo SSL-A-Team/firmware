@@ -31,6 +31,13 @@ const ACCEL_FILTER_SAMPLE_RATE_HZ: f32 = IMU_ODR.to_hz();
 /// reject motor/wheel vibration before the data is consumed by the state estimator.
 const ACCEL_FILTER_CUTOFF_HZ: f32 = 40.0;
 
+/// Number of stationary samples averaged at startup to estimate the gyro (X/Y/Z) and
+/// accel (X/Y) bias. ~5.0 s at the IMU ODR (1600 Hz).
+const IMU_CALIBRATION_SAMPLES: u32 = 5*1600;
+/// Accel Z below this magnitude (m/s^2) is treated as tipped / not upright. The robot must
+/// be upright and stationary for the boot-time bias calibration to accumulate.
+const ACCEL_TIPPED_Z_MPS2: f32 = 4.0;
+
 #[macro_export]
 macro_rules! create_imu_task {
     ($main_spawner:ident, $robot_state:ident, $imu_gyro_data_publisher:ident, $imu_accel_data_publisher:ident, $imu_led_cmd_pub:ident, $imu_telemetry_publisher:ident, $p:ident) => {
@@ -233,6 +240,18 @@ async fn imu_task_entry(
         accel_x_filter.reset();
         accel_y_filter.reset();
 
+        // On-boot IMU bias calibration state. Recomputed on every (re)configuration so a
+        // reconfigure (e.g. after an interrupt timeout) re-estimates the bias. While
+        // uncalibrated, the first IMU_CALIBRATION_SAMPLES stationary/upright samples are
+        // averaged to estimate the gyro (X/Y/Z) and accel (X/Y) bias; the offsets are then
+        // subtracted from every published sample.
+        let mut calibrated = false;
+        let mut calib_count: u32 = 0;
+        let mut gyro_sum = Vector3::<f32>::zeros();
+        let mut accel_sum = Vector3::<f32>::zeros();
+        let mut gyro_offset = Vector3::<f32>::zeros();
+        let mut accel_offset = Vector3::<f32>::zeros();
+
         'imu_data_loop: loop {
             // block on gyro interrupt, active low
             match select(gyro_int.wait_for_falling_edge(), Timer::after_millis(1000)).await {
@@ -240,24 +259,72 @@ async fn imu_task_entry(
                     // Got an interrupt, so IMU should be working.
                     robot_state.set_imu_inop(false);
 
-                    // read gyro data
+                    // read raw gyro and accel data
                     let imu_data = imu.gyro_get_data_rads().await;
-                    gyro_pub.publish_immediate(Vector3::new(imu_data[0], imu_data[1], imu_data[2]));
-
-                    // read accel data
                     // TODO: don't use raw data, impl conversion
                     let accel_data = imu.accel_get_data_mps().await;
 
-                    // Low-pass filter the X and Y accelerations to reject motor/wheel
-                    // vibration. Z is published raw for responsive tipped detection below.
-                    accel_x_filter.add_sample(accel_data[0] as f32);
-                    accel_y_filter.add_sample(accel_data[1] as f32);
-                    let accel_x_filtered = accel_x_filter
-                        .filtered_value()
-                        .unwrap_or(accel_data[0] as f32);
-                    let accel_y_filtered = accel_y_filter
-                        .filtered_value()
-                        .unwrap_or(accel_data[1] as f32);
+                    // On-boot bias estimation. While uncalibrated, average the first
+                    // IMU_CALIBRATION_SAMPLES readings taken while upright and stationary to
+                    // estimate the gyro (X/Y/Z) and accel (X/Y) bias, then subtract it from
+                    // every subsequent sample. Accel Z is left uncorrected so it keeps
+                    // measuring gravity for the tipped detection below. Samples are not
+                    // published until calibration completes.
+                    if !calibrated {
+                        if (accel_data[2] as f32) < ACCEL_TIPPED_Z_MPS2 {
+                            // Not upright (possibly tipped/moving); restart the average.
+                            calib_count = 0;
+                            gyro_sum = Vector3::zeros();
+                            accel_sum = Vector3::zeros();
+                        } else {
+                            gyro_sum += Vector3::new(imu_data[0], imu_data[1], imu_data[2]);
+                            accel_sum += Vector3::new(
+                                accel_data[0] as f32,
+                                accel_data[1] as f32,
+                                accel_data[2] as f32,
+                            );
+                            calib_count += 1;
+                            if calib_count >= IMU_CALIBRATION_SAMPLES {
+                                let n = calib_count as f32;
+                                gyro_offset = gyro_sum / n;
+                                // Correct accel X/Y only; leave Z (gravity/tipped detection).
+                                accel_offset =
+                                    Vector3::new(accel_sum[0] / n, accel_sum[1] / n, 0.0);
+                                calibrated = true;
+                                // Drop the transient accumulated during calibration.
+                                accel_x_filter.reset();
+                                accel_y_filter.reset();
+                                defmt::info!(
+                                    "IMU bias calibrated over {} samples: gyro=[{}, {}, {}] rad/s, accel_xy=[{}, {}] m/s^2",
+                                    calib_count,
+                                    gyro_offset[0],
+                                    gyro_offset[1],
+                                    gyro_offset[2],
+                                    accel_offset[0],
+                                    accel_offset[1],
+                                );
+                            }
+                        }
+                        // Don't publish partial/uncalibrated data.
+                        continue;
+                    }
+
+                    // Publish bias-corrected gyro.
+                    gyro_pub.publish_immediate(Vector3::new(
+                        imu_data[0] - gyro_offset[0],
+                        imu_data[1] - gyro_offset[1],
+                        imu_data[2] - gyro_offset[2],
+                    ));
+
+                    // Bias-correct accel X/Y, then low-pass filter to reject motor/wheel
+                    // vibration. Z is published raw (uncorrected) for responsive tipped
+                    // detection below.
+                    let accel_x_unbiased = accel_data[0] as f32 - accel_offset[0];
+                    let accel_y_unbiased = accel_data[1] as f32 - accel_offset[1];
+                    accel_x_filter.add_sample(accel_x_unbiased);
+                    accel_y_filter.add_sample(accel_y_unbiased);
+                    let accel_x_filtered = accel_x_filter.filtered_value().unwrap_or(accel_x_unbiased);
+                    let accel_y_filtered = accel_y_filter.filtered_value().unwrap_or(accel_y_unbiased);
 
                     accel_pub.publish_immediate(Vector3::new(
                         accel_x_filtered,
@@ -266,7 +333,7 @@ async fn imu_task_entry(
                     ));
 
                     // TODO: magic number, fix after raw data conversion
-                    if accel_data[2] < 4.0 {
+                    if (accel_data[2] as f32) < ACCEL_TIPPED_Z_MPS2 {
                         if !first_tipped_seen {
                             // If it's the first time a tipping occured, start tracking.
                             first_tipped_seen = true;

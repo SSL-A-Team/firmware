@@ -395,17 +395,12 @@ impl<
                     let _ = self.process_packets().await;
                     // if we're stably connected, process packets at 100Hz
 
-                    // If timeout have elapsed since we last got a packet,
-                    // reboot the robot (unless we had a shutdown request).
-                    let cur_time = Instant::now();
-                    if !cur_robot_state.shutdown_requested
-                        && Instant::duration_since(&cur_time, self.last_software_packet).as_millis()
-                            > Self::RESPONSE_FROM_PC_TIMEOUT_MS
-                    {
-                        defmt::warn!("software timeout - rebooting...");
-                        Timer::after_millis(100).await;
-                        cortex_m::peripheral::SCB::sys_reset();
-                    }
+                    // Previously, if the software packet timeout elapsed we rebooted the
+                    // MCU here. That reset was removed: rebooting mid-motion resets the IMU
+                    // and state estimator (corrupting samples) and is unsafe while moving.
+                    // The control task already fails safe (hard-stops the wheels) when it
+                    // stops receiving control packets, and the robot is recovered manually
+                    // in this case.
                 }
             }
 
