@@ -9,7 +9,8 @@ use embassy_sync::pubsub::PubSubChannel;
 use defmt_rtt as _;
 
 use ateam_control_board::{
-    create_audio_task, create_control_task, create_dotstar_task, create_imu_task, create_io_task,
+    create_audio_task, create_control_task, create_dotstar_task, create_imu_task_cal,
+    create_io_task,
     create_kicker_task, create_power_task, create_radio_task, get_system_config, git_version as gv,
     pins::{
         AccelDataPubSub, CommandsPubSub, GyroDataPubSub, KickerTelemetryPubSub, LedCommandPubSub,
@@ -183,7 +184,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p
     );
 
-    create_imu_task!(
+    create_imu_task_cal!(
         main_spawner,
         robot_state,
         imu_gyro_data_publisher,

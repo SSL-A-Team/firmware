@@ -70,6 +70,9 @@ bind_interrupts!(pub struct SystemIrqs {
     // EXTI channel interrupts required by embassy-stm32 0.6.0's ExtiInput::new()
     EXTI0 => embassy_stm32::exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI0>;
     EXTI1 => embassy_stm32::exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI1>;
+    // EXTI lines 10-15 share one IRQ; needed for the back user button (PE10) used as
+    // the IMU calibration trigger.
+    EXTI15_10 => embassy_stm32::exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI15_10>;
 
     BDMA_CHANNEL0 => embassy_stm32::dma::InterruptHandler<peripherals::BDMA_CH0>;
 });

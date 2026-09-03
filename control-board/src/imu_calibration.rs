@@ -111,15 +111,33 @@ pub fn store_calibration(
     cal: &ImuCalibration,
 ) -> Result<(), ()> {
     let buf = cal.serialize();
-    if flash
-        .blocking_erase(CAL_FLASH_OFFSET, CAL_FLASH_OFFSET + CAL_SECTOR_LEN)
-        .is_err()
-    {
-        defmt::error!("IMU calibration flash erase failed");
+    // Run the erase + program with interrupts disabled. This flash is single-bank, so
+    // while a sector is being erased/programmed any concurrent access to the bank
+    // (e.g. an interrupt handler's instruction fetch) can abort the operation
+    // (FLASH_SR.OPERR). Masking interrupts for the few-ms operation avoids that; the
+    // IMU is inop (wheels locked out) during calibration so the brief stall is safe.
+    let res = critical_section::with(|_| {
+        flash.blocking_erase(CAL_FLASH_OFFSET, CAL_FLASH_OFFSET + CAL_SECTOR_LEN)?;
+        flash.blocking_write(CAL_FLASH_OFFSET, &buf)
+    });
+    if let Err(e) = res {
+        defmt::error!("IMU calibration flash store failed: {}", e);
         return Err(());
     }
-    if flash.blocking_write(CAL_FLASH_OFFSET, &buf).is_err() {
-        defmt::error!("IMU calibration flash write failed");
+    Ok(())
+}
+
+/// Erases the calibration sector, deleting any stored IMU calibration. After this
+/// the blob reads as blank (magic mismatch), so [`load_calibration`] returns `None`
+/// and the IMU is treated as uncalibrated.
+pub fn erase_calibration(flash: &mut Flash<'static, Blocking>) -> Result<(), ()> {
+    // See `store_calibration`: mask interrupts so a concurrent flash access cannot
+    // abort the erase on this single-bank device.
+    let res = critical_section::with(|_| {
+        flash.blocking_erase(CAL_FLASH_OFFSET, CAL_FLASH_OFFSET + CAL_SECTOR_LEN)
+    });
+    if let Err(e) = res {
+        defmt::error!("IMU calibration flash erase failed: {}", e);
         return Err(());
     }
     Ok(())

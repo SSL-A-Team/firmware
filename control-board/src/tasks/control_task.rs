@@ -886,6 +886,7 @@ impl<
         // self.last_power_telemetry.high_current_operations_allowed() == 0
         self.shared_robot_state.shutdown_requested()
             || self.shared_robot_state.get_controls_err()
+            || self.shared_robot_state.get_imu_inop()
             || self.last_command.reset_controller() != 0
     }
 }

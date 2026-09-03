@@ -10,7 +10,7 @@ use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 use defmt_rtt as _;
 
 use ateam_control_board::{
-    create_dotstar_task, create_imu_task, create_io_task, get_system_config,
+    create_dotstar_task, create_imu_task_cal, create_io_task, get_system_config,
     pins::{AccelDataPubSub, GyroDataPubSub, LedCommandPubSub, TelemetryPubSub},
     robot_state::SharedRobotState,
 };
@@ -73,7 +73,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     // create_audio_task!(main_spawner, robot_state, p);
 
-    create_imu_task!(
+    create_imu_task_cal!(
         main_spawner,
         robot_state,
         imu_gyro_data_publisher,
@@ -85,12 +85,16 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     defmt::info!("=====================================================");
     defmt::info!("IMU hardware test / on-chip calibration validation");
-    defmt::info!("Keep the robot UPRIGHT and STATIONARY on a level");
-    defmt::info!("surface. The IMU task calibrates on-chip (gyro");
-    defmt::info!("self-cal + accel X/Y offset) and persists to flash;");
-    defmt::info!("watch the earlier log for 'restored from flash' vs");
-    defmt::info!("'calibrated on-chip and stored'. This loop then");
-    defmt::info!("verifies the published data is bias-corrected.");
+    defmt::info!("On boot the IMU loads its calibration from flash. If");
+    defmt::info!("none is stored, the IMU stays INOP (no auto-cal).");
+    defmt::info!("Press the BACK button to (re)calibrate: the IMU goes");
+    defmt::info!("inop, the IMU LED turns MAGENTA, and after a 1s wait");
+    defmt::info!("the gyro self-cal + accel offset run and overwrite");
+    defmt::info!("flash. HOLD the BACK button ~3s to DELETE the stored");
+    defmt::info!("calibration (IMU returns to inop). Keep the robot");
+    defmt::info!("UPRIGHT and STATIONARY on a level surface during");
+    defmt::info!("calibration. This loop verifies the published data");
+    defmt::info!("is bias-corrected once calibrated.");
     defmt::info!("=====================================================");
 
     validate_imu(
