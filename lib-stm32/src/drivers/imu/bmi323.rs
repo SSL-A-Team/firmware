@@ -274,10 +274,63 @@ const READ_BIT: u8 = 0x80;
 const CMD_SOFT_RESET: u16 = 0xDEAF;
 const CMD_AXIS_MAP_UPDATE: u16 = 0x0300;
 
+/// CMD register (0x7E) code that triggers the built-in gyro self-calibration
+/// (BMI3 API `BMI3_CMD_SELF_CALIB_TRIGGER`).
+const CMD_SELF_CALIB_TRIGGER: u16 = 0x0101;
+
 /// Feature engine enable magic written to FEATURE_IO2 (datasheet section 5.4).
 const FEATURE_ENGINE_ENABLE_MAGIC: u16 = 0x012C;
 /// Extended register address of AXIS_MAP_1 (datasheet section 6.2.1).
 const EXT_ADDR_AXIS_MAP_1: u16 = 0x03;
+/// Extended (feature-engine DMA) base address of the gyro self-calibration select
+/// word (BMI3 API `BMI3_BASE_ADDR_GYRO_SC_SELECT`).
+const EXT_ADDR_GYRO_SC_SELECT: u16 = 0x0026;
+
+/// Gyro self-calibration select flags (low byte of the SC select word).
+const SC_SELECT_SENSITIVITY: u16 = 0x0001;
+const SC_SELECT_OFFSET: u16 = 0x0002;
+/// When set, the sensor applies the computed correction to the data-path registers.
+const SC_APPLY_CORRECTION: u16 = 0x0004;
+
+/// FEATURE_IO1 gyro self-calibration status bits.
+const SC_ST_COMPLETE_MASK: u16 = 0x0010;
+const GYRO_SC_RESULT_MASK: u16 = 0x0020;
+
+/// Data-path (DP) offset/gain register field masks (datasheet register map).
+const GYR_DP_OFF_MASK: u16 = 0x03FF; // 10-bit signed offset
+const GYR_DP_DGAIN_MASK: u16 = 0x007F; // 7-bit gain
+const ACC_DP_OFF_MASK: u16 = 0x3FFF; // 14-bit signed offset
+
+/// On-chip data-path offset and gain for the gyroscope. Populated by the built-in
+/// self-calibration and applied automatically by the sensor. Offsets are the signed
+/// values held in the (10-bit) register field; gains are the raw 7-bit register
+/// values. These registers are volatile (lost on power-cycle/soft reset).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GyroDpOffsetGain {
+    pub off_x: i16,
+    pub off_y: i16,
+    pub off_z: i16,
+    pub dgain_x: u8,
+    pub dgain_y: u8,
+    pub dgain_z: u8,
+}
+
+/// On-chip data-path offset for the accelerometer (signed 14-bit register field per
+/// axis). Subtracted from the data path by the sensor. Volatile (lost on
+/// power-cycle/soft reset). There is no built-in accel self-calibration on the
+/// BMI323, so these are computed in firmware.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AccelDpOffset {
+    pub off_x: i16,
+    pub off_y: i16,
+    pub off_z: i16,
+}
+
+/// Sign-extends the low `bits` of `val` into an `i16`.
+const fn sign_extend(val: u16, bits: u32) -> i16 {
+    let shift = 16 - bits;
+    ((val << shift) as i16) >> shift
+}
 
 impl<'a, 'buf> Bmi323<'a, 'buf> {
     /// creates a new BMI323 instance from a pre-existing Spi peripheral
@@ -850,5 +903,241 @@ impl<'a, 'buf> Bmi323<'a, 'buf> {
 
         self.write(ImuRegisters::IO_INT_CTRL, io_int_ctrl_reg_val)
             .await;
+    }
+
+    /// Reads the on-chip gyro data-path offset/gain registers (0x66-0x6B).
+    pub async fn read_gyro_dp_offset_gain(&mut self) -> GyroDpOffsetGain {
+        let off_x = self.read(ImuRegisters::GYR_DP_OFF_X).await & GYR_DP_OFF_MASK;
+        let dgain_x = self.read(ImuRegisters::GYR_DP_DGAIN_X).await & GYR_DP_DGAIN_MASK;
+        let off_y = self.read(ImuRegisters::GYR_DP_OFF_Y).await & GYR_DP_OFF_MASK;
+        let dgain_y = self.read(ImuRegisters::GYR_DP_DGAIN_Y).await & GYR_DP_DGAIN_MASK;
+        let off_z = self.read(ImuRegisters::GYR_DP_OFF_Z).await & GYR_DP_OFF_MASK;
+        let dgain_z = self.read(ImuRegisters::GYR_DP_DGAIN_Z).await & GYR_DP_DGAIN_MASK;
+
+        GyroDpOffsetGain {
+            off_x: sign_extend(off_x, 10),
+            off_y: sign_extend(off_y, 10),
+            off_z: sign_extend(off_z, 10),
+            dgain_x: dgain_x as u8,
+            dgain_y: dgain_y as u8,
+            dgain_z: dgain_z as u8,
+        }
+    }
+
+    /// Writes the on-chip gyro data-path offset/gain registers. Used to restore a
+    /// previously stored self-calibration result after a power-cycle/soft reset.
+    pub async fn write_gyro_dp_offset_gain(&mut self, v: &GyroDpOffsetGain) {
+        self.write(ImuRegisters::GYR_DP_OFF_X, (v.off_x as u16) & GYR_DP_OFF_MASK)
+            .await;
+        self.write(
+            ImuRegisters::GYR_DP_DGAIN_X,
+            (v.dgain_x as u16) & GYR_DP_DGAIN_MASK,
+        )
+        .await;
+        self.write(ImuRegisters::GYR_DP_OFF_Y, (v.off_y as u16) & GYR_DP_OFF_MASK)
+            .await;
+        self.write(
+            ImuRegisters::GYR_DP_DGAIN_Y,
+            (v.dgain_y as u16) & GYR_DP_DGAIN_MASK,
+        )
+        .await;
+        self.write(ImuRegisters::GYR_DP_OFF_Z, (v.off_z as u16) & GYR_DP_OFF_MASK)
+            .await;
+        self.write(
+            ImuRegisters::GYR_DP_DGAIN_Z,
+            (v.dgain_z as u16) & GYR_DP_DGAIN_MASK,
+        )
+        .await;
+    }
+
+    /// Reads the on-chip accelerometer data-path offset registers (X/Y/Z).
+    pub async fn read_accel_dp_offset(&mut self) -> AccelDpOffset {
+        let off_x = self.read(ImuRegisters::ACC_DP_OFF_X).await & ACC_DP_OFF_MASK;
+        let off_y = self.read(ImuRegisters::ACC_DP_OFF_Y).await & ACC_DP_OFF_MASK;
+        let off_z = self.read(ImuRegisters::ACC_DP_OFF_Z).await & ACC_DP_OFF_MASK;
+
+        AccelDpOffset {
+            off_x: sign_extend(off_x, 14),
+            off_y: sign_extend(off_y, 14),
+            off_z: sign_extend(off_z, 14),
+        }
+    }
+
+    /// Writes the on-chip accelerometer data-path offset registers (X/Y/Z). The
+    /// sensor subtracts these from the data path.
+    pub async fn write_accel_dp_offset(&mut self, off: &AccelDpOffset) {
+        self.write(ImuRegisters::ACC_DP_OFF_X, (off.off_x as u16) & ACC_DP_OFF_MASK)
+            .await;
+        self.write(ImuRegisters::ACC_DP_OFF_Y, (off.off_y as u16) & ACC_DP_OFF_MASK)
+            .await;
+        self.write(ImuRegisters::ACC_DP_OFF_Z, (off.off_z as u16) & ACC_DP_OFF_MASK)
+            .await;
+    }
+
+    /// The accel DP offset register resolution (in bits of left-shift relative to a
+    /// raw 16-bit sample) for the configured range. Matches the BMI3 sensor API's
+    /// `scale_accel_offset` bit positions.
+    fn accel_dp_offset_bit_pos(&self) -> u32 {
+        match self.accel_range {
+            AccelRange::Range2g => 1,
+            AccelRange::Range4g => 2,
+            AccelRange::Range8g => 3,
+            AccelRange::Range16g => 4,
+        }
+    }
+
+    /// Converts a measured accelerometer bias, expressed in raw 16-bit sample
+    /// counts, into the signed value to program into the corresponding
+    /// `ACC_DP_OFF` register so the sensor removes that bias on-chip. Accounts for
+    /// the configured range and inverts the sign (the register is subtracted from
+    /// the data path). Saturates to the signed 14-bit register range.
+    pub fn accel_bias_counts_to_dp_offset(&self, bias_counts: i16) -> i16 {
+        let scale = 1i32 << self.accel_dp_offset_bit_pos();
+        let v = -(bias_counts as i32) * scale;
+        v.clamp(-(1 << 13), (1 << 13) - 1) as i16
+    }
+
+    /// Runs the BMI323 built-in gyroscope self-calibration (datasheet section 5.5).
+    ///
+    /// The accelerometer and gyroscope must already be enabled and the feature engine
+    /// active, and the device must be held stationary for the duration (up to
+    /// ~430 ms). The self-calibration routine requires a specific sensor configuration
+    /// (gyro normal mode / 100 Hz, accel high-performance / 100 Hz / 8 g) and rejects
+    /// other ODR/mode combinations with a precondition error; this method temporarily
+    /// applies that configuration and restores the caller's operational gyro/accel
+    /// configuration before returning. On success the computed offset (and, if
+    /// selected, sensitivity) correction is written by the sensor into the gyro
+    /// data-path registers and applied automatically; the applied values are read
+    /// back and returned.
+    pub async fn perform_gyro_self_calibration(
+        &mut self,
+        calibrate_offset: bool,
+        calibrate_sensitivity: bool,
+    ) -> Result<GyroDpOffsetGain, ()> {
+        // Build the self-calibration selection word. The apply-correction flag makes
+        // the sensor program the resulting correction into the DP registers. The high
+        // byte of the SC select word is reserved/zero after reset, so we write the
+        // selection directly (BMI3 API preserves the high byte via a DMA read-modify-
+        // write; here the reset default is sufficient).
+        let mut selection: u16 = 0;
+        if calibrate_offset {
+            selection |= SC_SELECT_OFFSET;
+        }
+        if calibrate_sensitivity {
+            selection |= SC_SELECT_SENSITIVITY;
+        }
+        if selection == 0 {
+            defmt::error!("BMI323 gyro self-calibration requested with nothing selected");
+            return Err(());
+        }
+        selection |= SC_APPLY_CORRECTION;
+
+        // Save the caller's operational gyro/accel configuration so it can be restored
+        // after the self-calibration completes (the SC config below differs).
+        let saved_gyro = (
+            self.gyro_mode,
+            self.gyro_range,
+            self.gyro_bw_mode,
+            self.gyro_odr,
+            self.gyro_avg_window,
+        );
+        let saved_accel = (
+            self.accel_mode,
+            self.accel_range,
+            self.accel_bw_mode,
+            self.accel_odr,
+            self.accel_avg_window,
+        );
+
+        // Apply the self-calibration precondition configuration (mirrors the Bosch
+        // reference driver): gyro normal mode at 100 Hz, accel high-performance at
+        // 100 Hz / 8 g. The gyro range is preserved.
+        let _ = self
+            .set_gyro_config(
+                GyroMode::ContinuousReducedCurrent,
+                saved_gyro.1,
+                Bandwidth3DbCutoffFreq::AccOdrOver2,
+                OutputDataRate::Odr100p0,
+                DataAveragingWindow::NoFiltering,
+            )
+            .await;
+        let _ = self
+            .set_accel_config(
+                AccelMode::ContinuousHighPerformance,
+                AccelRange::Range8g,
+                Bandwidth3DbCutoffFreq::AccOdrOver2,
+                OutputDataRate::Odr100p0,
+                DataAveragingWindow::NoFiltering,
+            )
+            .await;
+        // Let the new ODR settle before triggering the routine.
+        Timer::after_millis(50).await;
+
+        // Run the self-calibration, capturing the outcome so the operational config can
+        // be restored regardless of success/failure before returning.
+        let result = self.run_gyro_self_calibration(selection).await;
+
+        let _ = self
+            .set_gyro_config(
+                saved_gyro.0,
+                saved_gyro.1,
+                saved_gyro.2,
+                saved_gyro.3,
+                saved_gyro.4,
+            )
+            .await;
+        let _ = self
+            .set_accel_config(
+                saved_accel.0,
+                saved_accel.1,
+                saved_accel.2,
+                saved_accel.3,
+                saved_accel.4,
+            )
+            .await;
+
+        result
+    }
+
+    /// Inner helper for [`Self::perform_gyro_self_calibration`]: programs the SC select
+    /// word, triggers the routine, polls for completion, and returns the applied
+    /// data-path values. Assumes the SC precondition configuration is already applied.
+    async fn run_gyro_self_calibration(
+        &mut self,
+        selection: u16,
+    ) -> Result<GyroDpOffsetGain, ()> {
+        self.write_ext_register(EXT_ADDR_GYRO_SC_SELECT, selection & 0x00FF)
+            .await?;
+
+        // Trigger the self-calibration routine.
+        self.write(ImuRegisters::CMD, CMD_SELF_CALIB_TRIGGER).await;
+
+        // Poll FEATURE_IO1 for completion. The routine needs up to ~430 ms
+        // (10 x 43 ms per the BMI3 sensor API); allow extra margin.
+        let mut io1 = 0u16;
+        let mut completed = false;
+        for _ in 0..20 {
+            Timer::after_millis(43).await;
+            io1 = self.read(ImuRegisters::FEATURE_IO1).await;
+            if (io1 & SC_ST_COMPLETE_MASK) != 0 {
+                completed = true;
+                break;
+            }
+        }
+
+        if !completed {
+            defmt::error!("BMI323 gyro self-calibration did not complete");
+            return Err(());
+        }
+        if (io1 & GYRO_SC_RESULT_MASK) == 0 {
+            defmt::error!(
+                "BMI323 gyro self-calibration failed (status 0x{:x})",
+                io1 & 0x000F
+            );
+            return Err(());
+        }
+
+        defmt::info!("BMI323 gyro self-calibration succeeded");
+        Ok(self.read_gyro_dp_offset_gain().await)
     }
 }

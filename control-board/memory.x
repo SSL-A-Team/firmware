@@ -10,7 +10,10 @@ MEMORY
   /* - STM32H730xB                                 128K */
   /* - STM32H723xE/725xE                           512K */
   /* - STM32H723xG/725xG/733xG/735xG                 1M */
-  FLASH1  : ORIGIN = 0x08000000, LENGTH = 1M
+  /* The last 128K sector is reserved for persistent storage (IMU calibration),  */
+  /* so the firmware image is confined to the first 896K (7 x 128K sectors). See */
+  /* src/imu_calibration.rs (CAL_FLASH_OFFSET = 0x000E_0000).                     */
+  FLASH1  : ORIGIN = 0x08000000, LENGTH = 896K
 
   /* Data TCM  */
   /* - Two contiguous 64KB RAMs.                                     */

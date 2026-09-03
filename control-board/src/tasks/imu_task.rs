@@ -1,7 +1,9 @@
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_futures::select::{select, Either};
 use embassy_stm32::exti::ExtiInput;
+use embassy_stm32::flash::{Blocking, Flash};
 use embassy_stm32::gpio::Pull;
+use embassy_stm32::peripherals::FLASH;
 use embassy_stm32::spi::{MisoPin, MosiPin, SckPin};
 
 use embassy_stm32::Peri;
@@ -13,6 +15,7 @@ use ateam_lib_stm32::drivers::imu::bmi323::{self, *};
 use ateam_lib_stm32::filter::{Filter, IirFilter};
 
 use crate::create_error_telemetry_from_string;
+use crate::imu_calibration::{load_calibration, store_calibration, ImuCalibration};
 use crate::pins::*;
 use crate::robot_state::SharedRobotState;
 use crate::tasks::dotstar_task::{ControlBoardLedCommand, ImuStatusLedCommand};
@@ -31,12 +34,20 @@ const ACCEL_FILTER_SAMPLE_RATE_HZ: f32 = IMU_ODR.to_hz();
 /// reject motor/wheel vibration before the data is consumed by the state estimator.
 const ACCEL_FILTER_CUTOFF_HZ: f32 = 40.0;
 
-/// Number of stationary samples averaged at startup to estimate the gyro (X/Y/Z) and
-/// accel (X/Y) bias. ~5.0 s at the IMU ODR (1600 Hz).
-const IMU_CALIBRATION_SAMPLES: u32 = 5*1600;
+/// Number of stationary/upright samples averaged to estimate the accelerometer
+/// (X/Y) bias when running a fresh on-chip calibration. ~2.0 s at the IMU ODR
+/// (1600 Hz). The gyro bias is handled by the sensor's built-in self-calibration,
+/// so only the accel bias is averaged in firmware.
+const ACCEL_CALIBRATION_SAMPLES: u32 = 2 * 1600;
 /// Accel Z below this magnitude (m/s^2) is treated as tipped / not upright. The robot must
 /// be upright and stationary for the boot-time bias calibration to accumulate.
 const ACCEL_TIPPED_Z_MPS2: f32 = 4.0;
+
+/// Developer flag to force a fresh on-chip IMU (re)calibration even when a valid
+/// calibration is already stored in flash. Flip to `true`, build/flash, boot once
+/// while the robot is upright and stationary to overwrite the stored calibration,
+/// then set back to `false`. Left `false` for normal operation.
+const FORCE_IMU_RECALIBRATION: bool = false;
 
 #[macro_export]
 macro_rules! create_imu_task {
@@ -62,6 +73,7 @@ macro_rules! create_imu_task {
             $p.EXTI0,
             $p.EXTI1,
             $p.PB2,
+            $p.FLASH,
         );
     };
 }
@@ -90,6 +102,7 @@ macro_rules! create_imu_task_ie {
             $p.EXTI0,
             $p.EXTI1,
             $p.PB2,
+            $p.FLASH,
         );
     };
 }
@@ -107,6 +120,7 @@ async fn imu_task_entry(
     mut imu: Bmi323<'static, 'static>,
     mut _accel_int: ExtiInput<'static, embassy_stm32::mode::Async>,
     mut gyro_int: ExtiInput<'static, embassy_stm32::mode::Async>,
+    mut flash: Flash<'static, Blocking>,
 ) {
     defmt::info!("imu start startup.");
     let mut first_tipped_check_time = Instant::now();
@@ -240,17 +254,19 @@ async fn imu_task_entry(
         accel_x_filter.reset();
         accel_y_filter.reset();
 
-        // On-boot IMU bias calibration state. Recomputed on every (re)configuration so a
-        // reconfigure (e.g. after an interrupt timeout) re-estimates the bias. While
-        // uncalibrated, the first IMU_CALIBRATION_SAMPLES stationary/upright samples are
-        // averaged to estimate the gyro (X/Y/Z) and accel (X/Y) bias; the offsets are then
-        // subtracted from every published sample.
-        let mut calibrated = false;
-        let mut calib_count: u32 = 0;
-        let mut gyro_sum = Vector3::<f32>::zeros();
-        let mut accel_sum = Vector3::<f32>::zeros();
-        let mut gyro_offset = Vector3::<f32>::zeros();
-        let mut accel_offset = Vector3::<f32>::zeros();
+        // Establish the on-chip IMU bias calibration before publishing any data. The
+        // BMI323 corrects bias internally via its data-path offset registers (which are
+        // volatile and cleared by the soft reset in imu.init()). Prefer a calibration
+        // previously stored in flash; otherwise run the sensor's built-in gyro
+        // self-calibration plus a firmware accel X/Y bias estimate and persist the
+        // result. A fresh calibration requires the robot to be upright and stationary
+        // and is retried until it succeeds. After this returns, every published sample
+        // is already bias-corrected by the sensor.
+        establish_imu_calibration(&mut imu, &mut gyro_int, &mut flash, &telemetry_pub).await;
+
+        // Drop any transient accumulated on the accel filters during calibration.
+        accel_x_filter.reset();
+        accel_y_filter.reset();
 
         'imu_data_loop: loop {
             // block on gyro interrupt, active low
@@ -259,68 +275,25 @@ async fn imu_task_entry(
                     // Got an interrupt, so IMU should be working.
                     robot_state.set_imu_inop(false);
 
-                    // read raw gyro and accel data
+                    // read gyro and accel data (already bias-corrected on-chip via the
+                    // data-path offset registers established during calibration).
                     let imu_data = imu.gyro_get_data_rads().await;
                     // TODO: don't use raw data, impl conversion
                     let accel_data = imu.accel_get_data_mps().await;
 
-                    // On-boot bias estimation. While uncalibrated, average the first
-                    // IMU_CALIBRATION_SAMPLES readings taken while upright and stationary to
-                    // estimate the gyro (X/Y/Z) and accel (X/Y) bias, then subtract it from
-                    // every subsequent sample. Accel Z is left uncorrected so it keeps
-                    // measuring gravity for the tipped detection below. Samples are not
-                    // published until calibration completes.
-                    if !calibrated {
-                        if (accel_data[2] as f32) < ACCEL_TIPPED_Z_MPS2 {
-                            // Not upright (possibly tipped/moving); restart the average.
-                            calib_count = 0;
-                            gyro_sum = Vector3::zeros();
-                            accel_sum = Vector3::zeros();
-                        } else {
-                            gyro_sum += Vector3::new(imu_data[0], imu_data[1], imu_data[2]);
-                            accel_sum += Vector3::new(
-                                accel_data[0] as f32,
-                                accel_data[1] as f32,
-                                accel_data[2] as f32,
-                            );
-                            calib_count += 1;
-                            if calib_count >= IMU_CALIBRATION_SAMPLES {
-                                let n = calib_count as f32;
-                                gyro_offset = gyro_sum / n;
-                                // Correct accel X/Y only; leave Z (gravity/tipped detection).
-                                accel_offset =
-                                    Vector3::new(accel_sum[0] / n, accel_sum[1] / n, 0.0);
-                                calibrated = true;
-                                // Drop the transient accumulated during calibration.
-                                accel_x_filter.reset();
-                                accel_y_filter.reset();
-                                defmt::info!(
-                                    "IMU bias calibrated over {} samples: gyro=[{}, {}, {}] rad/s, accel_xy=[{}, {}] m/s^2",
-                                    calib_count,
-                                    gyro_offset[0],
-                                    gyro_offset[1],
-                                    gyro_offset[2],
-                                    accel_offset[0],
-                                    accel_offset[1],
-                                );
-                            }
-                        }
-                        // Don't publish partial/uncalibrated data.
-                        continue;
-                    }
-
-                    // Publish bias-corrected gyro.
+                    // Publish the (chip-corrected) gyro.
                     gyro_pub.publish_immediate(Vector3::new(
-                        imu_data[0] - gyro_offset[0],
-                        imu_data[1] - gyro_offset[1],
-                        imu_data[2] - gyro_offset[2],
+                        imu_data[0],
+                        imu_data[1],
+                        imu_data[2],
                     ));
 
-                    // Bias-correct accel X/Y, then low-pass filter to reject motor/wheel
-                    // vibration. Z is published raw (uncorrected) for responsive tipped
-                    // detection below.
-                    let accel_x_unbiased = accel_data[0] as f32 - accel_offset[0];
-                    let accel_y_unbiased = accel_data[1] as f32 - accel_offset[1];
+                    // Low-pass filter the (chip-corrected) accel X/Y to reject motor/wheel
+                    // vibration. Z is published unfiltered for responsive tipped detection
+                    // below (and is intentionally left with no on-chip offset so it keeps
+                    // measuring gravity).
+                    let accel_x_unbiased = accel_data[0] as f32;
+                    let accel_y_unbiased = accel_data[1] as f32;
                     accel_x_filter.add_sample(accel_x_unbiased);
                     accel_y_filter.add_sample(accel_y_unbiased);
                     let accel_x_filtered = accel_x_filter.filtered_value().unwrap_or(accel_x_unbiased);
@@ -370,6 +343,128 @@ async fn imu_task_entry(
     }
 }
 
+/// Establishes the on-chip IMU bias calibration before data publishing begins.
+///
+/// Applies a stored calibration from flash if one is present and valid; otherwise
+/// runs the sensor's built-in gyro self-calibration plus a firmware accelerometer
+/// X/Y bias estimate, applies both to the sensor's data-path offset registers, and
+/// persists the result to flash. A fresh calibration is retried until it succeeds
+/// (the robot must be upright and stationary).
+async fn establish_imu_calibration(
+    imu: &mut Bmi323<'static, 'static>,
+    gyro_int: &mut ExtiInput<'static, embassy_stm32::mode::Async>,
+    flash: &mut Flash<'static, Blocking>,
+    telemetry_pub: &TelemetryPublisher,
+) {
+    if !FORCE_IMU_RECALIBRATION {
+        if let Some(cal) = load_calibration(flash) {
+            imu.write_gyro_dp_offset_gain(&cal.gyro).await;
+            imu.write_accel_dp_offset(&cal.accel).await;
+            defmt::info!(
+                "IMU calibration restored from flash: gyro_off=[{}, {}, {}], accel_off_xy=[{}, {}]",
+                cal.gyro.off_x,
+                cal.gyro.off_y,
+                cal.gyro.off_z,
+                cal.accel.off_x,
+                cal.accel.off_y,
+            );
+            return;
+        }
+        defmt::info!("no valid stored IMU calibration; running on-chip calibration");
+    } else {
+        defmt::warn!("FORCE_IMU_RECALIBRATION set; running on-chip calibration");
+    }
+
+    loop {
+        // Built-in gyro self-calibration (offset). Requires the device stationary.
+        let gyro_cal = match imu.perform_gyro_self_calibration(true, false).await {
+            Ok(c) => c,
+            Err(_) => {
+                defmt::warn!("gyro self-calibration failed (hold robot stationary); retrying");
+                telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
+                    create_error_telemetry_from_string(
+                        "IMU gyro self-calibration failed; retrying",
+                    ),
+                ));
+                Timer::after_millis(500).await;
+                continue;
+            }
+        };
+
+        // Firmware accel X/Y bias estimate while upright and stationary. The accel DP
+        // offset registers are still zero here (cleared by the soft reset in
+        // imu.init()), so the measured average is the true bias.
+        let Some((bias_x_counts, bias_y_counts)) = average_accel_bias(imu, gyro_int).await
+        else {
+            defmt::warn!("accel bias estimate aborted (not upright/stationary); retrying");
+            continue;
+        };
+
+        let accel = AccelDpOffset {
+            off_x: imu.accel_bias_counts_to_dp_offset(bias_x_counts),
+            off_y: imu.accel_bias_counts_to_dp_offset(bias_y_counts),
+            // Leave Z uncorrected so it keeps measuring gravity for tipped detection.
+            off_z: 0,
+        };
+        imu.write_accel_dp_offset(&accel).await;
+
+        let cal = ImuCalibration {
+            gyro: gyro_cal,
+            accel,
+        };
+        if store_calibration(flash, &cal).is_ok() {
+            defmt::info!(
+                "IMU calibrated on-chip and stored to flash: gyro_off=[{}, {}, {}], accel_off_xy=[{}, {}]",
+                cal.gyro.off_x,
+                cal.gyro.off_y,
+                cal.gyro.off_z,
+                cal.accel.off_x,
+                cal.accel.off_y,
+            );
+        } else {
+            defmt::warn!(
+                "IMU calibrated on-chip but flash persistence failed (applied this session only)"
+            );
+        }
+        return;
+    }
+}
+
+/// Averages [`ACCEL_CALIBRATION_SAMPLES`] upright accelerometer samples (taken on the
+/// gyro data-ready interrupt) and returns the mean raw X/Y counts, i.e. the accel
+/// bias. Returns `None` if a non-upright sample or a data timeout is seen, so the
+/// caller can retry — ensuring the estimate is only taken while the robot is upright.
+async fn average_accel_bias(
+    imu: &mut Bmi323<'static, 'static>,
+    gyro_int: &mut ExtiInput<'static, embassy_stm32::mode::Async>,
+) -> Option<(i16, i16)> {
+    let mut sum_x: i32 = 0;
+    let mut sum_y: i32 = 0;
+    let mut count: u32 = 0;
+
+    while count < ACCEL_CALIBRATION_SAMPLES {
+        match select(gyro_int.wait_for_falling_edge(), Timer::after_millis(1000)).await {
+            Either::First(_) => {
+                let raw = imu.accel_get_raw_data().await;
+                if imu.convert_accel_raw_sample_mps(raw[2]) < ACCEL_TIPPED_Z_MPS2 {
+                    // Not upright (tipped/moving); abort so the caller retries.
+                    return None;
+                }
+                sum_x += raw[0] as i32;
+                sum_y += raw[1] as i32;
+                count += 1;
+            }
+            Either::Second(_) => {
+                defmt::warn!("accel bias estimate timed out waiting for IMU data");
+                return None;
+            }
+        }
+    }
+
+    let n = count as i32;
+    Some(((sum_x / n) as i16, (sum_y / n) as i16))
+}
+
 pub fn start_imu_task(
     imu_task_spawner: &Spawner,
     robot_state: &'static SharedRobotState,
@@ -391,6 +486,7 @@ pub fn start_imu_task(
     accel_int: Peri<'static, <ImuSpiInt1Pin as embassy_stm32::gpio::ExtiPin>::ExtiChannel>,
     gyro_int: Peri<'static, <ImuSpiInt2Pin as embassy_stm32::gpio::ExtiPin>::ExtiChannel>,
     _ext_imu_det_pin: Peri<'static, ExtImuNDetPin>,
+    flash: Peri<'static, FLASH>,
 ) {
     defmt::debug!("starting imu task...");
 
@@ -415,6 +511,9 @@ pub fn start_imu_task(
     let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::None, crate::SystemIrqs);
     let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::None, crate::SystemIrqs);
 
+    // Blocking flash access for persistent on-chip IMU calibration storage.
+    let flash = Flash::new_blocking(flash);
+
     imu_task_spawner.spawn(defmt::unwrap!(imu_task_entry(
         robot_state,
         gyro_data_publisher,
@@ -424,6 +523,7 @@ pub fn start_imu_task(
         imu,
         accel_int,
         gyro_int,
+        flash,
     )));
 }
 
@@ -448,6 +548,7 @@ pub fn start_imu_task_via_ie(
     accel_int: Peri<'static, <ImuSpiInt1Pin as embassy_stm32::gpio::ExtiPin>::ExtiChannel>,
     gyro_int: Peri<'static, <ImuSpiInt2Pin as embassy_stm32::gpio::ExtiPin>::ExtiChannel>,
     _ext_imu_det_pin: Peri<'static, ExtImuNDetPin>,
+    flash: Peri<'static, FLASH>,
 ) {
     defmt::debug!("starting imu task...");
 
@@ -472,6 +573,9 @@ pub fn start_imu_task_via_ie(
     let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::None, crate::SystemIrqs);
     let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::None, crate::SystemIrqs);
 
+    // Blocking flash access for persistent on-chip IMU calibration storage.
+    let flash = Flash::new_blocking(flash);
+
     imu_task_spawner.spawn(defmt::unwrap!(imu_task_entry(
         robot_state,
         gyro_data_publisher,
@@ -481,5 +585,6 @@ pub fn start_imu_task_via_ie(
         imu,
         accel_int,
         gyro_int,
+        flash,
     )));
 }
