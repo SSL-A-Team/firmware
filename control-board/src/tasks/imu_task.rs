@@ -1,5 +1,5 @@
-use embassy_executor::{SendSpawner, Spawner};
-use embassy_futures::select::{select, select3, Either, Either3};
+use embassy_executor::Spawner;
+use embassy_futures::select::{select, Either};
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::flash::{Blocking, Flash};
 use embassy_stm32::gpio::Pull;
@@ -15,7 +15,7 @@ use ateam_lib_stm32::drivers::imu::bmi323::{self, *};
 use ateam_lib_stm32::filter::{Filter, IirFilter};
 
 use crate::create_error_telemetry_from_string;
-use crate::imu_calibration::{erase_calibration, load_calibration, store_calibration, ImuCalibration};
+use crate::imu_calibration::{erase_calibration, load_calibration_to_chip, run_calibration};
 use crate::pins::*;
 use crate::robot_state::SharedRobotState;
 use crate::tasks::dotstar_task::{ControlBoardLedCommand, ImuStatusLedCommand};
@@ -34,24 +34,27 @@ const ACCEL_FILTER_SAMPLE_RATE_HZ: f32 = IMU_ODR.to_hz();
 /// reject motor/wheel vibration before the data is consumed by the state estimator.
 const ACCEL_FILTER_CUTOFF_HZ: f32 = 40.0;
 
-/// Number of stationary/upright samples averaged to estimate the accelerometer
-/// (X/Y) bias when running a fresh on-chip calibration. ~2.0 s at the IMU ODR
-/// (1600 Hz). The gyro bias is handled by the sensor's built-in self-calibration,
-/// so only the accel bias is averaged in firmware.
-const ACCEL_CALIBRATION_SAMPLES: u32 = 2 * 1600;
-/// Accel Z below this magnitude (m/s^2) is treated as tipped / not upright. The robot must
-/// be upright and stationary for the boot-time bias calibration to accumulate.
+/// Accel Z below this magnitude (m/s^2) is treated as tipped / not upright.
 const ACCEL_TIPPED_Z_MPS2: f32 = 4.0;
 
-/// Delay between the calibration button press and the start of the calibration
-/// routine. Gives the user time to release the button and let the robot settle so
-/// the gyro self-calibration and accel bias estimate are taken while stationary.
-const CALIBRATION_BUTTON_DELAY_MS: u64 = 1000;
+/// Settle delay after the calibration LED turns magenta before sampling starts, so the
+/// robot (and the operator's hand) can come to rest.
+const CALIBRATION_SETTLE_MS: u64 = 1000;
 
-/// Hold duration on the calibration (back) button that deletes the stored
-/// calibration instead of starting a new one. A quick press calibrates; holding for
-/// at least this long erases the stored calibration and returns the IMU to inop.
-const CALIBRATION_DELETE_HOLD_MS: u64 = 3000;
+/// While the IMU is inoperational (uncalibrated), re-publish an error telemetry at this
+/// interval so the software stack is informed over the radio.
+const INOP_ERROR_TELEM_INTERVAL_MS: u64 = 1000;
+
+/// Action selected at boot (by held buttons in `main`) for the IMU maintenance path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, defmt::Format)]
+pub enum ImuBootAction {
+    /// Normal boot: load the stored calibration (or go inop). No maintenance.
+    Normal,
+    /// Run a fresh calibration and store it, then halt (reboot to run normally).
+    Calibrate,
+    /// Erase the stored calibration, then halt.
+    EraseCalibration,
+}
 
 #[macro_export]
 macro_rules! create_imu_task {
@@ -82,70 +85,174 @@ macro_rules! create_imu_task {
     };
 }
 
-/// Like [`create_imu_task!`] but also wires the back user button (PE10/EXTI10) as the
-/// IMU calibration trigger. Use in binaries that don't otherwise consume PE10.
-#[macro_export]
-macro_rules! create_imu_task_cal {
-    ($main_spawner:ident, $robot_state:ident, $imu_gyro_data_publisher:ident, $imu_accel_data_publisher:ident, $imu_led_cmd_pub:ident, $imu_telemetry_publisher:ident, $p:ident) => {
-        ateam_control_board::tasks::imu_task::start_imu_task_with_cal_button(
-            &$main_spawner,
-            $robot_state,
-            $imu_gyro_data_publisher,
-            $imu_accel_data_publisher,
-            $imu_led_cmd_pub,
-            $imu_telemetry_publisher,
-            $p.SPI1,
-            $p.PA5,
-            $p.PA7,
-            $p.PA6,
-            $p.DMA2_CH7,
-            $p.DMA2_CH6,
-            $p.PA4,
-            $p.PA3,
-            $p.PC4,
-            $p.PB0,
-            $p.PB1,
-            $p.EXTI0,
-            $p.EXTI1,
-            $p.PB2,
-            $p.FLASH,
-            $p.PE10,
-            $p.EXTI10,
-        );
-    };
-}
-
-#[macro_export]
-macro_rules! create_imu_task_ie {
-    ($main_spawner:ident, $robot_state:ident, $imu_gyro_data_publisher:ident, $imu_accel_data_publisher:ident, $imu_led_cmd_pub:ident, $imu_telemetry_publisher:ident, $p:ident) => {
-        ateam_control_board::tasks::imu_task::start_imu_task_ie(
-            &$main_spawner,
-            $robot_state,
-            $imu_gyro_data_publisher,
-            $imu_accel_data_publisher,
-            $imu_led_cmd_pub,
-            $imu_telemetry_publisher,
-            $p.SPI1,
-            $p.PA5,
-            $p.PA7,
-            $p.PA6,
-            $p.DMA2_CH7,
-            $p.DMA2_CH6,
-            $p.PA4,
-            $p.PA3,
-            $p.PC4,
-            $p.PB0,
-            $p.PB1,
-            $p.EXTI0,
-            $p.EXTI1,
-            $p.PB2,
-            $p.FLASH,
-        );
-    };
-}
-
 #[link_section = ".axisram.buffers"]
 static mut IMU_BUFFER_CELL: [u8; bmi323::SPI_MIN_BUF_LEN] = [0; bmi323::SPI_MIN_BUF_LEN];
+
+/// Constructs the BMI323 driver from its SPI peripheral + pins. Shared by the normal imu
+/// task ([`start_imu_task`]) and the boot maintenance path (`main`).
+#[allow(clippy::too_many_arguments)]
+pub fn build_imu(
+    peri: Peri<'static, ImuSpi>,
+    sck: Peri<'static, impl SckPin<ImuSpi>>,
+    mosi: Peri<'static, impl MosiPin<ImuSpi>>,
+    miso: Peri<'static, impl MisoPin<ImuSpi>>,
+    txdma: Peri<'static, ImuSpiTxDma>,
+    rxdma: Peri<'static, ImuSpiRxDma>,
+    bmi323_nss: Peri<'static, ImuSpiNss0Pin>,
+) -> Bmi323<'static, 'static> {
+    let imu_buf: &mut [u8; bmi323::SPI_MIN_BUF_LEN] = unsafe { &mut (*(&raw mut IMU_BUFFER_CELL)) };
+    Bmi323::new_from_pins(
+        peri,
+        sck,
+        mosi,
+        miso,
+        txdma,
+        rxdma,
+        crate::SystemIrqs,
+        bmi323_nss.into(),
+        imu_buf,
+    )
+}
+
+/// Runs the full BMI323 configuration sequence: soft reset, self test, feature engine,
+/// 180-degree axis remap, gyro/accel config, and interrupt config. Returns `Err` on any
+/// failure (details logged via defmt). Shared by the imu task's (re)configuration loop
+/// and the boot maintenance path.
+///
+/// The IMU is mounted rotated 180 degrees about the board Z axis, corrected on-chip via
+/// the feature engine (X -> -X, Y -> -Y, Z -> Z). This must be done while the sensors are
+/// inactive (before configuring the accel/gyro) and re-applied on every (re)config, since
+/// the mapping is cleared by the soft reset in `imu.init()`.
+pub async fn configure_imu(imu: &mut Bmi323<'static, 'static>) -> Result<(), ()> {
+    imu.init().await;
+
+    if imu.self_test().await.is_err() {
+        defmt::error!("IMU self test failed");
+        return Err(());
+    }
+
+    if imu.enable_feature_engine().await.is_err() {
+        defmt::error!("IMU feature engine enable failed");
+        return Err(());
+    }
+    if imu
+        .set_axis_remap(AxisMap::XyzToXyz, true, true, false)
+        .await
+        .is_err()
+    {
+        defmt::error!("IMU axis remap failed");
+        return Err(());
+    }
+
+    // Configure the gyro and map its data-ready interrupt to INT2.
+    if imu
+        .set_gyro_config(
+            GyroMode::ContinuousHighPerformance,
+            GyroRange::PlusMinus2000DegPerSec,
+            Bandwidth3DbCutoffFreq::AccOdrOver4,
+            IMU_ODR,
+            DataAveragingWindow::NoFiltering,
+        )
+        .await
+        .is_err()
+    {
+        defmt::error!("IMU gyro configuration failed");
+        return Err(());
+    }
+    imu.set_gyro_interrupt_mode(InterruptMode::MappedToInt2).await;
+
+    // Configure the accel and map its data-ready interrupt to INT1.
+    if imu
+        .set_accel_config(
+            AccelMode::ContinuousHighPerformance,
+            AccelRange::Range4g,
+            Bandwidth3DbCutoffFreq::AccOdrOver4,
+            IMU_ODR,
+            DataAveragingWindow::NoFiltering,
+        )
+        .await
+        .is_err()
+    {
+        defmt::error!("IMU accel configuration failed");
+        return Err(());
+    }
+    imu.set_accel_interrupt_mode(InterruptMode::MappedToInt1).await;
+
+    imu.set_int1_pin_config(IntPinLevel::ActiveLow, IntPinDriveMode::PushPull)
+        .await;
+    imu.set_int2_pin_config(IntPinLevel::ActiveLow, IntPinDriveMode::PushPull)
+        .await;
+    imu.set_int2_enabled(true).await;
+
+    Ok(())
+}
+
+/// Boot maintenance routine. Runs before the heavy tasks are spawned, so the blocking
+/// full-sector flash erase/program happens while the system is quiet (it cannot be
+/// aborted by the 1 kHz control loop / motor / radio interrupts). Configures the IMU,
+/// then either runs a fresh calibration (magenta LED, settle delay, gyro self-cal +
+/// accel bias estimate, store) or erases the stored calibration, driving `led_command_pub`
+/// for feedback. The caller should halt (await forever) afterwards; a reboot then runs
+/// normally. Does nothing for [`ImuBootAction::Normal`].
+pub async fn run_boot_maintenance(
+    imu: &mut Bmi323<'static, 'static>,
+    flash: &mut Flash<'static, Blocking>,
+    led_command_pub: &LedCommandPublisher,
+    action: ImuBootAction,
+) {
+    led_command_pub
+        .publish(ControlBoardLedCommand::Imu(
+            ImuStatusLedCommand::Configuring,
+        ))
+        .await;
+    if configure_imu(imu).await.is_err() {
+        led_command_pub
+            .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
+            .await;
+        return;
+    }
+
+    match action {
+        ImuBootAction::Calibrate => {
+            defmt::info!("boot maintenance: calibrating IMU (hold robot upright & still)");
+            led_command_pub
+                .publish(ControlBoardLedCommand::Imu(
+                    ImuStatusLedCommand::Calibrating,
+                ))
+                .await;
+            Timer::after_millis(CALIBRATION_SETTLE_MS).await;
+            match run_calibration(imu, flash).await {
+                Ok(_) => {
+                    led_command_pub
+                        .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Ok))
+                        .await;
+                }
+                Err(_) => {
+                    defmt::error!("boot IMU calibration failed");
+                    led_command_pub
+                        .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
+                        .await;
+                }
+            }
+        }
+        ImuBootAction::EraseCalibration => {
+            defmt::info!("boot maintenance: erasing stored IMU calibration");
+            led_command_pub
+                .publish(ControlBoardLedCommand::Imu(
+                    ImuStatusLedCommand::Calibrating,
+                ))
+                .await;
+            if erase_calibration(flash).is_ok() {
+                defmt::info!("stored IMU calibration erased");
+            }
+            // Erased -> uncalibrated; show the inop/error color.
+            led_command_pub
+                .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
+                .await;
+        }
+        ImuBootAction::Normal => {}
+    }
+}
 
 #[embassy_executor::task]
 async fn imu_task_entry(
@@ -158,7 +265,6 @@ async fn imu_task_entry(
     mut _accel_int: ExtiInput<'static, embassy_stm32::mode::Async>,
     mut gyro_int: ExtiInput<'static, embassy_stm32::mode::Async>,
     mut flash: Flash<'static, Blocking>,
-    mut cal_button: Option<ExtiInput<'static, embassy_stm32::mode::Async>>,
 ) {
     defmt::info!("imu start startup.");
     let mut first_tipped_check_time = Instant::now();
@@ -180,14 +286,12 @@ async fn imu_task_entry(
             ))
             .await;
 
-        // At the beginning, assume IMU is not working yet.
+        // At the beginning, assume the IMU is not working yet.
         robot_state.set_imu_inop(true);
-        imu.init().await;
-        let self_test_res = imu.self_test().await;
-        if self_test_res.is_err() {
-            defmt::error!("IMU self test failed");
+
+        if configure_imu(&mut imu).await.is_err() {
             telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
-                create_error_telemetry_from_string("IMU self test failed"),
+                create_error_telemetry_from_string("IMU configuration failed"),
             ));
             led_command_pub
                 .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
@@ -196,100 +300,11 @@ async fn imu_task_entry(
             continue 'imu_configuration_loop;
         }
 
-        // The IMU is mounted rotated 180 degrees about the board Z axis. Correct for this
-        // on-chip via the feature engine so both accel and gyro report in the robot frame at
-        // zero runtime cost. A 180 degree rotation about Z is X -> -X, Y -> -Y, Z -> Z, i.e.
-        // pure sign inversion of the X and Y axes. This must be done while the sensors are
-        // inactive (before the accel/gyro config below) and re-applied on every (re)config,
-        // since the mapping is cleared by the soft reset performed in imu.init().
-        if imu.enable_feature_engine().await.is_err() {
-            defmt::error!("IMU feature engine enable failed");
-            telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
-                create_error_telemetry_from_string("IMU feature engine enable failed"),
-            ));
-            led_command_pub
-                .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
-                .await;
-            Timer::after_millis(1000).await;
-            continue 'imu_configuration_loop;
-        }
-        if imu
-            .set_axis_remap(AxisMap::XyzToXyz, true, true, false)
-            .await
-            .is_err()
-        {
-            defmt::error!("IMU axis remap failed");
-            telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
-                create_error_telemetry_from_string("IMU axis remap failed"),
-            ));
-            led_command_pub
-                .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
-                .await;
-            Timer::after_millis(1000).await;
-            continue 'imu_configuration_loop;
-        }
-
-        // configure the gyro, map int to int pin 2
-        let gyro_config_res = imu
-            .set_gyro_config(
-                GyroMode::ContinuousHighPerformance,
-                GyroRange::PlusMinus2000DegPerSec,
-                Bandwidth3DbCutoffFreq::AccOdrOver4,
-                IMU_ODR,
-                DataAveragingWindow::NoFiltering,
-            )
-            .await;
-        imu.set_gyro_interrupt_mode(InterruptMode::MappedToInt2)
-            .await;
-
-        if gyro_config_res.is_err() {
-            led_command_pub
-                .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
-                .await;
-            defmt::error!("gyro configration failed.");
-            telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
-                create_error_telemetry_from_string("IMU gyro configuration failed"),
-            ));
-        }
-
-        // configure the gyro, map int to int pin 1
-        let acc_config_res = imu
-            .set_accel_config(
-                AccelMode::ContinuousHighPerformance,
-                AccelRange::Range4g,
-                Bandwidth3DbCutoffFreq::AccOdrOver4,
-                IMU_ODR,
-                DataAveragingWindow::NoFiltering,
-            )
-            .await;
-        imu.set_accel_interrupt_mode(InterruptMode::MappedToInt1)
-            .await;
-
-        if acc_config_res.is_err() {
-            led_command_pub
-                .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
-                .await;
-            defmt::error!("accel configration failed.");
-            telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
-                create_error_telemetry_from_string("IMU accel configuration failed"),
-            ));
-        }
-
-        // configure the phys properties of the int pins
-        imu.set_int1_pin_config(IntPinLevel::ActiveLow, IntPinDriveMode::PushPull)
-            .await;
-        imu.set_int2_pin_config(IntPinLevel::ActiveLow, IntPinDriveMode::PushPull)
-            .await;
-
-        // enable gyro int
-        imu.set_int2_enabled(true).await;
-
-        // Load any stored IMU bias calibration from flash and apply it to the sensor's
-        // data-path offset registers (they are volatile and cleared by the soft reset
-        // in imu.init()). If a valid calibration is present the IMU operates normally.
-        // If not, the IMU is left in inop mode and does NOT auto-calibrate on boot; a
-        // calibration must be started by the back button (handled in the loop below).
-        let mut calibrated = load_calibration_to_chip(&mut imu, &mut flash).await;
+        // Apply a stored calibration from flash (the DP offset registers are volatile and
+        // cleared by the soft reset in configure_imu). No calibration is run here: if none
+        // is stored the IMU stays inoperational. Calibration is triggered from the boot
+        // maintenance path (hold enter on boot), which runs before the heavy tasks.
+        let calibrated = load_calibration_to_chip(&mut imu, &mut flash).await;
         if calibrated {
             robot_state.set_imu_inop(false);
             led_command_pub
@@ -301,54 +316,51 @@ async fn imu_task_entry(
                 .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
                 .await;
             defmt::warn!(
-                "no valid stored IMU calibration; IMU inop until calibrated (press back button)"
+                "no valid stored IMU calibration; IMU inoperational (hold enter on boot to calibrate)"
             );
+            telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
+                create_error_telemetry_from_string("IMU inoperational: not calibrated"),
+            ));
         }
 
-        // Drop any stale/transient filter state before starting.
+        // Clear any stale/transient filter state before starting.
         accel_x_filter.reset();
         accel_y_filter.reset();
 
-        'imu_data_loop: loop {
-            // Wait on the gyro data-ready interrupt, the calibration button, or a
-            // data-acquisition timeout. The button future is pending forever when no
-            // calibration button was provided (e.g. hardware test binaries).
-            let cal_button_wait = async {
-                match cal_button.as_mut() {
-                    Some(btn) => btn.wait_for_falling_edge().await,
-                    None => core::future::pending::<()>().await,
-                }
-            };
-            match select3(
-                gyro_int.wait_for_falling_edge(),
-                cal_button_wait,
-                Timer::after_millis(1000),
-            )
-            .await
-            {
-                Either3::First(_) => {
-                    // Got an interrupt, so the IMU hardware is alive.
+        let mut last_inop_telem = Instant::now();
 
+        'imu_data_loop: loop {
+            // block on gyro interrupt, active low
+            match select(gyro_int.wait_for_falling_edge(), Timer::after_millis(1000)).await {
+                Either::First(_) => {
                     // read gyro and accel data (already bias-corrected on-chip via the
                     // data-path offset registers when a calibration is applied).
                     let imu_data = imu.gyro_get_data_rads().await;
-                    // TODO: don't use raw data, impl conversion
                     let accel_data = imu.accel_get_data_mps().await;
 
-                    // While uncalibrated the IMU stays inop and does not publish (its
-                    // bias is unknown); keep servicing the hardware so the calibration
-                    // button still responds.
+                    // While uncalibrated the IMU stays inop and does not publish (its bias
+                    // is unknown); keep servicing the hardware and re-report periodically so
+                    // the software stack learns the IMU is inoperational over the radio.
                     if !calibrated {
+                        let now = Instant::now();
+                        if now.duration_since(last_inop_telem).as_millis()
+                            >= INOP_ERROR_TELEM_INTERVAL_MS
+                        {
+                            last_inop_telem = now;
+                            telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
+                                create_error_telemetry_from_string(
+                                    "IMU inoperational: not calibrated",
+                                ),
+                            ));
+                        }
                         continue;
                     }
+
+                    // Got an interrupt with a valid calibration, so the IMU is operational.
                     robot_state.set_imu_inop(false);
 
                     // Publish the (chip-corrected) gyro.
-                    gyro_pub.publish_immediate(Vector3::new(
-                        imu_data[0],
-                        imu_data[1],
-                        imu_data[2],
-                    ));
+                    gyro_pub.publish_immediate(Vector3::new(imu_data[0], imu_data[1], imu_data[2]));
 
                     // Low-pass filter the (chip-corrected) accel X/Y to reject motor/wheel
                     // vibration. Z is published unfiltered for responsive tipped detection
@@ -358,8 +370,10 @@ async fn imu_task_entry(
                     let accel_y_unbiased = accel_data[1] as f32;
                     accel_x_filter.add_sample(accel_x_unbiased);
                     accel_y_filter.add_sample(accel_y_unbiased);
-                    let accel_x_filtered = accel_x_filter.filtered_value().unwrap_or(accel_x_unbiased);
-                    let accel_y_filtered = accel_y_filter.filtered_value().unwrap_or(accel_y_unbiased);
+                    let accel_x_filtered =
+                        accel_x_filter.filtered_value().unwrap_or(accel_x_unbiased);
+                    let accel_y_filtered =
+                        accel_y_filter.filtered_value().unwrap_or(accel_y_unbiased);
 
                     accel_pub.publish_immediate(Vector3::new(
                         accel_x_filtered,
@@ -367,14 +381,13 @@ async fn imu_task_entry(
                         accel_data[2] as f32,
                     ));
 
-                    // TODO: magic number, fix after raw data conversion
                     if (accel_data[2] as f32) < ACCEL_TIPPED_Z_MPS2 {
                         if !first_tipped_seen {
                             // If it's the first time a tipping occured, start tracking.
                             first_tipped_seen = true;
                             first_tipped_check_time = Instant::now();
                         } else {
-                            // After the first tipped is seen, then wait if it has been tipped for long enough.
+                            // After the first tipped is seen, wait if it has been tipped long enough.
                             let cur_time = Instant::now();
                             if Instant::duration_since(&cur_time, first_tipped_check_time)
                                 .as_millis()
@@ -382,7 +395,6 @@ async fn imu_task_entry(
                             {
                                 robot_state.set_robot_tipped(true);
                             } else {
-                                // If it hasn't been long enough, clear the robot tipped.
                                 robot_state.set_robot_tipped(false);
                             }
                         }
@@ -392,87 +404,7 @@ async fn imu_task_entry(
                         robot_state.set_robot_tipped(false);
                     }
                 }
-                Either3::Second(_) => {
-                    // Back button pressed: place the IMU in inop mode and show the
-                    // calibrating LED color immediately (directly after the press). A
-                    // quick press then runs a calibration; holding the button for
-                    // CALIBRATION_DELETE_HOLD_MS instead deletes the stored calibration.
-                    defmt::info!("IMU calibration button pressed");
-                    calibrated = false;
-                    robot_state.set_imu_inop(true);
-                    led_command_pub
-                        .publish(ControlBoardLedCommand::Imu(
-                            ImuStatusLedCommand::Calibrating,
-                        ))
-                        .await;
-
-                    // Distinguish a short press (button released before the hold
-                    // threshold -> calibrate) from a long hold (still held at the
-                    // threshold -> delete). Either3::Second only fires when a button is
-                    // present, so `cal_button` is always Some here.
-                    let held_for_delete = match cal_button.as_mut() {
-                        Some(btn) => matches!(
-                            select(
-                                btn.wait_for_rising_edge(),
-                                Timer::after_millis(CALIBRATION_DELETE_HOLD_MS),
-                            )
-                            .await,
-                            Either::Second(_)
-                        ),
-                        None => false,
-                    };
-
-                    if held_for_delete {
-                        // Long hold: erase the stored calibration, clear the on-chip
-                        // offsets, and return to the uncalibrated/inop state.
-                        defmt::info!(
-                            "IMU calibration button held; deleting stored calibration"
-                        );
-                        imu.write_gyro_dp_offset_gain(&GyroDpOffsetGain::default())
-                            .await;
-                        imu.write_accel_dp_offset(&AccelDpOffset::default()).await;
-                        if erase_calibration(&mut flash).is_ok() {
-                            defmt::info!(
-                                "stored IMU calibration deleted; IMU inop until recalibrated"
-                            );
-                        } else {
-                            defmt::warn!("failed to erase stored IMU calibration");
-                        }
-                        led_command_pub
-                            .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
-                            .await;
-                    } else {
-                        // Short press: wait for the robot to settle, then run a fresh
-                        // on-chip calibration and overwrite any stored calibration.
-                        Timer::after_millis(CALIBRATION_BUTTON_DELAY_MS).await;
-
-                        if recalibrate_and_store(
-                            &mut imu,
-                            &mut gyro_int,
-                            &mut flash,
-                            &telemetry_pub,
-                        )
-                        .await
-                        {
-                            calibrated = true;
-                            led_command_pub
-                                .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Ok))
-                                .await;
-                        } else {
-                            led_command_pub
-                                .publish(ControlBoardLedCommand::Imu(ImuStatusLedCommand::Error))
-                                .await;
-                            defmt::warn!(
-                                "IMU calibration failed; IMU remains inop (press back button to retry)"
-                            );
-                        }
-                    }
-
-                    // Drop transient accel filter state accumulated across calibration.
-                    accel_x_filter.reset();
-                    accel_y_filter.reset();
-                }
-                Either3::Third(_) => {
+                Either::Second(_) => {
                     defmt::warn!("imu interrupt based data acq timed out.");
                     telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
                         create_error_telemetry_from_string("IMU interrupt timeout"),
@@ -485,126 +417,7 @@ async fn imu_task_entry(
     }
 }
 
-/// Loads a stored IMU calibration from flash (if present and valid) and writes it to
-/// the sensor's data-path offset registers. Returns `true` if a calibration was
-/// applied, `false` if none is present (the caller should then keep the IMU inop
-/// until a calibration is triggered by the button).
-async fn load_calibration_to_chip(imu: &mut Bmi323<'static, 'static>, flash: &mut Flash<'static, Blocking>) -> bool {
-    let Some(cal) = load_calibration(flash) else {
-        return false;
-    };
-    imu.write_gyro_dp_offset_gain(&cal.gyro).await;
-    imu.write_accel_dp_offset(&cal.accel).await;
-    defmt::info!(
-        "IMU calibration restored from flash: gyro_off=[{}, {}, {}], accel_off_xy=[{}, {}]",
-        cal.gyro.off_x,
-        cal.gyro.off_y,
-        cal.gyro.off_z,
-        cal.accel.off_x,
-        cal.accel.off_y,
-    );
-    true
-}
-
-/// Runs a single fresh on-chip IMU calibration and stores the result to flash,
-/// overwriting any existing calibration. Runs the sensor's built-in gyro
-/// self-calibration plus a firmware accelerometer X/Y bias estimate, applies both to
-/// the sensor's data-path offset registers, and persists them. Returns `true` on
-/// success. The robot must be upright and stationary; on failure the IMU is left
-/// uncalibrated (the caller keeps it inop) and the button can be pressed to retry.
-async fn recalibrate_and_store(
-    imu: &mut Bmi323<'static, 'static>,
-    gyro_int: &mut ExtiInput<'static, embassy_stm32::mode::Async>,
-    flash: &mut Flash<'static, Blocking>,
-    telemetry_pub: &TelemetryPublisher,
-) -> bool {
-    // Built-in gyro self-calibration (offset). Requires the device stationary.
-    let gyro_cal = match imu.perform_gyro_self_calibration(true, false).await {
-        Ok(c) => c,
-        Err(_) => {
-            defmt::warn!("gyro self-calibration failed (hold robot stationary)");
-            telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
-                create_error_telemetry_from_string("IMU gyro self-calibration failed"),
-            ));
-            return false;
-        }
-    };
-
-    // Firmware accel X/Y bias estimate while upright and stationary. The accel DP
-    // offset registers are still zero here (cleared by the soft reset in imu.init()),
-    // so the measured average is the true bias.
-    let Some((bias_x_counts, bias_y_counts)) = average_accel_bias(imu, gyro_int).await else {
-        defmt::warn!("accel bias estimate aborted (not upright/stationary)");
-        telemetry_pub.publish_immediate(TelemetryPacket::ErrorTelemetry(
-            create_error_telemetry_from_string("IMU accel bias estimate aborted"),
-        ));
-        return false;
-    };
-
-    let accel = AccelDpOffset {
-        off_x: imu.accel_bias_counts_to_dp_offset(bias_x_counts),
-        off_y: imu.accel_bias_counts_to_dp_offset(bias_y_counts),
-        // Leave Z uncorrected so it keeps measuring gravity for tipped detection.
-        off_z: 0,
-    };
-    imu.write_accel_dp_offset(&accel).await;
-
-    let cal = ImuCalibration {
-        gyro: gyro_cal,
-        accel,
-    };
-    if store_calibration(flash, &cal).is_ok() {
-        defmt::info!(
-            "IMU calibrated on-chip and stored to flash: gyro_off=[{}, {}, {}], accel_off_xy=[{}, {}]",
-            cal.gyro.off_x,
-            cal.gyro.off_y,
-            cal.gyro.off_z,
-            cal.accel.off_x,
-            cal.accel.off_y,
-        );
-    } else {
-        defmt::warn!(
-            "IMU calibrated on-chip but flash persistence failed (applied this session only)"
-        );
-    }
-    true
-}
-
-/// Averages [`ACCEL_CALIBRATION_SAMPLES`] upright accelerometer samples (taken on the
-/// gyro data-ready interrupt) and returns the mean raw X/Y counts, i.e. the accel
-/// bias. Returns `None` if a non-upright sample or a data timeout is seen, so the
-/// caller can retry — ensuring the estimate is only taken while the robot is upright.
-async fn average_accel_bias(
-    imu: &mut Bmi323<'static, 'static>,
-    gyro_int: &mut ExtiInput<'static, embassy_stm32::mode::Async>,
-) -> Option<(i16, i16)> {
-    let mut sum_x: i32 = 0;
-    let mut sum_y: i32 = 0;
-    let mut count: u32 = 0;
-
-    while count < ACCEL_CALIBRATION_SAMPLES {
-        match select(gyro_int.wait_for_falling_edge(), Timer::after_millis(1000)).await {
-            Either::First(_) => {
-                let raw = imu.accel_get_raw_data().await;
-                if imu.convert_accel_raw_sample_mps(raw[2]) < ACCEL_TIPPED_Z_MPS2 {
-                    // Not upright (tipped/moving); abort so the caller retries.
-                    return None;
-                }
-                sum_x += raw[0] as i32;
-                sum_y += raw[1] as i32;
-                count += 1;
-            }
-            Either::Second(_) => {
-                defmt::warn!("accel bias estimate timed out waiting for IMU data");
-                return None;
-            }
-        }
-    }
-
-    let n = count as i32;
-    Some(((sum_x / n) as i16, (sum_y / n) as i16))
-}
-
+#[allow(clippy::too_many_arguments)]
 pub fn start_imu_task(
     imu_task_spawner: &Spawner,
     robot_state: &'static SharedRobotState,
@@ -630,28 +443,13 @@ pub fn start_imu_task(
 ) {
     defmt::debug!("starting imu task...");
 
-    // let imu_buf = IMU_BUFFER_CELL.take();
-    // let imu_buf: &'static mut [u8; 14] = unsafe { & mut IMU_BUFFER_CELL };
-    let imu_buf: &mut [u8; bmi323::SPI_MIN_BUF_LEN] = unsafe { &mut (*(&raw mut IMU_BUFFER_CELL)) };
+    let imu = build_imu(peri, sck, mosi, miso, txdma, rxdma, bmi323_nss);
 
-    let imu = Bmi323::new_from_pins(
-        peri,
-        sck,
-        mosi,
-        miso,
-        txdma,
-        rxdma,
-        crate::SystemIrqs,
-        bmi323_nss.into(),
-        imu_buf,
-    );
-
-    // IMU breakout INT2 is directly connected to the MCU with no hardware PU/PD. Select software Pull::Up and
-    // imu open drain
+    // IMU breakout INT2 is directly connected to the MCU with no hardware PU/PD.
     let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::None, crate::SystemIrqs);
     let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::None, crate::SystemIrqs);
 
-    // Blocking flash access for persistent on-chip IMU calibration storage.
+    // Blocking flash access for reading the persisted on-chip IMU calibration.
     let flash = Flash::new_blocking(flash);
 
     imu_task_spawner.spawn(defmt::unwrap!(imu_task_entry(
@@ -664,139 +462,5 @@ pub fn start_imu_task(
         accel_int,
         gyro_int,
         flash,
-        None,
-    )));
-}
-
-/// Starts the IMU task with a calibration button (the back user button). Identical to
-/// [`start_imu_task`] but wires the given button pin/EXTI so a press triggers a fresh
-/// on-chip IMU calibration (see `imu_task_entry`).
-#[allow(clippy::too_many_arguments)]
-pub fn start_imu_task_with_cal_button(
-    imu_task_spawner: &Spawner,
-    robot_state: &'static SharedRobotState,
-    gyro_data_publisher: GyroDataPublisher,
-    accel_data_publisher: AccelDataPublisher,
-    led_cmd_publisher: LedCommandPublisher,
-    telemetry_publisher: TelemetryPublisher,
-    peri: Peri<'static, ImuSpi>,
-    sck: Peri<'static, impl SckPin<ImuSpi>>,
-    mosi: Peri<'static, impl MosiPin<ImuSpi>>,
-    miso: Peri<'static, impl MisoPin<ImuSpi>>,
-    txdma: Peri<'static, ImuSpiTxDma>,
-    rxdma: Peri<'static, ImuSpiRxDma>,
-    bmi323_nss: Peri<'static, ImuSpiNss0Pin>,
-    _ext_nss1_pin: Peri<'static, ExtImuSpiNss1Pin>,
-    _ext_nss2_pin: Peri<'static, ExtImuSpiNss2Pin>,
-    accel_int_pin: Peri<'static, ImuSpiInt1Pin>,
-    gyro_int_pin: Peri<'static, ImuSpiInt2Pin>,
-    accel_int: Peri<'static, <ImuSpiInt1Pin as embassy_stm32::gpio::ExtiPin>::ExtiChannel>,
-    gyro_int: Peri<'static, <ImuSpiInt2Pin as embassy_stm32::gpio::ExtiPin>::ExtiChannel>,
-    _ext_imu_det_pin: Peri<'static, ExtImuNDetPin>,
-    flash: Peri<'static, FLASH>,
-    cal_button_pin: Peri<'static, UsrBtnBackPin>,
-    cal_button_exti: Peri<'static, UsrBtnBackExti>,
-) {
-    defmt::debug!("starting imu task (with calibration button)...");
-
-    let imu_buf: &mut [u8; bmi323::SPI_MIN_BUF_LEN] = unsafe { &mut (*(&raw mut IMU_BUFFER_CELL)) };
-
-    let imu = Bmi323::new_from_pins(
-        peri,
-        sck,
-        mosi,
-        miso,
-        txdma,
-        rxdma,
-        crate::SystemIrqs,
-        bmi323_nss.into(),
-        imu_buf,
-    );
-
-    // IMU breakout INT2 is directly connected to the MCU with no hardware PU/PD. Select software Pull::Up and
-    // imu open drain
-    let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::None, crate::SystemIrqs);
-    let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::None, crate::SystemIrqs);
-
-    // Blocking flash access for persistent on-chip IMU calibration storage.
-    let flash = Flash::new_blocking(flash);
-
-    // Back user button: active-low, so a press is a falling edge.
-    let cal_button = ExtiInput::new(cal_button_pin, cal_button_exti, Pull::Up, crate::SystemIrqs);
-
-    imu_task_spawner.spawn(defmt::unwrap!(imu_task_entry(
-        robot_state,
-        gyro_data_publisher,
-        accel_data_publisher,
-        led_cmd_publisher,
-        telemetry_publisher,
-        imu,
-        accel_int,
-        gyro_int,
-        flash,
-        Some(cal_button),
-    )));
-}
-
-pub fn start_imu_task_via_ie(
-    imu_task_spawner: &SendSpawner,
-    robot_state: &'static SharedRobotState,
-    gyro_data_publisher: GyroDataPublisher,
-    accel_data_publisher: AccelDataPublisher,
-    led_cmd_publisher: LedCommandPublisher,
-    telemetry_publisher: TelemetryPublisher,
-    peri: Peri<'static, ImuSpi>,
-    sck: Peri<'static, impl SckPin<ImuSpi>>,
-    mosi: Peri<'static, impl MosiPin<ImuSpi>>,
-    miso: Peri<'static, impl MisoPin<ImuSpi>>,
-    txdma: Peri<'static, ImuSpiTxDma>,
-    rxdma: Peri<'static, ImuSpiRxDma>,
-    bmi323_nss: Peri<'static, ImuSpiNss0Pin>,
-    _ext_nss1_pin: Peri<'static, ExtImuSpiNss1Pin>,
-    _ext_nss2_pin: Peri<'static, ExtImuSpiNss2Pin>,
-    accel_int_pin: Peri<'static, ImuSpiInt1Pin>,
-    gyro_int_pin: Peri<'static, ImuSpiInt2Pin>,
-    accel_int: Peri<'static, <ImuSpiInt1Pin as embassy_stm32::gpio::ExtiPin>::ExtiChannel>,
-    gyro_int: Peri<'static, <ImuSpiInt2Pin as embassy_stm32::gpio::ExtiPin>::ExtiChannel>,
-    _ext_imu_det_pin: Peri<'static, ExtImuNDetPin>,
-    flash: Peri<'static, FLASH>,
-) {
-    defmt::debug!("starting imu task...");
-
-    // let imu_buf = IMU_BUFFER_CELL.take();
-    // let imu_buf: &'static mut [u8; 14] = unsafe { & mut IMU_BUFFER_CELL };
-    let imu_buf: &mut [u8; bmi323::SPI_MIN_BUF_LEN] = unsafe { &mut (*(&raw mut IMU_BUFFER_CELL)) };
-
-    let imu = Bmi323::new_from_pins(
-        peri,
-        sck,
-        mosi,
-        miso,
-        txdma,
-        rxdma,
-        crate::SystemIrqs,
-        bmi323_nss.into(),
-        imu_buf,
-    );
-
-    // IMU breakout INT2 is directly connected to the MCU with no hardware PU/PD. Select software Pull::Up and
-    // imu open drain
-    let accel_int = ExtiInput::new(accel_int_pin, accel_int, Pull::None, crate::SystemIrqs);
-    let gyro_int = ExtiInput::new(gyro_int_pin, gyro_int, Pull::None, crate::SystemIrqs);
-
-    // Blocking flash access for persistent on-chip IMU calibration storage.
-    let flash = Flash::new_blocking(flash);
-
-    imu_task_spawner.spawn(defmt::unwrap!(imu_task_entry(
-        robot_state,
-        gyro_data_publisher,
-        accel_data_publisher,
-        led_cmd_publisher,
-        telemetry_publisher,
-        imu,
-        accel_int,
-        gyro_int,
-        flash,
-        None,
     )));
 }

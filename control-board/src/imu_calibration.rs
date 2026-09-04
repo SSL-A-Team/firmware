@@ -12,10 +12,21 @@
 //! magic word, a format version, the firmware hash (so a firmware change that could
 //! alter the accel range/config invalidates stale calibration), and a CRC32.
 
-use ateam_lib_stm32::drivers::imu::bmi323::{AccelDpOffset, GyroDpOffsetGain};
+use ateam_lib_stm32::drivers::imu::bmi323::{AccelDpOffset, Bmi323, GyroDpOffsetGain};
 use embassy_stm32::flash::{Blocking, Flash};
+use embassy_time::Timer;
 
 use crate::git_version::FIRMWARE_HASH;
+
+/// Number of accelerometer samples averaged to estimate the (X/Y) bias during a fresh
+/// calibration. Sampled by polling (~2 s total); the gyro bias is handled by the
+/// sensor's built-in self-calibration, so only the accel bias is averaged in firmware.
+const ACCEL_CALIBRATION_SAMPLES: u32 = 2 * 1600;
+/// Polling period between accelerometer bias samples during calibration.
+const ACCEL_CALIBRATION_SAMPLE_PERIOD_US: u64 = 625;
+/// Accel Z below this magnitude (m/s^2) is treated as not upright; calibration is
+/// aborted so the bias is only ever estimated while the robot is upright.
+const ACCEL_UPRIGHT_Z_MPS2: f32 = 4.0;
 
 /// Magic identifying a valid calibration blob ("IMUC").
 const CAL_MAGIC: u32 = 0x494D_5543;
@@ -141,6 +152,94 @@ pub fn erase_calibration(flash: &mut Flash<'static, Blocking>) -> Result<(), ()>
         return Err(());
     }
     Ok(())
+}
+
+/// Loads a stored IMU calibration from flash (if present and valid) and writes it to
+/// the sensor's data-path offset registers (they are volatile and cleared by the soft
+/// reset in `imu.init()`). Returns `true` if a calibration was applied, `false` if
+/// none is present (the caller should then keep the IMU inop).
+pub async fn load_calibration_to_chip(
+    imu: &mut Bmi323<'static, 'static>,
+    flash: &mut Flash<'static, Blocking>,
+) -> bool {
+    let Some(cal) = load_calibration(flash) else {
+        return false;
+    };
+    imu.write_gyro_dp_offset_gain(&cal.gyro).await;
+    imu.write_accel_dp_offset(&cal.accel).await;
+    defmt::info!(
+        "IMU calibration restored from flash: gyro_off=[{}, {}, {}], accel_off_xy=[{}, {}]",
+        cal.gyro.off_x,
+        cal.gyro.off_y,
+        cal.gyro.off_z,
+        cal.accel.off_x,
+        cal.accel.off_y,
+    );
+    true
+}
+
+/// Runs a fresh on-chip IMU calibration and stores the result to flash, overwriting
+/// any existing calibration.
+///
+/// Runs the sensor's built-in gyro self-calibration plus a firmware accelerometer X/Y
+/// bias estimate (polled, upright-gated), applies both to the sensor's data-path
+/// offset registers, and persists them. The IMU must already be configured, and the
+/// robot must be upright and stationary. Returns the applied calibration on success.
+pub async fn run_calibration(
+    imu: &mut Bmi323<'static, 'static>,
+    flash: &mut Flash<'static, Blocking>,
+) -> Result<ImuCalibration, ()> {
+    // Built-in gyro self-calibration (offset). Requires the device stationary.
+    let gyro = imu.perform_gyro_self_calibration(true, false).await?;
+
+    // Accelerometer X/Y bias estimate. The accel DP offset registers are still zero
+    // here (cleared by the soft reset in imu.init()), so the measured average is the
+    // true bias.
+    let (bias_x_counts, bias_y_counts) = average_accel_bias(imu).await.ok_or(())?;
+
+    let accel = AccelDpOffset {
+        off_x: imu.accel_bias_counts_to_dp_offset(bias_x_counts),
+        off_y: imu.accel_bias_counts_to_dp_offset(bias_y_counts),
+        // Leave Z uncorrected so it keeps measuring gravity for tipped detection.
+        off_z: 0,
+    };
+    imu.write_accel_dp_offset(&accel).await;
+
+    let cal = ImuCalibration { gyro, accel };
+    store_calibration(flash, &cal)?;
+    defmt::info!(
+        "IMU calibrated on-chip and stored to flash: gyro_off=[{}, {}, {}], accel_off_xy=[{}, {}]",
+        cal.gyro.off_x,
+        cal.gyro.off_y,
+        cal.gyro.off_z,
+        cal.accel.off_x,
+        cal.accel.off_y,
+    );
+    Ok(cal)
+}
+
+/// Averages [`ACCEL_CALIBRATION_SAMPLES`] upright accelerometer samples (by polling the
+/// sensor) and returns the mean raw X/Y counts, i.e. the accel bias. Returns `None` if
+/// a non-upright sample is seen, so the estimate is only taken while the robot is
+/// upright. Polling is used (rather than the data-ready interrupt) so this can run
+/// during the quiet boot phase without EXTI wiring.
+async fn average_accel_bias(imu: &mut Bmi323<'static, 'static>) -> Option<(i16, i16)> {
+    let mut sum_x: i32 = 0;
+    let mut sum_y: i32 = 0;
+
+    for _ in 0..ACCEL_CALIBRATION_SAMPLES {
+        let raw = imu.accel_get_raw_data().await;
+        if imu.convert_accel_raw_sample_mps(raw[2]) < ACCEL_UPRIGHT_Z_MPS2 {
+            defmt::warn!("accel bias estimate aborted (not upright)");
+            return None;
+        }
+        sum_x += raw[0] as i32;
+        sum_y += raw[1] as i32;
+        Timer::after_micros(ACCEL_CALIBRATION_SAMPLE_PERIOD_US).await;
+    }
+
+    let n = ACCEL_CALIBRATION_SAMPLES as i32;
+    Some(((sum_x / n) as i16, (sum_y / n) as i16))
 }
 
 /// Standard CRC-32 (IEEE 802.3, reflected, poly 0xEDB88520). Computed once at boot

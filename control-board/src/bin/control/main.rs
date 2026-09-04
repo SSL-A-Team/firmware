@@ -3,13 +3,14 @@
 #![feature(impl_trait_in_assoc_type)]
 
 use embassy_executor::InterruptExecutor;
+use embassy_stm32::gpio::{Input, Pull};
 use embassy_stm32::{interrupt, pac::Interrupt, wdg::IndependentWatchdog};
 use embassy_sync::pubsub::PubSubChannel;
 
 use defmt_rtt as _;
 
 use ateam_control_board::{
-    create_audio_task, create_control_task, create_dotstar_task, create_imu_task_cal,
+    create_audio_task, create_control_task, create_dotstar_task, create_imu_task,
     create_io_task,
     create_kicker_task, create_power_task, create_radio_task, get_system_config, git_version as gv,
     pins::{
@@ -17,6 +18,7 @@ use ateam_control_board::{
         PowerTelemetryPubSub, TelemetryPubSub,
     },
     robot_state::SharedRobotState,
+    tasks::imu_task::{build_imu, run_boot_maintenance, ImuBootAction},
 };
 
 // load credentials from correct crate
@@ -40,6 +42,11 @@ use static_cell::ConstStaticCell;
 
 static ROBOT_STATE: ConstStaticCell<SharedRobotState> =
     ConstStaticCell::new(SharedRobotState::new());
+
+/// Bench-test override: when `Some`, forces the IMU boot action instead of reading the
+/// enter/back buttons, so each maintenance path can be flashed and exercised without
+/// physically holding a button. Leave `None` for production.
+const FORCE_BOOT_ACTION: Option<ImuBootAction> = None;
 
 static RADIO_C2_CHANNEL: CommandsPubSub = PubSubChannel::new();
 static RADIO_TELEMETRY_CHANNEL: TelemetryPubSub = PubSubChannel::new();
@@ -98,6 +105,47 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     );
 
     let robot_state = ROBOT_STATE.take();
+
+    ////////////////////////////////////////////////////////////////////////
+    //  IMU boot maintenance (before spawning the heavy tasks)             //
+    //                                                                     //
+    //  Calibrating/erasing does a blocking full-sector flash write, which //
+    //  must not race with the 1 kHz control loop / motor / radio          //
+    //  interrupts. Do it here, while the system is quiet, then halt; a     //
+    //  reboot then runs normally. Buttons: hold ENTER to calibrate, hold   //
+    //  BACK to erase; no button -> normal boot.                            //
+    ////////////////////////////////////////////////////////////////////////
+    let enter_held = Input::new(p.PE11, Pull::Up).is_low();
+    let back_held = Input::new(p.PE10, Pull::Up).is_low();
+    let boot_action = FORCE_BOOT_ACTION.unwrap_or(if enter_held {
+        ImuBootAction::Calibrate
+    } else if back_held {
+        ImuBootAction::EraseCalibration
+    } else {
+        ImuBootAction::Normal
+    });
+    defmt::info!("IMU boot action: {}", boot_action);
+
+    if boot_action != ImuBootAction::Normal {
+        // Spawn only the dotstar task (light, no flash) for LED feedback, then run the
+        // maintenance routine and halt. This branch diverges, so the normal boot code
+        // below still owns the peripherals moved into it here.
+        let led_command_subscriber = LED_COMMAND_PUBSUB.subscriber().unwrap();
+        create_dotstar_task!(main_spawner, led_command_subscriber, p);
+        let imu_led_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
+
+        let mut imu = build_imu(
+            p.SPI1, p.PA5, p.PA7, p.PA6, p.DMA2_CH7, p.DMA2_CH6, p.PA4,
+        );
+        let mut flash = embassy_stm32::flash::Flash::new_blocking(p.FLASH);
+
+        run_boot_maintenance(&mut imu, &mut flash, &imu_led_publisher, boot_action).await;
+
+        defmt::info!("IMU boot maintenance complete; halted. Reboot to run normally.");
+        loop {
+            Timer::after_millis(1000).await;
+        }
+    }
 
     ////////////////////////
     //  setup task pools  //
@@ -184,7 +232,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p
     );
 
-    create_imu_task_cal!(
+    create_imu_task!(
         main_spawner,
         robot_state,
         imu_gyro_data_publisher,

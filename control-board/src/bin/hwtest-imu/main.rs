@@ -4,15 +4,17 @@
 
 use embassy_executor::InterruptExecutor;
 use embassy_futures::select::{self, Either3};
+use embassy_stm32::gpio::{Input, Pull};
 use embassy_stm32::interrupt;
 use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 
 use defmt_rtt as _;
 
 use ateam_control_board::{
-    create_dotstar_task, create_imu_task_cal, create_io_task, get_system_config,
+    create_dotstar_task, create_imu_task, create_io_task, get_system_config,
     pins::{AccelDataPubSub, GyroDataPubSub, LedCommandPubSub, TelemetryPubSub},
     robot_state::SharedRobotState,
+    tasks::imu_task::{build_imu, run_boot_maintenance, ImuBootAction},
 };
 
 use embassy_time::Timer;
@@ -22,6 +24,11 @@ use static_cell::ConstStaticCell;
 
 static ROBOT_STATE: ConstStaticCell<SharedRobotState> =
     ConstStaticCell::new(SharedRobotState::new());
+
+/// Bench-test override: when `Some`, forces the IMU boot action instead of reading the
+/// enter/back buttons, so each maintenance path can be flashed and exercised without
+/// physically holding a button. Leave `None` for production.
+const FORCE_BOOT_ACTION: Option<ImuBootAction> = None;
 
 static GYRO_DATA_CHANNEL: GyroDataPubSub = PubSubChannel::new();
 static ACCEL_DATA_CHANNEL: AccelDataPubSub = PubSubChannel::new();
@@ -45,6 +52,38 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     defmt::info!("embassy HAL configured.");
 
     let robot_state = ROBOT_STATE.take();
+
+    // IMU boot maintenance: hold ENTER to calibrate, hold BACK to erase (or use
+    // FORCE_BOOT_ACTION). Runs before spawning the imu task, then halts; reboot to run
+    // the normal validation. See the control binary for the rationale.
+    let enter_held = Input::new(p.PE11, Pull::Up).is_low();
+    let back_held = Input::new(p.PE10, Pull::Up).is_low();
+    let boot_action = FORCE_BOOT_ACTION.unwrap_or(if enter_held {
+        ImuBootAction::Calibrate
+    } else if back_held {
+        ImuBootAction::EraseCalibration
+    } else {
+        ImuBootAction::Normal
+    });
+    defmt::info!("IMU boot action: {}", boot_action);
+
+    if boot_action != ImuBootAction::Normal {
+        let led_command_subscriber = LED_COMMAND_PUBSUB.subscriber().unwrap();
+        create_dotstar_task!(main_spawner, led_command_subscriber, p);
+        let imu_led_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
+
+        let mut imu = build_imu(
+            p.SPI1, p.PA5, p.PA7, p.PA6, p.DMA2_CH7, p.DMA2_CH6, p.PA4,
+        );
+        let mut flash = embassy_stm32::flash::Flash::new_blocking(p.FLASH);
+
+        run_boot_maintenance(&mut imu, &mut flash, &imu_led_publisher, boot_action).await;
+
+        defmt::info!("IMU boot maintenance complete; halted. Reboot to run normally.");
+        loop {
+            Timer::after_millis(1000).await;
+        }
+    }
 
     ////////////////////////
     //  setup task pools  //
@@ -73,7 +112,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     // create_audio_task!(main_spawner, robot_state, p);
 
-    create_imu_task_cal!(
+    create_imu_task!(
         main_spawner,
         robot_state,
         imu_gyro_data_publisher,
@@ -85,16 +124,13 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     defmt::info!("=====================================================");
     defmt::info!("IMU hardware test / on-chip calibration validation");
-    defmt::info!("On boot the IMU loads its calibration from flash. If");
-    defmt::info!("none is stored, the IMU stays INOP (no auto-cal).");
-    defmt::info!("Press the BACK button to (re)calibrate: the IMU goes");
-    defmt::info!("inop, the IMU LED turns MAGENTA, and after a 1s wait");
-    defmt::info!("the gyro self-cal + accel offset run and overwrite");
-    defmt::info!("flash. HOLD the BACK button ~3s to DELETE the stored");
-    defmt::info!("calibration (IMU returns to inop). Keep the robot");
-    defmt::info!("UPRIGHT and STATIONARY on a level surface during");
-    defmt::info!("calibration. This loop verifies the published data");
-    defmt::info!("is bias-corrected once calibrated.");
+    defmt::info!("Normal boot loads the calibration from flash; if none");
+    defmt::info!("is stored the IMU stays INOP. To (re)calibrate or erase,");
+    defmt::info!("hold ENTER (calibrate) or BACK (erase) at boot -> the IMU");
+    defmt::info!("does the work then halts; reboot to run normally. Keep");
+    defmt::info!("the robot UPRIGHT and STATIONARY on a level surface while");
+    defmt::info!("calibrating. This loop verifies the published data is");
+    defmt::info!("bias-corrected once calibrated.");
     defmt::info!("=====================================================");
 
     validate_imu(
