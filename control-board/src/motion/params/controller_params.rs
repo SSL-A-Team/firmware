@@ -12,12 +12,11 @@ use nalgebra::{Matrix3x5, SMatrix};
 pub const EKF_BUFFER_LEN: usize = 64;
 pub const EKF_DELAY_US: u32 = 35000;
 pub const VISION_DELAY_US: u32 = 35000;
-const VISION_VAR_M: f32 = 0.003*0.003;
+const VISION_VAR_M: f32 = 0.05*0.05;
 const VISION_VAR_RAD: f32 = 0.1*0.1;
 const PROC_VAR_M: f32 = 0.001*0.001;  // m
-const PROC_VAR_RAD: f32 = 0.01*0.01;  // rad
-const PROC_VAR_MPS: f32 = 0.01*0.01;  // m/s
-const PROC_VAR_RADPS: f32 = 0.1*0.1;  // rad/s
+const PROC_VAR_RAD: f32 = 0.001*0.001;  // rad
+const PROC_VAR_MPS: f32 = 0.005*0.005;  // m/s
 pub const EKF_R: SMatrix<f32, MEAS_LEN, MEAS_LEN> = SMatrix::<f32, MEAS_LEN, MEAS_LEN>::new(
     VISION_VAR_M, 0.,           0.,
     0.,           VISION_VAR_M, 0.,

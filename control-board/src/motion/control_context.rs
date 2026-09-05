@@ -4,7 +4,7 @@ use crate::motion::params::controller_params::{
 use crate::motion::pid::PidController;
 use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
 use ateam_common_packets::radio::ManeuverCommand;
-use ateam_controls::state_estimation::{BufferedEKF, INPUT_LEN, MEAS_LEN};
+use ateam_controls::state_estimation::{BufferedEKF, INPUT_LEN, MEAS_LEN, STATE_LEN};
 use ateam_controls::bangbang_trajectory::BangBangTraj3D;
 use ateam_controls::linear_trajectory::LinearTrajectory;
 use ateam_controls::pivot_trajectory::PivotTrajectory;
@@ -17,7 +17,7 @@ use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
 use core::f32::consts::PI;
 use embassy_time::Duration;
 use libm::{fabsf, hypotf, remainderf, sqrtf};
-use nalgebra::SVector;
+use nalgebra::{SMatrix, SVector};
 
 pub(crate) const VISION_ACTIVE_TIMEOUT_S: f32 = 0.5;
 
@@ -160,6 +160,10 @@ pub struct ControlContext {
     pub robot_model: RobotModel,
     //////////////// EKF ///////////////////
     pub ekf: BufferedEKF<EKF_BUFFER_LEN>,
+    /// Live EKF process covariance Q (tunable via KF_PROCESS_STD parameter).
+    pub ekf_q: SMatrix<f32, STATE_LEN, STATE_LEN>,
+    /// Live EKF measurement covariance R (tunable via KF_MEASUREMENT_STD parameter).
+    pub ekf_r: SMatrix<f32, MEAS_LEN, MEAS_LEN>,
     //////////////// EKF ///////////////////
     pub pose_pid_controller: PidController<3>,
     /// Accel (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
@@ -229,6 +233,8 @@ impl ControlContext {
                 SVector::<f32, 3>::zeros(),
                 SVector::<f32, 3>::zeros(),
             ),
+            ekf_q: EKF_Q,
+            ekf_r: EKF_R,
             //////////////// EKF ///////////////////
             pose_pid_controller: PidController::<3>::from_gains_matrix_with_anti_jitter(
                 &controller_params::pose_pid_gains(),
@@ -269,6 +275,21 @@ impl ControlContext {
         self.wheels_disabled = true;
         self.tracking_divergence_state = TrackingDivergenceState::Normal;
         self.tracking_recovery_at_rest_ticks = 0;
+    }
+
+    /// Fully reconstruct the buffered EKF using the current `ekf_q` / `ekf_r`
+    /// covariances. Called after a KF_PROCESS_STD / KF_MEASUREMENT_STD write so
+    /// the new variances take effect. State is reinitialized to zeros.
+    pub fn reinit_ekf(&mut self) {
+        self.ekf = BufferedEKF::<EKF_BUFFER_LEN>::new(
+            (self.dt * 1e6) as u32,
+            EKF_DELAY_US,
+            self.ekf_r,
+            self.ekf_q,
+            EKF_CORR_FACTOR,
+            SVector::<f32, 3>::zeros(),
+            SVector::<f32, 3>::zeros(),
+        );
     }
 
     /// Clear trajectory and command history without touching the PID or KF.
@@ -803,19 +824,25 @@ impl ControlContext {
         let phys = &self.robot_model.physical_params;
         match name {
             ParameterName::KF_PROCESS_STD => {
+                // EKF process covariance Q -> std (sqrt of diagonal variances).
+                // Q diag = [pos_lin, pos_lin, pos_ang, vel_lin, vel_lin]; the
+                // KF_PROCESS_STD vel-angular slot has no EKF state and reads 0.
                 reply.data.vec4_f32 = [
-                    kf.process_noise_std_pos_linear,
-                    kf.process_noise_std_pos_angular,
-                    kf.process_noise_std_vel_linear,
-                    kf.process_noise_std_vel_angular,
+                    sqrtf(self.ekf_q[(0, 0)]),
+                    sqrtf(self.ekf_q[(2, 2)]),
+                    sqrtf(self.ekf_q[(3, 3)]),
+                    0.0,
                 ];
             }
             ParameterName::KF_MEASUREMENT_STD => {
+                // EKF measurement covariance R -> std (sqrt of diagonal
+                // variances). R diag = [vision_lin, vision_lin, vision_ang];
+                // the encoder/gyro slots are unused by the EKF and read 0.
                 reply.data.vec4_f32 = [
-                    kf.measurement_noise_std_vision_pos_linear,
-                    kf.measurement_noise_std_vision_pos_angular,
-                    kf.measurement_noise_std_encoder_vel_angular,
-                    kf.measurement_noise_std_gyro_vel_angular,
+                    sqrtf(self.ekf_r[(0, 0)]),
+                    sqrtf(self.ekf_r[(2, 2)]),
+                    0.0,
+                    0.0,
                 ];
             }
             ParameterName::KF_MAX_STATE => {
@@ -875,22 +902,39 @@ impl ControlContext {
     pub fn write_param(&mut self, cmd: &ParameterCommand) {
         match cmd.parameter_name {
             ParameterName::KF_PROCESS_STD => {
+                // std -> variance (square); build EKF process covariance Q.
+                // Q diag = [pos_lin, pos_lin, pos_ang, vel_lin, vel_lin]; the
+                // vel-angular std slot (v[3]) has no EKF state and is ignored.
                 let v = unsafe { cmd.data.vec4_f32 };
-                let mut kf = self.robot_model.kf_params;
-                kf.process_noise_std_pos_linear = v[0];
-                kf.process_noise_std_pos_angular = v[1];
-                kf.process_noise_std_vel_linear = v[2];
-                kf.process_noise_std_vel_angular = v[3];
-                self.robot_model.update_kf_params(kf);
+                let pos_lin_var = v[0] * v[0];
+                let pos_ang_var = v[1] * v[1];
+                let vel_lin_var = v[2] * v[2];
+                self.ekf_q = SMatrix::<f32, STATE_LEN, STATE_LEN>::from_diagonal(
+                    &SVector::<f32, STATE_LEN>::from([
+                        pos_lin_var,
+                        pos_lin_var,
+                        pos_ang_var,
+                        vel_lin_var,
+                        vel_lin_var,
+                    ]),
+                );
+                self.reinit_ekf();
             }
             ParameterName::KF_MEASUREMENT_STD => {
+                // std -> variance (square); build EKF measurement covariance R.
+                // R diag = [vision_lin, vision_lin, vision_ang]; the encoder
+                // (v[2]) and gyro (v[3]) std slots are unused by the EKF.
                 let v = unsafe { cmd.data.vec4_f32 };
-                let mut kf = self.robot_model.kf_params;
-                kf.measurement_noise_std_vision_pos_linear = v[0];
-                kf.measurement_noise_std_vision_pos_angular = v[1];
-                kf.measurement_noise_std_encoder_vel_angular = v[2];
-                kf.measurement_noise_std_gyro_vel_angular = v[3];
-                self.robot_model.update_kf_params(kf);
+                let vision_lin_var = v[0] * v[0];
+                let vision_ang_var = v[1] * v[1];
+                self.ekf_r = SMatrix::<f32, MEAS_LEN, MEAS_LEN>::from_diagonal(
+                    &SVector::<f32, MEAS_LEN>::from([
+                        vision_lin_var,
+                        vision_lin_var,
+                        vision_ang_var,
+                    ]),
+                );
+                self.reinit_ekf();
             }
             ParameterName::KF_MAX_STATE => {
                 let v = unsafe { cmd.data.vec4_f32 };
