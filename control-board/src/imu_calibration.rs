@@ -19,9 +19,9 @@ use embassy_time::Timer;
 use crate::git_version::FIRMWARE_HASH;
 
 /// Number of accelerometer samples averaged to estimate the (X/Y) bias during a fresh
-/// calibration. Sampled by polling (~2 s total); the gyro bias is handled by the
+/// calibration. Sampled by polling (~5 s total); the gyro bias is handled by the
 /// sensor's built-in self-calibration, so only the accel bias is averaged in firmware.
-const ACCEL_CALIBRATION_SAMPLES: u32 = 2 * 1600;
+const ACCEL_CALIBRATION_SAMPLES: u32 = 5 * 1600;
 /// Polling period between accelerometer bias samples during calibration.
 const ACCEL_CALIBRATION_SAMPLE_PERIOD_US: u64 = 625;
 /// Accel Z below this magnitude (m/s^2) is treated as not upright; calibration is
