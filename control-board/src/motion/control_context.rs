@@ -66,55 +66,6 @@ impl ManeuverSetpoints {
     }
 }
 
-/// Startup seeding and steady-state tracking state for the vision outlier gate.
-///
-/// On boot the gate starts in `Seeding`, collecting vision samples until the
-/// position estimates are stable enough to trust. Once seeded it transitions to
-/// `Tracking`, where each incoming vision measurement is compared against the
-/// KF's predicted position. Measurements outside the gate are rejected as
-/// outliers; the gate expands over time so a robot that has been physically
-/// repositioned can eventually re-enter and be accepted.
-pub enum VisionGateState {
-    /// Collecting initial vision samples. Transitions to `Tracking` once
-    /// `VISION_SEED_SAMPLES` samples have been received and their positional
-    /// standard deviation is below `VISION_SEED_POS_STD_THRESH_M`.
-    Seeding {
-        n: u32,
-        pos_sum: Vector2f,
-        pos_sq_sum: Vector2f,
-    },
-    /// Gate is active. Measurements within `VISION_GATE_BASE_RADIUS_M +
-    /// VISION_GATE_EXPAND_RATE_M_PER_S * time_since_last_valid_s` of the KF
-    /// predicted position are accepted; others are rejected and the expansion
-    /// timer advances.
-    Tracking { time_since_last_valid_s: f32 },
-}
-
-impl Default for VisionGateState {
-    fn default() -> Self {
-        VisionGateState::Seeding {
-            n: 0,
-            pos_sum: Vector2f::zeros(),
-            pos_sq_sum: Vector2f::zeros(),
-        }
-    }
-}
-
-/// Notable vision gate events reported to the caller each tick via
-/// `ControlContext::last_gate_event`. Reset to `None` on normal ticks.
-/// Used by `control_task` to emit `ErrorTelemetry` over radio.
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub enum VisionGateEvent {
-    None,
-    /// Seed stability check failed — robot was not stationary, restarting.
-    SeedReset,
-    /// First outlier rejection after a valid tracking period (start of a burst).
-    /// Subsequent rejections in the same burst are suppressed to avoid spam.
-    FirstReject,
-    /// Measurement accepted after gate expansion — robot was physically repositioned.
-    AcceptJump,
-}
-
 /// Trajectory-divergence recovery state. A large unexpected tracking error
 /// (e.g. a collision knocks the robot off course) trips the controller into
 /// `Recovering`, where it commands an active brake until the wheels stop; only
@@ -127,28 +78,6 @@ pub enum TrackingDivergenceState {
     /// Diverged: commanding active brake, waiting for the wheels to stop before
     /// resetting the controller.
     Recovering,
-}
-
-/// Internal gate decision for a single vision tick. Computed with only
-/// `vision_gate` borrowed, then applied once that borrow ends.
-enum GateAction {
-    /// Still accumulating seed samples — no update to KF.
-    Accumulate,
-    /// Seed samples collected but variance check failed — restart accumulator.
-    SeedReset,
-    /// Seed stable — snap KF to vision and transition to Tracking.
-    SeedComplete,
-    /// Measurement within base radius — pass to KF update normally.
-    Accept,
-    /// Measurement outside base radius but within expanded gate — snap KF
-    /// to vision and reset velocity to encoder-implied.
-    AcceptJump,
-    /// First outlier rejection since the last valid update — emit telemetry once.
-    FirstReject,
-    /// Subsequent outlier rejection in the same burst — suppress telemetry.
-    Reject,
-    /// No vision packet this tick.
-    NoVision,
 }
 
 /// Controller infrastructure passed into each maneuver on every tick.
