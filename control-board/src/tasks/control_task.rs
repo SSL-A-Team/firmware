@@ -409,7 +409,7 @@ impl<
             // self.motor_fr.log_reset("FR");
 
             ticks_since_control_packet += 1;
-            while let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
+            if let Some(latest_packet) = self.command_subscriber.try_next_message_pure() {
                 match latest_packet {
                     ateam_common_packets::radio::DataPacket::BasicControl(latest_control) => {
                         if latest_control.reboot_robot() != 0 {
