@@ -394,8 +394,8 @@ impl ControlContext {
         // Capture post-snap / pre-KF-update state for telemetry.
         //////////////// EKF ///////////////////
         let mut state_prediction = SVector::<f32, 6>::zeros();
-        state_prediction.fixed_rows_mut::<3>(0).copy_from(&self.ekf.get_ekf_pos());
-        state_prediction.fixed_rows_mut::<3>(3).copy_from(&self.ekf.get_ekf_vel());
+        state_prediction.fixed_rows_mut::<3>(0).copy_from(&self.ekf.get_pos_buff());
+        state_prediction.fixed_rows_mut::<3>(3).copy_from(&self.ekf.get_vel_buff());
         //////////////// EKF ///////////////////
 
         // let measurement: Vector8f = if matches!(
