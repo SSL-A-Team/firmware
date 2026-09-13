@@ -78,6 +78,7 @@ impl BodyController {
         &mut self,
         last_command: BasicControl,
         vision_pose_meas: Vector3f,
+        vision_t_capture_host_us: u64,
         vision_update: bool,
         wheel_vel_meas: Vector4f,
         imu_gyro_theta_meas: f32,
@@ -91,6 +92,7 @@ impl BodyController {
 
         let state_prediction = self.control_context.update_state_estimate(
             vision_pose_meas,
+            vision_t_capture_host_us,
             vision_update,
             wheel_vel_meas,
             imu_gyro_theta_meas,

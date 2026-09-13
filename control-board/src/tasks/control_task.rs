@@ -5,7 +5,7 @@ use ateam_common_packets::{
     },
     radio::TelemetryPacket,
 };
-use ateam_controls::defaults::DEFAULT_CONTROL_DT;
+use ateam_controls::defaults::DEFAULT_CONTROL_DT_US;
 use ateam_controls::{Vector3f, Vector4f};
 
 use crate::create_error_telemetry_from_string;
@@ -21,7 +21,6 @@ use crate::{
     include_external_cpp_bin,
     motion::{
         active_brake::ActiveBrakeController, body_controller::BodyController,
-        control_context::VisionGateEvent,
     },
     motor::CurrentControlledMotor,
     parameter_interface::ParameterInterface,
@@ -52,13 +51,11 @@ static_idle_buffered_uart!(BACK_LEFT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_P
 static_idle_buffered_uart!(BACK_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 static_idle_buffered_uart!(FRONT_RIGHT, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, DEBUG_MOTOR_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
-const CONTROL_FREQ: f32 = 1.0 / DEFAULT_CONTROL_DT; // Hz
+const CONTROL_FREQ: f32 = 1.0 / (DEFAULT_CONTROL_DT_US as f32 * 1e-6); // Hz
 const BASIC_TELEM_FREQ: f32 = 100.0; // Hz, send basic telemetry at this frequency
 const EXTENDED_TELEM_FREQ: f32 = 100.0; // Hz, send extended telemetry at this frequency, or immediately when a vision update is received
 const TRACE_PRINT_FREQ: f32 = 10.0; // Hz, print trace info at this frequency
 const TIME_WITHOUT_PACKET_STOP: f32 = 0.5; // seconds, time without receiving a control packet before locking out motor commands
-
-const CONTROL_DT_US: u64 = (DEFAULT_CONTROL_DT * 1e6) as u64; // us
 
 // rate limit for error telemetry — prevents 1kHz error flood from starving radio
 // value is a diagnostic choice: UART at 5.25 Mbaud has negligible bandwidth constraint
@@ -366,14 +363,15 @@ impl<
         Timer::after_millis(10).await;
 
         let mut ctrl_seq_number = 0;
-        let loop_period = Duration::from_micros(CONTROL_DT_US);
+        let loop_period = Duration::from_micros(DEFAULT_CONTROL_DT_US as u64);
         let mut loop_rate_ticker = Ticker::every(loop_period);
 
-        let mut robot_controller = BodyController::new(DEFAULT_CONTROL_DT);
+        let mut robot_controller = BodyController::new(DEFAULT_CONTROL_DT_US as f32 * 1e-6);
 
         let mut _cmd_mode = BodyControlMode::BCM_OFF;
         let mut _cmd = BodyControlCommand::default();
         let mut last_vision_pose_meas = Vector3f::default();
+        let mut last_vision_t_capture_host_us: u64 = 0;
         let mut vision_update = false;
         let mut ticks_since_control_packet = 0;
 
@@ -384,9 +382,9 @@ impl<
         loop {
             let t_loop_start = Instant::now();
             let loop_invocation_dead_time = t_loop_start - last_loop_term_time;
-            if loop_invocation_dead_time > Duration::from_micros(CONTROL_DT_US) {
+            if loop_invocation_dead_time > Duration::from_micros(DEFAULT_CONTROL_DT_US as u64) {
                 if self.sched_lag_err_limiter.is_allowed() {
-                    defmt::warn!("control loop scheuling lagged. Expected <{:?}us between loop invocations, but got {:?}us", CONTROL_DT_US, loop_invocation_dead_time.as_micros());
+                    defmt::warn!("control loop scheuling lagged. Expected <{:?}us between loop invocations, but got {:?}us", DEFAULT_CONTROL_DT_US, loop_invocation_dead_time.as_micros());
                     self.telemetry_publisher
                         .publish_immediate(TelemetryPacket::ErrorTelemetry(
                             create_error_telemetry_from_string("control loop scheduling lagged"),
@@ -425,6 +423,7 @@ impl<
                         _cmd_mode = latest_control.body_control_mode;
                         _cmd = latest_control.cmd;
                         last_vision_pose_meas = latest_control.vision_position_update.into();
+                        last_vision_t_capture_host_us = (latest_control.vision_capture_us_hi as u64) << 32 | (latest_control.vision_capture_us_lo as u64);
                         vision_update = latest_control.vision_update() != 0;
 
                         let wheel_motion_type = match (
@@ -506,6 +505,7 @@ impl<
             match robot_controller.control_update(
                 self.last_command,
                 last_vision_pose_meas,
+                last_vision_t_capture_host_us,
                 vision_update,
                 wheel_vel_meas,
                 self.last_imu_gyro_theta,
@@ -535,23 +535,23 @@ impl<
                         }
                     }
                     if self.vision_gate_err_limiter.is_allowed() {
-                        let msg = match robot_controller.control_context.last_gate_event {
-                            VisionGateEvent::SeedReset => {
-                                Some("vision gate: seed unstable, restarting")
-                            }
-                            VisionGateEvent::FirstReject => Some("vision gate: outlier rejected"),
-                            VisionGateEvent::AcceptJump => {
-                                Some("vision gate: large jump accepted, controller reset")
-                            }
-                            VisionGateEvent::None => None,
-                        };
-                        if let Some(msg) = msg {
-                            self.telemetry_publisher.publish_immediate(
-                                TelemetryPacket::ErrorTelemetry(
-                                    create_error_telemetry_from_string(msg),
-                                ),
-                            );
-                        }
+                        // let msg = match robot_controller.control_context.last_gate_event {
+                        //     VisionGateEvent::SeedReset => {
+                        //         Some("vision gate: seed unstable, restarting")
+                        //     }
+                        //     VisionGateEvent::FirstReject => Some("vision gate: outlier rejected"),
+                        //     VisionGateEvent::AcceptJump => {
+                        //         Some("vision gate: large jump accepted, controller reset")
+                        //     }
+                        //     VisionGateEvent::None => None,
+                        // };
+                        // if let Some(msg) = msg {
+                        //     self.telemetry_publisher.publish_immediate(
+                        //         TelemetryPacket::ErrorTelemetry(
+                        //             create_error_telemetry_from_string(msg),
+                        //         ),
+                        //     );
+                        // }
                     }
                     if robot_controller.tracking_divergence_recovery_active()
                         && self.tracking_diverged_err_limiter.is_allowed()
@@ -610,7 +610,7 @@ impl<
                 self.motor_fr.set_motion_enabled(true);
                 let brake_a = self
                     .active_brake_controller
-                    .compute(wheel_vel_meas, DEFAULT_CONTROL_DT);
+                    .compute(wheel_vel_meas, DEFAULT_CONTROL_DT_US as f32 * 1e-6);
                 (brake_a, Vector4f::default())
             } else {
                 self.active_brake_controller.reset();

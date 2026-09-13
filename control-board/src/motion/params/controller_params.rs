@@ -1,35 +1,9 @@
 use ateam_controls::{Vector2f, Vector3f, Vector4f, Vector5f};
-use ateam_controls::state_estimation::{STATE_LEN, MEAS_LEN};
 use embassy_time::Duration;
-use nalgebra::{Matrix3x5, SMatrix};
+use nalgebra::{Matrix3x5};
 
 // PID gains per row: [Kp, Ki, Kd, Ki_err_min, Ki_err_max]
 
-//////////////////////////////
-//  state estimation params //
-//////////////////////////////
-
-pub const EKF_BUFFER_LEN: usize = 64;
-pub const EKF_DELAY_US: u32 = 35000;
-pub const VISION_DELAY_US: u32 = 35000;
-const VISION_VAR_M: f32 = 0.05*0.05;
-const VISION_VAR_RAD: f32 = 0.1*0.1;
-const PROC_VAR_M: f32 = 0.001*0.001;  // m
-const PROC_VAR_RAD: f32 = 0.001*0.001;  // rad
-const PROC_VAR_MPS: f32 = 0.005*0.005;  // m/s
-pub const EKF_R: SMatrix<f32, MEAS_LEN, MEAS_LEN> = SMatrix::<f32, MEAS_LEN, MEAS_LEN>::new(
-    VISION_VAR_M, 0.,           0.,
-    0.,           VISION_VAR_M, 0.,
-    0.,           0.,           VISION_VAR_RAD,
-);
-pub const EKF_Q: SMatrix<f32, STATE_LEN, STATE_LEN> = SMatrix::<f32, STATE_LEN, STATE_LEN>::new(
-    PROC_VAR_M,   0.,         0.,           0.,           0.,
-    0.,           PROC_VAR_M, 0.,           0.,           0.,
-    0.,           0.,         PROC_VAR_RAD, 0.,           0.,
-    0.,           0.,         0.,           PROC_VAR_MPS, 0.,
-    0.,           0.,         0.,           0.,           PROC_VAR_MPS,
-);
-pub const EKF_CORR_FACTOR: f32 = 1.0;
 
 //////////////////////////////
 //  current feedback gains  //
@@ -204,19 +178,6 @@ pub const ENC_LAG_MODE: EncLagMode = EncLagMode::Disabled;
 // the robot must receive SEED_SAMPLES consecutive vision measurements whose
 // positional standard deviation is below the threshold before the KF is seeded,
 // implicitly requiring the robot to be near-stationary at boot.
-
-const VISION_GATE_V_MAX_M_PER_S: f32 = 3.0;
-const VISION_GATE_N_MISS: u32 = 3;
-const VISION_GATE_T_VISION_S: f32 = 1.0 / 60.0;
-const VISION_GATE_T_LATENCY_S: f32 = 0.150;
-const VISION_GATE_SLACK_M: f32 = 0.005;
-
-pub const VISION_SEED_SAMPLES: u32 = 20;
-pub const VISION_SEED_POS_STD_THRESH_M: f32 = 0.03;
-pub const VISION_GATE_BASE_RADIUS_M: f32 = VISION_GATE_V_MAX_M_PER_S
-    * (VISION_GATE_N_MISS as f32 * VISION_GATE_T_VISION_S + VISION_GATE_T_LATENCY_S)
-    + VISION_GATE_SLACK_M;
-pub const VISION_GATE_EXPAND_RATE_M_PER_S: f32 = 2.0;
 
 // Encoder lag model physical parameters.
 // K[i]:       DC gain per axis (dimensionless).

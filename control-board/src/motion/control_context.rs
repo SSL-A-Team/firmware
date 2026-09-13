@@ -1,10 +1,14 @@
 use crate::motion::params::controller_params::{
-    EKF_BUFFER_LEN, EKF_CORR_FACTOR, EKF_DELAY_US, EKF_Q, EKF_R, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE, EncLagMode, POSE_ACCEL_MODE, POSE_VEL_MODE, PoseAccelMode, PoseVelMode, TRACKING_DIVERGENCE_RECOVERY_REST_TICKS, TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL, VISION_DELAY_US, VISION_GATE_BASE_RADIUS_M, VISION_GATE_EXPAND_RATE_M_PER_S, VISION_SEED_POS_STD_THRESH_M, VISION_SEED_SAMPLES,
+    PoseAccelMode, PoseVelMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON,
+    ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE,
+    TRACKING_DIVERGENCE_RECOVERY_REST_TICKS,
+    TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL
 };
 use crate::motion::pid::PidController;
 use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
 use ateam_common_packets::radio::ManeuverCommand;
-use ateam_controls::state_estimation::{BufferedEKF, INPUT_LEN, MEAS_LEN, STATE_LEN};
+use ateam_controls::defaults::{DEFAULT_EKF_BUFF_LEN, DEFAULT_VISION_BUFF_LEN, EKF_INPUT_LEN, EKF_MEAS_LEN, EKF_STATE_LEN};
+use ateam_controls::state_estimation::{BufferedEKF, StateEstimator, VisionFilter, VisionSample};
 use ateam_controls::bangbang_trajectory::BangBangTraj3D;
 use ateam_controls::linear_trajectory::LinearTrajectory;
 use ateam_controls::pivot_trajectory::PivotTrajectory;
@@ -15,7 +19,7 @@ use ateam_controls::{
 };
 use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
 use core::f32::consts::PI;
-use embassy_time::Duration;
+use embassy_time::{Duration, Instant};
 use libm::{fabsf, hypotf, remainderf, sqrtf};
 use nalgebra::{SMatrix, SVector};
 
@@ -87,13 +91,7 @@ pub enum TrackingDivergenceState {
 /// tracking helpers.
 pub struct ControlContext {
     pub robot_model: RobotModel,
-    //////////////// EKF ///////////////////
-    pub ekf: BufferedEKF<EKF_BUFFER_LEN>,
-    /// Live EKF process covariance Q (tunable via KF_PROCESS_STD parameter).
-    pub ekf_q: SMatrix<f32, STATE_LEN, STATE_LEN>,
-    /// Live EKF measurement covariance R (tunable via KF_MEASUREMENT_STD parameter).
-    pub ekf_r: SMatrix<f32, MEAS_LEN, MEAS_LEN>,
-    //////////////// EKF ///////////////////
+    pub state_estimator: StateEstimator<DEFAULT_EKF_BUFF_LEN, DEFAULT_VISION_BUFF_LEN>,
     pub pose_pid_controller: PidController<3>,
     /// Accel (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
     pub pose_accel_gain: Vector2f,
@@ -111,11 +109,6 @@ pub struct ControlContext {
     pub dt: f32,
     /// Cached KF state estimate — updated each tick before maneuver dispatch.
     pub state_estimate: Vector6f,
-    pub time_since_vision_update_s: f32,
-    pub vision_gate: VisionGateState,
-    /// Notable gate event from the most recent `update_state_estimate` call.
-    /// Reset to `None` every tick; set when a reportable condition occurs.
-    pub last_gate_event: VisionGateEvent,
     pub wheels_disabled: bool,
     /// Divergence-recovery state machine. `Recovering` engages active braking and
     /// holds it until the wheels stop, then resets the controller.
@@ -152,19 +145,7 @@ impl ControlContext {
                 RobotPhysicalParams::default(),
             )
             .expect("Failed to create RobotModel, check that parameters are valid"),
-            //////////////// EKF ///////////////////
-            ekf: BufferedEKF::<EKF_BUFFER_LEN>::new(
-                (dt * 1e6) as u32, 
-                EKF_DELAY_US,
-                EKF_R,
-                EKF_Q,
-                EKF_CORR_FACTOR,
-                SVector::<f32, 3>::zeros(),
-                SVector::<f32, 3>::zeros(),
-            ),
-            ekf_q: EKF_Q,
-            ekf_r: EKF_R,
-            //////////////// EKF ///////////////////
+            state_estimator: StateEstimator::<DEFAULT_EKF_BUFF_LEN, DEFAULT_VISION_BUFF_LEN>::default(),
             pose_pid_controller: PidController::<3>::from_gains_matrix_with_anti_jitter(
                 &controller_params::pose_pid_gains(),
                 Some(controller_params::POSE_PID_ANTI_JITTER_THRESH),
@@ -178,9 +159,6 @@ impl ControlContext {
             enc_lag,
             dt,
             state_estimate: Vector6f::zeros(),
-            time_since_vision_update_s: VISION_ACTIVE_TIMEOUT_S + 1.0,
-            vision_gate: VisionGateState::default(),
-            last_gate_event: VisionGateEvent::None,
             wheels_disabled: true,
             tracking_divergence_state: TrackingDivergenceState::Normal,
             tracking_recovery_at_rest_ticks: 0,
@@ -188,37 +166,22 @@ impl ControlContext {
     }
 
     pub fn vision_active(&self) -> bool {
-        self.time_since_vision_update_s <= VISION_ACTIVE_TIMEOUT_S
+        self.state_estimator.vision_active()
     }
 
     pub fn reset(&mut self) {
-        self.ekf.init(SVector::<f32, 3>::zeros(), SVector::<f32, 3>::zeros());
+        self.state_estimator.init(
+            SVector::<f32, 3>::zeros(),
+            SVector::<f32, 3>::zeros(),
+        );
         self.robot_model.reset();
         self.pose_pid_controller.reset();
         self.trajectory = None;
         self.prev_cmd = None;
-        self.time_since_vision_update_s = VISION_ACTIVE_TIMEOUT_S + 1.0;
-        self.vision_gate = VisionGateState::default();
-        self.last_gate_event = VisionGateEvent::None;
         self.enc_lag.reset();
         self.wheels_disabled = true;
         self.tracking_divergence_state = TrackingDivergenceState::Normal;
         self.tracking_recovery_at_rest_ticks = 0;
-    }
-
-    /// Fully reconstruct the buffered EKF using the current `ekf_q` / `ekf_r`
-    /// covariances. Called after a KF_PROCESS_STD / KF_MEASUREMENT_STD write so
-    /// the new variances take effect. State is reinitialized to zeros.
-    pub fn reinit_ekf(&mut self) {
-        self.ekf = BufferedEKF::<EKF_BUFFER_LEN>::new(
-            (self.dt * 1e6) as u32,
-            EKF_DELAY_US,
-            self.ekf_r,
-            self.ekf_q,
-            EKF_CORR_FACTOR,
-            SVector::<f32, 3>::zeros(),
-            SVector::<f32, 3>::zeros(),
-        );
     }
 
     /// Clear trajectory and command history without touching the PID or KF.
@@ -235,220 +198,46 @@ impl ControlContext {
     pub fn update_state_estimate(
         &mut self,
         vision_pose_meas: Vector3f,
+        vision_t_capture_host_us: u64,
         vision_update: bool,
         wheel_vel_meas: Vector4f,
         imu_gyro_theta_meas: f32,
         imu_accel_x_meas: f32,
         imu_accel_y_meas: f32,
     ) -> Result<Vector6f, ControlsError> {
-        // Capture the KF's current predicted position before any snap so the gate
-        // compares against dead-reckoned state, not a freshly-overwritten value.
-        let predicted_state = self.ekf.get_pos();
 
-        // [1] Outlier gate: classify this vision tick.
-        //
-        // Gate is XY-only. Theta outliers are not rejected here because heading
-        // errors from wheel slip are common and the controller handles them.
-        //
-        // Accumulator mutations happen inside the match; KF and state-machine
-        // mutations happen after so `vision_gate` is not borrowed when calling
-        // into `robot_model`.
-        let gate_action = if vision_update {
-            match &mut self.vision_gate {
-                VisionGateState::Seeding {
-                    n,
-                    pos_sum,
-                    pos_sq_sum,
-                } => {
-                    *n += 1;
-                    pos_sum.x += vision_pose_meas.x;
-                    pos_sum.y += vision_pose_meas.y;
-                    pos_sq_sum.x += vision_pose_meas.x * vision_pose_meas.x;
-                    pos_sq_sum.y += vision_pose_meas.y * vision_pose_meas.y;
+        let imu = SVector::<f32, 3>::new(
+            imu_accel_x_meas,
+            imu_accel_y_meas,
+            imu_gyro_theta_meas,
+        );
 
-                    if *n >= VISION_SEED_SAMPLES {
-                        let nf = *n as f32;
-                        let mean_x = pos_sum.x / nf;
-                        let mean_y = pos_sum.y / nf;
-                        // Variance = E[x²] - (E[x])²
-                        let var_x = pos_sq_sum.x / nf - mean_x * mean_x;
-                        let var_y = pos_sq_sum.y / nf - mean_y * mean_y;
-                        if sqrtf(var_x) < VISION_SEED_POS_STD_THRESH_M
-                            && sqrtf(var_y) < VISION_SEED_POS_STD_THRESH_M
-                        {
-                            GateAction::SeedComplete
-                        } else {
-                            GateAction::SeedReset
-                        }
-                    } else {
-                        GateAction::Accumulate
-                    }
-                }
-                VisionGateState::Tracking {
-                    time_since_last_valid_s,
-                } => {
-                    let dist = hypotf(
-                        vision_pose_meas.x - predicted_state[0],
-                        vision_pose_meas.y - predicted_state[1],
-                    );
-                    // Gate radius expands linearly while no valid update is received,
-                    // allowing a physically repositioned robot to eventually re-enter.
-                    let gate_radius = VISION_GATE_BASE_RADIUS_M
-                        + VISION_GATE_EXPAND_RATE_M_PER_S * *time_since_last_valid_s;
-
-                    if dist < gate_radius {
-                        *time_since_last_valid_s = 0.0;
-                        if dist >= VISION_GATE_BASE_RADIUS_M {
-                            GateAction::AcceptJump
-                        } else {
-                            GateAction::Accept
-                        }
-                    } else {
-                        // Distinguish first rejection from subsequent ones so
-                        // the caller can emit a single telemetry burst event.
-                        let is_first = *time_since_last_valid_s == 0.0;
-                        *time_since_last_valid_s += self.dt;
-                        if is_first {
-                            GateAction::FirstReject
-                        } else {
-                            GateAction::Reject
-                        }
-                    }
-                }
-            }
-        } else {
-            // No vision packet — advance the expansion timer so a robot that
-            // loses vision entirely can still recover when it returns.
-            if let VisionGateState::Tracking {
-                time_since_last_valid_s,
-            } = &mut self.vision_gate
-            {
-                *time_since_last_valid_s += self.dt;
-            }
-            GateAction::NoVision
-        };
-
-        // [2] Apply gate decision: KF snaps and state-machine transitions.
-        //
-        // SeedComplete and AcceptJump both snap position and velocity. SeedComplete
-        // additionally transitions the gate to Tracking. AcceptJump drops any
-        // in-flight trajectory so the controller replans from the new pose
-        // instead of continuing to chase the old one.
-        self.last_gate_event = VisionGateEvent::None;
-        let effective_vision_update = match gate_action {
-            GateAction::SeedComplete | GateAction::AcceptJump => {
-                self.robot_model.kf_set_pose(vision_pose_meas);
-                // Snap KF velocity to directly-measured values.
-                // Linear (vx, vy): encoder-implied via wheel Jacobian.
-                // Angular (ω): gyro, bypassing the Jacobian — lower noise
-                // (0.015 rad/s vs 50 rad/s encoder std) and no wheel-slip error.
-                let mut vel_seed =
-                    self.robot_model.transform_wheel2twist(vision_pose_meas.z) * wheel_vel_meas;
-                vel_seed[2] = imu_gyro_theta_meas;
-                self.robot_model.kf_set_vel(vel_seed);
-
-                //////////////// EKF ///////////////////
-                self.ekf.init(vision_pose_meas, SVector::<f32, 3>::zeros());
-                //////////////// EKF ///////////////////
-
-                self.trajectory = None;
-                self.prev_cmd = None;
-                self.pose_pid_controller.reset();
-                if matches!(gate_action, GateAction::SeedComplete) {
-                    self.vision_gate = VisionGateState::Tracking {
-                        time_since_last_valid_s: 0.0,
-                    };
-                    defmt::info!("vision gate: seeding complete");
-                } else {
-                    self.last_gate_event = VisionGateEvent::AcceptJump;
-                    defmt::info!("vision gate: large jump accepted");
-                }
-                true
-            }
-            GateAction::SeedReset => {
-                self.vision_gate = VisionGateState::default();
-                self.last_gate_event = VisionGateEvent::SeedReset;
-                defmt::warn!("vision gate: seed stability check failed, restarting");
-                false
-            }
-            GateAction::FirstReject => {
-                self.last_gate_event = VisionGateEvent::FirstReject;
-                defmt::warn!("vision gate: outlier rejected");
-                false
-            }
-            GateAction::Accept => true,
-            GateAction::Reject => {
-                defmt::warn!("vision gate: outlier rejected");
-                false
-            }
-            GateAction::Accumulate | GateAction::NoVision => false,
-        };
-
-        // [3] Update the vision activity timer used by global-position maneuvers.
-        if effective_vision_update {
-            self.time_since_vision_update_s = 0.0;
-        } else if self.time_since_vision_update_s <= VISION_ACTIVE_TIMEOUT_S {
-            self.time_since_vision_update_s += self.dt;
-        }
-
-        // Capture post-snap / pre-KF-update state for telemetry.
-        //////////////// EKF ///////////////////
-        let mut state_prediction = SVector::<f32, 6>::zeros();
-        state_prediction.fixed_rows_mut::<3>(0).copy_from(&self.ekf.get_pos_buff());
-        state_prediction.fixed_rows_mut::<3>(3).copy_from(&self.ekf.get_vel_buff());
-        //////////////// EKF ///////////////////
-
-        // let measurement: Vector8f = if matches!(
-        //     ENC_LAG_MODE,
-        //     EncLagMode::KfCorrectionOnly | EncLagMode::Full
-        // ) {
-        //     let lag_state = self.enc_lag.state();
-        //     let lag_body = Vector3f::new(lag_state.x, lag_state.y, imu_gyro_theta_meas);
-        //     let lag_wheel = self.robot_model.transform_twist2wheel(state_prediction[2]) * lag_body;
-        //     nalgebra::vector![
-        //         vision_pose_meas.x,
-        //         vision_pose_meas.y,
-        //         vision_pose_meas.z,
-        //         lag_wheel.x,
-        //         lag_wheel.y,
-        //         lag_wheel.z,
-        //         lag_wheel.w,
-        //         imu_gyro_theta_meas,
-        //     ]
-        // } else {
-        //     nalgebra::vector![
-        //         vision_pose_meas.x,
-        //         vision_pose_meas.y,
-        //         vision_pose_meas.z,
-        //         wheel_vel_meas.x,
-        //         wheel_vel_meas.y,
-        //         wheel_vel_meas.z,
-        //         wheel_vel_meas.w,
-        //         imu_gyro_theta_meas,
-        //     ]
-        // };
-
-        // self.robot_model
-        //     .kf_update(measurement, !effective_vision_update, false, false)?;
-        // self.state_estimate = self.robot_model.get_state();
-
-        //////////////// EKF ///////////////////
-        let u = SVector::<f32, INPUT_LEN>::new(imu_accel_x_meas, imu_accel_y_meas, imu_gyro_theta_meas);
-        let z = if effective_vision_update {
-            Some(vision_pose_meas)
+        let sample;
+        let vision = if vision_update {
+            sample = VisionSample {
+                meas: vision_pose_meas,
+                t_capture_host_us: vision_t_capture_host_us,
+            };
+            Some(&sample)
         } else {
             None
         };
-        self.ekf.tick(
-            u,
-            z,
-            VISION_DELAY_US,
+
+        self.state_estimator.tick(
+            Instant::now().as_micros(),
+            &imu,
+            &wheel_vel_meas,
+            vision,
         ).map_err(|_| ControlsError::SingularMatrix)?;
+
+        let mut state_prediction = SVector::<f32, 6>::zeros();
+        state_prediction.fixed_rows_mut::<3>(0).copy_from(&self.state_estimator.get_pos_buff());
+        state_prediction.fixed_rows_mut::<3>(3).copy_from(&self.state_estimator.get_vel_buff());
+
         let mut state_est = SVector::<f32, 6>::zeros();
-        state_est.fixed_rows_mut::<3>(0).copy_from(&self.ekf.get_pos());
-        state_est.fixed_rows_mut::<3>(3).copy_from(&self.ekf.get_vel());
+        state_est.fixed_rows_mut::<3>(0).copy_from(&self.state_estimator.get_pos());
+        state_est.fixed_rows_mut::<3>(3).copy_from(&self.state_estimator.get_vel());
         self.state_estimate = state_est;
-        //////////////// EKF ///////////////////
 
         Ok(state_prediction)
     }
@@ -756,10 +545,11 @@ impl ControlContext {
                 // EKF process covariance Q -> std (sqrt of diagonal variances).
                 // Q diag = [pos_lin, pos_lin, pos_ang, vel_lin, vel_lin]; the
                 // KF_PROCESS_STD vel-angular slot has no EKF state and reads 0.
+                let q = self.state_estimator.ekf.get_params().q;
                 reply.data.vec4_f32 = [
-                    sqrtf(self.ekf_q[(0, 0)]),
-                    sqrtf(self.ekf_q[(2, 2)]),
-                    sqrtf(self.ekf_q[(3, 3)]),
+                    sqrtf(q[(0, 0)]),
+                    sqrtf(q[(2, 2)]),
+                    sqrtf(q[(3, 3)]),
                     0.0,
                 ];
             }
@@ -767,9 +557,10 @@ impl ControlContext {
                 // EKF measurement covariance R -> std (sqrt of diagonal
                 // variances). R diag = [vision_lin, vision_lin, vision_ang];
                 // the encoder/gyro slots are unused by the EKF and read 0.
+                let r = self.state_estimator.ekf.get_params().r;
                 reply.data.vec4_f32 = [
-                    sqrtf(self.ekf_r[(0, 0)]),
-                    sqrtf(self.ekf_r[(2, 2)]),
+                    sqrtf(r[(0, 0)]),
+                    sqrtf(r[(2, 2)]),
                     0.0,
                     0.0,
                 ];
@@ -838,16 +629,29 @@ impl ControlContext {
                 let pos_lin_var = v[0] * v[0];
                 let pos_ang_var = v[1] * v[1];
                 let vel_lin_var = v[2] * v[2];
-                self.ekf_q = SMatrix::<f32, STATE_LEN, STATE_LEN>::from_diagonal(
-                    &SVector::<f32, STATE_LEN>::from([
+
+                let vision_filter_params = self.state_estimator.vision_filter.get_params();
+                let mut ekf_params = self.state_estimator.ekf.get_params();
+                ekf_params.q = SMatrix::<f32, EKF_STATE_LEN, EKF_STATE_LEN>::from_diagonal(
+                    &SVector::<f32, EKF_STATE_LEN>::from([
                         pos_lin_var,
                         pos_lin_var,
                         pos_ang_var,
                         vel_lin_var,
                         vel_lin_var,
-                    ]),
+                    ])
                 );
-                self.reinit_ekf();
+                let ekf = BufferedEKF::new(
+                    ekf_params,
+                    SVector::<f32, 3>::zeros(),
+                    SVector::<f32, 3>::zeros(),
+                );
+                let vision_filter = VisionFilter::new(vision_filter_params);
+                self.state_estimator = StateEstimator::new(
+                    ekf,
+                    vision_filter,
+                );
+                self.reset();
             }
             ParameterName::KF_MEASUREMENT_STD => {
                 // std -> variance (square); build EKF measurement covariance R.
@@ -856,14 +660,27 @@ impl ControlContext {
                 let v = unsafe { cmd.data.vec4_f32 };
                 let vision_lin_var = v[0] * v[0];
                 let vision_ang_var = v[1] * v[1];
-                self.ekf_r = SMatrix::<f32, MEAS_LEN, MEAS_LEN>::from_diagonal(
-                    &SVector::<f32, MEAS_LEN>::from([
+
+                let vision_filter_params = self.state_estimator.vision_filter.get_params();
+                let mut ekf_params = self.state_estimator.ekf.get_params();
+                ekf_params.r = SMatrix::<f32, EKF_MEAS_LEN, EKF_MEAS_LEN>::from_diagonal(
+                    &SVector::<f32, EKF_MEAS_LEN>::from([
                         vision_lin_var,
                         vision_lin_var,
                         vision_ang_var,
                     ]),
                 );
-                self.reinit_ekf();
+                let ekf = BufferedEKF::new(
+                    ekf_params,
+                    SVector::<f32, 3>::zeros(),
+                    SVector::<f32, 3>::zeros(),
+                );
+                let vision_filter = VisionFilter::new(vision_filter_params);
+                self.state_estimator = StateEstimator::new(
+                    ekf,
+                    vision_filter,
+                );
+                self.reset();
             }
             ParameterName::KF_MAX_STATE => {
                 let v = unsafe { cmd.data.vec4_f32 };
