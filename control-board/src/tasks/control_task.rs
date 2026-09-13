@@ -323,7 +323,9 @@ impl<
             kicker_status: self.last_kicker_telemetry,
         };
 
-        // Send extended telemetry if vision update was received, or if the extended telemetry interval has elapsed
+        // Send extended telemetry when the buffered EKF applied a vision
+        // measurement this tick, or if the extended
+        // telemetry interval has elapsed.
         let vision_update = debug_telem.body_control_telemetry.vision_update() != 0;
         let debug_telem_packet = TelemetryPacket::Extended(debug_telem);
         self.ticks_since_extended_telem += 1;

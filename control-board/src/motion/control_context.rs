@@ -169,6 +169,10 @@ impl ControlContext {
         self.state_estimator.vision_active()
     }
 
+    pub fn applied_vision_measurement(&self) -> Option<Vector3f> {
+        self.state_estimator.applied_vision()
+    }
+
     pub fn reset(&mut self) {
         self.state_estimator.init(
             SVector::<f32, 3>::zeros(),
