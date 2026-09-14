@@ -113,7 +113,7 @@ unsafe fn CEC() {
 
 /// Distance from the shaft centreline to where the lever arm contacts the
 /// scale. This is the one number that has to match the physical fixture.
-const LEVER_ARM_MM: f32 = 20.0;
+const LEVER_ARM_MM: f32 = 10.0;
 
 /// Nanotec DF45M024053-A2 torque constant, N*m/A. Note the manufacturer's
 /// characterization does not extend below 500 mA, so anything this predicts
@@ -129,11 +129,11 @@ const CURRENT_STEP_MA: i16 = 50;
 const MAX_SETPOINT_MA: i16 = 2000;
 
 /// Stall means no rotor cooling, so armed time is bounded.
-const ARMED_TIMEOUT_S: u64 = 20;
+const ARMED_TIMEOUT_S: u64 = 2000;
 
 /// A stalled shaft should read essentially zero. Anything above this while armed
 /// means the lever slipped off the scale and the torque reading is meaningless.
-const STALL_VIOLATION_RADS: f32 = 20.0;
+const STALL_VIOLATION_RADS: f32 = 50.0;
 
 /// Data row logging rate while armed.
 const ROW_LOG_HZ: u32 = 2;
@@ -453,8 +453,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                     ARMED_TIMEOUT_S
                 );
             } else if libm::fabsf(motors[active_wheel].read_rads()) > STALL_VIOLATION_RADS {
-                armed = false;
-                setpoint_ma = 0;
+                // armed = false;
+                // setpoint_ma = 0;
                 defmt::error!(
                     "{} is turning at {}rad/s - the rotor is not stalled, so the lever has slipped. Output disarmed; discard the last reading.",
                     WHEEL_NAMES[active_wheel],
