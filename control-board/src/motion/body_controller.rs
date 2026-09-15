@@ -220,21 +220,29 @@ impl BodyController {
 
         let t_after_effort = Instant::now();
 
-        // Report vision in telemetry when the buffered EKF actually applies the
-        // measurement
+        // Report vision in telemetry when the buffered EKF applies the
+        // measurement. A measurement present at the horizon but too old to use
+        // is reported via `vision_old` instead of `vision_update`.
         let applied_vision = self.control_context.applied_vision_measurement();
-        let vision_used = applied_vision.is_some();
+        let vision_update = matches!(applied_vision, Some((_, _, true)));
+        let vision_old = matches!(applied_vision, Some((_, _, false)));
+        let vision_meas_age_us = applied_vision.map(|(_, age_us, _)| age_us).unwrap_or(0);
+        let vision_pose = applied_vision
+            .map(|(meas, _, _)| meas)
+            .unwrap_or(vision_pose_meas);
 
         self.debug_telemetry = BodyControlExtendedTelemetry {
             _bitfield_align_1: Default::default(),
             _bitfield_1: BodyControlExtendedTelemetry::new_bitfield_1(
-                vision_used as u8,
+                vision_update as u8,
+                vision_old as u8,
                 Default::default(),
             ),
             _reserved2: Default::default(),
+            vision_meas_age_us,
             imu_gyro: [0.0, 0.0, imu_gyro_theta_meas],
             imu_accel: [imu_accel_x_meas, imu_accel_y_meas, 0.0],
-            vision_pose: applied_vision.unwrap_or(vision_pose_meas).into(),
+            vision_pose: vision_pose.into(),
             body_traj_pos: self
                 .control_context
                 .trajectory

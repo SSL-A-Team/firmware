@@ -169,7 +169,7 @@ impl ControlContext {
         self.state_estimator.vision_active()
     }
 
-    pub fn applied_vision_measurement(&self) -> Option<Vector3f> {
+    pub fn applied_vision_measurement(&self) -> Option<(Vector3f, u32, bool)> {
         self.state_estimator.applied_vision()
     }
 
