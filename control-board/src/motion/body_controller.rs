@@ -226,7 +226,7 @@ impl BodyController {
         let applied_vision = self.control_context.applied_vision_measurement();
         let vision_update = matches!(applied_vision, Some((_, _, true)));
         let vision_old = matches!(applied_vision, Some((_, _, false)));
-        let vision_meas_age_us = applied_vision.map(|(_, age_us, _)| age_us).unwrap_or(0);
+        let vision_insert_age_us = applied_vision.map(|(_, age_us, _)| age_us).unwrap_or(0);
         let vision_pose = applied_vision
             .map(|(meas, _, _)| meas)
             .unwrap_or(vision_pose_meas);
@@ -239,7 +239,7 @@ impl BodyController {
                 Default::default(),
             ),
             _reserved2: Default::default(),
-            vision_meas_age_us,
+            vision_insert_age_us,
             imu_gyro: [0.0, 0.0, imu_gyro_theta_meas],
             imu_accel: [imu_accel_x_meas, imu_accel_y_meas, 0.0],
             vision_pose: vision_pose.into(),
