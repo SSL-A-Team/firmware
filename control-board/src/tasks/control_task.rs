@@ -323,14 +323,18 @@ impl<
             kicker_status: self.last_kicker_telemetry,
         };
 
-        // Send extended telemetry when the buffered EKF applied a vision
-        // measurement this tick, or if the extended
-        // telemetry interval has elapsed.
-        let vision_update = debug_telem.body_control_telemetry.vision_update() != 0;
+        // Send extended telemetry when the buffered EKF saw a vision
+        // measurement at its horizon this tick -- whether it was applied
+        // (`vision_update`) or present but too old to fuse (`vision_old`) -- or
+        // if the extended telemetry interval has elapsed. Both vision events are
+        // single-tick (1 kHz) pulses, so without this force-send they would be
+        // aliased away between the 100 Hz periodic frames.
+        let vision_event = debug_telem.body_control_telemetry.vision_update() != 0
+            || debug_telem.body_control_telemetry.vision_old() != 0;
         let debug_telem_packet = TelemetryPacket::Extended(debug_telem);
         self.ticks_since_extended_telem += 1;
         if cur_state.radio_bridge_ok
-            && (self.ticks_since_extended_telem >= EXTENDED_TELEM_INTERVAL_TICKS || vision_update)
+            && (self.ticks_since_extended_telem >= EXTENDED_TELEM_INTERVAL_TICKS || vision_event)
         {
             self.telemetry_publisher
                 .publish_immediate(debug_telem_packet);
