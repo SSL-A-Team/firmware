@@ -8,7 +8,7 @@ use crate::motion::pid::PidController;
 use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
 use ateam_common_packets::radio::ManeuverCommand;
 use ateam_controls::defaults::{DEFAULT_EKF_BUFF_LEN, DEFAULT_VISION_BUFF_LEN, EKF_INPUT_LEN, EKF_MEAS_LEN, EKF_STATE_LEN};
-use ateam_controls::state_estimation::{BufferedEKF, StateEstimator, VisionFilter, VisionSample};
+use ateam_controls::state_estimation::{BufferedEKF, Odometer, StateEstimator, VisionFilter, VisionSample};
 use ateam_controls::bangbang_trajectory::BangBangTraj3D;
 use ateam_controls::linear_trajectory::LinearTrajectory;
 use ateam_controls::pivot_trajectory::PivotTrajectory;
@@ -636,6 +636,7 @@ impl ControlContext {
 
                 let vision_filter_params = self.state_estimator.vision_filter.get_params();
                 let mut ekf_params = self.state_estimator.ekf.get_params();
+                let odometer_params = self.state_estimator.odometer.get_params();
                 ekf_params.q = SMatrix::<f32, EKF_STATE_LEN, EKF_STATE_LEN>::from_diagonal(
                     &SVector::<f32, EKF_STATE_LEN>::from([
                         pos_lin_var,
@@ -651,9 +652,11 @@ impl ControlContext {
                     SVector::<f32, 3>::zeros(),
                 );
                 let vision_filter = VisionFilter::new(vision_filter_params);
+                let odometer = Odometer::new(odometer_params);
                 self.state_estimator = StateEstimator::new(
                     ekf,
                     vision_filter,
+                    odometer,
                 );
                 self.reset();
             }
@@ -667,6 +670,7 @@ impl ControlContext {
 
                 let vision_filter_params = self.state_estimator.vision_filter.get_params();
                 let mut ekf_params = self.state_estimator.ekf.get_params();
+                let odometer_params = self.state_estimator.odometer.get_params();
                 ekf_params.r = SMatrix::<f32, EKF_MEAS_LEN, EKF_MEAS_LEN>::from_diagonal(
                     &SVector::<f32, EKF_MEAS_LEN>::from([
                         vision_lin_var,
@@ -680,9 +684,11 @@ impl ControlContext {
                     SVector::<f32, 3>::zeros(),
                 );
                 let vision_filter = VisionFilter::new(vision_filter_params);
+                let odometer = Odometer::new(odometer_params);
                 self.state_estimator = StateEstimator::new(
                     ekf,
                     vision_filter,
+                    odometer,
                 );
                 self.reset();
             }
