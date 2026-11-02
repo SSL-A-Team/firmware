@@ -401,32 +401,31 @@ impl<
 
     pub fn read_data_nonblocking<RET, FN>(
         &'a self,
-        fn_read: FN,
+        mut fn_read: FN,
     ) -> Result<Option<RET>, RobotRadioNoraError>
     where
-        FN: FnOnce(&[u8]) -> RET,
+        FN: FnMut(&[u8]) -> RET,
     {
         if self.socket.is_some() {
-            if self.nora_driver.can_read_data() {
-                // In direct binary mode, +UESODB/+UESODBF events contain inline data.
-                // We can read and return it synchronously — no async AT+USORB needed.
-                match self.nora_driver.try_read_data_binary(fn_read) {
-                    Ok(Some(ret)) => Ok(Some(ret)),
-                    Ok(None) => Ok(None),
-                    Err(NoraRadioError::ReadLowLevelBufferEmpty) => Ok(None),
+            // In direct binary mode, +UESODB/+UESODBF events contain inline data.
+            // Fire-and-forget write acks arrive as many small non-data fragments at
+            // 3 Mbaud, so drain those here rather than stalling the read loop on them.
+            while self.nora_driver.can_read_data() {
+                match self.nora_driver.try_read_data_binary(&mut fn_read) {
+                    Ok(Some(ret)) => return Ok(Some(ret)),
+                    Ok(None) => return Ok(None),
+                    Err(NoraRadioError::ReadLowLevelBufferEmpty) => return Ok(None),
                     Err(NoraRadioError::ReadDataInvalid) => {
-                        // Non-data event in the queue (e.g. connection event) — skip it
                         defmt::trace!("non-data event in queue, skipping");
-                        Ok(None)
+                        continue;
                     }
                     Err(e) => {
                         defmt::trace!("try_read_data_binary failed: {:?}", e);
-                        Err(RobotRadioNoraError::DriverError(e))
+                        return Err(RobotRadioNoraError::DriverError(e));
                     }
                 }
-            } else {
-                Ok(None)
             }
+            Ok(None)
         } else {
             defmt::trace!("socket was none");
             Err(RobotRadioNoraError::SocketMissing)

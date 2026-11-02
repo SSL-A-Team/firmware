@@ -89,6 +89,8 @@ impl<
         const DEBUG_UART_QUEUES: bool,
     > NoraW36x<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, DEBUG_UART_QUEUES>
 {
+    const AT_RESPONSE_TIMEOUT_MS: u64 = 3000;
+
     pub fn new(
         reader: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
         writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
@@ -957,15 +959,26 @@ impl<
         F: FnMut(&[u8]) -> Option<Result<T, NoraRadioError>>,
     {
         let mut accum: Vec<u8, N> = Vec::new();
-        loop {
-            self.reader
-                .dequeue(|buf| {
-                    defmt::trace!("read_response_raw: {:?}", buf);
-                    let _ = accum.extend_from_slice(buf);
-                })
-                .await;
-            if let Some(result) = f(&accum) {
-                return result;
+        let read_fut = async {
+            loop {
+                self.reader
+                    .dequeue(|buf| {
+                        defmt::trace!("read_response_raw: {:?}", buf);
+                        let _ = accum.extend_from_slice(buf);
+                    })
+                    .await;
+                if let Some(result) = f(&accum) {
+                    return result;
+                }
+            }
+        };
+        // A lost or desynced response (e.g. a late +USOWB ack consumed by the wrong
+        // reader) must not hang the caller forever; surface it so the task can reset.
+        match select(read_fut, Timer::after_millis(Self::AT_RESPONSE_TIMEOUT_MS)).await {
+            embassy_futures::select::Either::First(r) => r,
+            embassy_futures::select::Either::Second(_) => {
+                defmt::warn!("NoraW36x - AT response timed out");
+                Err(NoraRadioError::OperationTimedOut)
             }
         }
     }

@@ -56,10 +56,16 @@ macro_rules! create_radio_nora_task {
 
 pub const RADIO_LOOP_RATE_MS: u64 = 10;
 
-pub const RADIO_MAX_TX_PACKET_SIZE: usize = 448;
+// AT+USOWB=<socket> (max 11 bytes) + SOH + 2-byte length header
+const NORA_USOWB_WIRE_OVERHEAD: usize = 14;
+pub const RADIO_MAX_TX_PACKET_SIZE: usize =
+    ateam_common_packets::MAX_ROBOT_TX_PACKET_SIZE + NORA_USOWB_WIRE_OVERHEAD;
 pub const RADIO_TX_BUF_DEPTH: usize = 4;
 pub const RADIO_MAX_RX_PACKET_SIZE: usize = 256;
-pub const RADIO_RX_BUF_DEPTH: usize = 4;
+// NORA-W36x at 3 Mbaud emits each AT response as many tiny idle-separated
+// fragments; a shallow queue overflows (silently dropping fragments) while
+// the thread-mode consumer is preempted by the control loop.
+pub const RADIO_RX_BUF_DEPTH: usize = 32;
 
 static_idle_buffered_uart!(RADIO_NORA, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, DEBUG_RADIO_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
@@ -518,6 +524,8 @@ impl<
                     .open_unicast(hello.ipv4, hello.port)
                     .await
                     .expect("failed to open unicast port");
+                // Data phase: don't block on per-write acks (they're drained by the read loop).
+                self.radio.set_fire_and_forget_sends(true);
                 defmt::info!("unicast open");
 
                 let end_time = Instant::now();
