@@ -12,7 +12,7 @@ use defmt_rtt as _;
 use ateam_control_board::{
     create_audio_task, create_control_task, create_dotstar_task, create_imu_task,
     create_io_task,
-    create_kicker_task, create_power_task, create_radio_task, get_system_config, git_version as gv,
+    create_kicker_task, create_power_task, create_radio_nora_task, get_system_config, git_version as gv,
     pins::{
         AccelDataPubSub, CommandsPubSub, GyroDataPubSub, KickerTelemetryPubSub, LedCommandPubSub,
         PowerTelemetryPubSub, TelemetryPubSub,
@@ -211,7 +211,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     create_audio_task!(main_spawner, robot_state, p);
 
-    create_radio_task!(
+    create_radio_nora_task!(
         main_spawner,
         radio_uart_queue_spawner,
         radio_uart_queue_spawner,

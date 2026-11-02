@@ -223,7 +223,6 @@ impl<
 
             // Keep a local flag of radio issues.
             let mut radio_inop_flag_local = false;
-            let mut radio_network_fail_local = false;
             // check for hardware config changes that affect radio connection
 
             let cur_robot_state = self.shared_robot_state.get_state();
@@ -326,7 +325,7 @@ impl<
                         .is_err()
                     {
                         // If network connection failed, go back up to verify UART.
-                        radio_network_fail_local = true;
+
                         self.connection_state = RadioConnectionState::ConnectedPhys;
                         self.led_command_pub
                             .publish(ControlBoardLedCommand::Radio(
@@ -363,7 +362,7 @@ impl<
                                 .await;
                         } else {
                             // Software didn't respond to our hello, it may not be started yet.
-                            radio_network_fail_local = true;
+    
                             self.connection_state = RadioConnectionState::ConnectedNetwork;
                             self.led_command_pub
                                 .publish(ControlBoardLedCommand::Radio(
@@ -372,7 +371,7 @@ impl<
                                 .await;
                         }
                     } else {
-                        radio_network_fail_local = true;
+
                         // If network connection failed, go back up to verify UART.
                         self.connection_state = RadioConnectionState::ConnectedPhys;
                         self.led_command_pub
@@ -414,19 +413,17 @@ impl<
             if radio_inop_flag_local {
                 // If hardware problems is present, adds a delay.
                 Timer::after_millis(Self::RETRY_DELAY_MS).await;
-            } else if radio_network_fail_local {
-                // If network problems is present, adds a delay.
-                Timer::after_millis(Self::RESPONSE_FROM_PC_TIMEOUT_MS).await;
             }
 
             last_robot_state = cur_robot_state;
 
             let loop_end_time = Instant::now();
             let loop_execution_time = loop_end_time - loop_start_time;
-            if loop_execution_time > Duration::from_millis(2)
+            if loop_execution_time > Duration::from_millis(10)
                 && self.connection_state == RadioConnectionState::Connected
             {
-                defmt::warn!("radio loop is connected and taking >2ms to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {:?}", loop_execution_time);
+                // delay is probably due to delay in ack from the module. This task async awaits the module ack, so it's not hanging up the system.
+                defmt::warn!("radio loop is connected and taking >10ms to complete (it may be interrupted by higher priority tasks). This is >100% of an execution frame. Did transmit ack pile up in a brust transfer? Loop execution time {:?}", loop_execution_time.as_micros());
             }
 
             last_loop_term_time = Instant::now();
@@ -566,6 +563,7 @@ impl<
                 }
             } else {
                 defmt::warn!("RadioNoraTask - error reading data packet");
+                break;
             }
         }
 
@@ -609,14 +607,14 @@ impl<
         }
 
         // always send the latest telemetry
-        if tx_ctr == 0 {
+        // if tx_ctr == 0 {
             self.last_basic_telemetry.transmission_sequence_number = self.seq_number as u8;
             self.seq_number = (self.seq_number + 1) & 0x00FF;
 
             if let Err(e) = self.radio.send_telemetry(self.last_basic_telemetry).await {
                 defmt::warn!("RadioNoraTask - failed to send basic telem packet {:?}", e);
             }
-        }
+        // }
 
         return Ok(());
     }
@@ -624,7 +622,8 @@ impl<
 
 pub fn startup_uart_config() -> usart::Config {
     let mut radio_uart_config = usart::Config::default();
-    radio_uart_config.baudrate = 115_200;
+    // radio_uart_config.baudrate = 115_200;
+    radio_uart_config.baudrate = 3_000_000;
     radio_uart_config.data_bits = DataBits::DataBits8;
     radio_uart_config.stop_bits = StopBits::STOP1;
     radio_uart_config.parity = Parity::ParityNone;
