@@ -100,7 +100,7 @@ impl BodyController {
             imu_accel_y_meas,
         )?;
 
-        let t_after_kf_update = Instant::now();
+        let t_after_state_est = Instant::now();
 
         // While the robot is halted (SSL HALT game state) or recovering from a
         // trajectory divergence (e.g. a collision), the control task ignores the
@@ -281,19 +281,12 @@ impl BodyController {
         self.debug_telemetry.set_maneuver_telemetry(maneuver_telem);
 
         let t_after_telem = Instant::now();
-
-        self.control_context
-            .robot_model
-            .kf_predict(self.body_accel_out);
-
-        let t_after_kf_predict = Instant::now();
         if trace {
             defmt::trace!(
-                "CONTROL UPDATE TRACE - KF update: {} us, effort compute: {} us, control outputs: {} us, KF predict: {} us",
-                (t_after_kf_update - t_start).as_micros(),
-                (t_after_effort - t_after_kf_update).as_micros(),
+                "CONTROL UPDATE TRACE - state estimate: {} us, effort compute: {} us, control outputs: {} us",
+                (t_after_state_est - t_start).as_micros(),
+                (t_after_effort - t_after_state_est).as_micros(),
                 (t_after_telem - t_after_effort).as_micros(),
-                (t_after_kf_predict - t_after_telem).as_micros(),
             );
         }
 

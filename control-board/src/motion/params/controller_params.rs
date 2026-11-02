@@ -163,7 +163,7 @@ pub const ENC_LAG_MODE: EncLagMode = EncLagMode::Disabled;
 //
 //   base_radius = v_max * (N_miss * T_vision + T_latency) + slack
 //
-//   v_max      = 3.0 m/s  (DEFAULT_KF_MAX_VEL_LINEAR)
+//   v_max      = 3.0 m/s  (DEFAULT_MAX_VEL_LINEAR)
 //   N_miss     = 3         consecutive missed vision packets tolerated
 //   T_vision   = 1/60 s   SSL-Vision camera rate
 //   T_latency  = 0.150 s  measured worst-case camera→KF pipeline latency

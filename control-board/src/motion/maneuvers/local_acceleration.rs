@@ -26,8 +26,8 @@ impl MotionManeuver for LocalAccelerationManeuver {
 
         let state_estimate = ctx.state_estimate;
         let target_accel = z_rotation_mat(state_estimate.z) * c.as_vec3f();
-        let next_state = ctx.robot_model.a * state_estimate + ctx.robot_model.b * target_accel;
-        let body_twist: Vector3f = next_state.fixed_rows::<3>(3).into();
+        let est_twist: Vector3f = state_estimate.fixed_rows::<3>(3).into();
+        let body_twist = est_twist + target_accel * ctx.dt;
 
         let telem =
             ManeuverExtendedTelemetry::LocalAcceleration(ExtendedLocalAccelerationTelemetry {

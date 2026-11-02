@@ -12,7 +12,7 @@ use ateam_controls::state_estimation::{BufferedEKF, Odometer, StateEstimator, Vi
 use ateam_controls::bangbang_trajectory::BangBangTraj3D;
 use ateam_controls::linear_trajectory::LinearTrajectory;
 use ateam_controls::pivot_trajectory::PivotTrajectory;
-use ateam_controls::robot_model::{KalmanFilterParams, RobotModel, RobotPhysicalParams};
+use ateam_controls::robot_model::{RobotModel, RobotPhysicalParams};
 use ateam_controls::trajectory::Trajectory;
 use ateam_controls::{
     z_rotation_mat, ControlsError, Vector2f, Vector3f, Vector4f, Vector6f, Vector8f,
@@ -139,12 +139,8 @@ impl ControlContext {
         );
 
         Self {
-            robot_model: RobotModel::new(
-                dt,
-                KalmanFilterParams::default(),
-                RobotPhysicalParams::default(),
-            )
-            .expect("Failed to create RobotModel, check that parameters are valid"),
+            robot_model: RobotModel::new(RobotPhysicalParams::default())
+                .expect("Failed to create RobotModel, check that parameters are valid"),
             state_estimator: StateEstimator::<DEFAULT_EKF_BUFF_LEN, DEFAULT_VISION_BUFF_LEN>::default(),
             pose_pid_controller: PidController::<3>::from_gains_matrix_with_anti_jitter(
                 &controller_params::pose_pid_gains(),
@@ -178,7 +174,6 @@ impl ControlContext {
             SVector::<f32, 3>::zeros(),
             SVector::<f32, 3>::zeros(),
         );
-        self.robot_model.reset();
         self.pose_pid_controller.reset();
         self.trajectory = None;
         self.prev_cmd = None;
@@ -527,7 +522,6 @@ impl ControlContext {
         match name {
             ParameterName::KF_PROCESS_STD => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::KF_MEASUREMENT_STD => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::KF_MAX_STATE => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::PHYS_WHEEL => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::PHYS_INERTIA => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::PHYS_MOTOR_MODEL => Some(ParameterDataFormat::VEC2_F32),
@@ -542,7 +536,6 @@ impl ControlContext {
     }
 
     pub fn read_param(&self, name: ParameterName::Type, reply: &mut ParameterCommand) {
-        let kf = &self.robot_model.kf_params;
         let phys = &self.robot_model.physical_params;
         match name {
             ParameterName::KF_PROCESS_STD => {
@@ -567,14 +560,6 @@ impl ControlContext {
                     sqrtf(r[(2, 2)]),
                     0.0,
                     0.0,
-                ];
-            }
-            ParameterName::KF_MAX_STATE => {
-                reply.data.vec4_f32 = [
-                    kf.max_pos_linear,
-                    kf.max_pos_angular,
-                    kf.max_vel_linear,
-                    kf.max_vel_angular,
                 ];
             }
             ParameterName::PHYS_WHEEL => {
@@ -691,15 +676,6 @@ impl ControlContext {
                     odometer,
                 );
                 self.reset();
-            }
-            ParameterName::KF_MAX_STATE => {
-                let v = unsafe { cmd.data.vec4_f32 };
-                let mut kf = self.robot_model.kf_params;
-                kf.max_pos_linear = v[0];
-                kf.max_pos_angular = v[1];
-                kf.max_vel_linear = v[2];
-                kf.max_vel_angular = v[3];
-                self.robot_model.update_kf_params(kf);
             }
             ParameterName::PHYS_WHEEL => {
                 let v = unsafe { cmd.data.vec4_f32 };

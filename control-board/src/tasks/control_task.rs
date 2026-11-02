@@ -652,7 +652,7 @@ impl<
             }
 
             if ticks_since_trace_print >= TRACE_PRINT_INTERVAL_TICKS {
-                let state = robot_controller.control_context.robot_model.x;
+                let state = robot_controller.control_context.state_estimate;
                 let wheel_torques = robot_controller.get_wheel_torques();
                 defmt::trace!(
                     "state position: {}, {}, {}",
