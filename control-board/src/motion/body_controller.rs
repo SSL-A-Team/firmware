@@ -175,7 +175,7 @@ impl BodyController {
             .control_context
             .compute_friction(self.body_twist_out, self.body_accel_out);
         let body_accel_fric_comp =
-            self.body_accel_out - self.control_context.robot_model.i_inv * friction_force_global;
+            self.body_accel_out - self.control_context.robot_model.force_to_accel(&friction_force_global);
 
         // Clamp body-level acceleration before converting to wheel torques.
         let clamped_x = body_accel_fric_comp
@@ -199,19 +199,19 @@ impl BodyController {
                     Vector3f::new(compensated_xy.x, compensated_xy.y, self.body_twist_out.z);
                 self.control_context
                     .robot_model
-                    .transform_twist2wheel(self.control_context.state_estimate.z)
+                    .transform_vel2wheel_global(self.control_context.state_estimate.z)
                     * compensated_twist
             } else {
                 self.control_context
                     .robot_model
-                    .transform_twist2wheel(self.control_context.state_estimate.z)
+                    .transform_vel2wheel_global(self.control_context.state_estimate.z)
                     * self.body_twist_out
             };
 
         self.wheel_torque_out = self
             .control_context
             .robot_model
-            .transform_accel2wheel(self.control_context.state_estimate.z)
+            .transform_accel2wheel_global(self.control_context.state_estimate.z)
             * self.body_accel_out_fric_comp;
 
         if !matches!(ENC_LAG_MODE, EncLagMode::Disabled) {

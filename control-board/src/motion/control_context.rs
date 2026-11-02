@@ -281,7 +281,7 @@ impl ControlContext {
             },
         );
 
-        let friction_force_local = self.robot_model.compute_friction_force(fric_twist_local);
+        let friction_force_local = self.robot_model.compute_local_friction_force(fric_twist_local);
         r_loc_to_glob * friction_force_local
     }
 
@@ -536,7 +536,7 @@ impl ControlContext {
     }
 
     pub fn read_param(&self, name: ParameterName::Type, reply: &mut ParameterCommand) {
-        let phys = &self.robot_model.physical_params;
+        let phys = self.robot_model.get_params();
         match name {
             ParameterName::KF_PROCESS_STD => {
                 // EKF process covariance Q -> std (sqrt of diagonal variances).
@@ -563,22 +563,22 @@ impl ControlContext {
                 ];
             }
             ParameterName::PHYS_WHEEL => {
-                reply.data.vec4_f32 = [phys.alpha, phys.beta, phys.l, phys.r];
+                reply.data.vec4_f32 = [phys.alpha_rad, phys.beta_rad, phys.l_m, phys.r_m];
             }
             ParameterName::PHYS_INERTIA => {
-                reply.data.vec2_f32 = [phys.mass, phys.iz];
+                reply.data.vec2_f32 = [phys.mass_kg, phys.iz_kgm2];
             }
             ParameterName::PHYS_MOTOR_MODEL => {
-                reply.data.vec2_f32 = [phys.motor_torque_constant, phys.motor_efficiency_factor];
+                reply.data.vec2_f32 = [phys.motor_torque_constant_nmpa, phys.motor_efficiency_factor];
             }
             ParameterName::PHYS_FRICTION_MODEL => {
                 reply.data.vec6_f32 = [
-                    phys.coulomb_friction_coefficient_linear_x,
-                    phys.coulomb_friction_coefficient_linear_y,
-                    phys.coulomb_friction_coefficient_angular,
-                    phys.viscous_friction_coefficient_linear_x,
-                    phys.viscous_friction_coefficient_linear_y,
-                    phys.viscous_friction_coefficient_angular,
+                    phys.coulomb_friction_linear_x_n,
+                    phys.coulomb_friction_linear_y_n,
+                    phys.coulomb_friction_angular_nm,
+                    phys.viscous_friction_linear_x_nspm,
+                    phys.viscous_friction_linear_y_nspm,
+                    phys.viscous_friction_angular_nmsprad,
                 ];
             }
             ParameterName::FRICTION_COMP_GATING => {
@@ -679,37 +679,37 @@ impl ControlContext {
             }
             ParameterName::PHYS_WHEEL => {
                 let v = unsafe { cmd.data.vec4_f32 };
-                let mut p = self.robot_model.physical_params;
-                p.alpha = v[0];
-                p.beta = v[1];
-                p.l = v[2];
-                p.r = v[3];
-                let _ = self.robot_model.update_physical_params(p);
+                let mut p = self.robot_model.get_params();
+                p.alpha_rad = v[0];
+                p.beta_rad = v[1];
+                p.l_m = v[2];
+                p.r_m = v[3];
+                let _ = self.robot_model.update_params(p);
             }
             ParameterName::PHYS_INERTIA => {
                 let v = unsafe { cmd.data.vec2_f32 };
-                let mut p = self.robot_model.physical_params;
-                p.mass = v[0];
-                p.iz = v[1];
-                let _ = self.robot_model.update_physical_params(p);
+                let mut p = self.robot_model.get_params();
+                p.mass_kg = v[0];
+                p.iz_kgm2 = v[1];
+                let _ = self.robot_model.update_params(p);
             }
             ParameterName::PHYS_MOTOR_MODEL => {
                 let v = unsafe { cmd.data.vec2_f32 };
-                let mut p = self.robot_model.physical_params;
-                p.motor_torque_constant = v[0];
+                let mut p = self.robot_model.get_params();
+                p.motor_torque_constant_nmpa = v[0];
                 p.motor_efficiency_factor = v[1];
-                let _ = self.robot_model.update_physical_params(p);
+                let _ = self.robot_model.update_params(p);
             }
             ParameterName::PHYS_FRICTION_MODEL => {
                 let v = unsafe { cmd.data.vec6_f32 };
-                let mut p = self.robot_model.physical_params;
-                p.coulomb_friction_coefficient_linear_x = v[0];
-                p.coulomb_friction_coefficient_linear_y = v[1];
-                p.coulomb_friction_coefficient_angular = v[2];
-                p.viscous_friction_coefficient_linear_x = v[3];
-                p.viscous_friction_coefficient_linear_y = v[4];
-                p.viscous_friction_coefficient_angular = v[5];
-                let _ = self.robot_model.update_physical_params(p);
+                let mut p = self.robot_model.get_params();
+                p.coulomb_friction_linear_x_n = v[0];
+                p.coulomb_friction_linear_y_n = v[1];
+                p.coulomb_friction_angular_nm = v[2];
+                p.viscous_friction_linear_x_nspm = v[3];
+                p.viscous_friction_linear_y_nspm = v[4];
+                p.viscous_friction_angular_nmsprad = v[5];
+                let _ = self.robot_model.update_params(p);
             }
             ParameterName::FRICTION_COMP_GATING => {
                 let v = unsafe { cmd.data.vec4_f32 };
