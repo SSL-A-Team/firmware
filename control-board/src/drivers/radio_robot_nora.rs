@@ -384,7 +384,7 @@ impl<
         }
     }
 
-    pub async fn read_data<RET, FN>(&'a self, fn_read: FN) -> Result<RET, RobotRadioNoraError>
+    pub async fn read_data<RET, FN>(&self, fn_read: FN) -> Result<RET, RobotRadioNoraError>
     where
         FN: FnOnce(&[u8]) -> RET,
     {
@@ -400,7 +400,7 @@ impl<
     }
 
     pub fn read_data_nonblocking<RET, FN>(
-        &'a self,
+        &self,
         mut fn_read: FN,
     ) -> Result<Option<RET>, RobotRadioNoraError>
     where

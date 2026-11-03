@@ -310,8 +310,12 @@ routes the next tick's seed through the `state_estimate` branch.
     AND `||(local_ax, local_ay)|| < lin_accel_thresh` → zero linear friction.
   - **Angular off** when both `|v_theta| < ang_vel_thresh` AND
     `|a_theta| < ang_accel_thresh` → zero angular friction.
-  - When on, the friction force always uses the target (commanded) local
-    twist as its velocity direction.
+  - When on, the viscous term uses the target (commanded) local twist. The
+    Coulomb sign comes from the encoder-measured local velocity per axis
+    (`wheel_to_local_vel`), which reads zero at rest unlike the state
+    estimate. While an axis is below `COULOMB_MEAS_VEL_THRESH_LINEAR`
+    (0.05 m/s) / `COULOMB_MEAS_VEL_THRESH_ANGULAR` (0.2 rad/s), Coulomb
+    follows the commanded accel instead (breakaway from rest).
 - Friction force = `robot_model.compute_friction_force(local_twist)`
 - Applied: `body_accel_fric_comp = body_accel - I_inv × R_z(θ) × friction_force_local`
 

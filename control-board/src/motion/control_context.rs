@@ -2,7 +2,7 @@ use crate::motion::params::controller_params::{
     PoseAccelMode, PoseVelMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON,
     ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE,
     TRACKING_DIVERGENCE_RECOVERY_REST_TICKS,
-    TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL
+    TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL, COULOMB_MEAS_VEL_THRESH_ANGULAR, COULOMB_MEAS_VEL_THRESH_LINEAR,
 };
 use crate::motion::pid::PidController;
 use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
@@ -109,6 +109,8 @@ pub struct ControlContext {
     pub dt: f32,
     /// Cached KF state estimate — updated each tick before maneuver dispatch.
     pub state_estimate: Vector6f,
+    /// Encoder-measured local body velocity [vx, vy, w] from the latest tick.
+    pub encoder_vel_local: Vector3f,
     pub wheels_disabled: bool,
     /// Divergence-recovery state machine. `Recovering` engages active braking and
     /// holds it until the wheels stop, then resets the controller.
@@ -155,6 +157,7 @@ impl ControlContext {
             enc_lag,
             dt,
             state_estimate: Vector6f::zeros(),
+            encoder_vel_local: Vector3f::zeros(),
             wheels_disabled: true,
             tracking_divergence_state: TrackingDivergenceState::Normal,
             tracking_recovery_at_rest_ticks: 0,
@@ -223,6 +226,7 @@ impl ControlContext {
         };
 
         let encoder_vel = self.robot_model.wheel_to_local_vel(&wheel_vel_meas);
+        self.encoder_vel_local = encoder_vel;
 
         self.state_estimator.tick(
             Instant::now().as_micros(),
@@ -283,7 +287,41 @@ impl ControlContext {
             },
         );
 
-        let friction_force_local = self.robot_model.compute_local_friction_force(fric_twist_local);
+        // Same model as RobotModel::compute_local_friction_force, except the Coulomb
+        // sign comes from the encoder-measured velocity, which reads zero at rest
+        // (the state estimate's velocity carries an offset there). While an axis is
+        // effectively stopped, Coulomb opposes the commanded accel (breakaway).
+        let p = self.robot_model.get_params();
+        let meas = self.encoder_vel_local;
+        let sign = |v: f32| if v > 0.0 { 1.0 } else if v < 0.0 { -1.0 } else { 0.0 };
+        let coulomb_dir = |v_meas: f32, a: f32, v_thresh: f32| {
+            if fabsf(v_meas) < v_thresh { sign(a) } else { sign(v_meas) }
+        };
+        let lin_thresh = COULOMB_MEAS_VEL_THRESH_LINEAR;
+        let ang_thresh = COULOMB_MEAS_VEL_THRESH_ANGULAR;
+        let friction_force_local = Vector3f::new(
+            if linear_comp_on {
+                -p.viscous_friction_linear_x_nspm * fric_twist_local.x
+                    - p.coulomb_friction_linear_x_n
+                        * coulomb_dir(meas.x, cmd_accel_local.x, lin_thresh)
+            } else {
+                0.0
+            },
+            if linear_comp_on {
+                -p.viscous_friction_linear_y_nspm * fric_twist_local.y
+                    - p.coulomb_friction_linear_y_n
+                        * coulomb_dir(meas.y, cmd_accel_local.y, lin_thresh)
+            } else {
+                0.0
+            },
+            if angular_comp_on {
+                -p.viscous_friction_angular_nmsprad * fric_twist_local.z
+                    - p.coulomb_friction_angular_nm
+                        * coulomb_dir(meas.z, cmd_accel_local.z, ang_thresh)
+            } else {
+                0.0
+            },
+        );
         r_loc_to_glob * friction_force_local
     }
 
@@ -533,6 +571,7 @@ impl ControlContext {
             ParameterName::TRAJ_RECOMPUTE_ERROR => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
             ParameterName::POSE_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::VISION_SEED_SAMPLES => Some(ParameterDataFormat::F32),
             _ => None,
         }
     }
@@ -591,6 +630,9 @@ impl ControlContext {
             }
             ParameterName::TRAJ_RECOMPUTE_ERROR => {
                 reply.data.vec4_f32 = self.tracking_error_thresh.into();
+            }
+            ParameterName::VISION_SEED_SAMPLES => {
+                reply.data.f32_ = self.state_estimator.vision_filter.get_params().seed_samples as f32;
             }
             ParameterName::POSE_FB_PIDII_LINEAR | ParameterName::POSE_FB_PIDII_ANGULAR => {
                 let gain = self.pose_pid_controller.get_gain();
@@ -724,6 +766,17 @@ impl ControlContext {
             ParameterName::TRAJ_RECOMPUTE_ERROR => {
                 let v = unsafe { cmd.data.vec4_f32 };
                 self.tracking_error_thresh = Vector4f::new(v[0], v[1], v[2], v[3]);
+            }
+            ParameterName::VISION_SEED_SAMPLES => {
+                let v = unsafe { cmd.data.f32_ };
+                let mut params = self.state_estimator.vision_filter.get_params();
+                params.seed_samples = if v.is_finite() {
+                    (libm::roundf(v) as usize).clamp(1, DEFAULT_VISION_BUFF_LEN)
+                } else {
+                    params.seed_samples
+                };
+                // Takes effect on the next vision reseed (apply_command resets afterwards).
+                self.state_estimator.vision_filter = VisionFilter::new(params);
             }
             ParameterName::POSE_FB_PIDII_LINEAR | ParameterName::POSE_FB_PIDII_ANGULAR => {
                 let v = unsafe { cmd.data.vec5_f32 };

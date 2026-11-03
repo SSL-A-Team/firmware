@@ -80,6 +80,12 @@ pub const TRACKING_ERROR_THRESHOLD: Vector4f = Vector4f::new(1.0, 1.57, 5.0, 10.
 /// [LINEAR_VEL_THRESHOLD, LINEAR_ACCEL_THRESHOLD, ANGULAR_VEL_THRESHOLD, ANGULAR_ACCEL_THRESHOLD]
 pub const FRICTION_COMP_GATING: Vector4f = Vector4f::new(0.1, 0.5, 0.5, 1.0);
 
+/// Coulomb friction compensation takes its sign from the encoder-measured
+/// local velocity on each axis. Below these speeds the axis is treated as
+/// stopped and Coulomb compensation follows the commanded accel instead.
+pub const COULOMB_MEAS_VEL_THRESH_LINEAR: f32 = 0.05; // m/s
+pub const COULOMB_MEAS_VEL_THRESH_ANGULAR: f32 = 0.2; // rad/s
+
 /// Maximum magnitude of the body-level acceleration output [linear (m/s²), angular (rad/s²)].
 /// The friction-compensated acceleration is clamped to these limits before conversion
 /// to wheel torques. Prevents runaway current commands from large PID errors.
@@ -119,7 +125,7 @@ pub const STOP_STATE_LINEAR_SPEED_LIMIT: f32 = 1.25; // m/s (SSL rule limit: 1.5
 /// threshold (via PidController anti-jitter) to avoid fighting encoder
 /// quantization noise near rest.
 ///
-/// BRAKE_MAX_CURRENT_A must stay below MAX_CURRENT_MA / 1000 (2.5 A).
+/// BRAKE_MAX_CURRENT_A must stay below MAX_CURRENT_MA / 1000 (5 A).
 pub const BRAKE_KP: f32 = 0.01; // A / (rad/s)
 pub const BRAKE_ANTI_JITTER_RADS: f32 = 5.0; // rad/s
 pub const BRAKE_MAX_CURRENT_A: f32 = 1.0; // A

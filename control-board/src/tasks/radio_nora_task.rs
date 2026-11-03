@@ -518,12 +518,17 @@ impl<
                 );
 
                 let start_time = Instant::now();
-                self.radio.close_peer().await.unwrap();
+                // Socket state is uncertain if either step fails, so return Err to
+                // re-establish the network connection instead of retrying the hello.
+                if let Err(e) = self.radio.close_peer().await {
+                    defmt::warn!("failed to close multicast peer: {}", e);
+                    return Err(());
+                }
 
-                self.radio
-                    .open_unicast(hello.ipv4, hello.port)
-                    .await
-                    .expect("failed to open unicast port");
+                if let Err(e) = self.radio.open_unicast(hello.ipv4, hello.port).await {
+                    defmt::warn!("failed to open unicast port: {}", e);
+                    return Err(());
+                }
                 // Data phase: don't block on per-write acks (they're drained by the read loop).
                 self.radio.set_fire_and_forget_sends(true);
                 defmt::info!("unicast open");

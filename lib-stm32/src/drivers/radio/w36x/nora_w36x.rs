@@ -1,4 +1,4 @@
-use core::cell::Cell;
+use core::cell::{Cell, RefCell};
 use core::fmt::Write;
 use defmt::Format;
 use embassy_futures::select::select;
@@ -78,6 +78,92 @@ pub struct NoraW36x<
     writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
     uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
     data_mode: Cell<DataMode>,
+    // Data-phase receive stream. The UART is idle-line framed and the module pauses
+    // mid-event, so +UESODB events arrive split across buffers, prefixed with \r\n, or
+    // packed behind write acks. Events are reassembled here from the byte stream.
+    rx_accum: RefCell<Vec<u8, RX_ACCUM_LEN>>,
+}
+
+const RX_ACCUM_LEN: usize = 1024;
+const UESODB_PREFIX: &[u8] = b"+UESODB";
+// Longest header between the event prefix and the 0x01 marker (+UESODBF carries ip,port).
+const UESODB_MAX_HEADER_LEN: usize = 64;
+
+/// Drop the first `n` bytes of the accumulator.
+fn rx_accum_consume(accum: &mut Vec<u8, RX_ACCUM_LEN>, n: usize) {
+    let n = n.min(accum.len());
+    let remaining = accum.len() - n;
+    accum.copy_within(n.., 0);
+    accum.truncate(remaining);
+}
+
+/// Find the next complete +UESODB / +UESODBF event in the accumulator.
+///
+/// Bytes before the event (\r\n, write acks, OK, other URCs) are discarded. Returns the
+/// payload range of a complete event at the front of the accumulator, or None if more
+/// bytes are needed. A trailing partial event is kept for the next call.
+fn rx_accum_next_event(accum: &mut Vec<u8, RX_ACCUM_LEN>) -> Option<(usize, usize)> {
+    loop {
+        let Some(start) = accum.windows(UESODB_PREFIX.len()).position(|w| w == UESODB_PREFIX) else {
+            // Keep a tail that could be the start of a prefix split across buffers.
+            let keep = accum.len().min(UESODB_PREFIX.len() - 1);
+            let drop = accum.len() - keep;
+            rx_accum_consume(accum, drop);
+            return None;
+        };
+        if start > 0 {
+            rx_accum_consume(accum, start);
+        }
+
+        // +UESODB:<socket_id><01><len_hi><len_lo><data>
+        // +UESODBF:<socket_id>,<remote_ip>,<remote_port><01><len_hi><len_lo><data>
+        let header_start = match (accum.get(7), accum.get(8)) {
+            (None, _) => return None,
+            (Some(b':'), _) => 8,
+            (Some(b'F'), None) => return None,
+            (Some(b'F'), Some(b':')) => 9,
+            _ => {
+                rx_accum_consume(accum, 1);
+                continue;
+            }
+        };
+
+        let mut marker = None;
+        let mut corrupt = false;
+        for (i, &b) in accum[header_start..].iter().enumerate().take(UESODB_MAX_HEADER_LEN) {
+            if b == 0x01 {
+                marker = Some(header_start + i);
+                break;
+            }
+            if !(0x20..=0x7E).contains(&b) {
+                corrupt = true;
+                break;
+            }
+        }
+        let marker = match marker {
+            Some(m) if !corrupt => m,
+            None if !corrupt && accum.len() - header_start < UESODB_MAX_HEADER_LEN => return None,
+            _ => {
+                rx_accum_consume(accum, 1);
+                continue;
+            }
+        };
+
+        if accum.len() < marker + 3 {
+            return None;
+        }
+        let data_len = ((accum[marker + 1] as usize) << 8) | (accum[marker + 2] as usize);
+        let data_start = marker + 3;
+        let data_end = data_start + data_len;
+        if data_len == 0 || data_end > RX_ACCUM_LEN {
+            rx_accum_consume(accum, 1);
+            continue;
+        }
+        if accum.len() < data_end {
+            return None;
+        }
+        return Some((data_start, data_end));
+    }
 }
 
 impl<
@@ -101,6 +187,7 @@ impl<
             writer,
             uart,
             data_mode: Cell::new(DataMode::BufferedMode),
+            rx_accum: RefCell::new(Vec::new()),
         }
     }
 
@@ -393,6 +480,7 @@ impl<
     ///
     /// Returns the socket ID assigned by the module.
     pub async fn create_socket(&self, protocol: SocketProtocol) -> Result<u8, NoraRadioError> {
+        self.clear_rx_accum();
         let mut str: String<16> = String::new();
         let proto_num = protocol as u8;
         write!(str, "AT+USOCR={proto_num},0").or(Err(NoraRadioError::CommandConstructionFailed))?;
@@ -518,6 +606,7 @@ impl<
     /// Uses AT+USOCL=<socket_handle>
     /// NORA-W36x returns OK for explicit close; +UESOCL is only unsolicited (remote peer close).
     pub async fn close_socket(&self, socket_handle: u8) -> Result<(), NoraRadioError> {
+        self.clear_rx_accum();
         let mut str: String<16> = String::new();
         write!(str, "AT+USOCL={socket_handle}")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
@@ -666,7 +755,7 @@ impl<
     /// The `{binary_data}` uses the u-blox binary format: 0x01 (SOH), MSB of length, LSB of length,
     /// followed by the raw data bytes.
     pub async fn read_data<RET, FN>(
-        &'a self,
+        &self,
         socket_handle: u8,
         max_length: u16,
         fn_read: FN,
@@ -722,14 +811,19 @@ impl<
         Ok(ret)
     }
 
-    pub fn can_read_data(&'a self) -> bool {
-        self.reader.can_dequque()
+    pub fn can_read_data(&self) -> bool {
+        self.reader.can_dequque() || !self.rx_accum.borrow().is_empty()
+    }
+
+    /// Discard any partially received data events (e.g. when the socket changes).
+    pub fn clear_rx_accum(&self) {
+        self.rx_accum.borrow_mut().clear();
     }
 
     /// Try to read a queued +UESODA URC indicating data is available.
     /// Returns the socket_id and length of available data, or an error if nothing queued.
     /// Used in buffered mode (AT+USORM=0).
-    pub fn try_read_data_ready(&'a self) -> Result<(u8, u16), NoraRadioError> {
+    pub fn try_read_data_ready(&self) -> Result<(u8, u16), NoraRadioError> {
         match self.reader.try_dequeue() {
             Ok(buf) => match self.parse_packet(buf.data()) {
                 Ok(NoraPacket::Event(ATEvent::SocketDataAvailable { socket_id, length })) => {
@@ -752,40 +846,47 @@ impl<
         }
     }
 
-    /// Try to read inline binary data from a queued +UESODB or +UESODBF event.
+    /// Try to read inline binary data from a +UESODB or +UESODBF event.
     /// Used in direct binary mode (AT+USORM=2).
-    /// Returns the data via the provided callback, or None if no data is queued.
+    /// Queued UART buffers are reassembled into a byte stream (see `rx_accum`) so events
+    /// split across buffers or packed behind other output are not lost. Returns the data
+    /// of the next complete event via the provided callback, or None if none is complete.
     pub fn try_read_data_binary<RET, FN>(
-        &'a self,
+        &self,
         fn_read: FN,
     ) -> Result<Option<RET>, NoraRadioError>
     where
         FN: FnOnce(&[u8]) -> RET,
     {
-        match self.reader.try_dequeue() {
-            Ok(buf) => match self.parse_packet(buf.data()) {
-                Ok(NoraPacket::Event(ATEvent::SocketDataBinary { socket_id: _, data })) => {
-                    Ok(Some(fn_read(data)))
-                }
-                Ok(NoraPacket::Event(ATEvent::SocketDataBinaryFrom {
-                    socket_id: _, data, ..
-                })) => Ok(Some(fn_read(data))),
-                other => {
-                    defmt::trace!("NoraW36x - expected binary data event, got {:?}", other);
-                    Err(NoraRadioError::ReadDataInvalid)
-                }
-            },
-            Err(queue::Error::QueueFull) => {
-                defmt::warn!("NoraW36x - ReadLowLevelBufferEmpty - QueueFull");
-                Err(NoraRadioError::ReadLowLevelBufferEmpty)
+        loop {
+            let event = rx_accum_next_event(&mut self.rx_accum.borrow_mut());
+            if let Some((data_start, data_end)) = event {
+                let ret = fn_read(&self.rx_accum.borrow()[data_start..data_end]);
+                rx_accum_consume(&mut self.rx_accum.borrow_mut(), data_end);
+                return Ok(Some(ret));
             }
-            Err(queue::Error::QueueEmpty) => {
-                defmt::warn!("NoraW36x - ReadLowLevelBufferEmpty - QueueEmpty");
-                Err(NoraRadioError::ReadLowLevelBufferEmpty)
-            }
-            Err(queue::Error::InProgress) => {
-                defmt::error!("NoraW36x - ReadLowLevelBufferBusy");
-                Err(NoraRadioError::ReadLowLevelBufferBusy)
+
+            match self.reader.try_dequeue() {
+                Ok(buf) => {
+                    let mut accum = self.rx_accum.borrow_mut();
+                    if accum.extend_from_slice(buf.data()).is_err() {
+                        defmt::warn!(
+                            "NoraW36x - receive stream overflow, discarding {} bytes",
+                            accum.len()
+                        );
+                        accum.clear();
+                        let _ = accum.extend_from_slice(buf.data());
+                    }
+                }
+                Err(queue::Error::QueueEmpty) => return Ok(None),
+                Err(queue::Error::QueueFull) => {
+                    defmt::warn!("NoraW36x - ReadLowLevelBufferEmpty - QueueFull");
+                    return Err(NoraRadioError::ReadLowLevelBufferEmpty);
+                }
+                Err(queue::Error::InProgress) => {
+                    defmt::error!("NoraW36x - ReadLowLevelBufferBusy");
+                    return Err(NoraRadioError::ReadLowLevelBufferBusy);
+                }
             }
         }
     }
@@ -964,6 +1065,15 @@ impl<
                 self.reader
                     .dequeue(|buf| {
                         defmt::trace!("read_response_raw: {:?}", buf);
+                        // Data events can arrive while waiting for a response; keep the
+                        // newest bytes so a trailing OK/ERROR is never dropped on overflow.
+                        let buf = &buf[buf.len().saturating_sub(N)..];
+                        let overflow = (accum.len() + buf.len()).saturating_sub(N);
+                        if overflow > 0 {
+                            let remaining = accum.len() - overflow;
+                            accum.copy_within(overflow.., 0);
+                            accum.truncate(remaining);
+                        }
                         let _ = accum.extend_from_slice(buf);
                     })
                     .await;
