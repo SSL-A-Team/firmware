@@ -43,7 +43,10 @@ include_external_cpp_bin! {CURRENT_CONTROLLED_WHEEL_IMAGE, "wheel-torque.bin"}
 
 const MAX_TX_PACKET_SIZE: usize = 80;
 const TX_BUF_DEPTH: usize = 5;
-const MAX_RX_PACKET_SIZE: usize = 80;
+// Sized from the packet definition so it tracks CcmResponse, which grew to
+// 84 bytes with the current sense estimator telemetry.
+const MAX_RX_PACKET_SIZE: usize =
+    core::mem::size_of::<ateam_common_packets::bindings::CcmResponse>();
 const RX_BUF_DEPTH: usize = 5;
 
 static_idle_buffered_uart!(FRONT_LEFT,  MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, false, #[link_section = ".axisram.buffers"]);
@@ -274,6 +277,10 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     let mut moved_yet = false;
     let mut curr_setpoint: i16 = 0;
     let mut last_seq_num: u8 = 0;
+
+    // telemetry arrives at 1kHz; log the current sense comparison at 10Hz
+    const CS_LOG_DIVISOR: u16 = 100;
+    let mut cs_log_ctr: u16 = 0;
     let mut ctr: usize = 0;
 
     // Button edge-detection state (true = was pressed on previous tick)
@@ -309,6 +316,32 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         if cur_seq != last_seq_num {
             torque_data_pub.publish_immediate(motors[active_wheel].get_latest_state());
             last_seq_num = cur_seq;
+
+            // Side-by-side dump of the three concurrent current estimates. See
+            // CURRENT_SENSING_INVESTIGATION.md - the raw shunt reading is bus
+            // current unless the motor image was built with CS_SYNC_SAMPLING,
+            // so raw and duty-corrected should differ by roughly 1/duty.
+            cs_log_ctr += 1;
+            if cs_log_ctr >= CS_LOG_DIVISOR {
+                cs_log_ctr = 0;
+
+                let m = &motors[active_wheel];
+                defmt::info!(
+                    "{} cs: filt {}mA, unfilt {}mA, duty_corr {}mA (valid {}), model {}mA (valid {}), duty {}, vel {}rad/s (src {}, valid {}), sync {}",
+                    WHEEL_NAMES[active_wheel],
+                    m.read_current_filt_ma(),
+                    m.read_current_unfilt_ma(),
+                    m.read_current_duty_corrected_ma(),
+                    m.read_cs_duty_correction_valid(),
+                    m.read_current_model_ma(),
+                    m.read_cs_model_valid(),
+                    m.read_cs_duty(),
+                    m.read_cs_vel_est_used_drads() as f32 / 10.0,
+                    if m.read_cs_vel_source_is_encoder() { "enc" } else { "hall" },
+                    m.read_cs_vel_est_valid(),
+                    m.read_cs_sync_sampling_enabled()
+                );
+            }
         }
 
         // Debounce cooldown countdown

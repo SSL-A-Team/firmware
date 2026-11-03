@@ -33,6 +33,7 @@ static volatile ImgHash_t dribbler_torque_img_hash_struct = {
 // communications data
 static CcmMotionCommand motor_command_packet;
 static CcmTelemetry response_packet;
+static CcmCurrentSenseTelemetry cs_telemetry;
 static uart_logging_status_rx_t uart_logging_status_receive;
 static uart_logging_status_tx_t uart_logging_status_send;
 static bool params_return_packet_requested = false;
@@ -71,6 +72,7 @@ static int16_t apply_current_limits(int16_t);
 static int16_t apply_current_slew_rate(int16_t);
 static float apply_vel_setpoint_slew_rate(float);
 static void update_dribbler_vel_est();
+static void update_current_sense_telemetry();
 static void do_vel_cur_control(float);
 
 static void update_errors();
@@ -101,6 +103,7 @@ int main() {
     // zero out packet initial states
     memset(&motor_command_packet, 0, sizeof(CcmMotionCommand));
     memset(&response_packet, 0, sizeof(CcmTelemetry));
+    memset(&cs_telemetry, 0, sizeof(CcmCurrentSenseTelemetry));
 
 #ifdef UART_ENABLED
     // Initialize UART and logging status.
@@ -253,6 +256,8 @@ int main() {
 
         memcpy(response_packet.current_telemetry.current_samples_ma, pwm6step_get_current_log(), sizeof(response_packet.current_telemetry.current_samples_ma));
 
+        update_current_sense_telemetry();
+
         // load errors into packets and set LEDs
         update_errors();
 
@@ -298,6 +303,20 @@ static void update_dribbler_vel_est() {
     response_packet.current_telemetry.hall_vel_est_drads = hall_drads;
     hall_vel_rads = iir_filter_update(&hall_vel_filter, hall_drads / 10.0f);
     response_packet.velocity_telemetry.wheel_vel_rads = hall_vel_rads;
+}
+
+// The dribbler has no encoder, so the model-based current observer always runs
+// on the internal hall estimate and CcmMotionCommand::cs_vel_source_encoder is
+// ignored here. Note also that the observer constants in motor_config.h are
+// uncharacterized placeholders for this motor.
+static void update_current_sense_telemetry() {
+    cs_telemetry.current_filt_ma = pwm6step_get_current_est_filt_ma();
+    cs_telemetry.current_unfilt_ma = pwm6step_get_current_est_unfilt_ma();
+    cs_telemetry.current_duty_corrected_ma = pwm6step_get_current_est_duty_corrected_ma();
+    cs_telemetry.current_model_ma = pwm6step_get_current_est_model_ma();
+    cs_telemetry.vel_est_used_drads = pwm6step_get_vel_est_used_drads();
+    cs_telemetry.duty_arr = pwm6step_get_mean_duty_arr();
+    cs_telemetry.cs_flags = pwm6step_get_current_sense_flags();
 }
 
 static void do_vel_cur_control(float effective_setpoint) {
@@ -438,7 +457,8 @@ static void send_packets() {
         response_pkt.seq_num = seq_ctr;  // intentionally overflow
         seq_ctr++;
 
-        response_pkt.data.motion = response_packet;
+        response_pkt.data.motion.telemetry = response_packet;
+        response_pkt.data.motion.current_sense = cs_telemetry;
     }
 
     // takes ~270uS, mostly hardware DMA, but should be cleared out by now.

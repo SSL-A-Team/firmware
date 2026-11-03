@@ -144,12 +144,36 @@ typedef enum
 // half words. Additionally, result must be at the end since a
 // ref to this struct will be passed into DMAR register for N
 // transfers
+//
+// The ADC converts selected channels in ascending channel-index order, so field
+// order here has to match ascending ADC_CH_MASK order:
+//
+//   CH3 / PA3 -> current sense amplifier output, pre-filter (no external RC).
+//                This is the tap synchronous sampling needs: it can actually
+//                follow the shunt's pulse train inside the PWM on-window.
+//   CH4 / PA4 -> same amplifier output through the external ~2 kHz RC low pass.
+//                Its time average is D * I_phase, i.e. bus current, because the
+//                shunt only conducts during the active vector.
+//   CH9       -> bus voltage divider.
+//
+// See CURRENT_SENSING_INVESTIGATION.md.
 typedef struct
 __attribute__((__packed__)) ADC_Result {
-    uint16_t    Motor_current_raw;
+    uint16_t    Motor_current_unfilt_raw;
+    uint16_t    Motor_current_filt_raw;
     uint16_t    Vbus_raw;
+    // not in the conversion sequence, see the temperature FUTURE note in
+    // currsen_setup()
     uint16_t    Spin_temperature_raw;
 } ADC_Result_t;
+
+// Number of DMA half-word transfers per conversion sequence. Must equal the
+// number of channels selected in ADC_CH_MASK, otherwise the circular DMA walks
+// out of phase with the conversion sequence and every field reads the wrong
+// channel.
+#ifndef ADC_DMA_NUM_TRANSFERS
+#define ADC_DMA_NUM_TRANSFERS 3
+#endif
 
 void currsen_enable_ht();
 void currsen_read_dma();
@@ -159,14 +183,26 @@ CS_Status_t currsen_adc_en();
 CS_Status_t currsen_adc_dis();
 CS_Status_t calculate_motor_zero_current_setpoint();
 
-uint16_t currsen_get_shunt_raw_adc();
+// raw ADC counts
+uint16_t currsen_get_shunt_raw_adc();          // control path tap, see below
+uint16_t currsen_get_shunt_filt_raw_adc();     // CH4, post external RC
+uint16_t currsen_get_shunt_unfilt_raw_adc();   // CH3, pre-filter
 uint16_t currsen_get_bus_raw_adc();
 
 Uint32FixedPoint_t currsen_get_shunt_voltage_fxpt();
 Uint32FixedPoint_t currsen_get_shunt_voltage_no_bias_fxpt();
 Uint32FixedPoint_t currsen_get_shunt_current_fxpt();
 uint16_t currsen_get_calibrated_bias_mv();
+
+// Current from the tap the control loop runs on. That is the filtered tap by
+// default, and the pre-filter tap when the image is built with
+// CS_SYNC_SAMPLING, because only then is the pre-filter tap sampled inside the
+// PWM on-window and therefore meaningful.
 uint16_t currsen_get_shunt_current_ma();
+// Both taps explicitly, for side-by-side comparison regardless of build config.
+uint16_t currsen_get_shunt_current_filt_ma();
+uint16_t currsen_get_shunt_current_unfilt_ma();
+
 uint16_t currsen_get_vbus_voltage_mv();
 
 float currsen_get_shunt_voltage_raw();

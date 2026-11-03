@@ -43,7 +43,10 @@ include_external_cpp_bin! {CURRENT_CONTROLLED_WHEEL_IMAGE, "wheel-torque.bin"}
 
 const MAX_TX_PACKET_SIZE: usize = 80;
 const TX_BUF_DEPTH: usize = 5;
-const MAX_RX_PACKET_SIZE: usize = 80;
+// Sized from the packet definition so it tracks CcmResponse, which grew to
+// 84 bytes with the current sense estimator telemetry.
+const MAX_RX_PACKET_SIZE: usize =
+    core::mem::size_of::<ateam_common_packets::bindings::CcmResponse>();
 const RX_BUF_DEPTH: usize = 5;
 
 static_idle_buffered_uart!(CCM_FL_UART, MAX_RX_PACKET_SIZE, RX_BUF_DEPTH, MAX_TX_PACKET_SIZE, TX_BUF_DEPTH, false, #[link_section = ".axisram.buffers"]);
@@ -372,25 +375,25 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         if curr_ctr > 10000 {
             curr_ctr = 0
         } else if curr_ctr > 5000 {
-            fl_ccm.set_current_setpoint(50);
-            bl_ccm.set_current_setpoint(50);
-            br_ccm.set_current_setpoint(50);
-            fr_ccm.set_current_setpoint(50);
+            fl_ccm.set_current_setpoint(100);
+            bl_ccm.set_current_setpoint(100);
+            br_ccm.set_current_setpoint(100);
+            fr_ccm.set_current_setpoint(100);
 
-            fl_ccm.set_setpoint(160.0);
-            bl_ccm.set_setpoint(160.0);
-            br_ccm.set_setpoint(160.0);
-            fr_ccm.set_setpoint(160.0);
+            fl_ccm.set_setpoint(10.0);
+            bl_ccm.set_setpoint(10.0);
+            br_ccm.set_setpoint(10.0);
+            fr_ccm.set_setpoint(10.0);
         } else {
-            fl_ccm.set_current_setpoint(-50);
-            bl_ccm.set_current_setpoint(-50);
-            br_ccm.set_current_setpoint(-50);
-            fr_ccm.set_current_setpoint(-50);
+            fl_ccm.set_current_setpoint(-100);
+            bl_ccm.set_current_setpoint(-100);
+            br_ccm.set_current_setpoint(-100);
+            fr_ccm.set_current_setpoint(-100);
 
-            fl_ccm.set_setpoint(-120.0);
-            bl_ccm.set_setpoint(-160.0);
-            br_ccm.set_setpoint(-160.0);
-            fr_ccm.set_setpoint(-160.0);
+            fl_ccm.set_setpoint(-10.0);
+            bl_ccm.set_setpoint(-10.0);
+            br_ccm.set_setpoint(-10.0);
+            fr_ccm.set_setpoint(-10.0);
         }
 
         // curr_ctr += 1;

@@ -45,6 +45,7 @@ static volatile ImgHash_t wheel_img_hash_struct = {
 // communications data
 static CcmMotionCommand motor_command_packet;
 static CcmTelemetry response_packet;
+static CcmCurrentSenseTelemetry cs_telemetry;
 static uart_logging_status_rx_t uart_logging_status_receive;
 static uart_logging_status_tx_t uart_logging_status_send;
 static bool params_return_packet_requested = false;
@@ -94,7 +95,9 @@ const float vel_gain_schedule[3] = {
 ////////////////////////////
 
 static bool allow_motor_to_run();
+static bool encoder_connected();
 static void update_wheel_vel_est();
+static void update_current_sense_telemetry();
 static float do_vel_control();
 static void do_vel_cur_control();
 
@@ -257,6 +260,11 @@ int main() {
             motor_command_packet.setpoint = 0.0f;
         }
 
+        // pick the velocity source the model-based current observer runs on.
+        // Hall is the default; the encoder is higher resolution at low speed but
+        // is a separate failure domain, so it stays opt-in from the control board.
+        pwm6step_set_vel_est_source_external(motor_command_packet.cs_vel_source_encoder != 0);
+
         // update wheel velocity est
         update_wheel_vel_est();
 
@@ -287,6 +295,8 @@ int main() {
         }
 
         response_packet.velocity_telemetry.vel_setpoint_rads = motor_command_packet.setpoint;
+
+        update_current_sense_telemetry();
 
         // load errors into packets and set LEDs
         update_errors();
@@ -372,6 +382,25 @@ static void update_wheel_vel_est() {
 
     // set the value
     response_packet.velocity_telemetry.wheel_vel_rads = enc_rad_s_filt;
+
+    // publish the encoder estimate to the motor driver so the model-based
+    // current observer can use it in place of the hall estimate
+    pwm6step_set_external_vel_est((int16_t) (enc_rad_s_filt * 10.0f), encoder_connected());
+}
+
+static void update_current_sense_telemetry() {
+    response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
+    response_packet.current_telemetry.motor_voltage_cmd_mv = pwm6step_get_voltage_command();
+    response_packet.current_telemetry.hall_vel_est_drads = pwm6step_hall_get_rps_estimate();
+    memcpy(response_packet.current_telemetry.current_samples_ma, pwm6step_get_current_log(), sizeof(response_packet.current_telemetry.current_samples_ma));
+
+    cs_telemetry.current_filt_ma = pwm6step_get_current_est_filt_ma();
+    cs_telemetry.current_unfilt_ma = pwm6step_get_current_est_unfilt_ma();
+    cs_telemetry.current_duty_corrected_ma = pwm6step_get_current_est_duty_corrected_ma();
+    cs_telemetry.current_model_ma = pwm6step_get_current_est_model_ma();
+    cs_telemetry.vel_est_used_drads = pwm6step_get_vel_est_used_drads();
+    cs_telemetry.duty_arr = pwm6step_get_mean_duty_arr();
+    cs_telemetry.cs_flags = pwm6step_get_current_sense_flags();
 }
 
 static void do_vel_cur_control() {
@@ -413,13 +442,17 @@ static float do_vel_control() {
     return control_setpoint_vel_duty;
 }
 
-static void update_errors() {
-    // detect if the encoder is not pulling the detect pin down
+// detect if the encoder is not pulling the detect pin down
+static bool encoder_connected() {
 #ifdef HAS_EXTERNAL_ENCODER
-    bool encoder_disconnected = (GPIOA->IDR & GPIO_IDR_5) != 0;
+    return (GPIOA->IDR & GPIO_IDR_5) == 0;
 #else
-    bool encoder_disconnected = false;
+    return true;
 #endif
+}
+
+static void update_errors() {
+    bool encoder_disconnected = !encoder_connected();
 
     // read error states
     const MotorErrors_t reported_motor_errors = pwm6step_get_motor_errors();
@@ -485,7 +518,8 @@ static void send_packets() {
         response_pkt.type = CCM_RESP_TELEM;
         response_pkt.timestamp = time_local_epoch_s();
 
-        response_pkt.data.motion = response_packet;
+        response_pkt.data.motion.telemetry = response_packet;
+        response_pkt.data.motion.current_sense = cs_telemetry;
     }
 
     // takes ~270uS, mostly hardware DMA, but should be cleared out by now.

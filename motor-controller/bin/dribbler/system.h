@@ -23,15 +23,38 @@
 //  ADC Config  //
 //////////////////
 
-// #define ADC_MODE CS_MODE_DMA
-// #define ADC_NUM_CHANNELS 5
-// #define ADC_CH_MASK (ADC_CHSELR_CHSEL3 | ADC_CHSELR_CHSEL4 | ADC_CHSELR_CHSEL5 | ADC_CHSELR_CHSEL16 | ADC_CHSELR_CHSEL17)
-// #define ADC_SR_MASK (ADC_SMPR_SMP_1 | ADC_SMPR_SMP_2)
-
 #define ADC_MODE CS_MODE_DMA
-#define ADC_NUM_CHANNELS 4
-#define ADC_CH_MASK (ADC_CHSELR_CHSEL3 | ADC_CHSELR_CHSEL4 | ADC_CHSELR_CHSEL16 | ADC_CHSELR_CHSEL17)
-#define ADC_SR_MASK (ADC_SMPR_SMP_1 | ADC_SMPR_SMP_2)
+// CH3 = PA3 current sense pre-filter, CH4 = PA4 current sense post external RC
+// LPF, CH9 = bus voltage divider. Order matters: the ADC converts in ascending
+// channel index, and ADC_Result_t's field order mirrors that.
+#define ADC_NUM_CHANNELS 3
+#define ADC_DMA_NUM_TRANSFERS 3
+#define ADC_CH_MASK (ADC_CHSELR_CHSEL3 | ADC_CHSELR_CHSEL4 | ADC_CHSELR_CHSEL9)
+#define ADC_SR_MASK (ADC_SMPR_SMP_0)
+
+////////////////////////////////
+//  CURRENT SENSE SAMPLING MODE   //
+////////////////////////////////////
+
+// Investigation Phase 1 (see CURRENT_SENSING_INVESTIGATION.md). Uncomment to
+// move the ADC trigger inside the PWM on-window so the shunt is sampled while
+// it is actually conducting, instead of reading the analog filter's time
+// average (which is bus current, D * I_phase).
+//
+// This changes what the ADC physically samples, so unlike the duty correction
+// and the model observer it cannot run concurrently with the default
+// configuration - it is a compile-time choice. Enabling it:
+//   - makes TIM1 CCR4 track duty                    (6step_current.c)
+//   - drops TIM1 CMS to up-count-only flags         (6step_current.c)
+//   - preloads CCR4                                 (6step_current.c)
+//   - shortens the ADC aperture to 125ns            (current_sensing.c)
+// It also requires the pre-filter ADC channel; with the ~2 kHz analog LPF in
+// the path the trigger placement is irrelevant. Telemetry reports the active
+// mode via CCM_CS_FLAG_SYNC_SAMPLING.
+//
+// Not viable below roughly 10 ARR counts of on-time (~1.7% duty): the trigger
+// sits too close to the switching edge for ringing to settle.
+// #define CS_SYNC_SAMPLING
 
 ////////////////////
 //  TIME KEEPING  //
