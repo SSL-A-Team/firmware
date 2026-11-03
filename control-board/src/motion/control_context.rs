@@ -222,10 +222,12 @@ impl ControlContext {
             None
         };
 
+        let encoder_vel = self.robot_model.wheel_to_local_vel(&wheel_vel_meas);
+
         self.state_estimator.tick(
             Instant::now().as_micros(),
             &imu,
-            &wheel_vel_meas,
+            &encoder_vel,
             vision,
         ).map_err(|_| ControlsError::SingularMatrix)?;
 
