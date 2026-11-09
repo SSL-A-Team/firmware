@@ -37,6 +37,13 @@ pub const POSE_PID_ANTI_JITTER_THRESH: Vector3f = Vector3f::new(0.001, 0.001, 0.
 /// velocity loop on it is chosen by the `wheel_vel_control_enabled` radio bit.
 pub const TRACKING_ACCEL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
 
+/// [CUTOFF_LINEAR_HZ, CUTOFF_ANGULAR_HZ] first-order low-pass cutoff on the
+/// trajectory feedforward accel in closed-loop tracking. Smooths bang-bang
+/// switching chatter (e.g. replanning to a target that moves in steps).
+/// <= 0 disables the filter on that axis group.
+/// Radio-tunable as `TRACKING_FF_ACCEL_CUTOFF_HZ`.
+pub const TRACKING_FF_ACCEL_CUTOFF_HZ: Vector2f = Vector2f::new(20.0, 20.0);
+
 /// [ERROR_POS_LINEAR (m), ERROR_POS_ANGULAR (rad), ERROR_VEL_LINEAR (m/s), ERROR_VEL_ANGULAR (rad/s)]
 /// Trajectory-vs-estimate errors above which closed-loop tracking is considered
 /// diverged, triggering divergence recovery (active brake, then reset).
@@ -54,6 +61,13 @@ pub const FRICTION_COMP_VEL_THRESHOLD: Vector2f = Vector2f::new(0.01, 0.001);
 /// to wheel torques. Prevents runaway current commands from large PID errors.
 pub const BODY_ACCEL_CLAMP_LINEAR: f32 = 20.0; // m/s²
 pub const BODY_ACCEL_CLAMP_ANGULAR: f32 = 100.0; // rad/s²
+
+/// Maximum commanded wheel current (A). The friction-compensated body accel is
+/// scaled down uniformly (direction preserved) so no wheel exceeds this. Matches
+/// the wheel-torque motor firmware's low-speed limit (MAX_CURR_WHEEL_NOT_TURNING,
+/// 2.16 A below 1 rev/s); exceeding it there clips wheels unevenly, which yaws
+/// the robot.
+pub const WHEEL_CURRENT_LIMIT_A: f32 = 2.16; // A
 
 /// Maximum magnitude of the body-level velocity output [linear (m/s), angular (rad/s)].
 /// Clamped before conversion to wheel velocity setpoints.

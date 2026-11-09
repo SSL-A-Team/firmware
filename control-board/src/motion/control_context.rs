@@ -56,6 +56,20 @@ impl Trajectory for TrackedTrajectory {
     }
 }
 
+impl TrackedTrajectory {
+    /// Like `sample`, but bang-bang accel is averaged over the coming tick so
+    /// switches inside the tick don't produce `+a_max`/`-a_max` chatter.
+    fn sample_over(&self, dt: f32) -> (Vector6f, Vector3f) {
+        match self {
+            Self::BangBang(t) => {
+                let (state, accel) = t.sample();
+                (state, t.mean_accel(dt).unwrap_or(accel))
+            }
+            _ => self.sample(),
+        }
+    }
+}
+
 /// Body-frame setpoints produced by a maneuver each tick.
 /// `body_controller` applies friction compensation and wheel transforms.
 #[derive(Copy, Clone, Default)]
@@ -98,6 +112,10 @@ pub struct ControlContext {
     pub pose_pid_controller: PidController<3>,
     /// Tracking accel (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
     pub tracking_accel_gain: Vector2f,
+    /// Feedforward accel low-pass cutoffs: [CUTOFF_LINEAR_HZ, CUTOFF_ANGULAR_HZ]; <= 0 disables
+    pub tracking_ff_accel_cutoff_hz: Vector2f,
+    /// Low-passed feedforward accel; `None` until the next tracking tick seeds it.
+    pub tracking_ff_accel_filt: Option<Vector3f>,
     /// Divergence thresholds: [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
     pub tracking_divergence_thresh: Vector4f,
     /// [LINEAR_VEL_THRESHOLD, ANGULAR_VEL_THRESHOLD]
@@ -153,6 +171,8 @@ impl ControlContext {
                 Some(controller_params::POSE_PID_ANTI_JITTER_THRESH),
             ),
             tracking_accel_gain: controller_params::TRACKING_ACCEL_GAIN,
+            tracking_ff_accel_cutoff_hz: controller_params::TRACKING_FF_ACCEL_CUTOFF_HZ,
+            tracking_ff_accel_filt: None,
             tracking_divergence_thresh: controller_params::TRACKING_DIVERGENCE_THRESHOLD,
             friction_comp_vel_thresh: controller_params::FRICTION_COMP_VEL_THRESHOLD,
             trajectory: None,
@@ -184,6 +204,7 @@ impl ControlContext {
         self.trajectory = None;
         self.prev_cmd = None;
         self.trajectory_open_loop = false;
+        self.tracking_ff_accel_filt = None;
         self.enc_lag.reset();
         self.tracking_divergence_state = TrackingDivergenceState::Normal;
         self.tracking_recovery_at_rest_ticks = 0;
@@ -195,6 +216,7 @@ impl ControlContext {
         self.trajectory = None;
         self.prev_cmd = None;
         self.trajectory_open_loop = false;
+        self.tracking_ff_accel_filt = None;
     }
 
     /// Run KF vision handling, measurement construction, and state update.
@@ -375,7 +397,7 @@ impl ControlContext {
             .trajectory
             .as_ref()
             .ok_or(ControlsError::InvalidInput)?;
-        let (traj_state, traj_accel) = traj.sample();
+        let (traj_state, traj_accel) = traj.sample_over(self.dt);
 
         let setpoints = self.calc_tracking_setpoints(traj_state, traj_accel)?;
 
@@ -405,6 +427,7 @@ impl ControlContext {
     {
         self.plan_if_needed(cmd, true, make_traj)?;
         self.trajectory_open_loop = true;
+        self.tracking_ff_accel_filt = None;
 
         let heading = self.state_estimate.z;
         let traj = self
@@ -414,7 +437,7 @@ impl ControlContext {
         if let TrackedTrajectory::Accel(t) = traj {
             t.set_body_heading(heading);
         }
-        let (traj_state, traj_accel) = traj.sample();
+        let (traj_state, traj_accel) = traj.sample_over(self.dt);
         traj.tick(self.dt);
 
         Ok(ManeuverSetpoints {
@@ -484,9 +507,10 @@ impl ControlContext {
             self.dt,
         );
 
-        // Wheel torque path: gain-weighted trajectory accel FF + PID FB.
+        // Wheel torque path: gain-weighted (low-passed) trajectory accel FF + PID FB.
+        let ff_accel = self.filter_ff_accel(traj_accel);
         let accel_out: Vector3f =
-            self.tracking_accel_gain[0] * traj_accel + self.tracking_accel_gain[1] * pos_pid_feedback;
+            self.tracking_accel_gain[0] * ff_accel + self.tracking_accel_gain[1] * pos_pid_feedback;
 
         // Wheel velocity path: the trajectory velocity (also the friction comp input).
         let twist_out: Vector3f = traj_vel;
@@ -495,6 +519,30 @@ impl ControlContext {
             body_twist: twist_out,
             body_accel: accel_out,
         })
+    }
+
+    /// First-order low-pass on the feedforward accel, linear cutoff on x/y and
+    /// angular cutoff on θ. Seeds from the raw value after a reset.
+    fn filter_ff_accel(&mut self, raw: Vector3f) -> Vector3f {
+        let alpha = |hz: f32| {
+            if hz > 0.0 {
+                1.0 - libm::expf(-2.0 * PI * hz * self.dt)
+            } else {
+                1.0
+            }
+        };
+        let a_lin = alpha(self.tracking_ff_accel_cutoff_hz[0]);
+        let a_ang = alpha(self.tracking_ff_accel_cutoff_hz[1]);
+        let filt = match self.tracking_ff_accel_filt {
+            Some(prev) => Vector3f::new(
+                prev.x + a_lin * (raw.x - prev.x),
+                prev.y + a_lin * (raw.y - prev.y),
+                prev.z + a_ang * (raw.z - prev.z),
+            ),
+            None => raw,
+        };
+        self.tracking_ff_accel_filt = Some(filt);
+        filt
     }
 
     fn tracking_error_exceeded(&self) -> bool {
@@ -537,6 +585,7 @@ impl ControlContext {
             ParameterName::PHYS_STRIBECK_MODEL => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::FRICTION_COMP_VEL_THRESHOLD => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_ACCEL_GAIN => Some(ParameterDataFormat::VEC2_F32),
+            ParameterName::TRACKING_FF_ACCEL_CUTOFF_HZ => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
             ParameterName::POSE_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
@@ -602,6 +651,9 @@ impl ControlContext {
             }
             ParameterName::TRACKING_ACCEL_GAIN => {
                 reply.data.vec2_f32 = self.tracking_accel_gain.into();
+            }
+            ParameterName::TRACKING_FF_ACCEL_CUTOFF_HZ => {
+                reply.data.vec2_f32 = self.tracking_ff_accel_cutoff_hz.into();
             }
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => {
                 reply.data.vec4_f32 = self.tracking_divergence_thresh.into();
@@ -744,6 +796,10 @@ impl ControlContext {
             ParameterName::TRACKING_ACCEL_GAIN => {
                 let v = unsafe { cmd.data.vec2_f32 };
                 self.tracking_accel_gain = Vector2f::new(v[0], v[1]);
+            }
+            ParameterName::TRACKING_FF_ACCEL_CUTOFF_HZ => {
+                let v = unsafe { cmd.data.vec2_f32 };
+                self.tracking_ff_accel_cutoff_hz = Vector2f::new(v[0], v[1]);
             }
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => {
                 let v = unsafe { cmd.data.vec4_f32 };

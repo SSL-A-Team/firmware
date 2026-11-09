@@ -156,8 +156,8 @@ gone. Motion code is split into:
     trajectory state (continuous handoff). It is only cleared when maneuvers
     are held (OFF, ESTOP, HALT, divergence recovery) or the controller resets.
 - **`params/controller_params.rs`** — body-level constants (PID gains,
-  `TRACKING_ACCEL_GAIN`, `TRACKING_DIVERGENCE_THRESHOLD`, `FRICTION_COMP_VEL_THRESHOLD`,
-  `BODY_*_CLAMP_*`, `ENC_LAG_*`).
+  `TRACKING_ACCEL_GAIN`, `TRACKING_FF_ACCEL_CUTOFF_HZ`, `TRACKING_DIVERGENCE_THRESHOLD`,
+  `FRICTION_COMP_VEL_THRESHOLD`, `BODY_*_CLAMP_*`, `ENC_LAG_*`).
 - **`pid.rs`** — `PidController<NUM_STATES>` (see below).
 - **`robot_model.rs`** — thin wrappers around `ateam_controls::RobotModel`.
 - **`constant_gain_kalman_filter.rs`** — legacy, unused.
@@ -340,7 +340,10 @@ Tracking output paths (closed-loop trajectory-tracking maneuvers):
 - **Wheel torque path:** `body_accel = TRACKING_ACCEL_GAIN[0]·traj_accel +
   TRACKING_ACCEL_GAIN[1]·pid_feedback`. `TRACKING_ACCEL_GAIN = [FF, FB] = [1.0, 1.0]`
   by default; `[1, 0]` is FF only, `[0, 1]` FB only. Radio param
-  `TRACKING_ACCEL_GAIN` (8).
+  `TRACKING_ACCEL_GAIN` (8). `traj_accel` is the bang-bang accel averaged over
+  the tick (`BangBangTraj3D::mean_accel(dt)`), then first-order low-passed at
+  `TRACKING_FF_ACCEL_CUTOFF_HZ = [linear, angular] = [20, 20]` Hz (radio param
+  16; <= 0 disables) to smooth bang-bang switching chatter.
 - **Wheel velocity path:** the body velocity output is always the trajectory
   velocity (no gain, no PID term); it is also the friction comp input. The
   `wheel_vel_control_enabled` radio bit selects whether the wheels run their
@@ -359,6 +362,7 @@ Friction comp gating:
 Output clamping (applied before kinematic transforms):
 - `BODY_ACCEL_CLAMP_LINEAR = 20.0 m/s²` — clamps friction-compensated linear accel magnitude.
 - `BODY_ACCEL_CLAMP_ANGULAR = 100.0 rad/s²` — clamps friction-compensated angular accel magnitude.
+- `WHEEL_CURRENT_LIMIT_A = 2.16 A` — after the accel clamp, the body accel (and every wheel torque) is scaled down uniformly so no wheel exceeds this (matches the wheel-torque firmware's low-speed limit; uneven clipping there yaws the robot).
 - `BODY_VEL_CLAMP_LINEAR = 10.0 m/s` — clamps wheel velocity setpoint linear magnitude.
 - `BODY_VEL_CLAMP_ANGULAR = 50.0 rad/s` — clamps wheel velocity setpoint angular magnitude.
 
@@ -713,7 +717,7 @@ Trajectory parameters (max vel/accel) sent per-command, falling back to defaults
 - `KalmanFilterParams` (process/measurement noise, covariance bounds)
 - `RobotPhysicalParams` (mass, inertia, wheel geometry, friction coefficients)
 - Pose PID gains (`POSE_FB_PIDII_LINEAR/ANGULAR`)
-- Controller parameters (`TRACKING_ACCEL_GAIN`,
+- Controller parameters (`TRACKING_ACCEL_GAIN`, `TRACKING_FF_ACCEL_CUTOFF_HZ`,
   `TRACKING_DIVERGENCE_THRESHOLD`, `FRICTION_COMP_VEL_THRESHOLD`,
   `VISION_SEED_SAMPLES`)
 

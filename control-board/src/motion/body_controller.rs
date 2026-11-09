@@ -2,7 +2,7 @@ use crate::motion::control_context::{ControlContext, ManeuverSetpoints, Tracking
 use crate::motion::maneuvers::{requires_vision, ManeuverManager};
 use crate::motion::params::controller_params::{
     EncLagMode, BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_LINEAR, BODY_VEL_CLAMP_ANGULAR,
-    BODY_VEL_CLAMP_LINEAR, ENC_LAG_MODE, STOP_STATE_LINEAR_SPEED_LIMIT,
+    BODY_VEL_CLAMP_LINEAR, ENC_LAG_MODE, STOP_STATE_LINEAR_SPEED_LIMIT, WHEEL_CURRENT_LIMIT_A,
 };
 use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::BodyControlMode::{BCM_ESTOP_BRAKE, BCM_OFF};
@@ -192,7 +192,7 @@ impl BodyController {
         let clamped_z = body_accel_fric_comp
             .z
             .clamp(-BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_ANGULAR);
-        let accel_clamped = clamped_x != body_accel_fric_comp.x
+        let mut accel_clamped = clamped_x != body_accel_fric_comp.x
             || clamped_y != body_accel_fric_comp.y
             || clamped_z != body_accel_fric_comp.z;
         self.body_accel_out_fric_comp = Vector3f::new(clamped_x, clamped_y, clamped_z);
@@ -218,6 +218,20 @@ impl BodyController {
             .robot_model
             .transform_accel2wheel_global(self.control_context.state_estimate.z)
             * self.body_accel_out_fric_comp;
+
+        // Scale the body accel (and so every wheel torque) uniformly so the
+        // largest wheel current stays within the wheel current limit.
+        let max_wheel_current = self
+            .control_context
+            .robot_model
+            .torques_to_currents(self.wheel_torque_out)
+            .amax();
+        if max_wheel_current > WHEEL_CURRENT_LIMIT_A {
+            let scale = WHEEL_CURRENT_LIMIT_A / max_wheel_current;
+            self.wheel_torque_out *= scale;
+            self.body_accel_out_fric_comp *= scale;
+            accel_clamped = true;
+        }
 
         if !matches!(ENC_LAG_MODE, EncLagMode::Disabled) {
             self.control_context.enc_lag.step(&body_xy);
