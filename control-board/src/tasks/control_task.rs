@@ -619,6 +619,20 @@ impl<
                 (brake_a, Vector4f::default())
             } else {
                 self.active_brake_controller.reset();
+                // Wheel torque (current) control is always on; the radio bit selects
+                // whether the wheel velocity loop runs too, unless the controller
+                // suppresses it this tick (trajectory hold, TRACKING_WHEEL_VEL_FB).
+                let wheel_motion_type = if self.last_command.wheel_vel_control_enabled() != 0
+                    && !robot_controller.wheel_vel_loop_suppressed()
+                {
+                    CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT
+                } else {
+                    CcmMotionControlType::CCM_MCT_CURRENT
+                };
+                self.motor_fl.set_motion_type(wheel_motion_type);
+                self.motor_bl.set_motion_type(wheel_motion_type);
+                self.motor_br.set_motion_type(wheel_motion_type);
+                self.motor_fr.set_motion_type(wheel_motion_type);
                 (
                     robot_controller.get_wheel_currents(),
                     robot_controller.get_wheel_velocities(),

@@ -51,6 +51,16 @@ pub const TRACKING_FF_ACCEL_CUTOFF_HZ: Vector2f = Vector2f::new(20.0, 20.0);
 /// Radio-tunable as `TRACKING_VEL_LOOKAHEAD_S`.
 pub const TRACKING_VEL_LOOKAHEAD_S: f32 = 0.001;
 
+/// [HOLD_VEL_LOOP_OFF, KV_LINEAR (1/s), KV_ANGULAR (1/s)] wheel velocity loop
+/// handling in closed-loop tracking (only matters with the wheel velocity loop on):
+/// - HOLD_VEL_LOOP_OFF != 0: run the wheels current-only while the trajectory is
+///   holding (its velocity is 0), so a 0 wheel velocity setpoint doesn't fight the
+///   pose feedback and breakaway friction comp.
+/// - KV_*: body velocity output = trajectory velocity + KV * (trajectory pose -
+///   estimate), so the wheel velocity loop drives toward the target. 0 disables.
+/// Radio-tunable as `TRACKING_WHEEL_VEL_FB`.
+pub const TRACKING_WHEEL_VEL_FB: Vector3f = Vector3f::new(0.0, 0.0, 0.0);
+
 /// [ERROR_POS_LINEAR (m), ERROR_POS_ANGULAR (rad), ERROR_VEL_LINEAR (m/s), ERROR_VEL_ANGULAR (rad/s)]
 /// Trajectory-vs-estimate errors above which closed-loop tracking is considered
 /// diverged, triggering divergence recovery (active brake, then reset).

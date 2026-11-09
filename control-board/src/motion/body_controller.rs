@@ -94,6 +94,7 @@ impl BodyController {
         trace: bool,
     ) -> Result<(bool, bool), ControlsError> {
         let t_start = Instant::now();
+        self.control_context.wheel_vel_loop_suppressed = false;
 
         let state_prediction = self.control_context.update_state_estimate(
             vision_pose_meas,
@@ -306,6 +307,12 @@ impl BodyController {
         }
 
         Ok((vel_clamped, accel_clamped))
+    }
+
+    /// True when the wheel velocity loop should be off this tick (see
+    /// `TRACKING_WHEEL_VEL_FB`); the control task then runs the wheels current-only.
+    pub fn wheel_vel_loop_suppressed(&self) -> bool {
+        self.control_context.wheel_vel_loop_suppressed
     }
 
     pub fn get_wheel_velocities(&self) -> Vector4f {

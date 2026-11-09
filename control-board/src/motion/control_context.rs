@@ -134,6 +134,11 @@ pub struct ControlContext {
     pub tracking_ff_accel_cutoff_hz: Vector2f,
     /// Lookahead (s) for the trajectory velocity used as the body velocity output
     pub tracking_vel_lookahead_s: f32,
+    /// [HOLD_VEL_LOOP_OFF, KV_LINEAR, KV_ANGULAR] wheel velocity setpoint feedback options
+    pub tracking_wheel_vel_fb: Vector3f,
+    /// Set this tick when the wheel velocity loop should be off (closed-loop
+    /// trajectory holding with TRACKING_WHEEL_VEL_FB[0] set). Cleared every tick.
+    pub wheel_vel_loop_suppressed: bool,
     /// Low-passed feedforward accel; `None` until the next tracking tick seeds it.
     pub tracking_ff_accel_filt: Option<Vector3f>,
     /// Divergence thresholds: [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
@@ -197,6 +202,8 @@ impl ControlContext {
             tracking_accel_gain: controller_params::TRACKING_ACCEL_GAIN,
             tracking_ff_accel_cutoff_hz: controller_params::TRACKING_FF_ACCEL_CUTOFF_HZ,
             tracking_vel_lookahead_s: controller_params::TRACKING_VEL_LOOKAHEAD_S,
+            tracking_wheel_vel_fb: controller_params::TRACKING_WHEEL_VEL_FB,
+            wheel_vel_loop_suppressed: false,
             tracking_ff_accel_filt: None,
             tracking_divergence_thresh: controller_params::TRACKING_DIVERGENCE_THRESHOLD,
             friction_comp_vel_thresh: controller_params::FRICTION_COMP_VEL_THRESHOLD,
@@ -483,6 +490,12 @@ impl ControlContext {
             .ok_or(ControlsError::InvalidInput)?;
         let (traj_state, traj_accel) = traj.sample_over(self.dt);
         let traj_vel_ahead = traj.vel_ahead(self.tracking_vel_lookahead_s);
+        // A held trajectory commands 0 wheel velocity, so the wheel velocity loop
+        // would resist the pose feedback that is still correcting the error.
+        const HOLD_VEL_EPS: f32 = 1e-4;
+        self.wheel_vel_loop_suppressed = self.tracking_wheel_vel_fb[0] != 0.0
+            && traj_vel_ahead.xy().norm() < HOLD_VEL_EPS
+            && fabsf(traj_vel_ahead.z) < HOLD_VEL_EPS;
 
         let setpoints = self.calc_tracking_setpoints(traj_state, traj_accel, traj_vel_ahead)?;
 
@@ -601,8 +614,16 @@ impl ControlContext {
             self.tracking_accel_gain[0] * ff_accel + self.tracking_accel_gain[1] * pos_pid_feedback;
 
         // Wheel velocity path: the trajectory velocity looked ahead to cover the
-        // coming tick and command latency (also the friction comp input).
-        let twist_out: Vector3f = traj_vel_ahead;
+        // coming tick and command latency (also the friction comp input), plus
+        // optional proportional pose feedback so the wheel velocity loop drives
+        // toward the target instead of holding the wheels at the trajectory speed.
+        let pos_error = traj_pos - pose_estimate;
+        let kv = Vector3f::new(
+            self.tracking_wheel_vel_fb[1],
+            self.tracking_wheel_vel_fb[1],
+            self.tracking_wheel_vel_fb[2],
+        );
+        let twist_out: Vector3f = traj_vel_ahead + kv.component_mul(&pos_error);
 
         Ok(ManeuverSetpoints {
             body_twist: twist_out,
@@ -676,6 +697,7 @@ impl ControlContext {
             ParameterName::TRACKING_ACCEL_GAIN => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_FF_ACCEL_CUTOFF_HZ => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_VEL_LOOKAHEAD_S => Some(ParameterDataFormat::F32),
+            ParameterName::TRACKING_WHEEL_VEL_FB => Some(ParameterDataFormat::VEC3_F32),
             ParameterName::FRICTION_COMP_HOLD_ERR_THRESHOLD => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
@@ -751,6 +773,9 @@ impl ControlContext {
             }
             ParameterName::TRACKING_VEL_LOOKAHEAD_S => {
                 reply.data.f32_ = self.tracking_vel_lookahead_s;
+            }
+            ParameterName::TRACKING_WHEEL_VEL_FB => {
+                reply.data.vec3_f32 = self.tracking_wheel_vel_fb.into();
             }
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => {
                 reply.data.vec4_f32 = self.tracking_divergence_thresh.into();
@@ -905,6 +930,10 @@ impl ControlContext {
             ParameterName::TRACKING_VEL_LOOKAHEAD_S => {
                 let v = unsafe { cmd.data.f32_ };
                 self.tracking_vel_lookahead_s = if v.is_finite() { v.max(0.0) } else { self.tracking_vel_lookahead_s };
+            }
+            ParameterName::TRACKING_WHEEL_VEL_FB => {
+                let v = unsafe { cmd.data.vec3_f32 };
+                self.tracking_wheel_vel_fb = Vector3f::new(v[0], v[1], v[2]);
             }
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => {
                 let v = unsafe { cmd.data.vec4_f32 };

@@ -350,6 +350,10 @@ Tracking output paths (closed-loop trajectory-tracking maneuvers):
   `wheel_vel_control_enabled` radio bit selects whether the wheels run their
   velocity loop on it (`CCM_MCT_VELOCITY_CURRENT`) or current only
   (`CCM_MCT_CURRENT`). Wheel torque control is always on.
+  `TRACKING_WHEEL_VEL_FB = [HOLD_VEL_LOOP_OFF, KV_LINEAR, KV_ANGULAR]` (radio
+  param 19, default all 0): HOLD_VEL_LOOP_OFF != 0 runs the wheels current-only
+  while the trajectory holds (a 0 wheel velocity setpoint otherwise resists the
+  pose feedback); KV_* add `KV·(traj_pose − estimate)` to the body velocity output.
 
 Divergence thresholds:
 - `TRACKING_DIVERGENCE_THRESHOLD = [1.0 m, 1.57 rad, 5.0 m/s, 10.0 rad/s]` —
