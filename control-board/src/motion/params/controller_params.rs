@@ -68,7 +68,7 @@ pub enum PoseAccelMode {
     Full,
 }
 
-pub const POSE_ACCEL_MODE: PoseAccelMode = PoseAccelMode::FeedbackOnly;
+pub const POSE_ACCEL_MODE: PoseAccelMode = PoseAccelMode::Full;
 
 /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
 /// Thresholds for when to recompute the trajectory
