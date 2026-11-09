@@ -2,13 +2,13 @@ use ateam_controls::{Vector2f, Vector3f, Vector4f, Vector5f};
 use embassy_time::Duration;
 use nalgebra::{Matrix3x5};
 
-// PID gains per row: [Kp, Ki, Kd, Ki_err_min, Ki_err_max]
+//////////////////////////////////
+//  trajectory tracking control  //
+//////////////////////////////////
 
-
-//////////////////////////////
-//  current feedback gains  //
-//////////////////////////////
-
+// Pose PID gains per row: [Kp, Ki, Kd, Ki_err_min, Ki_err_max]. The PID acts on
+// the trajectory-vs-estimate pose error (with twist error as the derivative) for
+// every closed-loop trajectory-tracking maneuver.
 const LINEAR_POSE_PID_GAINS: Vector5f = Vector5f::new(300.0, 0.0, 7.0, 0.0, 0.0);
 const ANGULAR_POSE_PID_GAINS: Vector5f = Vector5f::new(400.0, 0.0, 30.0, 0.0, 0.0);
 
@@ -27,57 +27,65 @@ pub fn pose_pid_gains() -> Matrix3x5<f32> {
 /// anti-jitter behavior on the motor controllers.
 pub const POSE_PID_ANTI_JITTER_THRESH: Vector3f = Vector3f::new(0.001, 0.001, 0.01);
 
-/// Acceleration (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
-/// Scales traj accel and PID feedback respectively in the wheel torque feedforward.
-pub const POSE_ACCEL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
+/// Tracking acceleration (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
+/// Scales traj accel and PID feedback respectively in the body accel output.
+/// Radio-tunable as `TRACKING_ACCEL_GAIN`.
+pub const TRACKING_ACCEL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
 
-/// Velocity path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
-/// Scales traj velocity and PID feedback (× dt) respectively in the wheel velocity setpoint.
-/// Only active when POSE_VEL_MODE includes feedforward or feedback.
-pub const POSE_VEL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
+/// Tracking velocity path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
+/// Scales traj velocity and PID feedback (× dt) respectively in the body velocity
+/// (wheel velocity setpoint) output. Radio-tunable as `TRACKING_VEL_GAIN`.
+pub const TRACKING_VEL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
 
-/// Pose velocity setpoint mode.
+/// Tracking velocity setpoint mode (closed-loop trajectory-tracking maneuvers).
 ///
-/// Controls what forms the wheel velocity setpoint.
-/// `Disabled`: integrate accel output from estimated twist (original behavior).
-/// `FeedforwardOnly`: trajectory velocity directly as the setpoint base, no PID correction.
-/// `FeedbackOnly`: integration base plus vel-gain-scaled PID correction term.
-/// `Full`: trajectory velocity base plus vel-gain-scaled PID correction.
+/// Controls what forms the body velocity output.
+/// `Disabled`: wheel velocity control is turned off on the motors for every
+///   maneuver (overrides the `wheel_vel_control_enabled` radio bit), so the
+///   wheels run current-only. The body velocity output is still the trajectory
+///   velocity, which friction compensation and telemetry use.
+/// `FeedforwardOnly`: trajectory velocity, no PID correction.
+/// `FeedbackOnly`: accel output integrated from the estimated twist, plus the
+///   vel-gain-scaled PID correction.
+/// `Full`: trajectory velocity plus the vel-gain-scaled PID correction.
 #[derive(PartialEq, Eq)]
-pub enum PoseVelMode {
+pub enum TrackingVelMode {
     Disabled,
     FeedforwardOnly,
     FeedbackOnly,
     Full,
 }
 
-pub const POSE_VEL_MODE: PoseVelMode = PoseVelMode::FeedforwardOnly;
+pub const TRACKING_VEL_MODE: TrackingVelMode = TrackingVelMode::FeedforwardOnly;
 
-/// Pose acceleration (torque feedforward) mode.
+/// Tracking acceleration (torque) mode (closed-loop trajectory-tracking maneuvers).
 ///
-/// Controls what contributes to the wheel torque feedforward via the accel path.
+/// Controls what contributes to the body accel output (wheel torque path).
 /// `Disabled`: zero accel output.
 /// `FeedforwardOnly`: trajectory acceleration only, no PID feedback.
 /// `FeedbackOnly`: PID feedback acceleration only, no trajectory accel.
-/// `Full`: trajectory acceleration plus PID feedback (original behavior).
+/// `Full`: trajectory acceleration plus PID feedback.
 #[derive(PartialEq, Eq)]
-pub enum PoseAccelMode {
+pub enum TrackingAccelMode {
     Disabled,
     FeedforwardOnly,
     FeedbackOnly,
     Full,
 }
 
-pub const POSE_ACCEL_MODE: PoseAccelMode = PoseAccelMode::Full;
+pub const TRACKING_ACCEL_MODE: TrackingAccelMode = TrackingAccelMode::Full;
 
-/// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
-/// Thresholds for when to recompute the trajectory
-pub const TRACKING_ERROR_THRESHOLD: Vector4f = Vector4f::new(1.0, 1.57, 5.0, 10.0);
+/// [ERROR_POS_LINEAR (m), ERROR_POS_ANGULAR (rad), ERROR_VEL_LINEAR (m/s), ERROR_VEL_ANGULAR (rad/s)]
+/// Trajectory-vs-estimate errors above which closed-loop tracking is considered
+/// diverged, triggering divergence recovery (active brake, then reset).
+/// Radio-tunable as `TRACKING_DIVERGENCE_THRESHOLD`.
+pub const TRACKING_DIVERGENCE_THRESHOLD: Vector4f = Vector4f::new(1.0, 1.57, 5.0, 10.0);
 
-/// Friction compensation is applied only while the commanded velocity is above
-/// these thresholds: linear on the local XY speed magnitude, angular on |w|.
-/// [LINEAR_VEL_THRESHOLD, LINEAR_ACCEL_THRESHOLD (unused), ANGULAR_VEL_THRESHOLD, ANGULAR_ACCEL_THRESHOLD (unused)]
-pub const FRICTION_COMP_GATING: Vector4f = Vector4f::new(0.01, 0.0, 0.001, 0.0);
+/// [LINEAR_VEL_THRESHOLD (m/s), ANGULAR_VEL_THRESHOLD (rad/s)]
+/// Friction compensation is applied only while the commanded velocity is at or
+/// above these thresholds: linear on the local XY speed magnitude, angular on |w|.
+/// Radio-tunable as `FRICTION_COMP_VEL_THRESHOLD`.
+pub const FRICTION_COMP_VEL_THRESHOLD: Vector2f = Vector2f::new(0.01, 0.001);
 
 /// Maximum magnitude of the body-level acceleration output [linear (m/s²), angular (rad/s²)].
 /// The friction-compensated acceleration is clamped to these limits before conversion
@@ -125,8 +133,7 @@ pub const BRAKE_MAX_CURRENT_A: f32 = 1.0; // A
 
 /// Trajectory divergence recovery: per-wheel speed (rad/s) below which all
 /// wheels are considered stopped, and the number of consecutive ticks they must
-/// stay below it for active braking to be "finished" (1 kHz, 100 ticks = 100
-/// ms). Once stopped, the controller resets and resumes from the fresh state
+/// stay below it for active braking to be "finished" (1 kHz, 1 tick = 1 ms). Once stopped, the controller resets and resumes from the fresh state
 /// estimate.
 pub const TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL: f32 = 50.0; // rad/s
 pub const TRACKING_DIVERGENCE_RECOVERY_REST_TICKS: u32 = 1;

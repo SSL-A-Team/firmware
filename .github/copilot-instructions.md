@@ -156,7 +156,7 @@ gone. Motion code is split into:
     trajectory state (continuous handoff). It is only cleared when maneuvers
     are held (OFF, ESTOP, HALT, divergence recovery) or the controller resets.
 - **`params/controller_params.rs`** — body-level constants (PID gains,
-  `POSE_*_GAIN/MODE`, `TRAJ_RECOMPUTE_ERROR`, `FRICTION_COMP_GATING`,
+  `TRACKING_*_GAIN/MODE`, `TRACKING_DIVERGENCE_THRESHOLD`, `FRICTION_COMP_VEL_THRESHOLD`,
   `BODY_*_CLAMP_*`, `ENC_LAG_*`).
 - **`pid.rs`** — `PidController<NUM_STATES>` (see below).
 - **`robot_model.rs`** — thin wrappers around `ateam_controls::RobotModel`.
@@ -210,8 +210,8 @@ control task to active-brake (it is also true during divergence recovery).
 All trajectory-tracking modes share the `track_trajectory` helper on
 `ControlContext`: pose PID via `calculate_with_derivative`
 (trajectory-vs-estimate twist error as the derivative), FF/FB gating via
-`POSE_ACCEL_MODE` / `POSE_VEL_MODE`, weighted by `pose_accel_gain` /
-`pose_vel_gain`. Modes differ in **trajectory planner** and (for pose) **vision
+`TRACKING_ACCEL_MODE` / `TRACKING_VEL_MODE`, weighted by `tracking_accel_gain` /
+`tracking_vel_gain`. Modes differ in **trajectory planner** and (for pose) **vision
 gating**. After producing the tracker outputs, `track_trajectory` steps the
 integrated `trajectory_state` forward to `t = dt` so the *next* tick's
 `tracking_error_exceeded` compares the estimate against where the trajectory
@@ -224,8 +224,9 @@ expected the robot to be one tick later.
 - Trajectory planner: `BangBangTraj3D::from_target_pose` to target pose `[x, y, θ]`.
 - Per-command overrides on `max_linear_vel/angular_vel/linear_acc/angular_acc`
   fall back to `TrajectoryParams::default()` per-field when zero.
-- Replans every tick; seed switches to KF estimate when any of the 4 tracking
-  errors exceed `TRAJ_RECOMPUTE_ERROR` (`tracking_error_exceeded`).
+- Replans on command change, seeded from the current trajectory state. If any
+  of the 4 tracking errors exceed `TRACKING_DIVERGENCE_THRESHOLD`
+  (`tracking_error_exceeded`), divergence recovery active-brakes and resets.
 
 #### `GlobalVelocity` maneuver → `ControlContext::twist_control_policy(_, Global, _)`
 - **Does not require vision.** Always tracks the commanded twist using whatever
@@ -236,7 +237,7 @@ expected the robot to be one tick later.
   used for replan-error checks via the shared tracker.
 - Per-command overrides on `max_linear_acc/max_angular_acc` (vel limits are
   always the defaults). Falls back per-field when zero.
-- Replans every tick; seed-state rule identical to `GlobalPosition`.
+- Replan and divergence rules identical to `GlobalPosition`.
 
 #### `LocalVelocity` maneuver → `ControlContext::twist_control_policy(_, Local, _)`
 - Same as `GlobalVelocity` except the target twist is rotated by
@@ -285,24 +286,21 @@ Key invariants:
   control task ORs it with HALT, emergency stop and `BCM_ESTOP_BRAKE`. Hard
   lockout (`stop_wheels()`, packet timeout, `BCM_OFF`) takes precedence.
 
-### Trajectory Recomputation
-The trajectory is **replanned every control tick** (1 kHz). The only
-question per tick is the **seed state**:
+### Trajectory Recomputation and Divergence
+`run_traj_track` replans when there is no trajectory or the command differs
+from the stored `prev_cmd`:
 
-- Seed from the current KF `state_estimate` when:
-  - No trajectory exists yet (`trajectory == None`), or
-  - Any of the four tracking errors between the integrated trajectory
-    state and the KF state estimate exceeds the corresponding
-    `TRAJ_RECOMPUTE_ERROR = [pos_lin, pos_ang, vel_lin, vel_ang]`
-    threshold (`tracking_error_exceeded`).
-- Otherwise seed from the integrated `trajectory_state` so consecutive
-  bang-bang profiles hand off continuously without commanding a
-  velocity step.
+- Seed from the current KF `state_estimate` when no trajectory exists or the
+  existing one is open loop.
+- Otherwise seed from the current trajectory sample so consecutive bang-bang
+  profiles hand off continuously without commanding a velocity step.
 
-There is no command-change detection or latched previous command; the
-plan is regenerated unconditionally from the current target each tick.
-Any vision inactive → active transition clears `self.trajectory`, which
-routes the next tick's seed through the `state_estimate` branch.
+Each tick, closed-loop tracking compares the trajectory sample with the
+estimate. If any error exceeds
+`TRACKING_DIVERGENCE_THRESHOLD = [pos_lin, pos_ang, vel_lin, vel_ang]`
+(`tracking_error_exceeded`), divergence recovery holds maneuvers and
+active-brakes until the wheels are at rest, then resets and resumes from the
+fresh estimate.
 
 ### Friction Compensation
 - Friction model is defined in the robot's **local frame** with independent
@@ -314,7 +312,7 @@ routes the next tick's seed through the `state_estimate` branch.
   estimate. Returns the **global-frame** friction force; the
   `BodyController` applies `body_accel_out − I_inv · F_fric_global` to get
   `body_accel_out_fric_comp`.
-- Gating via `FRICTION_COMP_GATING = [lin_vel=0.01, unused, ang_vel=0.001, unused]`:
+- Gating via `FRICTION_COMP_VEL_THRESHOLD = [lin_vel=0.01, ang_vel=0.001]`:
   - **Linear off** when `||(cmd_vx, cmd_vy)|| < 0.01 m/s`.
   - **Angular off** when `|cmd_w| < 0.001 rad/s`.
 - Friction force = `robot_model.compute_friction_force(local_twist)`
@@ -325,34 +323,40 @@ PID and gains:
 - Pose PID gains `[P, I, D, I_min, I_max]`:
   - Linear (x, y rows): `(300.0, 0.0, 7.0, 0.0, 0.0)`
   - Angular (θ row):    `(400.0, 0.0, 30.0, 0.0, 0.0)`
-  - Shared by both pose and twist tracking (single `pose_pid_controller`,
-    twist error supplied as the derivative input via
-    `calculate_with_derivative`).
+  - Shared by every closed-loop trajectory-tracking maneuver (single
+    `pose_pid_controller` on the pose error, twist error supplied as the
+    derivative input via `calculate_with_derivative`).
 - `POSE_PID_ANTI_JITTER_THRESH = [0.001 m, 0.001 m, 0.01 rad]` — per-axis
   linear-scaling deadband on the PID output (matches the fixed-point PI
   anti-jitter on the motor controllers).
 
-Output-path mode gating (replaces the old single `POSE_CONTROL_GAIN`):
-- `POSE_ACCEL_GAIN = [FF, FB] = [1.0, 1.0]` — scales trajectory accel and
-  PID feedback on the **wheel torque** path.
-- `POSE_VEL_GAIN   = [FF, FB] = [1.0, 1.0]` — scales trajectory vel and
-  (PID feedback × dt) on the **wheel velocity** setpoint path.
-- `POSE_ACCEL_MODE: PoseAccelMode` — `Disabled` | `FeedforwardOnly` |
-  `FeedbackOnly` | `Full`. Default: `FeedbackOnly` (torque path = PID feedback only).
-- `POSE_VEL_MODE: PoseVelMode` — `Disabled` | `FeedforwardOnly` |
+Tracking output-path gating (closed-loop trajectory-tracking maneuvers):
+- `TRACKING_ACCEL_GAIN = [FF, FB] = [1.0, 1.0]` — scales trajectory accel and
+  PID feedback on the **wheel torque** path. Radio param `TRACKING_ACCEL_GAIN` (8).
+- `TRACKING_VEL_GAIN   = [FF, FB] = [1.0, 1.0]` — scales trajectory vel and
+  (PID feedback × dt) on the **wheel velocity** setpoint path. Radio param
+  `TRACKING_VEL_GAIN` (15).
+- `TRACKING_ACCEL_MODE: TrackingAccelMode` — `Disabled` | `FeedforwardOnly` |
+  `FeedbackOnly` | `Full`. Default: `Full` (trajectory accel FF + PID FB).
+- `TRACKING_VEL_MODE: TrackingVelMode` — `Disabled` | `FeedforwardOnly` |
   `FeedbackOnly` | `Full`. Default: `FeedforwardOnly` (wheel-vel setpoint
   is the trajectory velocity directly; PID does not bias the velocity setpoint).
-- `Disabled` on the vel path means the velocity setpoint is derived by
-  integrating the accel output from the estimated twist (legacy behavior).
+  - `FeedbackOnly` integrates the accel output from the estimated twist and
+    adds the PID correction.
+  - `Disabled` turns the wheel velocity loop off on the motors for **every**
+    maneuver: the control task clears the `wheel_vel_control_enabled` radio
+    bit (`VELOCITY_CURRENT` → `CURRENT`, `VELOCITY` → `MOTOR_OFF`). The body
+    twist output is still the trajectory velocity for friction comp and
+    telemetry.
 
-Replan thresholds:
-- `TRAJ_RECOMPUTE_ERROR = [0.5 m, 1.0 rad, 4.0 m/s, 8.0 rad/s]` —
-  `[pos_lin, pos_ang, vel_lin, vel_ang]` integrated-trajectory-vs-estimate
-  thresholds. Drives the seed-state choice; the trajectory itself is
-  replanned every tick regardless.
+Divergence thresholds:
+- `TRACKING_DIVERGENCE_THRESHOLD = [1.0 m, 1.57 rad, 5.0 m/s, 10.0 rad/s]` —
+  `[pos_lin, pos_ang, vel_lin, vel_ang]` trajectory-vs-estimate errors that
+  trigger divergence recovery. Radio param `TRACKING_DIVERGENCE_THRESHOLD` (9).
 
 Friction comp gating:
-- `FRICTION_COMP_GATING = [lin_vel=0.01, unused, ang_vel=0.001, unused]` (commanded velocity).
+- `FRICTION_COMP_VEL_THRESHOLD = [lin_vel=0.01, ang_vel=0.001]` (commanded
+  velocity). Radio param `FRICTION_COMP_VEL_THRESHOLD` (7).
 
 Output clamping (applied before kinematic transforms):
 - `BODY_ACCEL_CLAMP_LINEAR = 20.0 m/s²` — clamps friction-compensated linear accel magnitude.
@@ -691,8 +695,10 @@ Trajectory parameters (max vel/accel) sent per-command, falling back to defaults
 `ParameterCommand` enables live tuning of:
 - `KalmanFilterParams` (process/measurement noise, covariance bounds)
 - `RobotPhysicalParams` (mass, inertia, wheel geometry, friction coefficients)
-- PID gains (pose and twist)
-- Controller parameters (trajectory thresholds, friction-comp gating)
+- Pose PID gains (`POSE_FB_PIDII_LINEAR/ANGULAR`)
+- Controller parameters (`TRACKING_ACCEL_GAIN`, `TRACKING_VEL_GAIN`,
+  `TRACKING_DIVERGENCE_THRESHOLD`, `FRICTION_COMP_VEL_THRESHOLD`,
+  `VISION_SEED_SAMPLES`)
 
 ---
 

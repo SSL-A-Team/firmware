@@ -1,6 +1,6 @@
 use crate::motion::params::controller_params::{
-    PoseAccelMode, PoseVelMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON,
-    ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE,
+    TrackingAccelMode, TrackingVelMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON,
+    ENC_LAG_T_SLOPE, TRACKING_ACCEL_MODE, TRACKING_VEL_MODE,
     TRACKING_DIVERGENCE_RECOVERY_REST_TICKS,
     TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL,
 };
@@ -97,14 +97,14 @@ pub struct ControlContext {
     pub robot_model: RobotModel,
     pub state_estimator: StateEstimator<DEFAULT_EKF_BUFF_LEN, DEFAULT_VISION_BUFF_LEN>,
     pub pose_pid_controller: PidController<3>,
-    /// Accel (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
-    pub pose_accel_gain: Vector2f,
-    /// Velocity setpoint path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
-    pub pose_vel_gain: Vector2f,
-    /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
-    pub tracking_error_thresh: Vector4f,
-    /// [LINEAR_VEL_THRESHOLD, LINEAR_ACCEL_THRESHOLD, ANGULAR_VEL_THRESHOLD, ANGULAR_ACCEL_THRESHOLD]
-    pub friction_comp_gating: Vector4f,
+    /// Tracking accel (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
+    pub tracking_accel_gain: Vector2f,
+    /// Tracking velocity setpoint path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
+    pub tracking_vel_gain: Vector2f,
+    /// Divergence thresholds: [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
+    pub tracking_divergence_thresh: Vector4f,
+    /// [LINEAR_VEL_THRESHOLD, ANGULAR_VEL_THRESHOLD]
+    pub friction_comp_vel_thresh: Vector2f,
     /// Active trajectory. t=0 is always "now" (updated via tick each control tick).
     pub trajectory: Option<TrackedTrajectory>,
     /// Last command stored by `run_traj_track`, used to detect command changes.
@@ -153,10 +153,10 @@ impl ControlContext {
                 &controller_params::pose_pid_gains(),
                 Some(controller_params::POSE_PID_ANTI_JITTER_THRESH),
             ),
-            pose_accel_gain: controller_params::POSE_ACCEL_GAIN,
-            pose_vel_gain: controller_params::POSE_VEL_GAIN,
-            tracking_error_thresh: controller_params::TRACKING_ERROR_THRESHOLD,
-            friction_comp_gating: controller_params::FRICTION_COMP_GATING,
+            tracking_accel_gain: controller_params::TRACKING_ACCEL_GAIN,
+            tracking_vel_gain: controller_params::TRACKING_VEL_GAIN,
+            tracking_divergence_thresh: controller_params::TRACKING_DIVERGENCE_THRESHOLD,
+            friction_comp_vel_thresh: controller_params::FRICTION_COMP_VEL_THRESHOLD,
             trajectory: None,
             prev_cmd: None,
             trajectory_open_loop: false,
@@ -249,20 +249,19 @@ impl ControlContext {
         Ok(state_prediction)
     }
 
-    /// Compute global-frame friction force from current state and commanded body twist/accel.
     /// Feed-forward friction force (global frame) for the commanded body twist.
     ///
     /// Both the Coulomb sign and the viscous magnitude come from the commanded
     /// (target) twist, not the state estimate. Linear compensation is on while the
-    /// commanded local XY speed is at least FRICTION_COMP_GATING[0]; angular while
-    /// the commanded angular speed is at least FRICTION_COMP_GATING[2].
+    /// commanded local XY speed is at least FRICTION_COMP_VEL_THRESHOLD[0]; angular
+    /// while the commanded angular speed is at least FRICTION_COMP_VEL_THRESHOLD[1].
     pub fn compute_friction(&self, body_twist: Vector3f) -> Vector3f {
         let theta = self.state_estimate.z;
         let cmd_twist_local: Vector3f = z_rotation_mat(-theta) * body_twist;
 
         let linear_comp_on =
-            hypotf(cmd_twist_local.x, cmd_twist_local.y) >= self.friction_comp_gating[0];
-        let angular_comp_on = fabsf(cmd_twist_local.z) >= self.friction_comp_gating[2];
+            hypotf(cmd_twist_local.x, cmd_twist_local.y) >= self.friction_comp_vel_thresh[0];
+        let angular_comp_on = fabsf(cmd_twist_local.z) >= self.friction_comp_vel_thresh[1];
 
         let fric_twist_local = Vector3f::new(
             if linear_comp_on { cmd_twist_local.x } else { 0.0 },
@@ -283,7 +282,7 @@ impl ControlContext {
     /// recovering, signalling the control task to command the active brake.
     ///
     /// - Normal: a large unexpected tracking error (an active trajectory whose
-    ///   error exceeds `TRAJ_RECOMPUTE_ERROR`, e.g. a collision knocking the
+    ///   error exceeds `TRACKING_DIVERGENCE_THRESHOLD`, e.g. a collision knocking the
     ///   robot off course) trips into `Recovering`.
     /// - Recovering: active braking is commanded until all wheels stay below
     ///   `RECOVERY_AT_REST_WHEEL_SPEED` for `RECOVERY_AT_REST_TICKS`, then the
@@ -480,19 +479,19 @@ impl ControlContext {
 
         let accel_out: Vector3f = {
             let accel_ff_term = if matches!(
-                POSE_ACCEL_MODE,
-                PoseAccelMode::FeedforwardOnly | PoseAccelMode::Full
+                TRACKING_ACCEL_MODE,
+                TrackingAccelMode::FeedforwardOnly | TrackingAccelMode::Full
             ) {
-                self.pose_accel_gain[0] * traj_accel
+                self.tracking_accel_gain[0] * traj_accel
             } else {
                 Vector3f::zeros()
             };
 
             let accel_fb_term = if matches!(
-                POSE_ACCEL_MODE,
-                PoseAccelMode::FeedbackOnly | PoseAccelMode::Full
+                TRACKING_ACCEL_MODE,
+                TrackingAccelMode::FeedbackOnly | TrackingAccelMode::Full
             ) {
-                self.pose_accel_gain[1] * pos_pid_feedback
+                self.tracking_accel_gain[1] * pos_pid_feedback
             } else {
                 Vector3f::zeros()
             };
@@ -501,18 +500,22 @@ impl ControlContext {
         };
 
         let twist_out: Vector3f = {
-            let vel_ff_term: Vector3f = if matches!(
-                POSE_VEL_MODE,
-                PoseVelMode::FeedforwardOnly | PoseVelMode::Full
-            ) {
-                self.pose_vel_gain[0] * traj_vel
-            } else {
-                (state_estimate.fixed_rows::<3>(3) + accel_out * self.dt).into()
+            // Disabled still outputs the trajectory velocity: the wheel velocity
+            // loop is off (see control_task), but friction compensation and
+            // telemetry use the commanded twist.
+            let vel_ff_term: Vector3f = match TRACKING_VEL_MODE {
+                TrackingVelMode::FeedforwardOnly | TrackingVelMode::Full => {
+                    self.tracking_vel_gain[0] * traj_vel
+                }
+                TrackingVelMode::Disabled => traj_vel,
+                TrackingVelMode::FeedbackOnly => {
+                    (state_estimate.fixed_rows::<3>(3) + accel_out * self.dt).into()
+                }
             };
 
             let vel_fb_term =
-                if matches!(POSE_VEL_MODE, PoseVelMode::FeedbackOnly | PoseVelMode::Full) {
-                    self.pose_vel_gain[1] * pos_pid_feedback * self.dt
+                if matches!(TRACKING_VEL_MODE, TrackingVelMode::FeedbackOnly | TrackingVelMode::Full) {
+                    self.tracking_vel_gain[1] * pos_pid_feedback * self.dt
                 } else {
                     Vector3f::zeros()
                 };
@@ -545,10 +548,10 @@ impl ControlContext {
             traj_state_twist.y - twist_estimate.y,
         );
         let angular_twist_error = fabsf(traj_state_twist.z - twist_estimate.z);
-        linear_pose_error > self.tracking_error_thresh[0]
-            || angular_pose_error > self.tracking_error_thresh[1]
-            || linear_twist_error > self.tracking_error_thresh[2]
-            || angular_twist_error > self.tracking_error_thresh[3]
+        linear_pose_error > self.tracking_divergence_thresh[0]
+            || angular_pose_error > self.tracking_divergence_thresh[1]
+            || linear_twist_error > self.tracking_divergence_thresh[2]
+            || angular_twist_error > self.tracking_divergence_thresh[3]
     }
 
     // -----------------------------------------------------------------------
@@ -563,9 +566,10 @@ impl ControlContext {
             ParameterName::PHYS_INERTIA => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::PHYS_MOTOR_MODEL => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC6_F32),
-            ParameterName::FRICTION_COMP_GATING => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::POSE_CONTROL_GAIN => Some(ParameterDataFormat::VEC2_F32),
-            ParameterName::TRAJ_RECOMPUTE_ERROR => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::FRICTION_COMP_VEL_THRESHOLD => Some(ParameterDataFormat::VEC2_F32),
+            ParameterName::TRACKING_ACCEL_GAIN => Some(ParameterDataFormat::VEC2_F32),
+            ParameterName::TRACKING_VEL_GAIN => Some(ParameterDataFormat::VEC2_F32),
+            ParameterName::TRACKING_DIVERGENCE_THRESHOLD => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
             ParameterName::POSE_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
             ParameterName::VISION_SEED_SAMPLES => Some(ParameterDataFormat::F32),
@@ -619,14 +623,17 @@ impl ControlContext {
                     phys.viscous_friction_angular_nmsprad,
                 ];
             }
-            ParameterName::FRICTION_COMP_GATING => {
-                reply.data.vec4_f32 = self.friction_comp_gating.into();
+            ParameterName::FRICTION_COMP_VEL_THRESHOLD => {
+                reply.data.vec2_f32 = self.friction_comp_vel_thresh.into();
             }
-            ParameterName::POSE_CONTROL_GAIN => {
-                reply.data.vec2_f32 = self.pose_accel_gain.into();
+            ParameterName::TRACKING_ACCEL_GAIN => {
+                reply.data.vec2_f32 = self.tracking_accel_gain.into();
             }
-            ParameterName::TRAJ_RECOMPUTE_ERROR => {
-                reply.data.vec4_f32 = self.tracking_error_thresh.into();
+            ParameterName::TRACKING_VEL_GAIN => {
+                reply.data.vec2_f32 = self.tracking_vel_gain.into();
+            }
+            ParameterName::TRACKING_DIVERGENCE_THRESHOLD => {
+                reply.data.vec4_f32 = self.tracking_divergence_thresh.into();
             }
             ParameterName::VISION_SEED_SAMPLES => {
                 reply.data.f32_ = self.state_estimator.vision_filter.get_params().seed_samples as f32;
@@ -752,17 +759,21 @@ impl ControlContext {
                 p.viscous_friction_angular_nmsprad = v[5];
                 let _ = self.robot_model.update_params(p);
             }
-            ParameterName::FRICTION_COMP_GATING => {
-                let v = unsafe { cmd.data.vec4_f32 };
-                self.friction_comp_gating = Vector4f::new(v[0], v[1], v[2], v[3]);
-            }
-            ParameterName::POSE_CONTROL_GAIN => {
+            ParameterName::FRICTION_COMP_VEL_THRESHOLD => {
                 let v = unsafe { cmd.data.vec2_f32 };
-                self.pose_accel_gain = Vector2f::new(v[0], v[1]);
+                self.friction_comp_vel_thresh = Vector2f::new(v[0], v[1]);
             }
-            ParameterName::TRAJ_RECOMPUTE_ERROR => {
+            ParameterName::TRACKING_ACCEL_GAIN => {
+                let v = unsafe { cmd.data.vec2_f32 };
+                self.tracking_accel_gain = Vector2f::new(v[0], v[1]);
+            }
+            ParameterName::TRACKING_VEL_GAIN => {
+                let v = unsafe { cmd.data.vec2_f32 };
+                self.tracking_vel_gain = Vector2f::new(v[0], v[1]);
+            }
+            ParameterName::TRACKING_DIVERGENCE_THRESHOLD => {
                 let v = unsafe { cmd.data.vec4_f32 };
-                self.tracking_error_thresh = Vector4f::new(v[0], v[1], v[2], v[3]);
+                self.tracking_divergence_thresh = Vector4f::new(v[0], v[1], v[2], v[3]);
             }
             ParameterName::VISION_SEED_SAMPLES => {
                 let v = unsafe { cmd.data.f32_ };

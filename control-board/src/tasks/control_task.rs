@@ -21,6 +21,7 @@ use crate::{
     include_external_cpp_bin,
     motion::{
         active_brake::ActiveBrakeController, body_controller::BodyController,
+        params::controller_params::{TrackingVelMode, TRACKING_VEL_MODE},
     },
     motor::CurrentControlledMotor,
     parameter_interface::ParameterInterface,
@@ -435,8 +436,12 @@ impl<
                         last_vision_t_capture_host_us = (latest_control.vision_capture_us_hi as u64) << 32 | (latest_control.vision_capture_us_lo as u64);
                         vision_update = latest_control.vision_update() != 0;
 
+                        // TRACKING_VEL_MODE Disabled turns the wheel velocity loop
+                        // off regardless of the radio bit.
+                        let wheel_vel_control_enabled = latest_control.wheel_vel_control_enabled() != 0
+                            && TRACKING_VEL_MODE != TrackingVelMode::Disabled;
                         let wheel_motion_type = match (
-                            latest_control.wheel_vel_control_enabled() != 0,
+                            wheel_vel_control_enabled,
                             latest_control.wheel_torque_control_enabled() != 0,
                         ) {
                             (true, true) => CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT,
