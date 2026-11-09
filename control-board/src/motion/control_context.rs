@@ -186,10 +186,8 @@ impl ControlContext {
         self.tracking_recovery_at_rest_ticks = 0;
     }
 
-    /// Clear trajectory and command history without touching the PID or KF.
-    ///
-    /// Called by `ManeuverManager` on mode change to ensure the next tick
-    /// replans from the current state estimate.
+    /// Clear trajectory and command history without touching the PID or KF,
+    /// so the next tracking maneuver replans from the current state estimate.
     pub fn reset_trajectory(&mut self) {
         self.trajectory = None;
         self.prev_cmd = None;

@@ -13,7 +13,11 @@ impl GlobalAccelerationManeuver {
 }
 
 impl MotionManeuver for GlobalAccelerationManeuver {
-    fn entry(&mut self, _cmd: ManeuverCommand, _ctx: &mut ControlContext) {}
+    fn entry(&mut self, _cmd: ManeuverCommand, ctx: &mut ControlContext) {
+        // Accel maneuvers don't track a trajectory, so drop the previous one rather
+        // than let it go stale; the next tracking maneuver seeds from the estimate.
+        ctx.reset_trajectory();
+    }
 
     fn update(
         &mut self,

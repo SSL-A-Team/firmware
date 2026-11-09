@@ -240,9 +240,11 @@ impl ManeuverManager {
     ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError> {
         let maneuver_cmd = cmd.get_maneuver_command();
         if cmd.body_control_mode != self.prev_mode {
+            // The trajectory is kept across maneuver changes: the new maneuver's
+            // command differs from the stored one, so run_traj_track replans
+            // seeded from the current trajectory state (continuous handoff).
             self.prev_mode = cmd.body_control_mode;
             self.active.reset();
-            ctx.reset_trajectory();
             self.active = ActiveManeuver::from_maneuver_command(&maneuver_cmd);
             self.active.entry_cmd(maneuver_cmd, ctx);
         }
