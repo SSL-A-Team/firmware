@@ -27,53 +27,15 @@ pub fn pose_pid_gains() -> Matrix3x5<f32> {
 /// anti-jitter behavior on the motor controllers.
 pub const POSE_PID_ANTI_JITTER_THRESH: Vector3f = Vector3f::new(0.001, 0.001, 0.01);
 
-/// Tracking acceleration (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
-/// Scales traj accel and PID feedback respectively in the body accel output.
+/// Tracking acceleration (wheel torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
+/// body accel = FF * trajectory accel + FB * pose PID feedback, so [1, 0] is
+/// feedforward only, [0, 1] feedback only and [1, 1] both.
 /// Radio-tunable as `TRACKING_ACCEL_GAIN`.
+///
+/// The tracking velocity (wheel velocity) path has no gains: the body velocity
+/// output is always the trajectory velocity. Whether the wheels run their
+/// velocity loop on it is chosen by the `wheel_vel_control_enabled` radio bit.
 pub const TRACKING_ACCEL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
-
-/// Tracking velocity path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
-/// Scales traj velocity and PID feedback (× dt) respectively in the body velocity
-/// (wheel velocity setpoint) output. Radio-tunable as `TRACKING_VEL_GAIN`.
-pub const TRACKING_VEL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
-
-/// Tracking velocity setpoint mode (closed-loop trajectory-tracking maneuvers).
-///
-/// Controls what forms the body velocity output.
-/// `Disabled`: wheel velocity control is turned off on the motors for every
-///   maneuver (overrides the `wheel_vel_control_enabled` radio bit), so the
-///   wheels run current-only. The body velocity output is still the trajectory
-///   velocity, which friction compensation and telemetry use.
-/// `FeedforwardOnly`: trajectory velocity, no PID correction.
-/// `FeedbackOnly`: accel output integrated from the estimated twist, plus the
-///   vel-gain-scaled PID correction.
-/// `Full`: trajectory velocity plus the vel-gain-scaled PID correction.
-#[derive(PartialEq, Eq)]
-pub enum TrackingVelMode {
-    Disabled,
-    FeedforwardOnly,
-    FeedbackOnly,
-    Full,
-}
-
-pub const TRACKING_VEL_MODE: TrackingVelMode = TrackingVelMode::FeedforwardOnly;
-
-/// Tracking acceleration (torque) mode (closed-loop trajectory-tracking maneuvers).
-///
-/// Controls what contributes to the body accel output (wheel torque path).
-/// `Disabled`: zero accel output.
-/// `FeedforwardOnly`: trajectory acceleration only, no PID feedback.
-/// `FeedbackOnly`: PID feedback acceleration only, no trajectory accel.
-/// `Full`: trajectory acceleration plus PID feedback.
-#[derive(PartialEq, Eq)]
-pub enum TrackingAccelMode {
-    Disabled,
-    FeedforwardOnly,
-    FeedbackOnly,
-    Full,
-}
-
-pub const TRACKING_ACCEL_MODE: TrackingAccelMode = TrackingAccelMode::Full;
 
 /// [ERROR_POS_LINEAR (m), ERROR_POS_ANGULAR (rad), ERROR_VEL_LINEAR (m/s), ERROR_VEL_ANGULAR (rad/s)]
 /// Trajectory-vs-estimate errors above which closed-loop tracking is considered

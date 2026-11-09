@@ -21,7 +21,6 @@ use crate::{
     include_external_cpp_bin,
     motion::{
         active_brake::ActiveBrakeController, body_controller::BodyController,
-        params::controller_params::{TrackingVelMode, TRACKING_VEL_MODE},
     },
     motor::CurrentControlledMotor,
     parameter_interface::ParameterInterface,
@@ -436,18 +435,12 @@ impl<
                         last_vision_t_capture_host_us = (latest_control.vision_capture_us_hi as u64) << 32 | (latest_control.vision_capture_us_lo as u64);
                         vision_update = latest_control.vision_update() != 0;
 
-                        // TRACKING_VEL_MODE Disabled turns the wheel velocity loop
-                        // off regardless of the radio bit.
-                        let wheel_vel_control_enabled = latest_control.wheel_vel_control_enabled() != 0
-                            && TRACKING_VEL_MODE != TrackingVelMode::Disabled;
-                        let wheel_motion_type = match (
-                            wheel_vel_control_enabled,
-                            latest_control.wheel_torque_control_enabled() != 0,
-                        ) {
-                            (true, true) => CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT,
-                            (true, false) => CcmMotionControlType::CCM_MCT_VELOCITY,
-                            (false, true) => CcmMotionControlType::CCM_MCT_CURRENT,
-                            (false, false) => CcmMotionControlType::CCM_MCT_MOTOR_OFF,
+                        // Wheel torque (current) control is always on; the radio bit
+                        // only selects whether the wheel velocity loop runs too.
+                        let wheel_motion_type = if latest_control.wheel_vel_control_enabled() != 0 {
+                            CcmMotionControlType::CCM_MCT_VELOCITY_CURRENT
+                        } else {
+                            CcmMotionControlType::CCM_MCT_CURRENT
                         };
 
                         self.motor_fl.set_motion_type(wheel_motion_type);
@@ -455,12 +448,10 @@ impl<
                         self.motor_br.set_motion_type(wheel_motion_type);
                         self.motor_fr.set_motion_type(wheel_motion_type);
 
-                        let motion_enabled =
-                            wheel_motion_type != CcmMotionControlType::CCM_MCT_MOTOR_OFF;
-                        self.motor_fl.set_motion_enabled(motion_enabled);
-                        self.motor_bl.set_motion_enabled(motion_enabled);
-                        self.motor_br.set_motion_enabled(motion_enabled);
-                        self.motor_fr.set_motion_enabled(motion_enabled);
+                        self.motor_fl.set_motion_enabled(true);
+                        self.motor_bl.set_motion_enabled(true);
+                        self.motor_br.set_motion_enabled(true);
+                        self.motor_fr.set_motion_enabled(true);
 
                         self.last_command = latest_control;
                         ticks_since_control_packet = 0;

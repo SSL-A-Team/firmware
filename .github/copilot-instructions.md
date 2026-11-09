@@ -156,7 +156,7 @@ gone. Motion code is split into:
     trajectory state (continuous handoff). It is only cleared when maneuvers
     are held (OFF, ESTOP, HALT, divergence recovery) or the controller resets.
 - **`params/controller_params.rs`** — body-level constants (PID gains,
-  `TRACKING_*_GAIN/MODE`, `TRACKING_DIVERGENCE_THRESHOLD`, `FRICTION_COMP_VEL_THRESHOLD`,
+  `TRACKING_ACCEL_GAIN`, `TRACKING_DIVERGENCE_THRESHOLD`, `FRICTION_COMP_VEL_THRESHOLD`,
   `BODY_*_CLAMP_*`, `ENC_LAG_*`).
 - **`pid.rs`** — `PidController<NUM_STATES>` (see below).
 - **`robot_model.rs`** — thin wrappers around `ateam_controls::RobotModel`.
@@ -209,9 +209,8 @@ control task to active-brake (it is also true during divergence recovery).
 
 All trajectory-tracking modes share the `track_trajectory` helper on
 `ControlContext`: pose PID via `calculate_with_derivative`
-(trajectory-vs-estimate twist error as the derivative), FF/FB gating via
-`TRACKING_ACCEL_MODE` / `TRACKING_VEL_MODE`, weighted by `tracking_accel_gain` /
-`tracking_vel_gain`. Modes differ in **trajectory planner** and (for pose) **vision
+(trajectory-vs-estimate twist error as the derivative), accel FF/FB weighted by
+`tracking_accel_gain`, and the trajectory velocity as the velocity output. Modes differ in **trajectory planner** and (for pose) **vision
 gating**. After producing the tracker outputs, `track_trajectory` steps the
 integrated `trajectory_state` forward to `t = dt` so the *next* tick's
 `tracking_error_exceeded` compares the estimate against where the trajectory
@@ -330,24 +329,16 @@ PID and gains:
   linear-scaling deadband on the PID output (matches the fixed-point PI
   anti-jitter on the motor controllers).
 
-Tracking output-path gating (closed-loop trajectory-tracking maneuvers):
-- `TRACKING_ACCEL_GAIN = [FF, FB] = [1.0, 1.0]` — scales trajectory accel and
-  PID feedback on the **wheel torque** path. Radio param `TRACKING_ACCEL_GAIN` (8).
-- `TRACKING_VEL_GAIN   = [FF, FB] = [1.0, 1.0]` — scales trajectory vel and
-  (PID feedback × dt) on the **wheel velocity** setpoint path. Radio param
-  `TRACKING_VEL_GAIN` (15).
-- `TRACKING_ACCEL_MODE: TrackingAccelMode` — `Disabled` | `FeedforwardOnly` |
-  `FeedbackOnly` | `Full`. Default: `Full` (trajectory accel FF + PID FB).
-- `TRACKING_VEL_MODE: TrackingVelMode` — `Disabled` | `FeedforwardOnly` |
-  `FeedbackOnly` | `Full`. Default: `FeedforwardOnly` (wheel-vel setpoint
-  is the trajectory velocity directly; PID does not bias the velocity setpoint).
-  - `FeedbackOnly` integrates the accel output from the estimated twist and
-    adds the PID correction.
-  - `Disabled` turns the wheel velocity loop off on the motors for **every**
-    maneuver: the control task clears the `wheel_vel_control_enabled` radio
-    bit (`VELOCITY_CURRENT` → `CURRENT`, `VELOCITY` → `MOTOR_OFF`). The body
-    twist output is still the trajectory velocity for friction comp and
-    telemetry.
+Tracking output paths (closed-loop trajectory-tracking maneuvers):
+- **Wheel torque path:** `body_accel = TRACKING_ACCEL_GAIN[0]·traj_accel +
+  TRACKING_ACCEL_GAIN[1]·pid_feedback`. `TRACKING_ACCEL_GAIN = [FF, FB] = [1.0, 1.0]`
+  by default; `[1, 0]` is FF only, `[0, 1]` FB only. Radio param
+  `TRACKING_ACCEL_GAIN` (8).
+- **Wheel velocity path:** the body velocity output is always the trajectory
+  velocity (no gain, no PID term); it is also the friction comp input. The
+  `wheel_vel_control_enabled` radio bit selects whether the wheels run their
+  velocity loop on it (`CCM_MCT_VELOCITY_CURRENT`) or current only
+  (`CCM_MCT_CURRENT`). Wheel torque control is always on.
 
 Divergence thresholds:
 - `TRACKING_DIVERGENCE_THRESHOLD = [1.0 m, 1.57 rad, 5.0 m/s, 10.0 rad/s]` —
@@ -573,7 +564,9 @@ Each of the 4 wheel motors has a dedicated STM32F031 running `wheel-torque` firm
 | `CCM_MCT_VELOCITY` | Closed-loop velocity control |
 | `CCM_MCT_VELOCITY_CURRENT` | Velocity + current combined control |
 
-Production mode is `CCM_MCT_VELOCITY_CURRENT` — the control board sends both wheel velocity and current (torque) setpoints.
+The control board always runs current (torque) control: `CCM_MCT_VELOCITY_CURRENT`
+when the `wheel_vel_control_enabled` radio bit is set (wheel velocity + current
+setpoints), otherwise `CCM_MCT_CURRENT`. Active braking forces `CCM_MCT_CURRENT`.
 
 ### Current Control on STM32F031 (`motor-controller/common/6step_current.c`)
 
@@ -653,7 +646,7 @@ clamped = clamp(current_ma, -2500, 2500)
 - `controls_err` atomic flag on `SharedRobotState`
 - If controls library returns error → flag set, motors locked out, error telemetry sent
 - `reset_controller` command clears error and re-enables motion
-- `BCM_OFF` mode → zero motor commands, motor type set to `CCM_MCT_MOTOR_OFF`
+- `BCM_OFF` mode → zero motor commands (motors keep their motion type and hold zero)
 - Loop timing instrumentation warns on >600 µs execution (sends an
   `ErrorTelemetry` "control loop execution time too high!")
 
@@ -696,7 +689,7 @@ Trajectory parameters (max vel/accel) sent per-command, falling back to defaults
 - `KalmanFilterParams` (process/measurement noise, covariance bounds)
 - `RobotPhysicalParams` (mass, inertia, wheel geometry, friction coefficients)
 - Pose PID gains (`POSE_FB_PIDII_LINEAR/ANGULAR`)
-- Controller parameters (`TRACKING_ACCEL_GAIN`, `TRACKING_VEL_GAIN`,
+- Controller parameters (`TRACKING_ACCEL_GAIN`,
   `TRACKING_DIVERGENCE_THRESHOLD`, `FRICTION_COMP_VEL_THRESHOLD`,
   `VISION_SEED_SAMPLES`)
 

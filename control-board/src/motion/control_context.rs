@@ -1,6 +1,5 @@
 use crate::motion::params::controller_params::{
-    TrackingAccelMode, TrackingVelMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON,
-    ENC_LAG_T_SLOPE, TRACKING_ACCEL_MODE, TRACKING_VEL_MODE,
+    ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE,
     TRACKING_DIVERGENCE_RECOVERY_REST_TICKS,
     TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL,
 };
@@ -99,8 +98,6 @@ pub struct ControlContext {
     pub pose_pid_controller: PidController<3>,
     /// Tracking accel (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
     pub tracking_accel_gain: Vector2f,
-    /// Tracking velocity setpoint path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
-    pub tracking_vel_gain: Vector2f,
     /// Divergence thresholds: [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
     pub tracking_divergence_thresh: Vector4f,
     /// [LINEAR_VEL_THRESHOLD, ANGULAR_VEL_THRESHOLD]
@@ -154,7 +151,6 @@ impl ControlContext {
                 Some(controller_params::POSE_PID_ANTI_JITTER_THRESH),
             ),
             tracking_accel_gain: controller_params::TRACKING_ACCEL_GAIN,
-            tracking_vel_gain: controller_params::TRACKING_VEL_GAIN,
             tracking_divergence_thresh: controller_params::TRACKING_DIVERGENCE_THRESHOLD,
             friction_comp_vel_thresh: controller_params::FRICTION_COMP_VEL_THRESHOLD,
             trajectory: None,
@@ -477,51 +473,12 @@ impl ControlContext {
             self.dt,
         );
 
-        let accel_out: Vector3f = {
-            let accel_ff_term = if matches!(
-                TRACKING_ACCEL_MODE,
-                TrackingAccelMode::FeedforwardOnly | TrackingAccelMode::Full
-            ) {
-                self.tracking_accel_gain[0] * traj_accel
-            } else {
-                Vector3f::zeros()
-            };
+        // Wheel torque path: gain-weighted trajectory accel FF + PID FB.
+        let accel_out: Vector3f =
+            self.tracking_accel_gain[0] * traj_accel + self.tracking_accel_gain[1] * pos_pid_feedback;
 
-            let accel_fb_term = if matches!(
-                TRACKING_ACCEL_MODE,
-                TrackingAccelMode::FeedbackOnly | TrackingAccelMode::Full
-            ) {
-                self.tracking_accel_gain[1] * pos_pid_feedback
-            } else {
-                Vector3f::zeros()
-            };
-
-            accel_ff_term + accel_fb_term
-        };
-
-        let twist_out: Vector3f = {
-            // Disabled still outputs the trajectory velocity: the wheel velocity
-            // loop is off (see control_task), but friction compensation and
-            // telemetry use the commanded twist.
-            let vel_ff_term: Vector3f = match TRACKING_VEL_MODE {
-                TrackingVelMode::FeedforwardOnly | TrackingVelMode::Full => {
-                    self.tracking_vel_gain[0] * traj_vel
-                }
-                TrackingVelMode::Disabled => traj_vel,
-                TrackingVelMode::FeedbackOnly => {
-                    (state_estimate.fixed_rows::<3>(3) + accel_out * self.dt).into()
-                }
-            };
-
-            let vel_fb_term =
-                if matches!(TRACKING_VEL_MODE, TrackingVelMode::FeedbackOnly | TrackingVelMode::Full) {
-                    self.tracking_vel_gain[1] * pos_pid_feedback * self.dt
-                } else {
-                    Vector3f::zeros()
-                };
-
-            vel_ff_term + vel_fb_term
-        };
+        // Wheel velocity path: the trajectory velocity (also the friction comp input).
+        let twist_out: Vector3f = traj_vel;
 
         Ok(ManeuverSetpoints {
             body_twist: twist_out,
@@ -568,7 +525,6 @@ impl ControlContext {
             ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC6_F32),
             ParameterName::FRICTION_COMP_VEL_THRESHOLD => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_ACCEL_GAIN => Some(ParameterDataFormat::VEC2_F32),
-            ParameterName::TRACKING_VEL_GAIN => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
             ParameterName::POSE_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
@@ -628,9 +584,6 @@ impl ControlContext {
             }
             ParameterName::TRACKING_ACCEL_GAIN => {
                 reply.data.vec2_f32 = self.tracking_accel_gain.into();
-            }
-            ParameterName::TRACKING_VEL_GAIN => {
-                reply.data.vec2_f32 = self.tracking_vel_gain.into();
             }
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => {
                 reply.data.vec4_f32 = self.tracking_divergence_thresh.into();
@@ -766,10 +719,6 @@ impl ControlContext {
             ParameterName::TRACKING_ACCEL_GAIN => {
                 let v = unsafe { cmd.data.vec2_f32 };
                 self.tracking_accel_gain = Vector2f::new(v[0], v[1]);
-            }
-            ParameterName::TRACKING_VEL_GAIN => {
-                let v = unsafe { cmd.data.vec2_f32 };
-                self.tracking_vel_gain = Vector2f::new(v[0], v[1]);
             }
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => {
                 let v = unsafe { cmd.data.vec4_f32 };

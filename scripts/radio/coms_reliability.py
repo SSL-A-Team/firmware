@@ -179,9 +179,9 @@ def build_control_packet(
       bit 0:  request_shutdown
       bit 1:  reboot_robot
       bit 2:  game_state_in_stop
-      bit 3:  emergency_stop
-      bit 4:  wheel_vel_control_enabled
-      bit 5:  wheel_torque_control_enabled
+      bit 3:  game_state_in_halt
+      bit 4:  emergency_stop
+      bit 5:  wheel_vel_control_enabled (wheel torque control is always on)
       bit 6:  vision_update
       bit 7:  reset_controller
       bits 8-31: reserved
