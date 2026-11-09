@@ -112,8 +112,10 @@ pub struct ControlContext {
     pub trajectory_open_loop: bool,
     pub enc_lag: FirstOrderLag<2>,
     pub dt: f32,
-    /// Cached KF state estimate — updated each tick before maneuver dispatch.
+    /// Cached KF state estimate (global frame) — updated each tick before maneuver dispatch.
     pub state_estimate: Vector6f,
+    /// State-estimate velocity in the robot's local frame [vx, vy, w], for telemetry.
+    pub state_estimate_vel_local: Vector3f,
     /// Divergence-recovery state machine. `Recovering` engages active braking and
     /// holds it until the wheels stop, then resets the controller.
     pub tracking_divergence_state: TrackingDivergenceState,
@@ -159,6 +161,7 @@ impl ControlContext {
             enc_lag,
             dt,
             state_estimate: Vector6f::zeros(),
+            state_estimate_vel_local: Vector3f::zeros(),
             tracking_divergence_state: TrackingDivergenceState::Normal,
             tracking_recovery_at_rest_ticks: 0,
         }
@@ -195,7 +198,8 @@ impl ControlContext {
     }
 
     /// Run KF vision handling, measurement construction, and state update.
-    /// Returns the pre-update state prediction used for telemetry.
+    /// Returns the EKF buffer-horizon state for telemetry: global pose, then
+    /// velocity in the robot's local frame.
     pub fn update_state_estimate(
         &mut self,
         vision_pose_meas: Vector3f,
@@ -235,12 +239,13 @@ impl ControlContext {
 
         let mut state_prediction = SVector::<f32, 6>::zeros();
         state_prediction.fixed_rows_mut::<3>(0).copy_from(&self.state_estimator.get_pos_buff());
-        state_prediction.fixed_rows_mut::<3>(3).copy_from(&self.state_estimator.get_vel_buff());
+        state_prediction.fixed_rows_mut::<3>(3).copy_from(&self.state_estimator.get_vel_buff_local());
 
         let mut state_est = SVector::<f32, 6>::zeros();
         state_est.fixed_rows_mut::<3>(0).copy_from(&self.state_estimator.get_pos());
         state_est.fixed_rows_mut::<3>(3).copy_from(&self.state_estimator.get_vel());
         self.state_estimate = state_est;
+        self.state_estimate_vel_local = self.state_estimator.get_vel_local();
 
         Ok(state_prediction)
     }

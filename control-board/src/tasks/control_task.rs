@@ -256,6 +256,7 @@ impl<
             .hall_disconnected_error() as u32;
 
         let state_est = robot_controller.control_context.state_estimate;
+        let vel_local = robot_controller.control_context.state_estimate_vel_local;
 
         let basic_telem = TelemetryPacket::Basic(BasicTelemetry {
             transmission_sequence_number: 0,
@@ -301,10 +302,10 @@ impl<
                 (state_est.y * 1000.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
                 (state_est.z * 1000.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
             ],
-            kf_body_vel_estimate: [
-                (state_est[3] * 1000.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
-                (state_est[4] * 1000.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
-                (state_est[5] * 1000.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+            body_vel_estimate: [
+                (vel_local.x * 1000.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+                (vel_local.y * 1000.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+                (vel_local.z * 1000.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
             ],
         });
 

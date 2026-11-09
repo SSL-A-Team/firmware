@@ -202,6 +202,9 @@ control task to active-brake (it is also true during divergence recovery).
 6. **Telemetry:** populates `BodyControlExtendedTelemetry` (vision pose,
    trajectory pos/vel, KF prediction + estimate split into pos/vel,
    commanded twist/accel ± friction comp) and attaches the maneuver telemetry.
+   Frames: positions, trajectory and commanded twist/accel are global; the KF
+   velocities (`kf_body_vel_estimate`, `kf_body_vel_prediction`) and `imu_accel`
+   are in the robot's **local** frame, as is `BasicTelemetry.body_vel_estimate`.
 7. **`robot_model.kf_predict(body_accel_out)`** — advances the state estimate
    one timestep using the *pre-friction-comp* commanded acceleration.
 
@@ -667,7 +670,7 @@ RadioPacket = RadioHeader + RadioData (union)
 |---|---|---|
 | `BasicControl` | PC → Robot | `BodyControlMode` + maneuver command payload + vision pose + trajectory params |
 | `ParameterCommand` | PC → Robot | Parameter read/write for live tuning |
-| `BasicTelemetry` | Robot → PC | Body mode, wheel velocities, body velocity estimate, battery %, kicker charge |
+| `BasicTelemetry` | Robot → PC | Body mode, wheel velocities, local-frame body velocity estimate, battery %, kicker charge |
 | `ExtendedTelemetry` | Robot → PC | Full state: IMU, vision, trajectory, KF state, body commands, per-maneuver telemetry |
 | `ErrorTelemetry` | Robot → PC | Error codes and diagnostic data |
 

@@ -306,8 +306,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                     b.kf_body_pos_estimate[1] as f32 / 1000.0,
                     b.kf_body_pos_estimate[2] as f32 / 1000.0,
                 ];
-                let vx = b.kf_body_vel_estimate[0] as f32 / 1000.0;
-                let vy = b.kf_body_vel_estimate[1] as f32 / 1000.0;
+                let vx = b.body_vel_estimate[0] as f32 / 1000.0;
+                let vy = b.body_vel_estimate[1] as f32 / 1000.0;
                 est_speed_sq = vx * vx + vy * vy;
             }
         }

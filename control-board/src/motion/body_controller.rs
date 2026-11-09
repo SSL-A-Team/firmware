@@ -273,11 +273,7 @@ impl BodyController {
                 .state_estimate
                 .fixed_rows::<3>(0)
                 .into(),
-            kf_body_vel_estimate: self
-                .control_context
-                .state_estimate
-                .fixed_rows::<3>(3)
-                .into(),
+            kf_body_vel_estimate: self.control_context.state_estimate_vel_local.into(),
             body_vel_u: self.body_twist_out.into(),
             body_accel_u: self.body_accel_out.into(),
             body_accel_u_fric_comp: self.body_accel_out_fric_comp.into(),
