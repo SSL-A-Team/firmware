@@ -44,6 +44,13 @@ pub const TRACKING_ACCEL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
 /// Radio-tunable as `TRACKING_FF_ACCEL_CUTOFF_HZ`.
 pub const TRACKING_FF_ACCEL_CUTOFF_HZ: Vector2f = Vector2f::new(20.0, 20.0);
 
+/// Lookahead (s) for the body velocity output in closed-loop tracking: the
+/// trajectory velocity at t = lookahead instead of t = 0. One tick (v(dt))
+/// matches the tick-averaged feedforward accel; more covers command and wheel
+/// velocity loop latency. Clamped to >= 0.
+/// Radio-tunable as `TRACKING_VEL_LOOKAHEAD_S`.
+pub const TRACKING_VEL_LOOKAHEAD_S: f32 = 0.001;
+
 /// [ERROR_POS_LINEAR (m), ERROR_POS_ANGULAR (rad), ERROR_VEL_LINEAR (m/s), ERROR_VEL_ANGULAR (rad/s)]
 /// Trajectory-vs-estimate errors above which closed-loop tracking is considered
 /// diverged, triggering divergence recovery (active brake, then reset).

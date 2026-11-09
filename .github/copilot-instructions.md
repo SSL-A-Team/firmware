@@ -344,8 +344,9 @@ Tracking output paths (closed-loop trajectory-tracking maneuvers):
   the tick (`BangBangTraj3D::mean_accel(dt)`), then first-order low-passed at
   `TRACKING_FF_ACCEL_CUTOFF_HZ = [linear, angular] = [20, 20]` Hz (radio param
   16; <= 0 disables) to smooth bang-bang switching chatter.
-- **Wheel velocity path:** the body velocity output is always the trajectory
-  velocity (no gain, no PID term); it is also the friction comp input. The
+- **Wheel velocity path:** the body velocity output is the trajectory velocity
+  `TRACKING_VEL_LOOKAHEAD_S` ahead (default 1 ms = one tick, radio param 18);
+  it is also the friction comp input. The
   `wheel_vel_control_enabled` radio bit selects whether the wheels run their
   velocity loop on it (`CCM_MCT_VELOCITY_CURRENT`) or current only
   (`CCM_MCT_CURRENT`). Wheel torque control is always on.
