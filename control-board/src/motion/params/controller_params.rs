@@ -74,17 +74,10 @@ pub const POSE_ACCEL_MODE: PoseAccelMode = PoseAccelMode::FeedbackOnly;
 /// Thresholds for when to recompute the trajectory
 pub const TRACKING_ERROR_THRESHOLD: Vector4f = Vector4f::new(1.0, 1.57, 5.0, 10.0);
 
-/// Only applies friction compensation when the absolute value of the
-/// velocity/acceleration is above the corresponding threshold in
-/// FRICTION_COMP_GATING, to avoid unstable state at 0 velocity
-/// [LINEAR_VEL_THRESHOLD, LINEAR_ACCEL_THRESHOLD, ANGULAR_VEL_THRESHOLD, ANGULAR_ACCEL_THRESHOLD]
-pub const FRICTION_COMP_GATING: Vector4f = Vector4f::new(0.1, 0.5, 0.5, 1.0);
-
-/// Coulomb friction compensation takes its sign from the encoder-measured
-/// local velocity on each axis. Below these speeds the axis is treated as
-/// stopped and Coulomb compensation follows the commanded accel instead.
-pub const COULOMB_MEAS_VEL_THRESH_LINEAR: f32 = 0.05; // m/s
-pub const COULOMB_MEAS_VEL_THRESH_ANGULAR: f32 = 0.2; // rad/s
+/// Friction compensation is applied only while the commanded velocity is above
+/// these thresholds: linear on the local XY speed magnitude, angular on |w|.
+/// [LINEAR_VEL_THRESHOLD, LINEAR_ACCEL_THRESHOLD (unused), ANGULAR_VEL_THRESHOLD, ANGULAR_ACCEL_THRESHOLD (unused)]
+pub const FRICTION_COMP_GATING: Vector4f = Vector4f::new(0.01, 0.0, 0.001, 0.0);
 
 /// Maximum magnitude of the body-level acceleration output [linear (m/s²), angular (rad/s²)].
 /// The friction-compensated acceleration is clamped to these limits before conversion

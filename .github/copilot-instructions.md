@@ -192,7 +192,7 @@ control task to active-brake (it is also true during divergence recovery).
 3. **`maneuver_manager.tick(last_command, &mut control_context)`** — dispatches
    to the active `MotionManeuver::update`, which calls one of the
    `*_control_policy` helpers and returns `(ManeuverSetpoints, ManeuverExtendedTelemetry)`.
-4. **Friction compensation:** `control_context.compute_friction(body_twist, body_accel)`
+4. **Friction compensation:** `control_context.compute_friction(body_twist)`
    returns a **global-frame** friction force; `body_accel_out_fric_comp = body_accel_out − I_inv · F_fric_global`.
 5. **Kinematic transform:** wheel velocities via `transform_twist2wheel(θ)` (with
    `enc_lag.invert()` pre-compensation on XY when `ENC_LAG_MODE` includes
@@ -307,24 +307,16 @@ routes the next tick's seed through the `state_estimate` branch.
 ### Friction Compensation
 - Friction model is defined in the robot's **local frame** with independent
   coefficients for x (forward/backward) and y (strafe).
-- `ControlContext::compute_friction(body_twist, body_accel)` rotates the
-  estimated body twist and the commanded body accel into the local frame,
-  gates per sub-comp, computes the local-frame friction force, then rotates
-  back to global. Returns the **global-frame** friction force; the
+- `ControlContext::compute_friction(body_twist)` rotates the commanded
+  body twist into the local frame, gates it, computes the local-frame
+  friction force, then rotates back to global. Both the Coulomb sign and the
+  viscous magnitude come from the **commanded** twist, never the state
+  estimate. Returns the **global-frame** friction force; the
   `BodyController` applies `body_accel_out − I_inv · F_fric_global` to get
   `body_accel_out_fric_comp`.
-- Per-axis gating via `FRICTION_COMP_GATING = [lin_vel_thresh,
-  lin_accel_thresh, ang_vel_thresh, ang_accel_thresh]`:
-  - **Linear off** when both `||(local_vx, local_vy)|| < lin_vel_thresh`
-    AND `||(local_ax, local_ay)|| < lin_accel_thresh` → zero linear friction.
-  - **Angular off** when both `|v_theta| < ang_vel_thresh` AND
-    `|a_theta| < ang_accel_thresh` → zero angular friction.
-  - When on, the viscous term uses the target (commanded) local twist. The
-    Coulomb sign comes from the encoder-measured local velocity per axis
-    (`wheel_to_local_vel`), which reads zero at rest unlike the state
-    estimate. While an axis is below `COULOMB_MEAS_VEL_THRESH_LINEAR`
-    (0.05 m/s) / `COULOMB_MEAS_VEL_THRESH_ANGULAR` (0.2 rad/s), Coulomb
-    follows the commanded accel instead (breakaway from rest).
+- Gating via `FRICTION_COMP_GATING = [lin_vel=0.01, unused, ang_vel=0.001, unused]`:
+  - **Linear off** when `||(cmd_vx, cmd_vy)|| < 0.01 m/s`.
+  - **Angular off** when `|cmd_w| < 0.001 rad/s`.
 - Friction force = `robot_model.compute_friction_force(local_twist)`
 - Applied: `body_accel_fric_comp = body_accel - I_inv × R_z(θ) × friction_force_local`
 
@@ -360,7 +352,7 @@ Replan thresholds:
   replanned every tick regardless.
 
 Friction comp gating:
-- `FRICTION_COMP_GATING = [lin_vel=0.1, lin_acc=0.5, ang_vel=0.5, ang_acc=1.0]`.
+- `FRICTION_COMP_GATING = [lin_vel=0.01, unused, ang_vel=0.001, unused]` (commanded velocity).
 
 Output clamping (applied before kinematic transforms):
 - `BODY_ACCEL_CLAMP_LINEAR = 20.0 m/s²` — clamps friction-compensated linear accel magnitude.

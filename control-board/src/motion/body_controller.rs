@@ -178,7 +178,7 @@ impl BodyController {
 
         let friction_force_global = self
             .control_context
-            .compute_friction(self.body_twist_out, self.body_accel_out);
+            .compute_friction(self.body_twist_out);
         let body_accel_fric_comp =
             self.body_accel_out - self.control_context.robot_model.force_to_accel(&friction_force_global);
 

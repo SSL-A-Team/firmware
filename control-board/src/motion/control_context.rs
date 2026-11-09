@@ -2,7 +2,7 @@ use crate::motion::params::controller_params::{
     PoseAccelMode, PoseVelMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON,
     ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE,
     TRACKING_DIVERGENCE_RECOVERY_REST_TICKS,
-    TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL, COULOMB_MEAS_VEL_THRESH_ANGULAR, COULOMB_MEAS_VEL_THRESH_LINEAR,
+    TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL,
 };
 use crate::motion::accel_trajectory::AccelTrajectory;
 use crate::motion::pid::PidController;
@@ -117,8 +117,6 @@ pub struct ControlContext {
     pub dt: f32,
     /// Cached KF state estimate — updated each tick before maneuver dispatch.
     pub state_estimate: Vector6f,
-    /// Encoder-measured local body velocity [vx, vy, w] from the latest tick.
-    pub encoder_vel_local: Vector3f,
     /// Divergence-recovery state machine. `Recovering` engages active braking and
     /// holds it until the wheels stop, then resets the controller.
     pub tracking_divergence_state: TrackingDivergenceState,
@@ -165,7 +163,6 @@ impl ControlContext {
             enc_lag,
             dt,
             state_estimate: Vector6f::zeros(),
-            encoder_vel_local: Vector3f::zeros(),
             tracking_divergence_state: TrackingDivergenceState::Normal,
             tracking_recovery_at_rest_ticks: 0,
         }
@@ -232,7 +229,6 @@ impl ControlContext {
         };
 
         let encoder_vel = self.robot_model.wheel_to_local_vel(&wheel_vel_meas);
-        self.encoder_vel_local = encoder_vel;
 
         self.state_estimator.tick(
             Instant::now().as_micros(),
@@ -254,81 +250,28 @@ impl ControlContext {
     }
 
     /// Compute global-frame friction force from current state and commanded body twist/accel.
-    pub fn compute_friction(&self, body_twist: Vector3f, body_accel: Vector3f) -> Vector3f {
-        let state_estimate = self.state_estimate;
-        let theta = state_estimate.z;
-        let r_glob_to_loc = z_rotation_mat(-theta);
-        let r_loc_to_glob = z_rotation_mat(theta);
+    /// Feed-forward friction force (global frame) for the commanded body twist.
+    ///
+    /// Both the Coulomb sign and the viscous magnitude come from the commanded
+    /// (target) twist, not the state estimate. Linear compensation is on while the
+    /// commanded local XY speed is at least FRICTION_COMP_GATING[0]; angular while
+    /// the commanded angular speed is at least FRICTION_COMP_GATING[2].
+    pub fn compute_friction(&self, body_twist: Vector3f) -> Vector3f {
+        let theta = self.state_estimate.z;
+        let cmd_twist_local: Vector3f = z_rotation_mat(-theta) * body_twist;
 
-        let est_twist_global: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-        let est_twist_local: Vector3f = r_glob_to_loc * est_twist_global;
-        let tgt_twist_local: Vector3f = r_glob_to_loc * body_twist;
-        let cmd_accel_local: Vector3f = r_glob_to_loc * body_accel;
-
-        let lin_vel_mag = hypotf(est_twist_local.x, est_twist_local.y);
-        let lin_accel_mag = hypotf(cmd_accel_local.x, cmd_accel_local.y);
-        let ang_vel_mag = fabsf(est_twist_local.z);
-        let ang_accel_mag = fabsf(cmd_accel_local.z);
-
-        let linear_comp_on = lin_accel_mag >= self.friction_comp_gating[1]
-            || lin_vel_mag >= self.friction_comp_gating[0];
-        let angular_comp_on = ang_accel_mag >= self.friction_comp_gating[3]
-            || ang_vel_mag >= self.friction_comp_gating[2];
+        let linear_comp_on =
+            hypotf(cmd_twist_local.x, cmd_twist_local.y) >= self.friction_comp_gating[0];
+        let angular_comp_on = fabsf(cmd_twist_local.z) >= self.friction_comp_gating[2];
 
         let fric_twist_local = Vector3f::new(
-            if linear_comp_on {
-                tgt_twist_local.x
-            } else {
-                0.0
-            },
-            if linear_comp_on {
-                tgt_twist_local.y
-            } else {
-                0.0
-            },
-            if angular_comp_on {
-                tgt_twist_local.z
-            } else {
-                0.0
-            },
+            if linear_comp_on { cmd_twist_local.x } else { 0.0 },
+            if linear_comp_on { cmd_twist_local.y } else { 0.0 },
+            if angular_comp_on { cmd_twist_local.z } else { 0.0 },
         );
 
-        // Same model as RobotModel::compute_local_friction_force, except the Coulomb
-        // sign comes from the encoder-measured velocity, which reads zero at rest
-        // (the state estimate's velocity carries an offset there). While an axis is
-        // effectively stopped, Coulomb opposes the commanded accel (breakaway).
-        let p = self.robot_model.get_params();
-        let meas = self.encoder_vel_local;
-        let sign = |v: f32| if v > 0.0 { 1.0 } else if v < 0.0 { -1.0 } else { 0.0 };
-        let coulomb_dir = |v_meas: f32, a: f32, v_thresh: f32| {
-            if fabsf(v_meas) < v_thresh { sign(a) } else { sign(v_meas) }
-        };
-        let lin_thresh = COULOMB_MEAS_VEL_THRESH_LINEAR;
-        let ang_thresh = COULOMB_MEAS_VEL_THRESH_ANGULAR;
-        let friction_force_local = Vector3f::new(
-            if linear_comp_on {
-                -p.viscous_friction_linear_x_nspm * fric_twist_local.x
-                    - p.coulomb_friction_linear_x_n
-                        * coulomb_dir(meas.x, cmd_accel_local.x, lin_thresh)
-            } else {
-                0.0
-            },
-            if linear_comp_on {
-                -p.viscous_friction_linear_y_nspm * fric_twist_local.y
-                    - p.coulomb_friction_linear_y_n
-                        * coulomb_dir(meas.y, cmd_accel_local.y, lin_thresh)
-            } else {
-                0.0
-            },
-            if angular_comp_on {
-                -p.viscous_friction_angular_nmsprad * fric_twist_local.z
-                    - p.coulomb_friction_angular_nm
-                        * coulomb_dir(meas.z, cmd_accel_local.z, ang_thresh)
-            } else {
-                0.0
-            },
-        );
-        r_loc_to_glob * friction_force_local
+        let friction_force_local = self.robot_model.compute_local_friction_force(fric_twist_local);
+        z_rotation_mat(theta) * friction_force_local
     }
 
     // -----------------------------------------------------------------------
