@@ -1,5 +1,6 @@
 use crate::motion::params::controller_params::{
     ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE,
+    FRICTION_COMP_HOLD_AWAY_SPEED, FRICTION_COMP_HOLD_RELEASE_FRAC,
     TRACKING_DIVERGENCE_RECOVERY_REST_TICKS,
     TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL,
 };
@@ -120,6 +121,10 @@ pub struct ControlContext {
     pub tracking_divergence_thresh: Vector4f,
     /// [LINEAR_VEL_THRESHOLD, ANGULAR_VEL_THRESHOLD]
     pub friction_comp_vel_thresh: Vector2f,
+    /// [ERROR_LINEAR, ERROR_ANGULAR] hold breakaway friction comp error thresholds; <= 0 disables
+    pub friction_comp_hold_err_thresh: Vector2f,
+    /// Hold breakaway comp latched on per group [linear, angular] (hysteresis).
+    pub friction_comp_hold_active: [bool; 2],
     /// Active trajectory. t=0 is always "now" (updated via tick each control tick).
     pub trajectory: Option<TrackedTrajectory>,
     /// Last command stored by `run_traj_track`, used to detect command changes.
@@ -175,6 +180,8 @@ impl ControlContext {
             tracking_ff_accel_filt: None,
             tracking_divergence_thresh: controller_params::TRACKING_DIVERGENCE_THRESHOLD,
             friction_comp_vel_thresh: controller_params::FRICTION_COMP_VEL_THRESHOLD,
+            friction_comp_hold_err_thresh: controller_params::FRICTION_COMP_HOLD_ERR_THRESHOLD,
+            friction_comp_hold_active: [false; 2],
             trajectory: None,
             prev_cmd: None,
             trajectory_open_loop: false,
@@ -278,7 +285,17 @@ impl ControlContext {
     /// (target) twist, not the state estimate. Linear compensation is on while the
     /// commanded local XY speed is at least FRICTION_COMP_VEL_THRESHOLD[0]; angular
     /// while the commanded angular speed is at least FRICTION_COMP_VEL_THRESHOLD[1].
-    pub fn compute_friction(&self, body_twist: Vector3f) -> Vector3f {
+    ///
+    /// When an axis group is off and a closed-loop trajectory is held, breakaway
+    /// friction comp is applied toward the target instead. It latches on when the
+    /// pose error exceeds FRICTION_COMP_HOLD_ERR_THRESHOLD and stays on until the
+    /// error drops below FRICTION_COMP_HOLD_RELEASE_FRAC of it, so it doesn't
+    /// toggle with the robot's springback around the threshold. It is off while the
+    /// robot moves away from the target faster than FRICTION_COMP_HOLD_AWAY_SPEED.
+    pub fn compute_friction(&mut self, body_twist: Vector3f) -> Vector3f {
+        // Tiny speed so the model returns its zero-speed (breakaway) magnitude.
+        const BREAKAWAY_SPEED: f32 = 1e-6;
+
         let theta = self.state_estimate.z;
         let cmd_twist_local: Vector3f = z_rotation_mat(-theta) * body_twist;
 
@@ -286,11 +303,58 @@ impl ControlContext {
             hypotf(cmd_twist_local.x, cmd_twist_local.y) >= self.friction_comp_vel_thresh[0];
         let angular_comp_on = fabsf(cmd_twist_local.z) >= self.friction_comp_vel_thresh[1];
 
-        let fric_twist_local = Vector3f::new(
+        let mut fric_twist_local = Vector3f::new(
             if linear_comp_on { cmd_twist_local.x } else { 0.0 },
             if linear_comp_on { cmd_twist_local.y } else { 0.0 },
             if angular_comp_on { cmd_twist_local.z } else { 0.0 },
         );
+
+        let held_traj = match self.trajectory.as_ref() {
+            Some(t) if !self.trajectory_open_loop => Some(t.sample().0),
+            _ => None,
+        };
+        let mut hold_active = [false; 2];
+        if let Some(traj_state) = held_traj {
+            let est_vel: Vector3f = self.state_estimate.fixed_rows::<3>(3).into();
+            let err_xy = Vector2f::new(
+                traj_state[0] - self.state_estimate[0],
+                traj_state[1] - self.state_estimate[1],
+            );
+            let err_th = remainderf(traj_state[2] - theta, 2.0 * PI);
+
+            // Latch on above the threshold, release below RELEASE_FRAC of it.
+            let latch = |was_active: bool, err: f32, thresh: f32| {
+                thresh > 0.0
+                    && if was_active {
+                        err > FRICTION_COMP_HOLD_RELEASE_FRAC * thresh
+                    } else {
+                        err > thresh
+                    }
+            };
+
+            let err_xy_norm = err_xy.norm();
+            if !linear_comp_on
+                && latch(self.friction_comp_hold_active[0], err_xy_norm, self.friction_comp_hold_err_thresh[0])
+            {
+                hold_active[0] = true;
+                if err_xy.dot(&est_vel.xy()) / err_xy_norm > -FRICTION_COMP_HOLD_AWAY_SPEED[0] {
+                    let dir_local =
+                        z_rotation_mat(-theta) * Vector3f::new(err_xy.x, err_xy.y, 0.0) / err_xy_norm;
+                    fric_twist_local.x = BREAKAWAY_SPEED * dir_local.x;
+                    fric_twist_local.y = BREAKAWAY_SPEED * dir_local.y;
+                }
+            }
+
+            if !angular_comp_on
+                && latch(self.friction_comp_hold_active[1], fabsf(err_th), self.friction_comp_hold_err_thresh[1])
+            {
+                hold_active[1] = true;
+                if err_th.signum() * est_vel.z > -FRICTION_COMP_HOLD_AWAY_SPEED[1] {
+                    fric_twist_local.z = BREAKAWAY_SPEED * err_th.signum();
+                }
+            }
+        }
+        self.friction_comp_hold_active = hold_active;
 
         let friction_force_local = self.robot_model.compute_local_friction_force(fric_twist_local);
         z_rotation_mat(theta) * friction_force_local
@@ -586,6 +650,7 @@ impl ControlContext {
             ParameterName::FRICTION_COMP_VEL_THRESHOLD => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_ACCEL_GAIN => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_FF_ACCEL_CUTOFF_HZ => Some(ParameterDataFormat::VEC2_F32),
+            ParameterName::FRICTION_COMP_HOLD_ERR_THRESHOLD => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
             ParameterName::POSE_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
@@ -648,6 +713,9 @@ impl ControlContext {
             }
             ParameterName::FRICTION_COMP_VEL_THRESHOLD => {
                 reply.data.vec2_f32 = self.friction_comp_vel_thresh.into();
+            }
+            ParameterName::FRICTION_COMP_HOLD_ERR_THRESHOLD => {
+                reply.data.vec2_f32 = self.friction_comp_hold_err_thresh.into();
             }
             ParameterName::TRACKING_ACCEL_GAIN => {
                 reply.data.vec2_f32 = self.tracking_accel_gain.into();
@@ -792,6 +860,10 @@ impl ControlContext {
             ParameterName::FRICTION_COMP_VEL_THRESHOLD => {
                 let v = unsafe { cmd.data.vec2_f32 };
                 self.friction_comp_vel_thresh = Vector2f::new(v[0], v[1]);
+            }
+            ParameterName::FRICTION_COMP_HOLD_ERR_THRESHOLD => {
+                let v = unsafe { cmd.data.vec2_f32 };
+                self.friction_comp_hold_err_thresh = Vector2f::new(v[0], v[1]);
             }
             ParameterName::TRACKING_ACCEL_GAIN => {
                 let v = unsafe { cmd.data.vec2_f32 };

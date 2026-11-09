@@ -56,6 +56,29 @@ pub const TRACKING_DIVERGENCE_THRESHOLD: Vector4f = Vector4f::new(1.0, 1.57, 5.0
 /// Radio-tunable as `FRICTION_COMP_VEL_THRESHOLD`.
 pub const FRICTION_COMP_VEL_THRESHOLD: Vector2f = Vector2f::new(0.01, 0.001);
 
+/// [ERROR_LINEAR (m), ERROR_ANGULAR (rad)]
+/// While friction comp is off for an axis group (commanded speed below
+/// FRICTION_COMP_VEL_THRESHOLD) and a closed-loop trajectory is held, breakaway
+/// friction comp (Stribeck static, or Coulomb) is applied toward the target
+/// when the trajectory-vs-estimate pose error exceeds these and the robot isn't
+/// moving away from the target. Lets a stalled robot break free without
+/// relying on PID windup. <= 0 disables.
+/// Radio-tunable as `FRICTION_COMP_HOLD_ERR_THRESHOLD`.
+pub const FRICTION_COMP_HOLD_ERR_THRESHOLD: Vector2f = Vector2f::new(0.005, 0.02);
+
+/// [LINEAR (m/s), ANGULAR (rad/s)] estimated speed away from the target above
+/// which hold breakaway friction comp is suppressed. A stalled robot rocks
+/// against its wheel/roller compliance; gating on the sign of velocity would
+/// toggle the comp with that rocking and amplify it, so only motion away faster
+/// than this (e.g. overshoot) turns it off.
+pub const FRICTION_COMP_HOLD_AWAY_SPEED: Vector2f = Vector2f::new(0.05, 0.2);
+
+/// Hold breakaway friction comp hysteresis: once on (error above
+/// FRICTION_COMP_HOLD_ERR_THRESHOLD) it stays on until the error drops below this
+/// fraction of the threshold. Switching off at the threshold itself lets the robot
+/// spring back past it and re-trigger, a limit cycle (~5 Hz in theta).
+pub const FRICTION_COMP_HOLD_RELEASE_FRAC: f32 = 0.25;
+
 /// Maximum magnitude of the body-level acceleration output [linear (m/s²), angular (rad/s²)].
 /// The friction-compensated acceleration is clamped to these limits before conversion
 /// to wheel torques. Prevents runaway current commands from large PID errors.

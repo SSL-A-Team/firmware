@@ -358,6 +358,14 @@ Divergence thresholds:
 Friction comp gating:
 - `FRICTION_COMP_VEL_THRESHOLD = [lin_vel=0.01, ang_vel=0.001]` (commanded
   velocity). Radio param `FRICTION_COMP_VEL_THRESHOLD` (7).
+- Hold breakaway comp: while an axis group's commanded speed is below that
+  threshold and a closed-loop trajectory is held, the model's zero-speed
+  (Stribeck static, else Coulomb) friction is applied toward the target once the
+  trajectory-vs-estimate error exceeds `FRICTION_COMP_HOLD_ERR_THRESHOLD =
+  [0.005 m, 0.02 rad]` (radio param 17; <= 0 disables). It stays latched until
+  the error drops below `FRICTION_COMP_HOLD_RELEASE_FRAC` (0.25) of the
+  threshold, and is off while the robot moves away from the target faster than
+  `FRICTION_COMP_HOLD_AWAY_SPEED = [0.05 m/s, 0.2 rad/s]`.
 
 Output clamping (applied before kinematic transforms):
 - `BODY_ACCEL_CLAMP_LINEAR = 20.0 m/s²` — clamps friction-compensated linear accel magnitude.
