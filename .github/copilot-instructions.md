@@ -375,7 +375,7 @@ Friction comp gating:
 Output clamping (applied before kinematic transforms):
 - `BODY_ACCEL_CLAMP_LINEAR = 20.0 m/s²` — clamps friction-compensated linear accel magnitude.
 - `BODY_ACCEL_CLAMP_ANGULAR = 100.0 rad/s²` — clamps friction-compensated angular accel magnitude.
-- `WHEEL_CURRENT_LIMIT_A = 2.16 A` — after the accel clamp, the body accel (and every wheel torque) is scaled down uniformly so no wheel exceeds this (matches the wheel-torque firmware's low-speed limit; uneven clipping there yaws the robot).
+- `WHEEL_CURRENT_LIMIT_STANDSTILL_A` / `WHEEL_CURRENT_LIMIT_MOVING_A` (both 2.16 A) — after the accel clamp, the body accel (and every wheel torque) is scaled down uniformly so each wheel stays within its own limit, picked from its measured speed like the wheel-torque firmware (standstill below `WHEEL_TURNING_VEL_THRESH_RADS` = 6.28 rad/s matches its `MAX_CURR_WHEEL_NOT_TURNING`). The moving limit is held at 2.16 A: at 4.9 A wheel velocity readings spiked past 1000 rad/s and the robot ran away. Uneven clipping in the motor firmware yaws the robot.
 - `BODY_VEL_CLAMP_LINEAR = 10.0 m/s` — clamps wheel velocity setpoint linear magnitude.
 - `BODY_VEL_CLAMP_ANGULAR = 50.0 rad/s` — clamps wheel velocity setpoint angular magnitude.
 

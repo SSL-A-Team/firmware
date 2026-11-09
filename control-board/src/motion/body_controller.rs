@@ -2,7 +2,8 @@ use crate::motion::control_context::{ControlContext, ManeuverSetpoints, Tracking
 use crate::motion::maneuvers::{requires_vision, ManeuverManager};
 use crate::motion::params::controller_params::{
     EncLagMode, BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_LINEAR, BODY_VEL_CLAMP_ANGULAR,
-    BODY_VEL_CLAMP_LINEAR, ENC_LAG_MODE, STOP_STATE_LINEAR_SPEED_LIMIT, WHEEL_CURRENT_LIMIT_A,
+    BODY_VEL_CLAMP_LINEAR, ENC_LAG_MODE, STOP_STATE_LINEAR_SPEED_LIMIT,
+    WHEEL_CURRENT_LIMIT_MOVING_A, WHEEL_CURRENT_LIMIT_STANDSTILL_A, WHEEL_TURNING_VEL_THRESH_RADS,
 };
 use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::BodyControlMode::{BCM_ESTOP_BRAKE, BCM_OFF};
@@ -14,6 +15,7 @@ use ateam_common_packets::radio::ManeuverExtendedTelemetry;
 use ateam_controls::trajectory::Trajectory;
 use ateam_controls::{ControlsError, Vector3f, Vector4f};
 use embassy_time::Instant;
+use libm::fabsf;
 use nalgebra::SVector;
 
 // ---------------------------------------------------------------------------
@@ -222,13 +224,24 @@ impl BodyController {
 
         // Scale the body accel (and so every wheel torque) uniformly so the
         // largest wheel current stays within the wheel current limit.
-        let max_wheel_current = self
+        // Per-wheel limit from measured wheel speed, as in the motor firmware.
+        let wheel_currents = self
             .control_context
             .robot_model
-            .torques_to_currents(self.wheel_torque_out)
-            .amax();
-        if max_wheel_current > WHEEL_CURRENT_LIMIT_A {
-            let scale = WHEEL_CURRENT_LIMIT_A / max_wheel_current;
+            .torques_to_currents(self.wheel_torque_out);
+        let mut scale: f32 = 1.0;
+        for i in 0..4 {
+            let limit = if fabsf(wheel_vel_meas[i]) < WHEEL_TURNING_VEL_THRESH_RADS {
+                WHEEL_CURRENT_LIMIT_STANDSTILL_A
+            } else {
+                WHEEL_CURRENT_LIMIT_MOVING_A
+            };
+            let current = fabsf(wheel_currents[i]);
+            if current > limit {
+                scale = scale.min(limit / current);
+            }
+        }
+        if scale < 1.0 {
             self.wheel_torque_out *= scale;
             self.body_accel_out_fric_comp *= scale;
             accel_clamped = true;

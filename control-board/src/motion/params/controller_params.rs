@@ -102,12 +102,22 @@ pub const FRICTION_COMP_HOLD_RELEASE_FRAC: f32 = 0.25;
 pub const BODY_ACCEL_CLAMP_LINEAR: f32 = 20.0; // m/s²
 pub const BODY_ACCEL_CLAMP_ANGULAR: f32 = 100.0; // rad/s²
 
-/// Maximum commanded wheel current (A). The friction-compensated body accel is
-/// scaled down uniformly (direction preserved) so no wheel exceeds this. Matches
-/// the wheel-torque motor firmware's low-speed limit (MAX_CURR_WHEEL_NOT_TURNING,
-/// 2.16 A below 1 rev/s); exceeding it there clips wheels unevenly, which yaws
-/// the robot.
-pub const WHEEL_CURRENT_LIMIT_A: f32 = 2.16; // A
+/// Maximum commanded wheel current (A), chosen per wheel from its measured speed
+/// like the wheel-torque motor firmware's `apply_current_limits`. The
+/// friction-compensated body accel is scaled down uniformly (direction
+/// preserved) so every wheel stays within its own limit; exceeding the motor
+/// firmware's limit instead clips wheels unevenly, which yaws the robot.
+/// - Below WHEEL_TURNING_VEL_THRESH_RADS: the motor firmware's standstill limit
+///   (MAX_CURR_WHEEL_NOT_TURNING).
+/// - Otherwise: the moving limit (the motor firmware allows up to
+///   MAX_CURR_WHEEL_TURNING, 6.3 A). Held at the standstill value for now: at
+///   4.9 A wheel velocity readings spiked to >1000 rad/s, which corrupted the
+///   state estimate and caused a runaway (also unlocking the higher limit).
+pub const WHEEL_CURRENT_LIMIT_STANDSTILL_A: f32 = 2.16; // A
+pub const WHEEL_CURRENT_LIMIT_MOVING_A: f32 = 2.16; // A
+/// Wheel speed (rad/s) at or above which a wheel uses the moving current limit.
+/// Matches the motor firmware's WHEEL_TURNING_VEL_THRESH_RADS (1 rev/s).
+pub const WHEEL_TURNING_VEL_THRESH_RADS: f32 = 6.28;
 
 /// Maximum magnitude of the body-level velocity output [linear (m/s), angular (rad/s)].
 /// Clamped before conversion to wheel velocity setpoints.
