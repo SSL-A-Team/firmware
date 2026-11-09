@@ -534,6 +534,7 @@ impl ControlContext {
             ParameterName::PHYS_INERTIA => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::PHYS_MOTOR_MODEL => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::PHYS_STRIBECK_MODEL => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::FRICTION_COMP_VEL_THRESHOLD => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_ACCEL_GAIN => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => Some(ParameterDataFormat::VEC4_F32),
@@ -586,6 +587,14 @@ impl ControlContext {
                     phys.coulomb_friction_angular_nm,
                     phys.viscous_friction_linear_nspm,
                     phys.viscous_friction_angular_nmsprad,
+                ];
+            }
+            ParameterName::PHYS_STRIBECK_MODEL => {
+                reply.data.vec4_f32 = [
+                    phys.static_friction_linear_n,
+                    phys.static_friction_angular_nm,
+                    phys.stribeck_vel_linear_mps,
+                    phys.stribeck_vel_angular_radps,
                 ];
             }
             ParameterName::FRICTION_COMP_VEL_THRESHOLD => {
@@ -717,6 +726,15 @@ impl ControlContext {
                 p.coulomb_friction_angular_nm = v[1];
                 p.viscous_friction_linear_nspm = v[2];
                 p.viscous_friction_angular_nmsprad = v[3];
+                let _ = self.robot_model.update_params(p);
+            }
+            ParameterName::PHYS_STRIBECK_MODEL => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                let mut p = self.robot_model.get_params();
+                p.static_friction_linear_n = v[0];
+                p.static_friction_angular_nm = v[1];
+                p.stribeck_vel_linear_mps = v[2];
+                p.stribeck_vel_angular_radps = v[3];
                 let _ = self.robot_model.update_params(p);
             }
             ParameterName::FRICTION_COMP_VEL_THRESHOLD => {

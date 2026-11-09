@@ -453,6 +453,10 @@ coulomb_friction_linear: 0.0     // N, along local +x (direction-scaled)
 coulomb_friction_angular: 0.0    // N·m
 viscous_friction_linear: 0.0     // N/(m/s), along local +x (direction-scaled)
 viscous_friction_angular: 0.0    // N·m/(rad/s)
+static_friction_linear: 0.0      // N at zero speed, along local +x (direction-scaled)
+static_friction_angular: 0.0     // N·m at zero speed
+stribeck_vel_linear: 0.0         // m/s, static → coulomb decay scale (0 disables)
+stribeck_vel_angular: 0.0        // rad/s, static → coulomb decay scale (0 disables)
 ```
 
 #### Kinematic Transforms
@@ -478,13 +482,23 @@ roller speed for unit motion along `dir`, normalized to 1 along local +x
 (`RobotModel::friction_direction_factor`; ≈1.30 along ±y for α=30°, β=45°).
 Same approach as the TIGERs firmware (`model_fric.c`).
 
+Each magnitude includes a Stribeck term: friction starts at the static value
+at zero speed and decays to Coulomb over the Stribeck velocity (disabled when
+`v_stribeck <= 0` or `c_static <= c_coul`).
+
 ```
+m(s)     = c_coul + (c_static - c_coul) · exp(-(s / v_stribeck)²) + c_visc · s
 dir      = v_xy / |v_xy|
 k(dir)   = Σ_i |dir × D_i| / Σ_i |x̂ × D_i|     // D_i = wheel drive directions (columns of M)
-F_xy     = -k(dir) · (c_coul_lin + c_visc_lin · |v_xy|) · dir
-Tz       = -c_visc_ang · v_theta - c_coul_ang · sign(v_theta)
+F_xy     = -k(dir) · m_lin(|v_xy|) · dir
+Tz       = -sign(v_theta) · m_ang(|v_theta|)
 friction_force = [Fx, Fy, Tz]   // local frame
 ```
+
+Radio params: `PHYS_FRICTION_MODEL` (6) = `[coulomb_lin, coulomb_ang, viscous_lin,
+viscous_ang]`, `PHYS_STRIBECK_MODEL` (15) = `[static_lin, static_ang,
+stribeck_vel_lin, stribeck_vel_ang]`. The `rollout` accel-tuning routine fits
+all four terms per axis from coast-down deceleration.
 
 #### Motor Model
 ```
