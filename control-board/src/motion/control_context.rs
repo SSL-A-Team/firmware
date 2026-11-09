@@ -119,7 +119,6 @@ pub struct ControlContext {
     pub state_estimate: Vector6f,
     /// Encoder-measured local body velocity [vx, vy, w] from the latest tick.
     pub encoder_vel_local: Vector3f,
-    pub wheels_disabled: bool,
     /// Divergence-recovery state machine. `Recovering` engages active braking and
     /// holds it until the wheels stop, then resets the controller.
     pub tracking_divergence_state: TrackingDivergenceState,
@@ -167,7 +166,6 @@ impl ControlContext {
             dt,
             state_estimate: Vector6f::zeros(),
             encoder_vel_local: Vector3f::zeros(),
-            wheels_disabled: true,
             tracking_divergence_state: TrackingDivergenceState::Normal,
             tracking_recovery_at_rest_ticks: 0,
         }
@@ -191,7 +189,6 @@ impl ControlContext {
         self.prev_cmd = None;
         self.trajectory_open_loop = false;
         self.enc_lag.reset();
-        self.wheels_disabled = true;
         self.tracking_divergence_state = TrackingDivergenceState::Normal;
         self.tracking_recovery_at_rest_ticks = 0;
     }

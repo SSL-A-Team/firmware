@@ -120,6 +120,10 @@ pub(crate) fn build_linear_params(
 }
 
 pub trait MotionManeuver {
+    /// Maneuver can only run with active vision. While vision is inactive and
+    /// this maneuver is commanded, the body controller holds it and active-brakes.
+    const REQUIRES_VISION: bool = false;
+
     fn entry(&mut self, cmd: ManeuverCommand, ctx: &mut ControlContext);
 
     fn update(
@@ -129,6 +133,29 @@ pub trait MotionManeuver {
     ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError>;
 
     fn reset(&mut self);
+}
+
+/// Whether the maneuver for `cmd` requires active vision (`REQUIRES_VISION`).
+/// Decided from the command so it holds even before the maneuver is constructed.
+pub fn requires_vision(cmd: &ManeuverCommand) -> bool {
+    match cmd {
+        ManeuverCommand::Off => false,
+        ManeuverCommand::GlobalPosition(_) => GlobalPositionManeuver::REQUIRES_VISION,
+        ManeuverCommand::GlobalVelocity(_) => GlobalVelocityManeuver::REQUIRES_VISION,
+        ManeuverCommand::LocalVelocity(_) => LocalVelocityManeuver::REQUIRES_VISION,
+        ManeuverCommand::GlobalAcceleration(_) => GlobalAccelerationManeuver::REQUIRES_VISION,
+        ManeuverCommand::LocalAcceleration(_) => LocalAccelerationManeuver::REQUIRES_VISION,
+        ManeuverCommand::GlobalAccelerationOpenLoop(_) => {
+            GlobalAccelerationOpenLoopManeuver::REQUIRES_VISION
+        }
+        ManeuverCommand::LocalAccelerationOpenLoop(_) => {
+            LocalAccelerationOpenLoopManeuver::REQUIRES_VISION
+        }
+        ManeuverCommand::HeadingPivot(_) => HeadingPivotManeuver::REQUIRES_VISION,
+        ManeuverCommand::PointPivot(_) => PointPivotManeuver::REQUIRES_VISION,
+        ManeuverCommand::HeadingLine(_) => HeadingLineManeuver::REQUIRES_VISION,
+        ManeuverCommand::PointLine(_) => PointLineManeuver::REQUIRES_VISION,
+    }
 }
 
 enum ActiveManeuver {

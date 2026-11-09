@@ -1,5 +1,5 @@
 use crate::motion::control_context::{ControlContext, ManeuverSetpoints, TrackingDivergenceState};
-use crate::motion::maneuvers::ManeuverManager;
+use crate::motion::maneuvers::{requires_vision, ManeuverManager};
 use crate::motion::params::controller_params::{
     EncLagMode, BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_LINEAR, BODY_VEL_CLAMP_ANGULAR,
     BODY_VEL_CLAMP_LINEAR, ENC_LAG_MODE, STOP_STATE_LINEAR_SPEED_LIMIT,
@@ -30,6 +30,9 @@ pub struct BodyController {
     pub wheel_torque_out: Vector4f,
     pub telemetry: BodyControlTelemetry,
     pub debug_telemetry: BodyControlExtendedTelemetry,
+    /// Commanded maneuver requires vision and vision is inactive: maneuvers are
+    /// held and the control task active-brakes.
+    pub vision_hold: bool,
 }
 
 impl BodyController {
@@ -37,6 +40,7 @@ impl BodyController {
         BodyController {
             control_context: ControlContext::new(dt),
             maneuver_manager: ManeuverManager::new(),
+            vision_hold: false,
             body_twist_out: Vector3f::default(),
             body_accel_out: Vector3f::default(),
             body_accel_out_fric_comp: Vector3f::default(),
@@ -63,15 +67,18 @@ impl BodyController {
         self.control_context.vision_active()
     }
 
-    pub fn wheels_disabled(&self) -> bool {
-        self.control_context.wheels_disabled
-    }
-
     /// True while recovering from a trajectory divergence (e.g. a collision); the
     /// control task should command the active brake. Reset happens automatically
     /// once the wheels stop.
     pub fn tracking_divergence_recovery_active(&self) -> bool {
         self.control_context.tracking_divergence_state == TrackingDivergenceState::Recovering
+    }
+
+    /// True when the control task should command the active brake instead of the
+    /// maneuver outputs: divergence recovery, or a vision-required maneuver is
+    /// commanded while vision is inactive.
+    pub fn active_brake_requested(&self) -> bool {
+        self.tracking_divergence_recovery_active() || self.vision_hold
     }
 
     pub fn control_update(
@@ -88,8 +95,6 @@ impl BodyController {
     ) -> Result<(bool, bool), ControlsError> {
         let t_start = Instant::now();
 
-        self.control_context.wheels_disabled = false;
-
         let state_prediction = self.control_context.update_state_estimate(
             vision_pose_meas,
             vision_t_capture_host_us,
@@ -102,8 +107,9 @@ impl BodyController {
 
         let t_after_state_est = Instant::now();
 
-        // While the robot is halted (SSL HALT game state) or recovering from a
-        // trajectory divergence (e.g. a collision), the control task ignores the
+        // While the robot is halted (SSL HALT game state), recovering from a
+        // trajectory divergence (e.g. a collision), or commanded into a maneuver
+        // that requires vision while vision is inactive, the control task ignores the
         // maneuver outputs and commands the active brake instead. Progressing the
         // maneuver anyway would keep advancing its trajectory clock and publish
         // telemetry (trajectory pose/vel, commanded twist/accel, maneuver state)
@@ -114,7 +120,10 @@ impl BodyController {
         //
         // The divergence-recovery state is read before running its state machine
         // below, so it reflects the decision made on the previous tick.
-        let hold_maneuvers = last_command.game_state_in_halt() != 0
+        self.vision_hold = requires_vision(&last_command.get_maneuver_command())
+            && !self.control_context.vision_active();
+        let hold_maneuvers = self.vision_hold
+            || last_command.game_state_in_halt() != 0
             || self.control_context.tracking_divergence_state
                 == TrackingDivergenceState::Recovering
             || last_command.body_control_mode == BCM_OFF
@@ -129,15 +138,11 @@ impl BodyController {
                 .tick(last_command, &mut self.control_context)?
         };
 
-        let disabled = self.control_context.wheels_disabled;
         // Trajectory-divergence recovery: a large unexpected tracking error (e.g.
         // a collision) trips into a braking recovery; the controller resets only
         // after braking finishes, then tracking replans from the fresh estimate.
         self.control_context
             .update_tracking_divergence_recovery(wheel_vel_meas);
-        if !disabled {
-            self.control_context.wheels_disabled = false;
-        }
 
         self.body_twist_out = setpoints.body_twist;
         self.body_accel_out = setpoints.body_accel;

@@ -14,6 +14,8 @@ impl GlobalPositionManeuver {
 }
 
 impl MotionManeuver for GlobalPositionManeuver {
+    const REQUIRES_VISION: bool = true;
+
     fn entry(&mut self, _cmd: ManeuverCommand, _ctx: &mut ControlContext) {}
 
     fn update(
@@ -24,13 +26,6 @@ impl MotionManeuver for GlobalPositionManeuver {
         let ManeuverCommand::GlobalPosition(c) = cmd else {
             return Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off));
         };
-
-        // Vision required: disable wheels and return zero setpoints until a
-        // fresh vision sample arrives.
-        if !ctx.vision_active() {
-            ctx.wheels_disabled = true;
-            return Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off));
-        }
 
         let default_params = TrajectoryParams::default();
         let traj_params = TrajectoryParams {

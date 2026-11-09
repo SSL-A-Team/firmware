@@ -137,7 +137,7 @@ gone. Motion code is split into:
 - **`control_context.rs`** — `ControlContext` owns all controller infra
   (RobotModel/KF, shared `pose_pid_controller`, trajectory + integrated
   `trajectory_state`, gains, gating thresholds, `enc_lag`, `state_estimate`,
-  vision timeout, `wheels_disabled`). Exposes the four control policies
+  vision timeout). Exposes the four control policies
   (`pose_control_policy`, `twist_control_policy`, `accel_control_policy`,
   `pivot_control_policy`) and the shared `track_trajectory` helper. Also
   defines `ManeuverSetpoints` (per-tick `{body_twist, body_accel}`) and
@@ -174,14 +174,15 @@ Top-level container; almost all logic is delegated:
   `body_accel_out_fric_comp`, `wheel_vel_out`, `wheel_torque_out`
 - `telemetry: BodyControlTelemetry`, `debug_telemetry: BodyControlExtendedTelemetry`
 
-`wheels_disabled()` and `vision_active()` are pass-throughs to
-`control_context`. `wheels_disabled` is reset to `false` at the top of every
-`control_update()` and re-asserted by policies that need lockout (currently
-`pose_control_policy` when vision isn't active).
+`vision_active()` is a pass-through to `control_context`. Maneuvers that need
+vision declare `MotionManeuver::REQUIRES_VISION = true` (`GlobalPosition`,
+`HeadingLine`, `PointLine`). While one is commanded and vision is inactive,
+`control_update()` sets `vision_hold`, holds the maneuver (maneuver and
+trajectory reset, zero setpoints), and `active_brake_requested()` tells the
+control task to active-brake (it is also true during divergence recovery).
 
 ### `control_update()` Flow
-1. Reset `control_context.wheels_disabled = false`.
-2. **`control_context.update_state_estimate()`** — handles vision-transition
+1. **`control_context.update_state_estimate()`** — handles vision-transition
    logic (snap KF + drop trajectory + reset PID on inactive → active),
    advances `time_since_vision_update_s`, builds the 8-element measurement
    vector (substituting `enc_lag` predictions for encoder rows when
@@ -217,11 +218,9 @@ integrated `trajectory_state` forward to `t = dt` so the *next* tick's
 expected the robot to be one tick later.
 
 #### `GlobalPosition` maneuver → `ControlContext::pose_control_policy`
-- **Requires active vision.** Without a fresh vision sample (within
-  `VISION_ACTIVE_TIMEOUT_S = 0.5 s`) the policy asserts
-  `wheels_disabled = true` and returns zero setpoints; upstream forces
-  wheel velocity and current commands to zero (motors keep their commanded
-  type — they hold zero, not free-wheel).
+- **Requires active vision** (`REQUIRES_VISION`). Without a fresh vision
+  sample (within `VISION_ACTIVE_TIMEOUT_S = 0.5 s`) the body controller holds
+  the maneuver and the control task active-brakes.
 - Trajectory planner: `BangBangTraj3D::from_target_pose` to target pose `[x, y, θ]`.
 - Per-command overrides on `max_linear_vel/angular_vel/linear_acc/angular_acc`
   fall back to `TrajectoryParams::default()` per-field when zero.
@@ -274,17 +273,17 @@ modes; only the **gating** differs (pose mode requires vision, velocity mode doe
 
 | Event                        | Position mode                                                                                                | Velocity mode                                                                                                            |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| **Start without vision**     | `wheels_disabled()=true`; wheel vel & current forced to 0; controller idle, waiting for first vision.        | Runs normally; KF integrates from default `(0, 0, 0)` pose using encoders + gyro.                                        |
+| **Start without vision**     | Maneuver held (`vision_hold`), robot active-brakes, waiting for first vision.                                 | Runs normally; KF integrates from default `(0, 0, 0)` pose using encoders + gyro.                                        |
 | **First vision arrives**     | KF snaps to vision via `kf_set_pose`; fresh trajectory planned; robot starts tracking.                       | KF snaps to vision; in-flight trajectory dropped and `pose_pid_controller` reset → next tick re-seeds the trajectory from the snapped estimate and the PID restarts clean.  |
-| **Vision lost > 0.5 s**      | `wheels_disabled()=true` every tick until vision returns; no state is reset on the transition (the unified vision-reacquisition handler will snap + replan when vision comes back). | Trajectory keeps running on encoder+gyro dead-reckoning; no commanded change.                                            |
+| **Vision lost > 0.5 s**      | Maneuver held and trajectory cleared every tick until vision returns; robot active-brakes. | Trajectory keeps running on encoder+gyro dead-reckoning; no commanded change.                                            |
 | **Vision returns**           | Treated as a fresh start (first-vision path): KF snaps, new trajectory planned, tracking resumes.            | Vision transitioning inactive → active **always** snaps the KF via `kf_set_pose`, drops the in-flight trajectory, and resets `pose_pid_controller`. Next tick replans from the snapped state estimate. |
 
 Key invariants:
 - PID integrator and trajectory state are never carried across a vision transition
   that snaps the KF — windup from pre-vision state is cleared.
-- `wheels_disabled()` is the only mechanism by which the body controller forces
-  wheel commands to zero; the control task ORs it with the existing lockout
-  conditions (`stop_wheels()`, packet timeout, `BCM_OFF`).
+- `active_brake_requested()` is how the body controller asks for braking; the
+  control task ORs it with HALT, emergency stop and `BCM_ESTOP_BRAKE`. Hard
+  lockout (`stop_wheels()`, packet timeout, `BCM_OFF`) takes precedence.
 
 ### Trajectory Recomputation
 The trajectory is **replanned every control tick** (1 kHz). The only

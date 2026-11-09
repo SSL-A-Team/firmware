@@ -586,14 +586,13 @@ impl<
 
             let in_hard_stop = self.stop_wheels()
                 || ticks_since_control_packet >= TICKS_WITHOUT_PACKET_STOP
-                || _cmd_mode == BodyControlMode::BCM_OFF
-                || robot_controller.wheels_disabled();
+                || _cmd_mode == BodyControlMode::BCM_OFF;
 
             let in_active_brake = !in_hard_stop
                 && (self.last_command.game_state_in_halt() != 0
                     || self.last_command.emergency_stop() != 0
                     || _cmd_mode == BodyControlMode::BCM_ESTOP_BRAKE
-                    || robot_controller.tracking_divergence_recovery_active());
+                    || robot_controller.active_brake_requested());
 
             // wheel_current_cmd in Amperes; converted to mA below.
             let (wheel_current_cmd, wheel_vel_cmd) = if in_hard_stop {
