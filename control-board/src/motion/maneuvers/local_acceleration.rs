@@ -1,9 +1,12 @@
-use crate::motion::control_context::{ControlContext, ManeuverSetpoints};
+use crate::motion::accel_trajectory::{AccelFrame, AccelTrajectory};
+use crate::motion::control_context::{ControlContext, ManeuverSetpoints, TrackedTrajectory};
 use crate::motion::maneuvers::MotionManeuver;
 use ateam_common_packets::bindings::ExtendedLocalAccelerationTelemetry;
 use ateam_common_packets::radio::{ManeuverCommand, ManeuverExtendedTelemetry};
-use ateam_controls::{z_rotation_mat, ControlsError, Vector3f};
+use ateam_controls::ControlsError;
 
+/// Integrates the commanded robot-frame acceleration into the trajectory and tracks it
+/// closed loop (pose PID + feedforward), like the velocity and position maneuvers.
 pub struct LocalAccelerationManeuver;
 
 impl LocalAccelerationManeuver {
@@ -13,11 +16,7 @@ impl LocalAccelerationManeuver {
 }
 
 impl MotionManeuver for LocalAccelerationManeuver {
-    fn entry(&mut self, _cmd: ManeuverCommand, ctx: &mut ControlContext) {
-        // Accel maneuvers don't track a trajectory, so drop the previous one rather
-        // than let it go stale; the next tracking maneuver seeds from the estimate.
-        ctx.reset_trajectory();
-    }
+    fn entry(&mut self, _cmd: ManeuverCommand, _ctx: &mut ControlContext) {}
 
     fn update(
         &mut self,
@@ -28,23 +27,17 @@ impl MotionManeuver for LocalAccelerationManeuver {
             return Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off));
         };
 
-        let state_estimate = ctx.state_estimate;
-        let target_accel = z_rotation_mat(state_estimate.z) * c.as_vec3f();
-        let est_twist: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-        let body_twist = est_twist + target_accel * ctx.dt;
+        let accel = c.as_vec3f();
+        let setpoints = ctx.run_traj_track(cmd, |seed| {
+            Ok(TrackedTrajectory::Accel(AccelTrajectory::new(
+                seed,
+                accel,
+                AccelFrame::Local,
+            )))
+        })?;
 
-        let telem =
-            ManeuverExtendedTelemetry::LocalAcceleration(ExtendedLocalAccelerationTelemetry {
-                cmd_echo: c,
-            });
-
-        Ok((
-            ManeuverSetpoints {
-                body_twist,
-                body_accel: target_accel,
-            },
-            telem,
-        ))
+        let telem = ManeuverExtendedTelemetry::LocalAcceleration(ExtendedLocalAccelerationTelemetry { cmd_echo: c });
+        Ok((setpoints, telem))
     }
 
     fn reset(&mut self) {}

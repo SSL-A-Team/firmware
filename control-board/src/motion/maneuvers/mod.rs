@@ -1,9 +1,11 @@
 pub mod global_acceleration;
+pub mod global_acceleration_open_loop;
 pub mod global_position;
 pub mod global_velocity;
 pub mod heading_line;
 pub mod heading_pivot;
 pub mod local_acceleration;
+pub mod local_acceleration_open_loop;
 pub mod local_velocity;
 pub mod point_line;
 pub mod point_pivot;
@@ -17,11 +19,13 @@ use ateam_controls::pivot_trajectory::{PivotDirection as TrajPivotDirection, Piv
 use ateam_controls::ControlsError;
 
 use crate::motion::maneuvers::global_acceleration::GlobalAccelerationManeuver;
+use crate::motion::maneuvers::global_acceleration_open_loop::GlobalAccelerationOpenLoopManeuver;
 use crate::motion::maneuvers::global_position::GlobalPositionManeuver;
 use crate::motion::maneuvers::global_velocity::GlobalVelocityManeuver;
 use crate::motion::maneuvers::heading_line::HeadingLineManeuver;
 use crate::motion::maneuvers::heading_pivot::HeadingPivotManeuver;
 use crate::motion::maneuvers::local_acceleration::LocalAccelerationManeuver;
+use crate::motion::maneuvers::local_acceleration_open_loop::LocalAccelerationOpenLoopManeuver;
 use crate::motion::maneuvers::local_velocity::LocalVelocityManeuver;
 use crate::motion::maneuvers::point_line::PointLineManeuver;
 use crate::motion::maneuvers::point_pivot::PointPivotManeuver;
@@ -134,6 +138,8 @@ enum ActiveManeuver {
     LocalVelocity(LocalVelocityManeuver),
     GlobalAcceleration(GlobalAccelerationManeuver),
     LocalAcceleration(LocalAccelerationManeuver),
+    GlobalAccelerationOpenLoop(GlobalAccelerationOpenLoopManeuver),
+    LocalAccelerationOpenLoop(LocalAccelerationOpenLoopManeuver),
     HeadingPivot(HeadingPivotManeuver),
     PointPivot(PointPivotManeuver),
     HeadingLine(HeadingLineManeuver),
@@ -156,6 +162,12 @@ impl ActiveManeuver {
             ManeuverCommand::LocalAcceleration(_) => {
                 Self::LocalAcceleration(LocalAccelerationManeuver::new())
             }
+            ManeuverCommand::GlobalAccelerationOpenLoop(_) => {
+                Self::GlobalAccelerationOpenLoop(GlobalAccelerationOpenLoopManeuver::new())
+            }
+            ManeuverCommand::LocalAccelerationOpenLoop(_) => {
+                Self::LocalAccelerationOpenLoop(LocalAccelerationOpenLoopManeuver::new())
+            }
             ManeuverCommand::HeadingPivot(_) => Self::HeadingPivot(HeadingPivotManeuver::new()),
             ManeuverCommand::PointPivot(_) => Self::PointPivot(PointPivotManeuver::new()),
             ManeuverCommand::HeadingLine(_) => Self::HeadingLine(HeadingLineManeuver::new()),
@@ -172,6 +184,8 @@ impl ActiveManeuver {
             Self::LocalVelocity(s) => s.reset(),
             Self::GlobalAcceleration(s) => s.reset(),
             Self::LocalAcceleration(s) => s.reset(),
+            Self::GlobalAccelerationOpenLoop(s) => s.reset(),
+            Self::LocalAccelerationOpenLoop(s) => s.reset(),
             Self::HeadingPivot(s) => s.reset(),
             Self::PointPivot(s) => s.reset(),
             Self::HeadingLine(s) => s.reset(),
@@ -187,6 +201,8 @@ impl ActiveManeuver {
             Self::LocalVelocity(s) => s.entry(cmd, ctx),
             Self::GlobalAcceleration(s) => s.entry(cmd, ctx),
             Self::LocalAcceleration(s) => s.entry(cmd, ctx),
+            Self::GlobalAccelerationOpenLoop(s) => s.entry(cmd, ctx),
+            Self::LocalAccelerationOpenLoop(s) => s.entry(cmd, ctx),
             Self::HeadingPivot(s) => s.entry(cmd, ctx),
             Self::PointPivot(s) => s.entry(cmd, ctx),
             Self::HeadingLine(s) => s.entry(cmd, ctx),
@@ -206,6 +222,8 @@ impl ActiveManeuver {
             Self::LocalVelocity(s) => s.update(cmd, ctx),
             Self::GlobalAcceleration(s) => s.update(cmd, ctx),
             Self::LocalAcceleration(s) => s.update(cmd, ctx),
+            Self::GlobalAccelerationOpenLoop(s) => s.update(cmd, ctx),
+            Self::LocalAccelerationOpenLoop(s) => s.update(cmd, ctx),
             Self::HeadingPivot(s) => s.update(cmd, ctx),
             Self::PointPivot(s) => s.update(cmd, ctx),
             Self::HeadingLine(s) => s.update(cmd, ctx),

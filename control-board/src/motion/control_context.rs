@@ -4,6 +4,7 @@ use crate::motion::params::controller_params::{
     TRACKING_DIVERGENCE_RECOVERY_REST_TICKS,
     TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL, COULOMB_MEAS_VEL_THRESH_ANGULAR, COULOMB_MEAS_VEL_THRESH_LINEAR,
 };
+use crate::motion::accel_trajectory::AccelTrajectory;
 use crate::motion::pid::PidController;
 use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
 use ateam_common_packets::radio::ManeuverCommand;
@@ -33,6 +34,7 @@ pub enum TrackedTrajectory {
     BangBang(BangBangTraj3D),
     Pivot(PivotTrajectory),
     Linear(LinearTrajectory),
+    Accel(AccelTrajectory),
 }
 
 impl Trajectory for TrackedTrajectory {
@@ -41,6 +43,7 @@ impl Trajectory for TrackedTrajectory {
             Self::BangBang(t) => t.tick(dt),
             Self::Pivot(t) => t.tick(dt),
             Self::Linear(t) => t.tick(dt),
+            Self::Accel(t) => t.tick(dt),
         }
     }
 
@@ -49,6 +52,7 @@ impl Trajectory for TrackedTrajectory {
             Self::BangBang(t) => t.sample(),
             Self::Pivot(t) => t.sample(),
             Self::Linear(t) => t.sample(),
+            Self::Accel(t) => t.sample(),
         }
     }
 }
@@ -105,6 +109,10 @@ pub struct ControlContext {
     pub trajectory: Option<TrackedTrajectory>,
     /// Last command stored by `run_traj_track`, used to detect command changes.
     pub prev_cmd: Option<ManeuverCommand>,
+    /// True while the trajectory is driven open loop (`run_traj_open_loop`). Its
+    /// state is not corrected toward the estimate, so it is excluded from
+    /// divergence detection and not used to seed closed-loop tracking.
+    pub trajectory_open_loop: bool,
     pub enc_lag: FirstOrderLag<2>,
     pub dt: f32,
     /// Cached KF state estimate — updated each tick before maneuver dispatch.
@@ -154,6 +162,7 @@ impl ControlContext {
             friction_comp_gating: controller_params::FRICTION_COMP_GATING,
             trajectory: None,
             prev_cmd: None,
+            trajectory_open_loop: false,
             enc_lag,
             dt,
             state_estimate: Vector6f::zeros(),
@@ -180,6 +189,7 @@ impl ControlContext {
         self.pose_pid_controller.reset();
         self.trajectory = None;
         self.prev_cmd = None;
+        self.trajectory_open_loop = false;
         self.enc_lag.reset();
         self.wheels_disabled = true;
         self.tracking_divergence_state = TrackingDivergenceState::Normal;
@@ -191,6 +201,7 @@ impl ControlContext {
     pub fn reset_trajectory(&mut self) {
         self.trajectory = None;
         self.prev_cmd = None;
+        self.trajectory_open_loop = false;
     }
 
     /// Run KF vision handling, measurement construction, and state update.
@@ -342,7 +353,10 @@ impl ControlContext {
     pub fn update_tracking_divergence_recovery(&mut self, wheel_vel_meas: Vector4f) -> bool {
         match self.tracking_divergence_state {
             TrackingDivergenceState::Normal => {
-                if self.trajectory.is_some() && self.tracking_error_exceeded() {
+                if self.trajectory.is_some()
+                    && !self.trajectory_open_loop
+                    && self.tracking_error_exceeded()
+                {
                     self.tracking_divergence_state = TrackingDivergenceState::Recovering;
                     self.tracking_recovery_at_rest_ticks = 0;
                     defmt::warn!("tracking diverged (possible collision), braking");
@@ -395,10 +409,11 @@ impl ControlContext {
     /// which brakes and then resets (clearing the trajectory).
     ///
     /// # Seed selection
-    /// - An existing trajectory  → seed from its current `sample()` state
-    ///   (continuous handoff). Snapping to `state_estimate` would mask
+    /// - An existing closed-loop trajectory → seed from its current `sample()`
+    ///   state (continuous handoff). Snapping to `state_estimate` would mask
     ///   divergence from the recovery state machine.
-    /// - No trajectory          → seed from `state_estimate` (snap to reality).
+    /// - No trajectory, or an open-loop one → seed from `state_estimate`
+    ///   (snap to reality; open-loop state was never corrected).
     pub fn run_traj_track<F>(
         &mut self,
         cmd: ManeuverCommand,
@@ -407,31 +422,14 @@ impl ControlContext {
     where
         F: FnOnce(Vector6f) -> Result<TrackedTrajectory, ControlsError>,
     {
-        let should_replan = self.trajectory.is_none() || self.command_changed(&cmd);
-
-        if should_replan {
-            let seed = match self.trajectory.as_ref() {
-                // Existing trajectory → continuous seed from its current state
-                // (before this tick's advance), even if the tracking error is
-                // high. Never snap to the estimate here: doing so would zero the
-                // tracking error and prevent the divergence-recovery state
-                // machine from ever detecting a collision.
-                Some(traj) => traj.sample().0,
-                // No trajectory yet → seed from the state estimate.
-                None => self.state_estimate,
-            };
-            match make_traj(seed) {
-                Ok(new_traj) => {
-                    self.trajectory = Some(new_traj);
-                }
-                Err(e) => {
-                    self.trajectory = None;
-                    return Err(e);
-                }
-            }
-        }
-
-        self.prev_cmd = Some(cmd);
+        // Existing closed-loop trajectory → continuous seed from its current state
+        // (before this tick's advance), even if the tracking error is high. Never
+        // snap to the estimate here: doing so would zero the tracking error and
+        // prevent the divergence-recovery state machine from ever detecting a
+        // collision.
+        let seed_from_traj = !self.trajectory_open_loop;
+        self.plan_if_needed(cmd, seed_from_traj, make_traj)?;
+        self.trajectory_open_loop = false;
 
         let traj = self
             .trajectory
@@ -448,6 +446,67 @@ impl ControlContext {
         }
 
         Ok(setpoints)
+    }
+
+    /// Plan or continue a trajectory and drive it open loop: the setpoints are
+    /// the trajectory's own twist and acceleration, with no pose feedback.
+    ///
+    /// Replans under the same rule as `run_traj_track`, seeded from the current
+    /// trajectory state if one exists (open or closed loop), else the estimate.
+    pub fn run_traj_open_loop<F>(
+        &mut self,
+        cmd: ManeuverCommand,
+        make_traj: F,
+    ) -> Result<ManeuverSetpoints, ControlsError>
+    where
+        F: FnOnce(Vector6f) -> Result<TrackedTrajectory, ControlsError>,
+    {
+        self.plan_if_needed(cmd, true, make_traj)?;
+        self.trajectory_open_loop = true;
+
+        let traj = self
+            .trajectory
+            .as_mut()
+            .ok_or(ControlsError::InvalidInput)?;
+        let (traj_state, traj_accel) = traj.sample();
+        traj.tick(self.dt);
+
+        Ok(ManeuverSetpoints {
+            body_twist: traj_state.fixed_rows::<3>(3).into(),
+            body_accel: traj_accel,
+        })
+    }
+
+    /// Replan when there is no trajectory or `cmd` changed. The seed is the
+    /// current trajectory state when `seed_from_traj` and a trajectory exists,
+    /// otherwise the state estimate.
+    fn plan_if_needed<F>(
+        &mut self,
+        cmd: ManeuverCommand,
+        seed_from_traj: bool,
+        make_traj: F,
+    ) -> Result<(), ControlsError>
+    where
+        F: FnOnce(Vector6f) -> Result<TrackedTrajectory, ControlsError>,
+    {
+        if self.trajectory.is_none() || self.command_changed(&cmd) {
+            let seed = match self.trajectory.as_ref() {
+                Some(traj) if seed_from_traj => traj.sample().0,
+                _ => self.state_estimate,
+            };
+            match make_traj(seed) {
+                Ok(new_traj) => {
+                    self.trajectory = Some(new_traj);
+                }
+                Err(e) => {
+                    self.trajectory = None;
+                    self.prev_cmd = None;
+                    return Err(e);
+                }
+            }
+        }
+        self.prev_cmd = Some(cmd);
+        Ok(())
     }
 
     // -----------------------------------------------------------------------

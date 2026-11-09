@@ -143,13 +143,18 @@ gone. Motion code is split into:
   defines `ManeuverSetpoints` (per-tick `{body_twist, body_accel}`) and
   `CommandFrame { Global, Local }`.
 - **`maneuvers/`** — one file per maneuver (`global_position`, `global_velocity`,
-  `local_velocity`, `global_acceleration`, `local_acceleration`, `pivot`) plus
+  `local_velocity`, `global_acceleration`, `local_acceleration`,
+  `global_acceleration_open_loop`, `local_acceleration_open_loop`, `pivot`) plus
   `mod.rs` defining the `MotionManeuver` trait (`entry` / `update` / `reset`),
   the `ActiveManeuver` enum, and `ManeuverManager`.
   - `ManeuverManager::tick(cmd, ctx)` watches `BasicControl.body_control_mode`;
     on a mode change it `reset()`s the prior maneuver, constructs the new one
     via `ActiveManeuver::from_maneuver_command`, calls `entry_cmd`, then runs
     `update_cmd` (which calls into the appropriate `*_control_policy`).
+  - The trajectory is **kept across mode changes**: the new maneuver's command
+    differs from the stored one, so it replans seeded from the current
+    trajectory state (continuous handoff). It is only cleared when maneuvers
+    are held (OFF, ESTOP, HALT, divergence recovery) or the controller resets.
 - **`params/controller_params.rs`** — body-level constants (PID gains,
   `POSE_*_GAIN/MODE`, `TRAJ_RECOMPUTE_ERROR`, `FRICTION_COMP_GATING`,
   `BODY_*_CLAMP_*`, `ENC_LAG_*`).
@@ -239,14 +244,19 @@ expected the robot to be one tick later.
   `z_rotation_mat(θ)` (using the KF estimate's θ) into the global frame
   before planning.
 
-#### `GlobalAcceleration` maneuver → `ControlContext::accel_control_policy(_, Global)`
-- Direct passthrough — applies target acceleration through dynamics model
-  `next_state = A·x + B·u`; returns `(next_twist, target_accel)`.
-- No trajectory planning or PID feedback.
-
-#### `LocalAcceleration` maneuver → `ControlContext::accel_control_policy(_, Local)`
-- Rotates local accel into global frame via `z_rotation_mat(θ)`, then same as
-  `GlobalAcceleration`.
+#### Acceleration maneuvers (`motion/accel_trajectory.rs`)
+All four integrate the commanded acceleration into an `AccelTrajectory`
+(`TrackedTrajectory::Accel`): `v += a·dt`, `x += v·dt + ½a·dt²`. Local-frame
+accels rotate with the trajectory's own heading. No state estimate is used
+except as the seed when there is no trajectory.
+- `GlobalAcceleration` (`BCM_GLOBAL_ACCEL`) / `LocalAcceleration`
+  (`BCM_LOCAL_ACCEL`): closed loop via `run_traj_track` (pose PID +
+  feedforward), like the velocity and position maneuvers.
+- `GlobalAccelerationOpenLoop` (`BCM_GLOBAL_ACCEL_OPEN_LOOP`) /
+  `LocalAccelerationOpenLoop` (`BCM_LOCAL_ACCEL_OPEN_LOOP`): open loop via
+  `run_traj_open_loop`, which commands the trajectory's twist and accel
+  directly. Open-loop trajectories are excluded from divergence detection and
+  are not used to seed closed-loop tracking (that seeds from the estimate).
 
 #### `Pivot` maneuver → `ControlContext::pivot_control_policy`
 - Orbits the robot around a fixed center point (e.g., the ball) while pointing
@@ -679,6 +689,8 @@ enum ManeuverCommand {
     LocalVelocity { vx, vy, vθ, max_accel },
     GlobalAcceleration { ax, ay, aθ },
     LocalAcceleration { ax, ay, aθ },
+    GlobalAccelerationOpenLoop { ax, ay, aθ },
+    LocalAccelerationOpenLoop { ax, ay, aθ },
     Pivot { center_x, center_y, global_theta, orbit_radius, max_angular_vel, max_angular_acc, heading_lag },
 }
 ```
