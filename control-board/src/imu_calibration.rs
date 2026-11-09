@@ -9,14 +9,13 @@
 //! The blob is stored in the last 128 KiB flash sector (offset [`CAL_FLASH_OFFSET`]),
 //! which is reserved (kept out of the firmware image) in `memory.x`. It is one
 //! flash word (32 bytes, the H7 write granularity) and is validated on read with a
-//! magic word, a format version, the firmware hash (so a firmware change that could
-//! alter the accel range/config invalidates stale calibration), and a CRC32.
+//! magic word, a format version, and a CRC32. It survives reflashing (the sector is
+//! outside the image) and firmware changes; bump [`CAL_VERSION`] when a change could
+//! invalidate stored calibration (blob layout or IMU range/config).
 
 use ateam_lib_stm32::drivers::imu::bmi323::{AccelDpOffset, Bmi323, GyroDpOffsetGain};
 use embassy_stm32::flash::{Blocking, Flash};
 use embassy_time::Timer;
-
-use crate::git_version::FIRMWARE_HASH;
 
 /// Number of accelerometer samples averaged to estimate the (X/Y) bias during a fresh
 /// calibration. Sampled by polling (~5 s total); the gyro bias is handled by the
@@ -30,7 +29,8 @@ const ACCEL_UPRIGHT_Z_MPS2: f32 = 4.0;
 
 /// Magic identifying a valid calibration blob ("IMUC").
 const CAL_MAGIC: u32 = 0x494D_5543;
-/// On-disk format version. Bump when the blob layout changes.
+/// On-disk format version. Bump when the blob layout or the IMU range/config
+/// changes, so stale calibration is rejected.
 const CAL_VERSION: u32 = 1;
 /// Offset of the calibration sector from the start of flash. This is the last
 /// 128 KiB sector of the 1 MiB device (0x080E_0000), reserved in `memory.x`.
@@ -53,7 +53,7 @@ impl ImuCalibration {
         let mut buf = [0u8; CAL_BLOB_LEN];
         buf[0..4].copy_from_slice(&CAL_MAGIC.to_le_bytes());
         buf[4..8].copy_from_slice(&CAL_VERSION.to_le_bytes());
-        buf[8..12].copy_from_slice(&FIRMWARE_HASH);
+        // buf[8..12] reserved (formerly the firmware hash); left zero, ignored on read.
         buf[12..14].copy_from_slice(&self.gyro.off_x.to_le_bytes());
         buf[14..16].copy_from_slice(&self.gyro.off_y.to_le_bytes());
         buf[16..18].copy_from_slice(&self.gyro.off_z.to_le_bytes());
@@ -70,15 +70,12 @@ impl ImuCalibration {
     }
 
     /// Parses and validates a blob previously written by [`Self::serialize`].
-    /// Returns `None` if the magic, version, firmware hash, or CRC do not match.
+    /// Returns `None` if the magic, version, or CRC do not match.
     fn deserialize(buf: &[u8; CAL_BLOB_LEN]) -> Option<Self> {
         if u32::from_le_bytes(buf[0..4].try_into().unwrap()) != CAL_MAGIC {
             return None;
         }
         if u32::from_le_bytes(buf[4..8].try_into().unwrap()) != CAL_VERSION {
-            return None;
-        }
-        if buf[8..12] != FIRMWARE_HASH {
             return None;
         }
         let stored_crc = u32::from_le_bytes(buf[28..32].try_into().unwrap());
@@ -105,7 +102,7 @@ impl ImuCalibration {
 }
 
 /// Reads and validates the stored IMU calibration from flash. Returns `None` if no
-/// valid blob is present (blank flash, version/firmware mismatch, or CRC failure).
+/// valid blob is present (blank flash, version mismatch, or CRC failure).
 pub fn load_calibration(flash: &mut Flash<'static, Blocking>) -> Option<ImuCalibration> {
     let mut buf = [0u8; CAL_BLOB_LEN];
     if flash.blocking_read(CAL_FLASH_OFFSET, &mut buf).is_err() {
