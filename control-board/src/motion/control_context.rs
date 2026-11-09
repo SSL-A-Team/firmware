@@ -533,7 +533,7 @@ impl ControlContext {
             ParameterName::PHYS_WHEEL => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::PHYS_INERTIA => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::PHYS_MOTOR_MODEL => Some(ParameterDataFormat::VEC2_F32),
-            ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC6_F32),
+            ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::FRICTION_COMP_VEL_THRESHOLD => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_ACCEL_GAIN => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => Some(ParameterDataFormat::VEC4_F32),
@@ -581,12 +581,10 @@ impl ControlContext {
                 reply.data.vec2_f32 = [phys.motor_torque_constant_nmpa, phys.motor_efficiency_factor];
             }
             ParameterName::PHYS_FRICTION_MODEL => {
-                reply.data.vec6_f32 = [
-                    phys.coulomb_friction_linear_x_n,
-                    phys.coulomb_friction_linear_y_n,
+                reply.data.vec4_f32 = [
+                    phys.coulomb_friction_linear_n,
                     phys.coulomb_friction_angular_nm,
-                    phys.viscous_friction_linear_x_nspm,
-                    phys.viscous_friction_linear_y_nspm,
+                    phys.viscous_friction_linear_nspm,
                     phys.viscous_friction_angular_nmsprad,
                 ];
             }
@@ -713,14 +711,12 @@ impl ControlContext {
                 let _ = self.robot_model.update_params(p);
             }
             ParameterName::PHYS_FRICTION_MODEL => {
-                let v = unsafe { cmd.data.vec6_f32 };
+                let v = unsafe { cmd.data.vec4_f32 };
                 let mut p = self.robot_model.get_params();
-                p.coulomb_friction_linear_x_n = v[0];
-                p.coulomb_friction_linear_y_n = v[1];
-                p.coulomb_friction_angular_nm = v[2];
-                p.viscous_friction_linear_x_nspm = v[3];
-                p.viscous_friction_linear_y_nspm = v[4];
-                p.viscous_friction_angular_nmsprad = v[5];
+                p.coulomb_friction_linear_n = v[0];
+                p.coulomb_friction_angular_nm = v[1];
+                p.viscous_friction_linear_nspm = v[2];
+                p.viscous_friction_angular_nmsprad = v[3];
                 let _ = self.robot_model.update_params(p);
             }
             ParameterName::FRICTION_COMP_VEL_THRESHOLD => {

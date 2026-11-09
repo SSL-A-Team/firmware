@@ -308,8 +308,9 @@ active-brakes until the wheels are at rest, then resets and resumes from the
 fresh estimate.
 
 ### Friction Compensation
-- Friction model is defined in the robot's **local frame** with independent
-  coefficients for x (forward/backward) and y (strafe).
+- Friction model is defined in the robot's **local frame**: one linear
+  Coulomb/viscous pair (defined along local +x) scaled by a wheel-geometry
+  direction factor `k(dir)`, plus an angular pair (see Friction Model below).
 - `ControlContext::compute_friction(body_twist)` rotates the commanded
   body twist into the local frame, gates it, computes the local-frame
   friction force, then rotates back to global. Both the Coulomb sign and the
@@ -320,7 +321,7 @@ fresh estimate.
 - Gating via `FRICTION_COMP_VEL_THRESHOLD = [lin_vel=0.01, ang_vel=0.001]`:
   - **Linear off** when `||(cmd_vx, cmd_vy)|| < 0.01 m/s`.
   - **Angular off** when `|cmd_w| < 0.001 rad/s`.
-- Friction force = `robot_model.compute_friction_force(local_twist)`
+- Friction force = `robot_model.compute_local_friction_force(local_twist)`
 - Applied: `body_accel_fric_comp = body_accel - I_inv × R_z(θ) × friction_force_local`
 
 ### Controller Parameters (`control-board/src/motion/params/controller_params.rs`)
@@ -448,12 +449,10 @@ mass: 2.7            // robot mass (kg)
 iz: 0.008            // moment of inertia about z-axis (kg·m²)
 motor_torque_constant: 0.0335   // Nm/A
 motor_efficiency_factor: 17.36
-coulomb_friction_coeff_linear_x: 0.0
-coulomb_friction_coeff_linear_y: 0.0
-coulomb_friction_coeff_angular: 0.0
-viscous_friction_coeff_linear_x: 0.0
-viscous_friction_coeff_linear_y: 0.0
-viscous_friction_coeff_angular: 0.0
+coulomb_friction_linear: 0.0     // N, along local +x (direction-scaled)
+coulomb_friction_angular: 0.0    // N·m
+viscous_friction_linear: 0.0     // N/(m/s), along local +x (direction-scaled)
+viscous_friction_angular: 0.0    // N·m/(rad/s)
 ```
 
 #### Kinematic Transforms
@@ -472,12 +471,17 @@ All transforms are θ-dependent (rotate between body and global frames).
 
 #### Friction Model
 
-Per local body axis (caller rotates global state into local before invoking,
-and rotates the returned force back to global):
+Local frame (caller rotates global state into local before invoking, and
+rotates the returned force back to global). Linear friction opposes the
+direction of motion; its magnitude is scaled by `k(dir)`, the total omni-wheel
+roller speed for unit motion along `dir`, normalized to 1 along local +x
+(`RobotModel::friction_direction_factor`; ≈1.30 along ±y for α=30°, β=45°).
+Same approach as the TIGERs firmware (`model_fric.c`).
 
 ```
-Fx_local = -c_visc_x · vx_local - c_coul_x · sign(vx_local)
-Fy_local = -c_visc_y · vy_local - c_coul_y · sign(vy_local)
+dir      = v_xy / |v_xy|
+k(dir)   = Σ_i |dir × D_i| / Σ_i |x̂ × D_i|     // D_i = wheel drive directions (columns of M)
+F_xy     = -k(dir) · (c_coul_lin + c_visc_lin · |v_xy|) · dir
 Tz       = -c_visc_ang · v_theta - c_coul_ang · sign(v_theta)
 friction_force = [Fx, Fy, Tz]   // local frame
 ```
