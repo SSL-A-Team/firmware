@@ -388,6 +388,8 @@ impl ControlContext {
     ///
     /// Replans under the same rule as `run_traj_track`, seeded from the current
     /// trajectory state if one exists (open or closed loop), else the estimate.
+    /// Accel trajectories get the state-estimate heading each tick, so
+    /// `AccelFrame::Body` commands follow the robot's estimated frame.
     pub fn run_traj_open_loop<F>(
         &mut self,
         cmd: ManeuverCommand,
@@ -399,10 +401,14 @@ impl ControlContext {
         self.plan_if_needed(cmd, true, make_traj)?;
         self.trajectory_open_loop = true;
 
+        let heading = self.state_estimate.z;
         let traj = self
             .trajectory
             .as_mut()
             .ok_or(ControlsError::InvalidInput)?;
+        if let TrackedTrajectory::Accel(t) = traj {
+            t.set_body_heading(heading);
+        }
         let (traj_state, traj_accel) = traj.sample();
         traj.tick(self.dt);
 

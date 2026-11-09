@@ -7,6 +7,9 @@ pub enum AccelFrame {
     Global,
     /// Robot frame; rotates with the trajectory's own heading, not the estimate.
     Local,
+    /// Robot frame; rotates with the state-estimate heading supplied each tick
+    /// via `set_body_heading` (falls back to the trajectory heading until set).
+    Body,
 }
 
 /// Trajectory that integrates a constant commanded acceleration from a seed state.
@@ -14,6 +17,7 @@ pub struct AccelTrajectory {
     state: Vector6f,
     accel: Vector3f,
     frame: AccelFrame,
+    body_heading: Option<f32>,
 }
 
 impl AccelTrajectory {
@@ -22,13 +26,22 @@ impl AccelTrajectory {
             state: seed,
             accel,
             frame,
+            body_heading: None,
         }
+    }
+
+    /// Heading used to rotate `AccelFrame::Body` accelerations into the global frame.
+    pub fn set_body_heading(&mut self, theta: f32) {
+        self.body_heading = Some(theta);
     }
 
     fn global_accel(&self) -> Vector3f {
         match self.frame {
             AccelFrame::Global => self.accel,
             AccelFrame::Local => z_rotation_mat(self.state.z) * self.accel,
+            AccelFrame::Body => {
+                z_rotation_mat(self.body_heading.unwrap_or(self.state.z)) * self.accel
+            }
         }
     }
 }

@@ -245,9 +245,12 @@ expected the robot to be one tick later.
 
 #### Acceleration maneuvers (`motion/accel_trajectory.rs`)
 All four integrate the commanded acceleration into an `AccelTrajectory`
-(`TrackedTrajectory::Accel`): `v += a·dt`, `x += v·dt + ½a·dt²`. Local-frame
-accels rotate with the trajectory's own heading. No state estimate is used
-except as the seed when there is no trajectory.
+(`TrackedTrajectory::Accel`): `v += a·dt`, `x += v·dt + ½a·dt²`. Closed-loop
+local accels (`AccelFrame::Local`) rotate with the trajectory's own heading;
+open-loop local accels (`AccelFrame::Body`) rotate with the **state-estimate**
+heading, refreshed each tick by `run_traj_open_loop`, so they stay in the
+robot's frame even if it yaws. Otherwise the state estimate is only the seed
+when there is no trajectory.
 - `GlobalAcceleration` (`BCM_GLOBAL_ACCEL`) / `LocalAcceleration`
   (`BCM_LOCAL_ACCEL`): closed loop via `run_traj_track` (pose PID +
   feedforward), like the velocity and position maneuvers.

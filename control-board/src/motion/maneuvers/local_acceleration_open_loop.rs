@@ -6,7 +6,9 @@ use ateam_common_packets::radio::{ManeuverCommand, ManeuverExtendedTelemetry};
 use ateam_controls::ControlsError;
 
 /// Integrates the commanded robot-frame acceleration into the trajectory and commands
-/// its twist and acceleration directly, with no pose feedback.
+/// its twist and acceleration directly, with no pose feedback. The command is
+/// rotated by the state-estimate heading each tick (`AccelFrame::Body`), so it
+/// stays in the robot's frame even if the robot yaws away from the trajectory.
 pub struct LocalAccelerationOpenLoopManeuver;
 
 impl LocalAccelerationOpenLoopManeuver {
@@ -32,7 +34,7 @@ impl MotionManeuver for LocalAccelerationOpenLoopManeuver {
             Ok(TrackedTrajectory::Accel(AccelTrajectory::new(
                 seed,
                 accel,
-                AccelFrame::Local,
+                AccelFrame::Body,
             )))
         })?;
 
