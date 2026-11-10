@@ -94,6 +94,27 @@ const USOWB_ACK_PREFIX: &[u8] = b"\r\n+USOWB:";
 const USOWB_ACK_SUFFIX: &[u8] = b"\r\nOK\r\n";
 const USOWB_ACK_MAX_LEN: usize = 32;
 
+/// True if `accum` holds an OK terminating a command response. The OK that ends a
+/// "+USOWB:<id>,<len>" write ack (from an earlier fire-and-forget send) does not count:
+/// those can arrive late and would otherwise complete the wrong command.
+fn has_command_ok(accum: &[u8]) -> bool {
+    let mut search_from = 0;
+    while let Some(pos) = accum[search_from..].windows(4).position(|w| w == b"OK\r\n") {
+        let ok_at = search_from + pos;
+        let before = &accum[..ok_at];
+        let before = before.strip_suffix(b"\r\n").unwrap_or(before);
+        let line_start = before
+            .windows(2)
+            .rposition(|w| w == b"\r\n")
+            .map_or(0, |p| p + 2);
+        if !before[line_start..].starts_with(b"+USOWB:") {
+            return true;
+        }
+        search_from = ok_at + 4;
+    }
+    false
+}
+
 /// Remove `n` bytes starting at `at` from the accumulator.
 fn rx_accum_remove(accum: &mut Vec<u8, RX_ACCUM_LEN>, at: usize, n: usize) {
     let n = n.min(accum.len() - at);
@@ -536,7 +557,7 @@ impl<
                         if let Ok(s) = core::str::from_utf8(&after[..end]) {
                             if let Ok(id) = s.trim().parse::<u8>() {
                                 // Wait for trailing OK\r\n so it isn't left in the queue
-                                if !accum.windows(4).any(|w| w == b"OK\r\n") {
+                                if !has_command_ok(accum) {
                                     return None;
                                 }
                                 return Some(Ok(id));
@@ -650,7 +671,7 @@ impl<
             if accum.windows(5).any(|w| w == b"ERROR") {
                 return Some(Err(NoraRadioError::SocketCloseFailed));
             }
-            if accum.windows(4).any(|w| w == b"OK\r\n") {
+            if has_command_ok(accum) {
                 defmt::debug!("nora - close socket - OK");
                 return Some(Ok(()));
             }
@@ -854,6 +875,13 @@ impl<
         self.rx_accum.borrow_mut().clear();
     }
 
+    /// Discard everything received so far (accumulator and queued UART buffers), e.g.
+    /// stale write acks from fire-and-forget sends before issuing new commands.
+    pub fn discard_pending_rx(&self) {
+        self.clear_rx_accum();
+        while self.reader.try_dequeue().is_ok() {}
+    }
+
     /// Try to read a queued +UESODA URC indicating data is available.
     /// Returns the socket_id and length of available data, or an error if nothing queued.
     /// Used in buffered mode (AT+USORM=0).
@@ -933,7 +961,7 @@ impl<
             if accum.windows(5).any(|w| w == b"ERROR") {
                 return Some(Err(NoraRadioError::ReadDataInvalid));
             }
-            if !accum.windows(4).any(|w| w == b"OK\r\n") {
+            if !has_command_ok(accum) {
                 return None;
             }
             let s = match ATResponse::new(accum) {
@@ -957,7 +985,7 @@ impl<
             if accum.windows(5).any(|w| w == b"ERROR") {
                 return Some(Err(NoraRadioError::ReadDataInvalid));
             }
-            if !accum.windows(4).any(|w| w == b"OK\r\n") {
+            if !has_command_ok(accum) {
                 return None;
             }
             let s = match ATResponse::new(accum) {
@@ -981,7 +1009,7 @@ impl<
             if accum.windows(5).any(|w| w == b"ERROR") {
                 return Some(Err(NoraRadioError::ReadDataInvalid));
             }
-            if !accum.windows(4).any(|w| w == b"OK\r\n") {
+            if !has_command_ok(accum) {
                 return None;
             }
             let s = match ATResponse::new(accum) {
@@ -1005,7 +1033,7 @@ impl<
             if accum.windows(5).any(|w| w == b"ERROR") {
                 return Some(Err(NoraRadioError::ReadDataInvalid));
             }
-            if !accum.windows(4).any(|w| w == b"OK\r\n") {
+            if !has_command_ok(accum) {
                 return None;
             }
             let s = match ATResponse::new(accum) {
@@ -1042,7 +1070,7 @@ impl<
                 defmt::warn!("read_regulatory_domain: AT+UWRD? returned ERROR");
                 return Some(Err(NoraRadioError::ReadDataInvalid));
             }
-            if !accum.windows(4).any(|w| w == b"OK\r\n") {
+            if !has_command_ok(accum) {
                 return None;
             }
             let s = match ATResponse::new(accum) {
@@ -1150,7 +1178,7 @@ impl<
             if accum.windows(5).any(|w| w == b"ERROR") {
                 return Some(Err(NoraRadioError::ReadDataInvalid));
             }
-            if accum.windows(4).any(|w| w == b"OK\r\n") {
+            if has_command_ok(accum) {
                 return Some(Ok(()));
             }
             None
