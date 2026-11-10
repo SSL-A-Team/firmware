@@ -39,6 +39,9 @@ pub const POSE_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 0.5);
 /// A free (unloaded) wheel has ~3.5 ms current-to-acceleration delay, leaving ~18 deg
 /// phase margin at KP 200 (50-67 Hz limit cycles in 1 kHz captures); KP 100 with the
 /// motor's 100 Hz speed low-pass keeps ~40 deg and halves the current noise.
+/// KP 50-70 cut the >20 Hz current noise a further 30-50% but degraded heading tracking
+/// on combined 0.2 m + 90 deg moves (2.5-3.7 deg RMS vs ~2.0 deg); KP 30 also degraded
+/// XY tracking (square: 52 vs ~35 mm RMS).
 pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(100.0, 0.0, 1.5, 2.5);
 
 /// Maximum feed-forward wheel current (A). The body acceleration output is
