@@ -35,14 +35,15 @@ pub const POSE_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 2.0);
 /// 1.57 rad/s per tick at 1 ms, so their gain would put ~1.7 A of quantization noise on
 /// the current; KP = 200 keeps the same ~0.3 A per tick. Higher gains ring when a wheel
 /// unloads or slips (measured: +/-1.2 A current std at 500 vs +/-0.2 A at 150-200).
-pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(200.0, 0.0, 1.5, 2.0);
+pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(200.0, 0.0, 1.5, 2.5);
 
 /// Maximum feed-forward wheel current (A). The body acceleration output is
 /// scaled uniformly so no wheel's feed-forward current exceeds this. Radio-tunable
 /// as `WHEEL_FF_CURRENT_LIMIT`.
-// 3-4 A caps caused wheel slip and an unstable wheel loop on robot 2 (tethered, high
-// floor friction); keep 2 A until traction/gains are revisited.
-pub const WHEEL_FF_CURRENT_LIMIT_A: f32 = 2.0;
+// Robot 2 cap sweep (plateau_profile.py): 2.0 A stalls sideways motion; 3.0 A gains
+// nothing over 2.5 A (sideways is traction-limited, wheels spin out), and 3-4 A with
+// kP 500 caused wheel slip and an unstable wheel loop. 2.5 A leaves transient headroom.
+pub const WHEEL_FF_CURRENT_LIMIT_A: f32 = 2.5;
 
 /// [ERROR_POS_LINEAR (m), ERROR_POS_ANGULAR (rad), ERROR_VEL_LINEAR (m/s), ERROR_VEL_ANGULAR (rad/s)]
 /// Trajectory-vs-estimate errors above which closed-loop tracking is considered
@@ -51,8 +52,10 @@ pub const WHEEL_FF_CURRENT_LIMIT_A: f32 = 2.0;
 pub const TRACKING_DIVERGENCE_THRESHOLD: Vector4f = Vector4f::new(1.0, 1.57, 5.0, 10.0);
 
 /// Maximum wheel current change per second for the feed-forward torque output
-/// (TIGERs `CtrlPantheraUpdate`: 0.5 A per 1 ms control tick).
-pub const WHEEL_CURRENT_SLOPE_LIMIT_A_PER_S: f32 = 500.0;
+/// (TIGERs `CtrlPantheraUpdate`: 0.5 A per 1 ms control tick). Lowered to 50 A/s:
+/// at TIGERs' rate the feed-forward steps at move start and Coulomb direction changes
+/// spin up our least-loaded wheel (front-right/back-left diagonal) and yaw the robot.
+pub const WHEEL_CURRENT_SLOPE_LIMIT_A_PER_S: f32 = 50.0;
 
 /// Maximum magnitude of the body-level acceleration output [linear (m/s²), angular (rad/s²)].
 /// The feed-forward output acceleration (local frame, friction and efficiency
