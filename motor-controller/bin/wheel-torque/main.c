@@ -142,6 +142,7 @@ static void update_current_sense_telemetry();
 static float do_vel_control();
 static void do_vel_cur_control();
 static int16_t clamp_motion_current(float current_ma);
+static void update_current_i2t();
 
 static void update_errors();
 static void read_packets();
@@ -361,6 +362,8 @@ int main() {
                 break;
         }
 
+        update_current_i2t();
+
         response_packet.velocity_telemetry.vel_setpoint_rads = motor_command_packet.setpoint;
         response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
         response_packet.current_telemetry.motor_voltage_cmd_mv = pwm6step_get_voltage_command();
@@ -391,19 +394,46 @@ static bool allow_motor_to_run() {
         && uart_logging_status_send == UART_LOGGING_OK;
 }
 
+// I2T accumulator above the continuous current limit (A^2*s), see CURRENT_I2T_BUDGET_A2S.
+static float current_i2t_a2s = 0.0f;
+// Current applied this loop (mA), 0 when not in a current mode.
+static int16_t i2t_applied_current_ma = 0;
+
+static void update_current_i2t() {
+    const float i_a = (float) i2t_applied_current_ma * 1e-3f;
+    const float i_cont_a = (float) MAX_CURR_WHEEL_NOT_TURNING * 1e-3f;
+    current_i2t_a2s += (i_a * i_a - i_cont_a * i_cont_a) * VELOCITY_LOOP_RATE_S;
+    if (current_i2t_a2s < 0.0f) {
+        current_i2t_a2s = 0.0f;
+    } else if (current_i2t_a2s > CURRENT_I2T_BUDGET_A2S) {
+        current_i2t_a2s = CURRENT_I2T_BUDGET_A2S;
+    }
+    i2t_applied_current_ma = 0;
+}
+
 static int16_t apply_current_limits(int16_t desired_current) {
     int16_t applied_current = desired_current;
+
+    // Thermal budget spent: continuous limit at any speed.
+    if (current_i2t_a2s >= CURRENT_I2T_BUDGET_A2S) {
+        if (applied_current > MAX_CURR_WHEEL_NOT_TURNING) {
+            applied_current = (int16_t) MAX_CURR_WHEEL_NOT_TURNING;
+        } else if (applied_current < -MAX_CURR_WHEEL_NOT_TURNING) {
+            applied_current = (int16_t) -MAX_CURR_WHEEL_NOT_TURNING;
+        }
+    }
+    desired_current = applied_current;
 
     // enforce hard current limits based on wheel velocity. If wheel is not turning at all
     // do not allow current above 90% of the max continuous rated current
     if (fabsf(response_packet.velocity_telemetry.wheel_vel_rads) < WHEEL_TURNING_VEL_THRESH_RADS) {
-        if (desired_current > MAX_CURR_WHEEL_NOT_TURNING) {
-            applied_current = (int16_t) MAX_CURR_WHEEL_NOT_TURNING;
+        if (desired_current > MAX_CURR_WHEEL_BOOST) {
+            applied_current = (int16_t) MAX_CURR_WHEEL_BOOST;
             current_limited = true;
         }
 
-        if (desired_current < -MAX_CURR_WHEEL_NOT_TURNING) {
-            applied_current = (int16_t) -MAX_CURR_WHEEL_NOT_TURNING;
+        if (desired_current < -MAX_CURR_WHEEL_BOOST) {
+            applied_current = (int16_t) -MAX_CURR_WHEEL_BOOST;
             current_limited = true;
         }
 
@@ -422,6 +452,7 @@ static int16_t apply_current_limits(int16_t desired_current) {
         current_limited = false;
     }
 
+    i2t_applied_current_ma = applied_current;
     return applied_current;
 }
 
@@ -608,8 +639,8 @@ static void update_errors() {
     response_packet.undervoltage_error = false;
     response_packet.overvoltage_error = false;
 
-    // torque limiting
-    response_packet.torque_limited = false;
+    // torque limiting: I2T thermal budget spent, current held to the continuous limit
+    response_packet.torque_limited = current_i2t_a2s >= CURRENT_I2T_BUDGET_A2S;
 
     // loop time
     response_packet.control_loop_time_error = slipped_control_frame_count > 10;

@@ -26,13 +26,16 @@ pub const POSE_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 2.0);
 
 /// Wheel velocity loop on the motor controllers [KP (mA/(rad/s)), KI (mA/rad),
 /// ANTI_JITTER (rad/s), MAX_CURRENT (A)]. P-only like TIGERs (velKi = 0).
-/// MAX_CURRENT caps the total (feed-forward + loop) wheel current on the motor.
+/// MAX_CURRENT caps the total (feed-forward + loop) wheel current on the motor; the
+/// motor's I2T budget keeps the long-term average at its continuous rating.
 /// Radio-tunable as `WHEEL_VEL_FB`; periodically re-sent to the motors.
 pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(500.0, 0.0, 1.5, 2.0);
 
 /// Maximum feed-forward wheel current (A). The body acceleration output is
 /// scaled uniformly so no wheel's feed-forward current exceeds this. Radio-tunable
 /// as `WHEEL_FF_CURRENT_LIMIT`.
+// 3-4 A caps caused wheel slip and an unstable wheel loop on robot 2 (tethered, high
+// floor friction); keep 2 A until traction/gains are revisited.
 pub const WHEEL_FF_CURRENT_LIMIT_A: f32 = 2.0;
 
 /// [ERROR_POS_LINEAR (m), ERROR_POS_ANGULAR (rad), ERROR_VEL_LINEAR (m/s), ERROR_VEL_ANGULAR (rad/s)]

@@ -58,6 +58,13 @@
 #define MAX_CURR_WHEEL_NOT_TURNING 2160
 // 90% of peak current in mA
 #define MAX_CURR_WHEEL_TURNING 6300
+// Short-term current allowed while the wheel is (nearly) stalled, to break static
+// friction. Bounded by the I2T budget below.
+#define MAX_CURR_WHEEL_BOOST 4000
+// I2T thermal budget above the continuous limit (MAX_CURR_WHEEL_NOT_TURNING), in A^2*s:
+// 1 s at MAX_CURR_WHEEL_BOOST. Once spent, current is limited to the continuous limit
+// at any speed until it recovers (~2.4 s at zero current).
+#define CURRENT_I2T_BUDGET_A2S 11.3f
 // Allowable control autority by the wheel vel PID as a percentage of the commanded feedforward current
 #define MAX_VEL_CONTROL_AUTH 0.50f 
 
