@@ -625,7 +625,10 @@ impl<
                 if in_hard_stop {
                     defmt::info!("control task - motor commands locked out");
                 } else {
-                    defmt::info!("control task - motor commands enabled");
+                    defmt::info!(
+                        "control task - motor commands enabled (mode {})",
+                        _cmd_mode as u8
+                    );
                 }
                 motors_locked_out = in_hard_stop;
             }
