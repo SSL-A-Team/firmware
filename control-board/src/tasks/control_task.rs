@@ -554,8 +554,8 @@ impl<
             ) {
                 Ok((vel_clamped, accel_clamped)) => {
                     if vel_clamped {
-                        defmt::warn!("body velocity clamped");
                         if self.body_vel_clamp_err_limiter.is_allowed() {
+                            defmt::warn!("body velocity clamped");
                             self.telemetry_publisher.publish_immediate(
                                 TelemetryPacket::ErrorTelemetry(
                                     create_error_telemetry_from_string("body velocity clamped"),
@@ -564,8 +564,8 @@ impl<
                         }
                     }
                     if accel_clamped {
-                        defmt::warn!("body acceleration clamped");
                         if self.body_accel_clamp_err_limiter.is_allowed() {
+                            defmt::warn!("body acceleration clamped");
                             self.telemetry_publisher.publish_immediate(
                                 TelemetryPacket::ErrorTelemetry(
                                     create_error_telemetry_from_string("body acceleration clamped"),
