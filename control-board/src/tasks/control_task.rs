@@ -32,6 +32,8 @@ use crate::{
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel-torque.bin"}
 
 const MAX_CURRENT_MA: f32 = 5000.0; // mA
+/// Loop period beyond DEFAULT_CONTROL_DT_US (us) reported as a scheduling lag.
+const LOOP_PERIOD_LAG_MARGIN_US: u64 = 200;
 /// Period (control ticks) for re-sending wheel velocity loop parameters to the motors.
 const WHEEL_PARAM_RESEND_PERIOD_TICKS: u16 = 50;
 
@@ -405,15 +407,22 @@ impl<
         let mut ticks_since_control_packet = 0;
 
         let task_start_time = Instant::now();
-        let mut last_loop_term_time = Instant::now();
+        let mut last_loop_start_time: Option<Instant> = None;
         let mut ticks_since_trace_print = 0;
 
         loop {
             let t_loop_start = Instant::now();
-            let loop_invocation_dead_time = t_loop_start - last_loop_term_time;
-            if loop_invocation_dead_time > Duration::from_micros(DEFAULT_CONTROL_DT_US as u64) {
+            // Start-to-start period. The ticker is fixed-rate, so on-time loops
+            // see ~DEFAULT_CONTROL_DT_US regardless of their execution time; a
+            // longer period means the task was woken late (another task on the
+            // executor did not yield).
+            let loop_period = last_loop_start_time.map(|t| t_loop_start - t);
+            last_loop_start_time = Some(t_loop_start);
+            if let Some(period) = loop_period.filter(|p| {
+                p.as_micros() > DEFAULT_CONTROL_DT_US as u64 + LOOP_PERIOD_LAG_MARGIN_US
+            }) {
                 if self.sched_lag_err_limiter.is_allowed() {
-                    defmt::warn!("control loop scheuling lagged. Expected <{:?}us between loop invocations, but got {:?}us", DEFAULT_CONTROL_DT_US, loop_invocation_dead_time.as_micros());
+                    defmt::warn!("control loop scheduling lagged. Expected {}us loop period, but got {}us", DEFAULT_CONTROL_DT_US, period.as_micros());
                     self.telemetry_publisher
                         .publish_immediate(TelemetryPacket::ErrorTelemetry(
                             create_error_telemetry_from_string("control loop scheduling lagged"),
@@ -787,7 +796,6 @@ impl<
             }
             /////////////////////////////////////
 
-            last_loop_term_time = Instant::now();
             loop_rate_ticker.next().await;
         }
     }
