@@ -9,8 +9,8 @@
 use core::cell::SyncUnsafeCell;
 
 pub const NUM_SIGNALS: usize = 24;
-pub const CAPTURE_LEN: usize = 2000;
-const START_DELAY_TICKS: u32 = 1300;
+pub const CAPTURE_LEN: usize = 2500;
+const START_DELAY_TICKS: u32 = 3800;
 const DUMP_EVERY_TICKS: u32 = 10;
 
 /// Signals per sample, stored as i16 with fixed scales:
