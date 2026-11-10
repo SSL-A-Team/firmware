@@ -70,5 +70,7 @@
 
 
 #define ENCODER_IIR_TF_MS 190.0f
+// wheel speed low-pass cutoff (1st order); keeps the free-wheel P loop phase margin ~40 deg at kP 100
+#define ENCODER_VEL_LPF_HZ 100.0f
 #define TORQUE_IIR_TF_MS 0.40f
 // #define DC_IIR_TF_MS 0.20f

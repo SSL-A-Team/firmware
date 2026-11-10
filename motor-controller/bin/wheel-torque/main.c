@@ -81,7 +81,7 @@ static bool current_limited = false;
 // state that can fight in the drive's null space at rest. Gains are writable from
 // the control board via CCM_PARAM_VEL_CONTROLLER_*.
 static PidConstants_t vel_velcur_controller_constants = {
-    .kP = 200.0f,  // mA / (rad/s); TIGERs-equivalent current per encoder tick (see controller_params.rs)
+    .kP = 100.0f,  // mA / (rad/s); see WHEEL_VEL_FB in control-board controller_params.rs
     .kI = 0.0f,
     .kD = 0.0f,
     .kI_max = 500.0f,
@@ -94,6 +94,7 @@ static Pid_t vel_velcur_controller;
 // applied before the hardware limits. Writable via CCM_PARAM_MOTION_CURRENT_LIMIT.
 static float motion_current_limit_ma = 2000.0f;
 static float vel_cur_component = 0.0;
+static IIRFilter_t encoder_filter;
 
 // legacy velocity control model
 static GainScheduledPid_t vel_pid;
@@ -190,6 +191,7 @@ int main() {
 
     quadenc_setup();
     quadenc_reset_encoder_delta();
+    iir_filter_init(&encoder_filter, iir_filter_alpha_from_cutoff_hz(ENCODER_VEL_LPF_HZ, VELOCITY_LOOP_RATE_S));
 
 
     ////////////////////////////////////
@@ -535,8 +537,10 @@ static void read_packets() {
 static void update_wheel_vel_est() {
     int32_t enc_delta = quadenc_get_encoder_delta();
     float rads_delta = mm_enc_ticks_to_rad(&df45_model, enc_delta);
-    // raw 1 ms encoder delta, unfiltered (as TIGERs): filtering adds delay to the P loop
-    float enc_rad_s_filt = discrete_time_derivative(rads_delta, VELOCITY_LOOP_RATE_S);
+    // 1 ms encoder delta (as TIGERs), low-passed: our 4000 tick/rev encoder quantizes the
+    // 1 ms speed to 1.57 rad/s, which the P loop turns into broadband current noise.
+    float enc_vel_rads = discrete_time_derivative(rads_delta, VELOCITY_LOOP_RATE_S);
+    float enc_rad_s_filt = iir_filter_update(&encoder_filter, enc_vel_rads);
 
     // set the value
     response_packet.velocity_telemetry.wheel_vel_rads = enc_rad_s_filt;
