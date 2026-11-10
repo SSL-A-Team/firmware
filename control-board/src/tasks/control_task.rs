@@ -409,6 +409,7 @@ impl<
         let task_start_time = Instant::now();
         let mut last_loop_start_time: Option<Instant> = None;
         let mut ticks_since_trace_print = 0;
+        let mut motors_locked_out = false;
 
         loop {
             let t_loop_start = Instant::now();
@@ -620,10 +621,15 @@ impl<
                     || robot_controller.active_brake_requested());
 
             // wheel_current_cmd in Amperes; converted to mA below.
-            let (wheel_current_cmd, wheel_vel_cmd) = if in_hard_stop {
-                if ticks_since_trace_print > TRACE_PRINT_INTERVAL_TICKS {
-                    defmt::warn!("control task - motor commands locked out");
+            if in_hard_stop != motors_locked_out {
+                if in_hard_stop {
+                    defmt::info!("control task - motor commands locked out");
+                } else {
+                    defmt::info!("control task - motor commands enabled");
                 }
+                motors_locked_out = in_hard_stop;
+            }
+            let (wheel_current_cmd, wheel_vel_cmd) = if in_hard_stop {
                 self.active_brake_controller.reset();
                 (Vector4f::default(), Vector4f::default())
             } else if in_active_brake {

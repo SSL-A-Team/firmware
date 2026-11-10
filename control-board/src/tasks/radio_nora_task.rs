@@ -222,6 +222,8 @@ impl<
             tx_ctr &= 0x03;
 
             let loop_start_time = Instant::now();
+            let connected_at_loop_start =
+                self.connection_state == RadioConnectionState::Connected;
             let loop_invocation_dead_time = loop_start_time - last_loop_term_time;
             if loop_start_time - last_loop_term_time > Duration::from_millis(11) {
                 defmt::warn!("radio loop scheuling lagged. Expected ~10ms between loop invocations, but got {:?}us", loop_invocation_dead_time.as_micros());
@@ -425,9 +427,9 @@ impl<
 
             let loop_end_time = Instant::now();
             let loop_execution_time = loop_end_time - loop_start_time;
-            if loop_execution_time > Duration::from_millis(10)
-                && self.connection_state == RadioConnectionState::Connected
-            {
+            // Skip the iteration that completes the connection: it includes the
+            // hello handshake.
+            if loop_execution_time > Duration::from_millis(10) && connected_at_loop_start {
                 // delay is probably due to delay in ack from the module. This task async awaits the module ack, so it's not hanging up the system.
                 defmt::warn!("radio loop is connected and taking >10ms to complete (it may be interrupted by higher priority tasks). This is >100% of an execution frame. Did transmit ack pile up in a brust transfer? Loop execution time {:?}", loop_execution_time.as_micros());
             }
