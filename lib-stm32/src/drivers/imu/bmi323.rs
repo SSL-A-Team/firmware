@@ -278,6 +278,21 @@ const CMD_AXIS_MAP_UPDATE: u16 = 0x0300;
 /// (BMI3 API `BMI3_CMD_SELF_CALIB_TRIGGER`).
 const CMD_SELF_CALIB_TRIGGER: u16 = 0x0101;
 
+/// CMD register (0x7E) code that triggers the built-in self-test
+/// (BMI3 API `BMI3_CMD_SELF_TEST_TRIGGER`).
+const CMD_SELF_TEST_TRIGGER: u16 = 0x0100;
+/// Extended register self-test result / selection (BMI3 API `BMI3_BASE_ADDR_ST_*`).
+const EXT_ADDR_ST_RESULT: u16 = 0x0024;
+const EXT_ADDR_ST_SELECT: u16 = 0x0025;
+const ST_SELECT_ACC_GYR: u16 = 0x0003;
+/// FEATURE_IO1.st_result (overall self-test pass).
+const ST_RESULT_MASK: u16 = 0x0040;
+/// ST_RESULT acc x/y/z ok (bits 0-2), gyr x/y/z ok (bits 3-5), gyr drive ok (bit 6).
+const ST_RESULT_ALL_OK: u16 = 0x007F;
+/// Self-test completion polling (BMI3 API: 10 x 35 ms).
+const SELF_TEST_POLL_COUNT: usize = 10;
+const SELF_TEST_POLL_MS: u64 = 35;
+
 /// Feature engine enable magic written to FEATURE_IO2 (datasheet section 5.4).
 const FEATURE_ENGINE_ENABLE_MAGIC: u16 = 0x012C;
 /// Extended register address of AXIS_MAP_1 (datasheet section 6.2.1).
@@ -601,18 +616,62 @@ impl<'a, 'buf> Bmi323<'a, 'buf> {
         Err(())
     }
 
-    async fn accel_self_test(&mut self) -> Result<(), ()> {
-        defmt::warn!("BMI323 accel self test unimplemented");
+    /// Reads a single 16-bit word from the extended register map (datasheet section 6.2).
+    async fn read_ext_register(&mut self, ext_addr: u16) -> u16 {
+        self.write(ImuRegisters::FEATURE_DATA_ADDR, ext_addr).await;
+        self.read(ImuRegisters::FEATURE_DATA_TX).await
+    }
 
+    /// Runs the built-in accel + gyro self-test through the feature engine, following
+    /// the Bosch BMI3 SensorAPI `bmi3_perform_self_test`: select both sensors, put the
+    /// accel in high-performance mode at 100 Hz, trigger, poll for completion, then
+    /// restore the accel config. Requires the feature engine to be enabled.
+    async fn builtin_self_test(&mut self) -> Result<(), ()> {
+        self.write_ext_register(EXT_ADDR_ST_SELECT, ST_SELECT_ACC_GYR).await?;
+
+        let (saved_mode, saved_odr) = (self.accel_mode, self.accel_odr);
+        self.accel_mode = AccelMode::ContinuousHighPerformance;
+        self.accel_odr = OutputDataRate::Odr100p0;
+        let result = self.run_builtin_self_test().await;
+
+        self.accel_mode = saved_mode;
+        self.accel_odr = saved_odr;
+        self.apply_accel_config().await?;
+        result
+    }
+
+    async fn run_builtin_self_test(&mut self) -> Result<(), ()> {
+        self.apply_accel_config().await?;
+        self.write(ImuRegisters::CMD, CMD_SELF_TEST_TRIGGER).await;
+
+        let mut io1 = 0;
+        for _ in 0..SELF_TEST_POLL_COUNT {
+            Timer::after_millis(SELF_TEST_POLL_MS).await;
+            io1 = self.read(ImuRegisters::FEATURE_IO1).await;
+            if (io1 & SC_ST_COMPLETE_MASK) != 0 {
+                break;
+            }
+        }
+        if (io1 & SC_ST_COMPLETE_MASK) == 0 {
+            defmt::error!("BMI323 self test did not complete (error status 0x{:x})", io1 & 0x000F);
+            return Err(());
+        }
+
+        let detail = self.read_ext_register(EXT_ADDR_ST_RESULT).await & ST_RESULT_ALL_OK;
+        if (io1 & ST_RESULT_MASK) == 0 || detail != ST_RESULT_ALL_OK {
+            defmt::error!(
+                "BMI323 self test failed: result bits 0x{:x} (acc xyz = bits 0-2, gyr xyz = bits 3-5, gyr drive = bit 6)",
+                detail
+            );
+            return Err(());
+        }
+
+        defmt::debug!("BMI323 self test passed");
         Ok(())
     }
 
-    async fn gyro_self_test(&mut self) -> Result<(), ()> {
-        defmt::warn!("BMI323 gyro self test unimplemented");
-
-        Ok(())
-    }
-
+    /// Verifies the chip ID and runs the built-in accel/gyro self-test. Requires the
+    /// feature engine to be enabled and leaves the sensors in their prior config.
     pub async fn self_test(&mut self) -> Result<(), ()> {
         let mut has_self_test_error = Ok(());
 
@@ -633,11 +692,7 @@ impl<'a, 'buf> Bmi323<'a, 'buf> {
             defmt::debug!("BMI323 id verified: 0x{:x}", chip_id);
         }
 
-        if (self.accel_self_test().await).is_err() {
-            has_self_test_error = Err(());
-        }
-
-        if (self.gyro_self_test().await).is_err() {
+        if self.builtin_self_test().await.is_err() {
             has_self_test_error = Err(());
         }
 

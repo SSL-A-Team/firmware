@@ -114,7 +114,7 @@ pub fn build_imu(
     )
 }
 
-/// Runs the full BMI323 configuration sequence: soft reset, self test, feature engine,
+/// Runs the full BMI323 configuration sequence: soft reset, feature engine, self test,
 /// 180-degree axis remap, gyro/accel config, and interrupt config. Returns `Err` on any
 /// failure (details logged via defmt). Shared by the imu task's (re)configuration loop
 /// and the boot maintenance path.
@@ -126,13 +126,15 @@ pub fn build_imu(
 pub async fn configure_imu(imu: &mut Bmi323<'static, 'static>) -> Result<(), ()> {
     imu.init().await;
 
-    if imu.self_test().await.is_err() {
-        defmt::error!("IMU self test failed");
+    if imu.enable_feature_engine().await.is_err() {
+        defmt::error!("IMU feature engine enable failed");
         return Err(());
     }
 
-    if imu.enable_feature_engine().await.is_err() {
-        defmt::error!("IMU feature engine enable failed");
+    // The built-in self-test runs on the feature engine and restores the sensors to
+    // inactive, as the axis remap below requires.
+    if imu.self_test().await.is_err() {
+        defmt::error!("IMU self test failed");
         return Err(());
     }
     if imu
