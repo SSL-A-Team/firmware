@@ -13,6 +13,8 @@
 //! outside the image) and firmware changes; bump [`CAL_VERSION`] when a change could
 //! invalidate stored calibration (blob layout or IMU range/config).
 
+use crate::crc::crc32;
+
 use ateam_lib_stm32::drivers::imu::bmi323::{AccelDpOffset, Bmi323, GyroDpOffsetGain};
 use embassy_stm32::flash::{Blocking, Flash};
 use embassy_time::Timer;
@@ -237,18 +239,4 @@ async fn average_accel_bias(imu: &mut Bmi323<'static, 'static>) -> Option<(i16, 
 
     let n = ACCEL_CALIBRATION_SAMPLES as i32;
     Some(((sum_x / n) as i16, (sum_y / n) as i16))
-}
-
-/// Standard CRC-32 (IEEE 802.3, reflected, poly 0xEDB88520). Computed once at boot
-/// and once per (re)calibration, so a small bitwise implementation is fine.
-fn crc32(data: &[u8]) -> u32 {
-    let mut crc: u32 = 0xFFFF_FFFF;
-    for &byte in data {
-        crc ^= byte as u32;
-        for _ in 0..8 {
-            let mask = (crc & 1).wrapping_neg();
-            crc = (crc >> 1) ^ (0xEDB8_8320 & mask);
-        }
-    }
-    !crc
 }

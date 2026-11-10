@@ -23,6 +23,7 @@ use embassy_stm32::{
 };
 use embassy_time::Instant;
 
+pub mod crc;
 pub mod git_version;
 pub mod image_hash;
 pub mod imu_calibration;

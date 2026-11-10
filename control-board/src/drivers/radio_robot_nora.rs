@@ -2,6 +2,7 @@ use ateam_common_packets::bindings::{
     self, BasicControl, BasicTelemetry, CommandCode, ErrorTelemetry, ExtendedTelemetry,
     HelloRequest, HelloResponse, ParameterCommand, RadioData, RadioHeader, RadioPacket,
 };
+use crate::crc::crc32;
 use ateam_common_packets::radio::DataPacket;
 use ateam_lib_stm32::drivers::radio::nora_w36x::{
     NoraRadioError, NoraW36x, SocketConnection, WifiAuth, DataMode,
@@ -54,6 +55,7 @@ pub enum RobotRadioNoraError {
     ControlPacketDecodeInvalid,
     ParameterPacketDecodeInvalid,
     PacketTypeUnknown,
+    PacketCrcMismatch,
 }
 
 impl From<NoraRadioError> for RobotRadioNoraError {
@@ -704,6 +706,13 @@ impl<
             size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<BasicControl>();
         const PARAMERTER_PACKET_SIZE: usize =
             size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<ParameterCommand>();
+
+        // The header's crc32 covers everything after it (set by the radio bridge).
+        if (data.len() == CONTROL_PACKET_SIZE || data.len() == PARAMERTER_PACKET_SIZE)
+            && u32::from_le_bytes([data[0], data[1], data[2], data[3]]) != crc32(&data[4..])
+        {
+            return Err(RobotRadioNoraError::PacketCrcMismatch);
+        }
 
         if data.len() == CONTROL_PACKET_SIZE {
             let mut data_copy = [0u8; size_of::<RadioPacket>()];
