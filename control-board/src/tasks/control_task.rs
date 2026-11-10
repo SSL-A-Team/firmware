@@ -239,13 +239,10 @@ impl<
         robot_controller: &mut BodyController,
         cur_state: RobotState,
     ) {
-        self.motor_fl.send_motion_command();
-        self.motor_bl.send_motion_command();
-        self.motor_br.send_motion_command();
-        self.motor_fr.send_motion_command();
-
-        // Periodically (re)send the wheel velocity loop parameters, one per tick,
-        // so they survive motor resets and dropped UART packets.
+        // Every WHEEL_PARAM_RESEND_PERIOD_TICKS, (re)send the wheel velocity loop
+        // parameters, one per tick, in place of that tick's motion command (the motors
+        // hold the previous command). Two packets back-to-back in one tick merge in
+        // the motor's UART receive and are both dropped.
         let phase = seq_number % WHEEL_PARAM_RESEND_PERIOD_TICKS;
         if phase < 4 {
             let fb = robot_controller.control_context.wheel_vel_fb;
@@ -259,6 +256,11 @@ impl<
             self.motor_bl.send_param_write_f32(param, value);
             self.motor_br.send_param_write_f32(param, value);
             self.motor_fr.send_param_write_f32(param, value);
+        } else {
+            self.motor_fl.send_motion_command();
+            self.motor_bl.send_motion_command();
+            self.motor_br.send_motion_command();
+            self.motor_fr.send_motion_command();
         }
 
         let front_left_motor_error = self.motor_fl.read_is_error() as u32;
