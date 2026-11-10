@@ -89,6 +89,19 @@ const UESODB_PREFIX: &[u8] = b"+UESODB";
 // Longest header between the event prefix and the 0x01 marker (+UESODBF carries ip,port).
 const UESODB_MAX_HEADER_LEN: usize = 64;
 
+// Write ack the module may interleave inside a +UESODB event (see rx_accum_next_event).
+const USOWB_ACK_PREFIX: &[u8] = b"\r\n+USOWB:";
+const USOWB_ACK_SUFFIX: &[u8] = b"\r\nOK\r\n";
+const USOWB_ACK_MAX_LEN: usize = 32;
+
+/// Remove `n` bytes starting at `at` from the accumulator.
+fn rx_accum_remove(accum: &mut Vec<u8, RX_ACCUM_LEN>, at: usize, n: usize) {
+    let n = n.min(accum.len() - at);
+    let remaining = accum.len() - n;
+    accum.copy_within(at + n.., at);
+    accum.truncate(remaining);
+}
+
 /// Drop the first `n` bytes of the accumulator.
 fn rx_accum_consume(accum: &mut Vec<u8, RX_ACCUM_LEN>, n: usize) {
     let n = n.min(accum.len());
@@ -154,6 +167,27 @@ fn rx_accum_next_event(accum: &mut Vec<u8, RX_ACCUM_LEN>) -> Option<(usize, usiz
         }
         let data_len = ((accum[marker + 1] as usize) << 8) | (accum[marker + 2] as usize);
         let data_start = marker + 3;
+
+        // The module can emit the response to a concurrent binary write
+        // ("\r\n+USOWB:<id>,<len>\r\nOK\r\n") between the event header and its
+        // payload. Splice it out so the payload is contiguous again.
+        let pending = &accum[data_start..];
+        let ack_prefix_len = USOWB_ACK_PREFIX.len().min(pending.len());
+        if pending[..ack_prefix_len] == USOWB_ACK_PREFIX[..ack_prefix_len] {
+            if pending.len() < USOWB_ACK_PREFIX.len() {
+                return None;
+            }
+            let window = &pending[..pending.len().min(USOWB_ACK_MAX_LEN)];
+            match window.windows(USOWB_ACK_SUFFIX.len()).position(|w| w == USOWB_ACK_SUFFIX) {
+                Some(pos) => {
+                    rx_accum_remove(accum, data_start, pos + USOWB_ACK_SUFFIX.len());
+                    continue;
+                }
+                None if pending.len() < USOWB_ACK_MAX_LEN => return None,
+                None => {}
+            }
+        }
+
         let data_end = data_start + data_len;
         if data_len == 0 || data_end > RX_ACCUM_LEN {
             rx_accum_consume(accum, 1);
