@@ -21,8 +21,9 @@ pub const POSE_FB_XY: Vector3f = Vector3f::new(8.0, 0.3, 0.01);
 /// [POS_K (1/s), POS_MAX (rad/s), ANTI_JITTER (rad), VEL_K]:
 /// w += clamp(POS_K * theta_err, POS_MAX) + VEL_K * (w_traj - w_est).
 /// Radio-tunable as `POSE_FB_W`.
-// POS_MAX lowered from TIGERs' 8 rad/s while bringing up.
-pub const POSE_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 2.0);
+// POS_MAX lowered from TIGERs' 8 rad/s while bringing up. VEL_K lowered from TIGERs'
+// 2: through the gyro and the Coulomb ramp it closed a loop that rang at ~12 Hz.
+pub const POSE_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 0.5);
 
 /// Wheel velocity loop on the motor controllers [KP (mA/(rad/s)), KI (mA/rad),
 /// ANTI_JITTER (rad/s), MAX_CURRENT (A)]. P-only like TIGERs (velKi = 0).
@@ -35,7 +36,10 @@ pub const POSE_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 2.0);
 /// 1.57 rad/s per tick at 1 ms, so their gain would put ~1.7 A of quantization noise on
 /// the current; KP = 200 keeps the same ~0.3 A per tick. Higher gains ring when a wheel
 /// unloads or slips (measured: +/-1.2 A current std at 500 vs +/-0.2 A at 150-200).
-pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(200.0, 0.0, 1.5, 2.5);
+/// A free (unloaded) wheel has ~3.5 ms current-to-acceleration delay, leaving ~18 deg
+/// phase margin at KP 200 (50-67 Hz limit cycles in 1 kHz captures); KP 100 with the
+/// motor's 100 Hz speed low-pass keeps ~40 deg and halves the current noise.
+pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(100.0, 0.0, 1.5, 2.5);
 
 /// Maximum feed-forward wheel current (A). The body acceleration output is
 /// scaled uniformly so no wheel's feed-forward current exceeds this. Radio-tunable
@@ -56,6 +60,12 @@ pub const TRACKING_DIVERGENCE_THRESHOLD: Vector4f = Vector4f::new(1.0, 1.57, 5.0
 /// at TIGERs' rate the feed-forward steps at move start and Coulomb direction changes
 /// spin up our least-loaded wheel (front-right/back-left diagonal) and yaw the robot.
 pub const WHEEL_CURRENT_SLOPE_LIMIT_A_PER_S: f32 = 50.0;
+
+/// Low-pass cutoff (Hz) on the commanded velocity fed to the friction model only.
+/// The Coulomb ramp (ateam_controls FRICTION_*_RAMP) is a steep gain on that velocity,
+/// which contains gyro/pose feedback noise; unfiltered it put ~0.1 A of 8-60 Hz ripple
+/// on the wheel current targets. Not in TIGERs.
+pub const FRICTION_VEL_LPF_HZ: f32 = 15.0;
 
 /// Maximum magnitude of the body-level acceleration output [linear (m/s²), angular (rad/s²)].
 /// The feed-forward output acceleration (local frame, friction and efficiency
