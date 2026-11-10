@@ -412,6 +412,8 @@ impl<
         let mut last_loop_start_time: Option<Instant> = None;
         let mut ticks_since_trace_print = 0;
         let mut motors_locked_out = false;
+        #[cfg(feature = "hf-capture")]
+        let mut hf_capture = super::hf_capture::HfCapture::new();
 
         loop {
             let t_loop_start = Instant::now();
@@ -631,6 +633,8 @@ impl<
                         "control task - motor commands enabled (mode {})",
                         _cmd_mode as u8
                     );
+                    #[cfg(feature = "hf-capture")]
+                    hf_capture.on_motors_enabled();
                 }
                 motors_locked_out = in_hard_stop;
             }
@@ -738,6 +742,44 @@ impl<
             self.motor_bl.set_current_setpoint(wheel_ma.y as i16);
             self.motor_br.set_current_setpoint(wheel_ma.z as i16);
             self.motor_fr.set_current_setpoint(wheel_ma.w as i16);
+
+            #[cfg(feature = "hf-capture")]
+            {
+                use super::hf_capture::q;
+                let tick = ctrl_seq_number as i16;
+                let gyro = self.last_imu_gyro_theta;
+                let state = robot_controller.control_context.state_estimate;
+                let u = robot_controller.body_twist_out;
+                let (mfl, mbl, mbr, mfr) = (&self.motor_fl, &self.motor_bl, &self.motor_br, &self.motor_fr);
+                hf_capture.tick(|| {
+                    [
+                        tick,
+                        q(gyro, 1e3),
+                        q(state[(0, 0)], 1e4),
+                        q(state[(1, 0)], 1e4),
+                        q(state[(2, 0)], 1e4),
+                        q(wheel_vel_meas.x, 100.0),
+                        q(wheel_vel_meas.y, 100.0),
+                        q(wheel_vel_meas.z, 100.0),
+                        q(wheel_vel_meas.w, 100.0),
+                        q(wheel_vel_cmd.x, 100.0),
+                        q(wheel_vel_cmd.y, 100.0),
+                        q(wheel_vel_cmd.z, 100.0),
+                        q(wheel_vel_cmd.w, 100.0),
+                        wheel_ma.x as i16,
+                        wheel_ma.y as i16,
+                        wheel_ma.z as i16,
+                        wheel_ma.w as i16,
+                        mfl.read_current_setpoint_ma(),
+                        mbl.read_current_setpoint_ma(),
+                        mbr.read_current_setpoint_ma(),
+                        mfr.read_current_setpoint_ma(),
+                        q(u.x, 1e3),
+                        q(u.y, 1e3),
+                        q(u.z, 1e3),
+                    ]
+                });
+            }
 
             let t_after_control = Instant::now();
 

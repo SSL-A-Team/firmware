@@ -62,6 +62,8 @@ credentials = { path = "../credentials" }
 [features]
 default = []
 no-private-credentials = ["credentials/no-private-credentials"]
+# 1 kHz control-loop signal capture streamed over defmt (tasks/hf_capture.rs)
+hf-capture = []
 
 [dev-dependencies]
 defmt-test = "0.4.0"

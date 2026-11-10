@@ -1,6 +1,8 @@
 pub mod audio_task;
 pub mod control_task;
 pub mod dotstar_task;
+#[cfg(feature = "hf-capture")]
+pub mod hf_capture;
 pub mod imu_task;
 pub mod kicker_task;
 pub mod power_task;
