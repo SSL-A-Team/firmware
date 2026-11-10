@@ -3,7 +3,7 @@ use crate::motion::maneuvers::{requires_vision, ManeuverManager};
 use crate::motion::params::controller_params::{
     EncLagMode, BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_LINEAR, BODY_VEL_CLAMP_ANGULAR,
     BODY_VEL_CLAMP_LINEAR, ENC_LAG_MODE, STOP_STATE_LINEAR_SPEED_LIMIT,
-    WHEEL_CURRENT_SLOPE_LIMIT_A_PER_S,
+    FRICTION_VEL_LPF_HZ, WHEEL_CURRENT_SLOPE_LIMIT_A_PER_S,
 };
 use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::BodyControlMode::{BCM_ESTOP_BRAKE, BCM_OFF};
@@ -31,6 +31,9 @@ pub struct BodyController {
     pub wheel_torque_out: Vector4f,
     /// Slope-limited wheel current output (A); the slope limiter's state.
     pub wheel_current_out: Vector4f,
+    /// Low-passed local commanded velocity used only for friction compensation.
+    friction_vel_local_filt: Vector3f,
+    friction_vel_alpha: f32,
     pub telemetry: BodyControlTelemetry,
     pub debug_telemetry: BodyControlExtendedTelemetry,
     /// Commanded maneuver requires vision and vision is inactive: maneuvers are
@@ -50,6 +53,11 @@ impl BodyController {
             wheel_vel_out: Vector4f::default(),
             wheel_torque_out: Vector4f::default(),
             wheel_current_out: Vector4f::default(),
+            friction_vel_local_filt: Vector3f::default(),
+            friction_vel_alpha: {
+                let tau = 1.0 / (2.0 * core::f32::consts::PI * FRICTION_VEL_LPF_HZ);
+                dt / (tau + dt)
+            },
             telemetry: Default::default(),
             debug_telemetry: Default::default(),
         }
@@ -64,6 +72,7 @@ impl BodyController {
         self.wheel_vel_out = Vector4f::default();
         self.wheel_torque_out = Vector4f::default();
         self.wheel_current_out = Vector4f::default();
+        self.friction_vel_local_filt = Vector3f::default();
         self.telemetry = Default::default();
         self.debug_telemetry = Default::default();
     }
@@ -192,7 +201,12 @@ impl BodyController {
         let robot_model = &self.control_context.robot_model;
         let twist_local: Vector3f = to_local * self.body_twist_out;
         let accel_local: Vector3f = to_local * self.body_accel_out;
-        let ff_accel_local = robot_model.feedforward_local_accel(twist_local, accel_local);
+        // The commanded velocity carries the feedback terms (gyro / pose noise); the steep
+        // Coulomb ramp would pass that straight into the current, so low-pass it here.
+        self.friction_vel_local_filt +=
+            (twist_local - self.friction_vel_local_filt) * self.friction_vel_alpha;
+        let ff_accel_local =
+            robot_model.feedforward_local_accel(self.friction_vel_local_filt, accel_local);
 
         // Clamp body-level acceleration before converting to wheel torques.
         let clamped_local = Vector3f::new(
