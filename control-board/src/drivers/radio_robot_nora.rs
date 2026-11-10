@@ -367,6 +367,11 @@ impl<
         }
     }
 
+    /// Discard all pending receive data (see `NoraW36x::discard_pending_rx`).
+    pub fn discard_pending_rx(&self) {
+        self.nora_driver.discard_pending_rx();
+    }
+
     pub fn set_fire_and_forget_sends(&mut self, enabled: bool) {
         self.fire_and_forget_sends = enabled;
     }

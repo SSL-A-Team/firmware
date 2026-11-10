@@ -58,6 +58,9 @@ pub const RADIO_LOOP_RATE_MS: u64 = 10;
 
 // AT+USOWB=<socket> (max 11 bytes) + SOH + 2-byte length header
 const NORA_USOWB_WIRE_OVERHEAD: usize = 14;
+/// Time to let in-flight fire-and-forget write acks arrive before resetting the
+/// software session.
+const SESSION_RESET_RX_SETTLE_MS: u64 = 20;
 pub const RADIO_MAX_TX_PACKET_SIZE: usize =
     ateam_common_packets::MAX_ROBOT_TX_PACKET_SIZE + NORA_USOWB_WIRE_OVERHEAD;
 pub const RADIO_TX_BUF_DEPTH: usize = 4;
@@ -124,6 +127,9 @@ impl<
 {
     const RETRY_DELAY_MS: u64 = 1000;
     const RESPONSE_FROM_PC_TIMEOUT_MS: u64 = 1000;
+    /// Hello retry period; the bridge answers in ~100 ms, so retry quickly to rejoin
+    /// soon after the link comes back.
+    const HELLO_RESPONSE_TIMEOUT_MS: u64 = 300;
     const UART_CONNECT_TIMEOUT_MS: u64 = 8000;
 
     pub fn new(
@@ -241,9 +247,8 @@ impl<
                         || cur_robot_state.hw_robot_team_is_blue
                             != last_robot_state.hw_robot_team_is_blue)
                 {
-                    // Enter connected network state (disconnecting)
-                    self.connection_state = RadioConnectionState::ConnectedNetwork;
                     defmt::info!("shell state change triggering software reconnect");
+                    self.connection_state = self.reset_software_session().await;
                 }
 
                 // We are at least connected on UART and the wifi network id changed
@@ -395,16 +400,21 @@ impl<
                     let _ = self.process_packets(tx_ctr).await;
                     // if we're stably connected, process packets at 100Hz
 
-                    // If timeout have elapsed since we last got a packet,
-                    // reboot the robot (unless we had a shutdown request).
+                    // If timeout have elapsed since we last got a packet, drop the
+                    // software session and go back to sending hellos (unless we had a
+                    // shutdown request).
                     let cur_time = Instant::now();
                     if !cur_robot_state.shutdown_requested
                         && Instant::duration_since(&cur_time, self.last_software_packet).as_millis()
                             > Self::RESPONSE_FROM_PC_TIMEOUT_MS
                     {
-                        defmt::warn!("software timeout - rebooting...");
-                        Timer::after_millis(100).await;
-                        cortex_m::peripheral::SCB::sys_reset();
+                        defmt::warn!("software timeout - reconnecting");
+                        self.connection_state = self.reset_software_session().await;
+                        self.led_command_pub
+                            .publish(ControlBoardLedCommand::Radio(
+                                RadioStatusLedCommand::ConnectedNetwork,
+                            ))
+                            .await;
                     }
                 }
             }
@@ -490,6 +500,31 @@ impl<
         return Ok(());
     }
 
+    /// Drop the software session (unicast peer) and reopen the hello socket, keeping
+    /// the WiFi link. Returns the state to continue from: `ConnectedNetwork` to
+    /// re-send hellos, or `ConnectedUart` to redo the network connection if the
+    /// sockets could not be reset.
+    async fn reset_software_session(&mut self) -> RadioConnectionState {
+        // Fire-and-forget write acks may still be in flight; let them arrive and drop
+        // them so they are not taken as responses to the socket commands below.
+        self.radio.set_fire_and_forget_sends(false);
+        Timer::after_millis(SESSION_RESET_RX_SETTLE_MS).await;
+        self.radio.discard_pending_rx();
+
+        let res = match self.radio.close_peer().await {
+            Ok(()) => self.radio.open_multicast().await.map_err(|e| ("open hello socket", e)),
+            Err(e) => Err(("close peer", e)),
+        };
+        match res {
+            Ok(()) => RadioConnectionState::ConnectedNetwork,
+            Err((step, e)) => {
+                defmt::warn!("could not reset the software session ({}: {}), reconnecting network", step, e);
+                let _ = self.radio.disconnect_network().await;
+                RadioConnectionState::ConnectedUart
+            }
+        }
+    }
+
     async fn connect_software(&mut self, robot_id: u8, is_blue: bool) -> Result<bool, ()> {
         defmt::info!("sending hello");
 
@@ -506,7 +541,7 @@ impl<
 
         let hello = self
             .radio
-            .wait_hello(Duration::from_millis(Self::RESPONSE_FROM_PC_TIMEOUT_MS))
+            .wait_hello(Duration::from_millis(Self::HELLO_RESPONSE_TIMEOUT_MS))
             .await;
         match hello {
             Ok(hello) => {
