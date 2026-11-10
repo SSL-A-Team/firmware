@@ -10,7 +10,10 @@ cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7.5"
 
 defmt = "1.0.1"
-defmt-rtt = "1.0.0"
+# Never block on a full RTT buffer: probe-rs switches the channel to blocking
+# mode on attach, which otherwise stalls every logging task (incl. the radio)
+# once the host stops draining it.
+defmt-rtt = { version = "1.0.0", features = ["disable-blocking-mode"] }
 
 embassy-executor = { version = "0.10.0", features = [
     "platform-cortex-m",
