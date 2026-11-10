@@ -29,7 +29,13 @@ pub const POSE_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 2.0);
 /// MAX_CURRENT caps the total (feed-forward + loop) wheel current on the motor; the
 /// motor's I2T budget keeps the long-term average at its continuous rating.
 /// Radio-tunable as `WHEEL_VEL_FB`; periodically re-sent to the motors.
-pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(500.0, 0.0, 1.5, 2.0);
+///
+/// TIGERs' velKp = 300 mA per encoder tick per 1 ms (23040 ticks/rev, 0.27 rad/s per
+/// tick), i.e. ~1.1 A/(rad/s), with the same DF45 motor. Our 4000 tick/rev encoder is
+/// 1.57 rad/s per tick at 1 ms, so their gain would put ~1.7 A of quantization noise on
+/// the current; KP = 200 keeps the same ~0.3 A per tick. Higher gains ring when a wheel
+/// unloads or slips (measured: +/-1.2 A current std at 500 vs +/-0.2 A at 150-200).
+pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(200.0, 0.0, 1.5, 2.0);
 
 /// Maximum feed-forward wheel current (A). The body acceleration output is
 /// scaled uniformly so no wheel's feed-forward current exceeds this. Radio-tunable

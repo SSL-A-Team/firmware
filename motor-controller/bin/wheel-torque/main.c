@@ -51,7 +51,6 @@ static uart_logging_status_tx_t uart_logging_status_send;
 static bool params_return_packet_requested = false;
 
 // encoder filter
-static IIRFilter_t encoder_filter;
 
 // motor model
 static MotorModel_t df45_model;
@@ -82,7 +81,7 @@ static bool current_limited = false;
 // state that can fight in the drive's null space at rest. Gains are writable from
 // the control board via CCM_PARAM_VEL_CONTROLLER_*.
 static PidConstants_t vel_velcur_controller_constants = {
-    .kP = 500.0f,  // mA / (rad/s)
+    .kP = 200.0f,  // mA / (rad/s); TIGERs-equivalent current per encoder tick (see controller_params.rs)
     .kI = 0.0f,
     .kD = 0.0f,
     .kI_max = 500.0f,
@@ -192,8 +191,6 @@ int main() {
     quadenc_setup();
     quadenc_reset_encoder_delta();
 
-    // setup the velocity filter
-    iir_filter_init(&encoder_filter, iir_filter_alpha_from_cutoff_hz(200.0f, VELOCITY_LOOP_RATE_S));
 
     ////////////////////////////////////
     //  Current Sense Initialization  //
@@ -538,11 +535,8 @@ static void read_packets() {
 static void update_wheel_vel_est() {
     int32_t enc_delta = quadenc_get_encoder_delta();
     float rads_delta = mm_enc_ticks_to_rad(&df45_model, enc_delta);
-    // float enc_vel_rad_s = quadenc_delta_to_w(enc_delta, VELOCITY_LOOP_RATE_S);
-    float enc_vel_rads = discrete_time_derivative(rads_delta, VELOCITY_LOOP_RATE_S);
-
-    // filter the recovered velocity
-    float enc_rad_s_filt = iir_filter_update(&encoder_filter, enc_vel_rads);
+    // raw 1 ms encoder delta, unfiltered (as TIGERs): filtering adds delay to the P loop
+    float enc_rad_s_filt = discrete_time_derivative(rads_delta, VELOCITY_LOOP_RATE_S);
 
     // set the value
     response_packet.velocity_telemetry.wheel_vel_rads = enc_rad_s_filt;
