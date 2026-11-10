@@ -15,7 +15,7 @@ use ateam_controls::pivot_trajectory::PivotTrajectory;
 use ateam_controls::robot_model::{RobotModel, RobotPhysicalParams};
 use ateam_controls::trajectory::Trajectory;
 use ateam_controls::{
-    z_rotation_mat, ControlsError, Vector2f, Vector3f, Vector4f, Vector6f, Vector8f,
+    ControlsError, Vector2f, Vector3f, Vector4f, Vector6f, Vector8f,
 };
 use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
 use core::f32::consts::PI;
@@ -100,8 +100,6 @@ pub struct ControlContext {
     pub tracking_accel_gain: Vector2f,
     /// Divergence thresholds: [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
     pub tracking_divergence_thresh: Vector4f,
-    /// [LINEAR_VEL_THRESHOLD, ANGULAR_VEL_THRESHOLD]
-    pub friction_comp_vel_thresh: Vector2f,
     /// Active trajectory. t=0 is always "now" (updated via tick each control tick).
     pub trajectory: Option<TrackedTrajectory>,
     /// Last command stored by `run_traj_track`, used to detect command changes.
@@ -154,7 +152,6 @@ impl ControlContext {
             ),
             tracking_accel_gain: controller_params::TRACKING_ACCEL_GAIN,
             tracking_divergence_thresh: controller_params::TRACKING_DIVERGENCE_THRESHOLD,
-            friction_comp_vel_thresh: controller_params::FRICTION_COMP_VEL_THRESHOLD,
             trajectory: None,
             prev_cmd: None,
             trajectory_open_loop: false,
@@ -250,28 +247,11 @@ impl ControlContext {
         Ok(state_prediction)
     }
 
-    /// Feed-forward friction force (global frame) for the commanded body twist.
-    ///
-    /// Both the Coulomb sign and the viscous magnitude come from the commanded
-    /// (target) twist, not the state estimate. Linear compensation is on while the
-    /// commanded local XY speed is at least FRICTION_COMP_VEL_THRESHOLD[0]; angular
-    /// while the commanded angular speed is at least FRICTION_COMP_VEL_THRESHOLD[1].
-    pub fn compute_friction(&self, body_twist: Vector3f) -> Vector3f {
-        let theta = self.state_estimate.z;
-        let cmd_twist_local: Vector3f = z_rotation_mat(-theta) * body_twist;
-
-        let linear_comp_on =
-            hypotf(cmd_twist_local.x, cmd_twist_local.y) >= self.friction_comp_vel_thresh[0];
-        let angular_comp_on = fabsf(cmd_twist_local.z) >= self.friction_comp_vel_thresh[1];
-
-        let fric_twist_local = Vector3f::new(
-            if linear_comp_on { cmd_twist_local.x } else { 0.0 },
-            if linear_comp_on { cmd_twist_local.y } else { 0.0 },
-            if angular_comp_on { cmd_twist_local.z } else { 0.0 },
-        );
-
-        let friction_force_local = self.robot_model.compute_local_friction_force(fric_twist_local);
-        z_rotation_mat(theta) * friction_force_local
+    /// Heading used to rotate the global commanded twist/accel into the local
+    /// frame for the wheel outputs: the estimate advanced by half a control
+    /// period, compensating the rotation during the period (TIGERs `controlXY`).
+    pub fn output_heading(&self) -> f32 {
+        self.state_estimate.z + self.state_estimate[5] * self.dt * 0.5
     }
 
     // -----------------------------------------------------------------------
@@ -488,7 +468,7 @@ impl ControlContext {
         let accel_out: Vector3f =
             self.tracking_accel_gain[0] * traj_accel + self.tracking_accel_gain[1] * pos_pid_feedback;
 
-        // Wheel velocity path: the trajectory velocity (also the friction comp input).
+        // Wheel velocity path: the trajectory velocity (also the friction model input).
         let twist_out: Vector3f = traj_vel;
 
         Ok(ManeuverSetpoints {
@@ -532,9 +512,8 @@ impl ControlContext {
             ParameterName::KF_MEASUREMENT_STD => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::PHYS_WHEEL => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::PHYS_INERTIA => Some(ParameterDataFormat::VEC2_F32),
-            ParameterName::PHYS_MOTOR_MODEL => Some(ParameterDataFormat::VEC2_F32),
-            ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::FRICTION_COMP_VEL_THRESHOLD => Some(ParameterDataFormat::VEC2_F32),
+            ParameterName::PHYS_MOTOR_MODEL => Some(ParameterDataFormat::F32),
+            ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC6_F32),
             ParameterName::TRACKING_ACCEL_GAIN => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
@@ -578,18 +557,17 @@ impl ControlContext {
                 reply.data.vec2_f32 = [phys.mass_kg, phys.iz_kgm2];
             }
             ParameterName::PHYS_MOTOR_MODEL => {
-                reply.data.vec2_f32 = [phys.motor_torque_constant_nmpa, phys.motor_efficiency_factor];
+                reply.data.f32_ = phys.motor_torque_constant_nmpa;
             }
             ParameterName::PHYS_FRICTION_MODEL => {
-                reply.data.vec4_f32 = [
-                    phys.coulomb_friction_linear_n,
-                    phys.coulomb_friction_angular_nm,
-                    phys.viscous_friction_linear_nspm,
-                    phys.viscous_friction_angular_nmsprad,
+                reply.data.vec6_f32 = [
+                    phys.coulomb_xy_n,
+                    phys.viscous_xy_nspm,
+                    phys.coulomb_w_nm,
+                    phys.viscous_w_nmsprad,
+                    phys.efficiency_xy,
+                    phys.efficiency_w,
                 ];
-            }
-            ParameterName::FRICTION_COMP_VEL_THRESHOLD => {
-                reply.data.vec2_f32 = self.friction_comp_vel_thresh.into();
             }
             ParameterName::TRACKING_ACCEL_GAIN => {
                 reply.data.vec2_f32 = self.tracking_accel_gain.into();
@@ -704,24 +682,21 @@ impl ControlContext {
                 let _ = self.robot_model.update_params(p);
             }
             ParameterName::PHYS_MOTOR_MODEL => {
-                let v = unsafe { cmd.data.vec2_f32 };
+                let v = unsafe { cmd.data.f32_ };
                 let mut p = self.robot_model.get_params();
-                p.motor_torque_constant_nmpa = v[0];
-                p.motor_efficiency_factor = v[1];
+                p.motor_torque_constant_nmpa = v;
                 let _ = self.robot_model.update_params(p);
             }
             ParameterName::PHYS_FRICTION_MODEL => {
-                let v = unsafe { cmd.data.vec4_f32 };
+                let v = unsafe { cmd.data.vec6_f32 };
                 let mut p = self.robot_model.get_params();
-                p.coulomb_friction_linear_n = v[0];
-                p.coulomb_friction_angular_nm = v[1];
-                p.viscous_friction_linear_nspm = v[2];
-                p.viscous_friction_angular_nmsprad = v[3];
+                p.coulomb_xy_n = v[0];
+                p.viscous_xy_nspm = v[1];
+                p.coulomb_w_nm = v[2];
+                p.viscous_w_nmsprad = v[3];
+                p.efficiency_xy = v[4];
+                p.efficiency_w = v[5];
                 let _ = self.robot_model.update_params(p);
-            }
-            ParameterName::FRICTION_COMP_VEL_THRESHOLD => {
-                let v = unsafe { cmd.data.vec2_f32 };
-                self.friction_comp_vel_thresh = Vector2f::new(v[0], v[1]);
             }
             ParameterName::TRACKING_ACCEL_GAIN => {
                 let v = unsafe { cmd.data.vec2_f32 };

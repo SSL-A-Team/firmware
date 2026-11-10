@@ -3,6 +3,7 @@ use crate::motion::maneuvers::{requires_vision, ManeuverManager};
 use crate::motion::params::controller_params::{
     EncLagMode, BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_LINEAR, BODY_VEL_CLAMP_ANGULAR,
     BODY_VEL_CLAMP_LINEAR, ENC_LAG_MODE, STOP_STATE_LINEAR_SPEED_LIMIT,
+    WHEEL_CURRENT_SLOPE_LIMIT_A_PER_S,
 };
 use crate::parameter_interface::ParameterInterface;
 use ateam_common_packets::bindings::BodyControlMode::{BCM_ESTOP_BRAKE, BCM_OFF};
@@ -12,7 +13,7 @@ use ateam_common_packets::bindings::{
 };
 use ateam_common_packets::radio::ManeuverExtendedTelemetry;
 use ateam_controls::trajectory::Trajectory;
-use ateam_controls::{ControlsError, Vector3f, Vector4f};
+use ateam_controls::{z_rotation_mat, ControlsError, Vector3f, Vector4f};
 use embassy_time::Instant;
 use nalgebra::SVector;
 
@@ -28,6 +29,8 @@ pub struct BodyController {
     pub body_accel_out_fric_comp: Vector3f,
     pub wheel_vel_out: Vector4f,
     pub wheel_torque_out: Vector4f,
+    /// Slope-limited wheel current output (A); the slope limiter's state.
+    pub wheel_current_out: Vector4f,
     pub telemetry: BodyControlTelemetry,
     pub debug_telemetry: BodyControlExtendedTelemetry,
     /// Commanded maneuver requires vision and vision is inactive: maneuvers are
@@ -46,6 +49,7 @@ impl BodyController {
             body_accel_out_fric_comp: Vector3f::default(),
             wheel_vel_out: Vector4f::default(),
             wheel_torque_out: Vector4f::default(),
+            wheel_current_out: Vector4f::default(),
             telemetry: Default::default(),
             debug_telemetry: Default::default(),
         }
@@ -59,6 +63,7 @@ impl BodyController {
         self.body_accel_out_fric_comp = Vector3f::default();
         self.wheel_vel_out = Vector4f::default();
         self.wheel_torque_out = Vector4f::default();
+        self.wheel_current_out = Vector4f::default();
         self.telemetry = Default::default();
         self.debug_telemetry = Default::default();
     }
@@ -176,48 +181,47 @@ impl BodyController {
             || twist_clamped_z != self.body_twist_out.z;
         self.body_twist_out = Vector3f::new(twist_clamped_x, twist_clamped_y, twist_clamped_z);
 
-        let friction_force_global = self
-            .control_context
-            .compute_friction(self.body_twist_out);
-        let body_accel_fric_comp =
-            self.body_accel_out - self.control_context.robot_model.force_to_accel(&friction_force_global);
+        // Feed-forward output stage after TIGERs Mannheim `CtrlPantheraUpdate`
+        // (Firmware src/robot/ctrl_panthera.c): in the local frame (heading
+        // advanced by half a period), add the friction compensation for the
+        // commanded velocity to the commanded acceleration, divide by the
+        // output efficiency, convert to wheel torque, then slope-limit the
+        // wheel current.
+        let output_heading = self.control_context.output_heading();
+        let to_local = z_rotation_mat(-output_heading);
+        let robot_model = &self.control_context.robot_model;
+        let twist_local: Vector3f = to_local * self.body_twist_out;
+        let accel_local: Vector3f = to_local * self.body_accel_out;
+        let ff_accel_local = robot_model.feedforward_local_accel(twist_local, accel_local);
 
         // Clamp body-level acceleration before converting to wheel torques.
-        let clamped_x = body_accel_fric_comp
-            .x
-            .clamp(-BODY_ACCEL_CLAMP_LINEAR, BODY_ACCEL_CLAMP_LINEAR);
-        let clamped_y = body_accel_fric_comp
-            .y
-            .clamp(-BODY_ACCEL_CLAMP_LINEAR, BODY_ACCEL_CLAMP_LINEAR);
-        let clamped_z = body_accel_fric_comp
-            .z
-            .clamp(-BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_ANGULAR);
-        let accel_clamped = clamped_x != body_accel_fric_comp.x
-            || clamped_y != body_accel_fric_comp.y
-            || clamped_z != body_accel_fric_comp.z;
-        self.body_accel_out_fric_comp = Vector3f::new(clamped_x, clamped_y, clamped_z);
+        let clamped_local = Vector3f::new(
+            ff_accel_local.x.clamp(-BODY_ACCEL_CLAMP_LINEAR, BODY_ACCEL_CLAMP_LINEAR),
+            ff_accel_local.y.clamp(-BODY_ACCEL_CLAMP_LINEAR, BODY_ACCEL_CLAMP_LINEAR),
+            ff_accel_local.z.clamp(-BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_ANGULAR),
+        );
+        let accel_clamped = clamped_local != ff_accel_local;
+        self.body_accel_out_fric_comp = z_rotation_mat(output_heading) * clamped_local;
+
         let body_xy = SVector::<f32, 2>::new(self.body_twist_out.x, self.body_twist_out.y);
-        self.wheel_vel_out =
+        let vel_cmd_global =
             if matches!(ENC_LAG_MODE, EncLagMode::FeedforwardOnly | EncLagMode::Full) {
                 let compensated_xy = self.control_context.enc_lag.invert(&body_xy);
-                let compensated_twist =
-                    Vector3f::new(compensated_xy.x, compensated_xy.y, self.body_twist_out.z);
-                self.control_context
-                    .robot_model
-                    .transform_vel2wheel_global(self.control_context.state_estimate.z)
-                    * compensated_twist
+                Vector3f::new(compensated_xy.x, compensated_xy.y, self.body_twist_out.z)
             } else {
-                self.control_context
-                    .robot_model
-                    .transform_vel2wheel_global(self.control_context.state_estimate.z)
-                    * self.body_twist_out
+                self.body_twist_out
             };
+        self.wheel_vel_out = robot_model.transform_vel2wheel_local() * (to_local * vel_cmd_global);
 
-        self.wheel_torque_out = self
-            .control_context
-            .robot_model
-            .transform_accel2wheel_global(self.control_context.state_estimate.z)
-            * self.body_accel_out_fric_comp;
+        let target_currents = robot_model
+            .torques_to_currents(robot_model.transform_accel2wheel_local() * clamped_local);
+        let max_step = WHEEL_CURRENT_SLOPE_LIMIT_A_PER_S * self.control_context.dt;
+        for i in 0..4 {
+            let step = (target_currents[i] - self.wheel_current_out[i]).clamp(-max_step, max_step);
+            self.wheel_current_out[i] += step;
+        }
+        self.wheel_torque_out =
+            self.wheel_current_out * robot_model.get_params().motor_torque_constant_nmpa;
 
         if !matches!(ENC_LAG_MODE, EncLagMode::Disabled) {
             self.control_context.enc_lag.step(&body_xy);
@@ -303,9 +307,7 @@ impl BodyController {
     }
 
     pub fn get_wheel_currents(&self) -> Vector4f {
-        self.control_context
-            .robot_model
-            .torques_to_currents(self.wheel_torque_out)
+        self.wheel_current_out
     }
 
     pub fn get_control_telem(&self) -> BodyControlTelemetry {

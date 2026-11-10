@@ -43,15 +43,14 @@ pub const TRACKING_ACCEL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
 /// Radio-tunable as `TRACKING_DIVERGENCE_THRESHOLD`.
 pub const TRACKING_DIVERGENCE_THRESHOLD: Vector4f = Vector4f::new(1.0, 1.57, 5.0, 10.0);
 
-/// [LINEAR_VEL_THRESHOLD (m/s), ANGULAR_VEL_THRESHOLD (rad/s)]
-/// Friction compensation is applied only while the commanded velocity is at or
-/// above these thresholds: linear on the local XY speed magnitude, angular on |w|.
-/// Radio-tunable as `FRICTION_COMP_VEL_THRESHOLD`.
-pub const FRICTION_COMP_VEL_THRESHOLD: Vector2f = Vector2f::new(0.01, 0.001);
+/// Maximum wheel current change per second for the feed-forward torque output
+/// (TIGERs `CtrlPantheraUpdate`: 0.5 A per 1 ms control tick).
+pub const WHEEL_CURRENT_SLOPE_LIMIT_A_PER_S: f32 = 500.0;
 
 /// Maximum magnitude of the body-level acceleration output [linear (m/s²), angular (rad/s²)].
-/// The friction-compensated acceleration is clamped to these limits before conversion
-/// to wheel torques. Prevents runaway current commands from large PID errors.
+/// The feed-forward output acceleration (local frame, friction and efficiency
+/// applied) is clamped per axis to these limits before conversion to wheel torques.
+/// Prevents runaway current commands from large PID errors.
 pub const BODY_ACCEL_CLAMP_LINEAR: f32 = 20.0; // m/s²
 pub const BODY_ACCEL_CLAMP_ANGULAR: f32 = 100.0; // rad/s²
 
