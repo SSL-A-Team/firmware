@@ -4,7 +4,6 @@ use crate::motion::params::controller_params::{
     TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL,
 };
 use crate::motion::accel_trajectory::AccelTrajectory;
-use crate::motion::pid::PidController;
 use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
 use ateam_common_packets::radio::ManeuverCommand;
 use ateam_controls::defaults::{DEFAULT_EKF_BUFF_LEN, DEFAULT_VISION_BUFF_LEN, EKF_INPUT_LEN, EKF_MEAS_LEN, EKF_STATE_LEN};
@@ -15,7 +14,7 @@ use ateam_controls::pivot_trajectory::PivotTrajectory;
 use ateam_controls::robot_model::{RobotModel, RobotPhysicalParams};
 use ateam_controls::trajectory::Trajectory;
 use ateam_controls::{
-    ControlsError, Vector2f, Vector3f, Vector4f, Vector6f, Vector8f,
+    ControlsError, Vector3f, Vector4f, Vector6f, Vector8f,
 };
 use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
 use core::f32::consts::PI;
@@ -95,9 +94,14 @@ pub enum TrackingDivergenceState {
 pub struct ControlContext {
     pub robot_model: RobotModel,
     pub state_estimator: StateEstimator<DEFAULT_EKF_BUFF_LEN, DEFAULT_VISION_BUFF_LEN>,
-    pub pose_pid_controller: PidController<3>,
-    /// Tracking accel (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
-    pub tracking_accel_gain: Vector2f,
+    /// XY position feedback [K, MAX, ANTI_JITTER] (see controller_params::POSE_FB_XY)
+    pub pose_fb_xy: Vector3f,
+    /// Angular feedback [POS_K, POS_MAX, ANTI_JITTER, VEL_K] (see controller_params::POSE_FB_W)
+    pub pose_fb_w: Vector4f,
+    /// Wheel velocity loop [KP, KI, ANTI_JITTER, MAX_CURRENT], forwarded to the motor controllers
+    pub wheel_vel_fb: Vector4f,
+    /// Feed-forward wheel current limit (A)
+    pub wheel_ff_current_limit: f32,
     /// Divergence thresholds: [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
     pub tracking_divergence_thresh: Vector4f,
     /// Active trajectory. t=0 is always "now" (updated via tick each control tick).
@@ -146,11 +150,10 @@ impl ControlContext {
             robot_model: RobotModel::new(RobotPhysicalParams::default())
                 .expect("Failed to create RobotModel, check that parameters are valid"),
             state_estimator: StateEstimator::<DEFAULT_EKF_BUFF_LEN, DEFAULT_VISION_BUFF_LEN>::default(),
-            pose_pid_controller: PidController::<3>::from_gains_matrix_with_anti_jitter(
-                &controller_params::pose_pid_gains(),
-                Some(controller_params::POSE_PID_ANTI_JITTER_THRESH),
-            ),
-            tracking_accel_gain: controller_params::TRACKING_ACCEL_GAIN,
+            pose_fb_xy: controller_params::POSE_FB_XY,
+            pose_fb_w: controller_params::POSE_FB_W,
+            wheel_vel_fb: controller_params::WHEEL_VEL_FB,
+            wheel_ff_current_limit: controller_params::WHEEL_FF_CURRENT_LIMIT_A,
             tracking_divergence_thresh: controller_params::TRACKING_DIVERGENCE_THRESHOLD,
             trajectory: None,
             prev_cmd: None,
@@ -177,7 +180,6 @@ impl ControlContext {
             SVector::<f32, 3>::zeros(),
             SVector::<f32, 3>::zeros(),
         );
-        self.pose_pid_controller.reset();
         self.trajectory = None;
         self.prev_cmd = None;
         self.trajectory_open_loop = false;
@@ -446,30 +448,49 @@ impl ControlContext {
         traj_state: Vector6f,
         traj_accel: Vector3f,
     ) -> Result<ManeuverSetpoints, ControlsError> {
+        // Trajectory tracking after TIGERs Mannheim `controlXY` / `controlW`
+        // (Firmware src/robot/ctrl_panthera.c), in the global frame. Position
+        // error feeds the velocity setpoint; the acceleration output is the
+        // trajectory feed-forward only. Both fade to zero inside the
+        // anti-jitter thresholds so the outputs are exactly zero at rest.
         let state_estimate = self.state_estimate;
         let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
-        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-
-        let mut traj_pos: Vector3f = traj_state.fixed_rows::<3>(0).into();
+        let traj_pos: Vector3f = traj_state.fixed_rows::<3>(0).into();
         let traj_vel: Vector3f = traj_state.fixed_rows::<3>(3).into();
 
-        // Wrap θ to avoid PID over-rotation at the ±π discontinuity.
-        traj_pos.z = pose_estimate.z + remainderf(traj_pos.z - pose_estimate.z, 2.0 * PI);
+        // XY: P on position, clamped in magnitude, then anti-jitter scaled.
+        let [k_xy, max_xy, aj_xy] = [self.pose_fb_xy[0], self.pose_fb_xy[1], self.pose_fb_xy[2]];
+        let err_x = traj_pos.x - pose_estimate.x;
+        let err_y = traj_pos.y - pose_estimate.y;
+        let err_xy = hypotf(err_x, err_y);
+        let mut fb_x = err_x * k_xy;
+        let mut fb_y = err_y * k_xy;
+        let fb_xy = hypotf(fb_x, fb_y);
+        if fb_xy > max_xy && fb_xy > 0.0 {
+            fb_x *= max_xy / fb_xy;
+            fb_y *= max_xy / fb_xy;
+        }
+        let scale_xy = anti_jitter_scale(err_xy, aj_xy);
 
-        let twist_error = traj_vel - twist_estimate;
-        let pos_pid_feedback = self.pose_pid_controller.calculate_with_derivative(
-            &traj_pos,
-            &pose_estimate,
-            &twist_error,
-            self.dt,
+        // W: P on orientation (clamped) plus P on angular velocity, anti-jitter
+        // scaled by the orientation error.
+        let [k_w, max_w, aj_w, k_vel_w] =
+            [self.pose_fb_w[0], self.pose_fb_w[1], self.pose_fb_w[2], self.pose_fb_w[3]];
+        let err_w = remainderf(traj_pos.z - pose_estimate.z, 2.0 * PI);
+        let pos_fb_w = (err_w * k_w).clamp(-max_w, max_w);
+        let vel_fb_w = (traj_vel.z - state_estimate[5]) * k_vel_w;
+        let scale_w = anti_jitter_scale(fabsf(err_w), aj_w);
+
+        let twist_out = Vector3f::new(
+            traj_vel.x + fb_x * scale_xy,
+            traj_vel.y + fb_y * scale_xy,
+            traj_vel.z + (pos_fb_w + vel_fb_w) * scale_w,
         );
-
-        // Wheel torque path: gain-weighted trajectory accel FF + PID FB.
-        let accel_out: Vector3f =
-            self.tracking_accel_gain[0] * traj_accel + self.tracking_accel_gain[1] * pos_pid_feedback;
-
-        // Wheel velocity path: the trajectory velocity (also the friction model input).
-        let twist_out: Vector3f = traj_vel;
+        let accel_out = Vector3f::new(
+            traj_accel.x * scale_xy,
+            traj_accel.y * scale_xy,
+            traj_accel.z * scale_w,
+        );
 
         Ok(ManeuverSetpoints {
             body_twist: twist_out,
@@ -514,10 +535,11 @@ impl ControlContext {
             ParameterName::PHYS_INERTIA => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::PHYS_MOTOR_MODEL => Some(ParameterDataFormat::F32),
             ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC6_F32),
-            ParameterName::TRACKING_ACCEL_GAIN => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
-            ParameterName::POSE_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::POSE_FB_XY => Some(ParameterDataFormat::VEC3_F32),
+            ParameterName::POSE_FB_W => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::WHEEL_VEL_FB => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::WHEEL_FF_CURRENT_LIMIT => Some(ParameterDataFormat::F32),
             ParameterName::VISION_SEED_SAMPLES => Some(ParameterDataFormat::F32),
             _ => None,
         }
@@ -569,28 +591,23 @@ impl ControlContext {
                     phys.efficiency_w,
                 ];
             }
-            ParameterName::TRACKING_ACCEL_GAIN => {
-                reply.data.vec2_f32 = self.tracking_accel_gain.into();
-            }
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => {
                 reply.data.vec4_f32 = self.tracking_divergence_thresh.into();
             }
             ParameterName::VISION_SEED_SAMPLES => {
                 reply.data.f32_ = self.state_estimator.vision_filter.get_params().seed_samples as f32;
             }
-            ParameterName::POSE_FB_PIDII_LINEAR | ParameterName::POSE_FB_PIDII_ANGULAR => {
-                let gain = self.pose_pid_controller.get_gain();
-                let row = match name {
-                    ParameterName::POSE_FB_PIDII_LINEAR => 0,
-                    _ => 2,
-                };
-                reply.data.vec5_f32 = [
-                    gain[(row, 0)],
-                    gain[(row, 1)],
-                    gain[(row, 2)],
-                    gain[(row, 3)],
-                    gain[(row, 4)],
-                ];
+            ParameterName::POSE_FB_XY => {
+                reply.data.vec3_f32 = self.pose_fb_xy.into();
+            }
+            ParameterName::POSE_FB_W => {
+                reply.data.vec4_f32 = self.pose_fb_w.into();
+            }
+            ParameterName::WHEEL_VEL_FB => {
+                reply.data.vec4_f32 = self.wheel_vel_fb.into();
+            }
+            ParameterName::WHEEL_FF_CURRENT_LIMIT => {
+                reply.data.f32_ = self.wheel_ff_current_limit;
             }
             _ => unreachable!(),
         }
@@ -698,10 +715,6 @@ impl ControlContext {
                 p.efficiency_w = v[5];
                 let _ = self.robot_model.update_params(p);
             }
-            ParameterName::TRACKING_ACCEL_GAIN => {
-                let v = unsafe { cmd.data.vec2_f32 };
-                self.tracking_accel_gain = Vector2f::new(v[0], v[1]);
-            }
             ParameterName::TRACKING_DIVERGENCE_THRESHOLD => {
                 let v = unsafe { cmd.data.vec4_f32 };
                 self.tracking_divergence_thresh = Vector4f::new(v[0], v[1], v[2], v[3]);
@@ -717,22 +730,41 @@ impl ControlContext {
                 // Takes effect on the next vision reseed (apply_command resets afterwards).
                 self.state_estimator.vision_filter = VisionFilter::new(params);
             }
-            ParameterName::POSE_FB_PIDII_LINEAR | ParameterName::POSE_FB_PIDII_ANGULAR => {
-                let v = unsafe { cmd.data.vec5_f32 };
-                let mut gain = self.pose_pid_controller.get_gain();
-                if cmd.parameter_name == ParameterName::POSE_FB_PIDII_LINEAR {
-                    for col in 0..5 {
-                        gain[(0, col)] = v[col];
-                        gain[(1, col)] = v[col];
-                    }
-                } else {
-                    for col in 0..5 {
-                        gain[(2, col)] = v[col];
-                    }
+            ParameterName::POSE_FB_XY => {
+                let v = unsafe { cmd.data.vec3_f32 };
+                if v.iter().all(|x| x.is_finite() && *x >= 0.0) {
+                    self.pose_fb_xy = Vector3f::new(v[0], v[1], v[2]);
                 }
-                self.pose_pid_controller.set_gain(gain);
+            }
+            ParameterName::POSE_FB_W => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                if v.iter().all(|x| x.is_finite() && *x >= 0.0) {
+                    self.pose_fb_w = Vector4f::new(v[0], v[1], v[2], v[3]);
+                }
+            }
+            ParameterName::WHEEL_VEL_FB => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                if v.iter().all(|x| x.is_finite() && *x >= 0.0) {
+                    self.wheel_vel_fb = Vector4f::new(v[0], v[1], v[2], v[3].min(6.3));
+                }
+            }
+            ParameterName::WHEEL_FF_CURRENT_LIMIT => {
+                let v = unsafe { cmd.data.f32_ };
+                if v.is_finite() && v >= 0.0 {
+                    self.wheel_ff_current_limit = v;
+                }
             }
             _ => unreachable!(),
         }
+    }
+}
+
+/// TIGERs `MapToRangef32(0, thresh, 0, 1, err)`: linear 0..1 ramp over
+/// [0, thresh], 1 above it (and always 1 when the threshold is disabled).
+fn anti_jitter_scale(err_abs: f32, thresh: f32) -> f32 {
+    if thresh <= 0.0 {
+        1.0
+    } else {
+        (err_abs / thresh).clamp(0.0, 1.0)
     }
 }

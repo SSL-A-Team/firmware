@@ -1,41 +1,39 @@
-use ateam_controls::{Vector2f, Vector3f, Vector4f, Vector5f};
+use ateam_controls::{Vector3f, Vector4f};
 use embassy_time::Duration;
-use nalgebra::{Matrix3x5};
 
 //////////////////////////////////
 //  trajectory tracking control  //
 //////////////////////////////////
 
-// Pose PID gains per row: [Kp, Ki, Kd, Ki_err_min, Ki_err_max]. The PID acts on
-// the trajectory-vs-estimate pose error (with twist error as the derivative) for
-// every closed-loop trajectory-tracking maneuver.
-const LINEAR_POSE_PID_GAINS: Vector5f = Vector5f::new(300.0, 0.0, 7.0, 0.0, 0.0);
-const ANGULAR_POSE_PID_GAINS: Vector5f = Vector5f::new(400.0, 0.0, 30.0, 0.0, 0.0);
+// Trajectory tracking feedback after TIGERs Mannheim `controlXY` / `controlW`
+// (Firmware src/robot/ctrl_panthera.c, defaults from main2019/robot_impl.c,
+// configCtrlDirectDrive). Position error is fed into the velocity setpoint (the
+// wheel velocity loops do the correcting); the wheel torque path carries only the
+// trajectory acceleration feed-forward. Inside the anti-jitter threshold both the
+// feedback and the acceleration feed-forward are scaled linearly to zero.
 
-pub fn pose_pid_gains() -> Matrix3x5<f32> {
-    Matrix3x5::from_rows(&[
-        LINEAR_POSE_PID_GAINS.transpose(),
-        LINEAR_POSE_PID_GAINS.transpose(),
-        ANGULAR_POSE_PID_GAINS.transpose(),
-    ])
-}
+/// [K (1/s), MAX (m/s), ANTI_JITTER (m)]: v_xy += clamp(K * pos_err_xy, MAX).
+/// Radio-tunable as `POSE_FB_XY`.
+// MAX lowered from TIGERs' 2.0 m/s while bringing up (a 0.3 m vision jump otherwise
+// commands 2 m/s; see controls/analysis/feedback_sim.py).
+pub const POSE_FB_XY: Vector3f = Vector3f::new(8.0, 0.3, 0.01);
 
-/// Per-axis anti-jitter thresholds for the body pose PID controller, in the
-/// same units as the pose error: [x (m), y (m), theta (rad)]. When the
-/// absolute pose error on an axis is below the threshold, the PID output for
-/// that axis is linearly scaled toward zero, matching the fixed-point PI
-/// anti-jitter behavior on the motor controllers.
-pub const POSE_PID_ANTI_JITTER_THRESH: Vector3f = Vector3f::new(0.001, 0.001, 0.01);
+/// [POS_K (1/s), POS_MAX (rad/s), ANTI_JITTER (rad), VEL_K]:
+/// w += clamp(POS_K * theta_err, POS_MAX) + VEL_K * (w_traj - w_est).
+/// Radio-tunable as `POSE_FB_W`.
+// POS_MAX lowered from TIGERs' 8 rad/s while bringing up.
+pub const POSE_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 2.0);
 
-/// Tracking acceleration (wheel torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
-/// body accel = FF * trajectory accel + FB * pose PID feedback, so [1, 0] is
-/// feedforward only, [0, 1] feedback only and [1, 1] both.
-/// Radio-tunable as `TRACKING_ACCEL_GAIN`.
-///
-/// The tracking velocity (wheel velocity) path has no gains: the body velocity
-/// output is always the trajectory velocity. Whether the wheels run their
-/// velocity loop on it is chosen by the `wheel_vel_control_enabled` radio bit.
-pub const TRACKING_ACCEL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
+/// Wheel velocity loop on the motor controllers [KP (mA/(rad/s)), KI (mA/rad),
+/// ANTI_JITTER (rad/s), MAX_CURRENT (A)]. P-only like TIGERs (velKi = 0).
+/// MAX_CURRENT caps the total (feed-forward + loop) wheel current on the motor.
+/// Radio-tunable as `WHEEL_VEL_FB`; periodically re-sent to the motors.
+pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(500.0, 0.0, 1.5, 2.0);
+
+/// Maximum feed-forward wheel current (A). The body acceleration output is
+/// scaled uniformly so no wheel's feed-forward current exceeds this. Radio-tunable
+/// as `WHEEL_FF_CURRENT_LIMIT`.
+pub const WHEEL_FF_CURRENT_LIMIT_A: f32 = 2.0;
 
 /// [ERROR_POS_LINEAR (m), ERROR_POS_ANGULAR (rad), ERROR_VEL_LINEAR (m/s), ERROR_VEL_ANGULAR (rad/s)]
 /// Trajectory-vs-estimate errors above which closed-loop tracking is considered

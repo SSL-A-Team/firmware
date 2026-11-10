@@ -1,6 +1,6 @@
 use ateam_common_packets::{
     bindings::{
-        BasicControl, BasicTelemetry, BodyControlCommand, BodyControlMode, CcmMotionControlType,
+        BasicControl, BasicTelemetry, BodyControlCommand, BodyControlMode, CcmMotionControlType, CcmParameter,
         ExtendedTelemetry, KickerTelemetry, PowerTelemetry,
     },
     radio::TelemetryPacket,
@@ -32,6 +32,8 @@ use crate::{
 include_external_cpp_bin! {WHEEL_FW_IMG, "wheel-torque.bin"}
 
 const MAX_CURRENT_MA: f32 = 5000.0; // mA
+/// Period (control ticks) for re-sending wheel velocity loop parameters to the motors.
+const WHEEL_PARAM_RESEND_PERIOD_TICKS: u16 = 50;
 
 const MAX_TX_PACKET_SIZE: usize = 80;
 const TX_BUF_DEPTH: usize = 3;
@@ -239,6 +241,23 @@ impl<
         self.motor_bl.send_motion_command();
         self.motor_br.send_motion_command();
         self.motor_fr.send_motion_command();
+
+        // Periodically (re)send the wheel velocity loop parameters, one per tick,
+        // so they survive motor resets and dropped UART packets.
+        let phase = seq_number % WHEEL_PARAM_RESEND_PERIOD_TICKS;
+        if phase < 4 {
+            let fb = robot_controller.control_context.wheel_vel_fb;
+            let (param, value) = match phase {
+                0 => (CcmParameter::CCM_PARAM_VEL_CONTROLLER_GAIN_P, fb[0]),
+                1 => (CcmParameter::CCM_PARAM_VEL_CONTROLLER_GAIN_I, fb[1]),
+                2 => (CcmParameter::CCM_PARAM_VEL_CONTROLLER_ANTIJITTER, fb[2]),
+                _ => (CcmParameter::CCM_PARAM_MOTION_CURRENT_LIMIT, fb[3] * 1000.0),
+            };
+            self.motor_fl.send_param_write_f32(param, value);
+            self.motor_bl.send_param_write_f32(param, value);
+            self.motor_br.send_param_write_f32(param, value);
+            self.motor_fr.send_param_write_f32(param, value);
+        }
 
         let front_left_motor_error = self.motor_fl.read_is_error() as u32;
         let back_left_motor_error = self.motor_bl.read_is_error() as u32;

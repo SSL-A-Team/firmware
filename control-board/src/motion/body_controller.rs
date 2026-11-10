@@ -213,8 +213,19 @@ impl BodyController {
             };
         self.wheel_vel_out = robot_model.transform_vel2wheel_local() * (to_local * vel_cmd_global);
 
-        let target_currents = robot_model
+        // Scale the body acceleration uniformly (direction preserved) so no
+        // wheel's feed-forward current exceeds the limit.
+        let mut target_currents = robot_model
             .torques_to_currents(robot_model.transform_accel2wheel_local() * clamped_local);
+        let max_current = target_currents.amax();
+        let current_limit = self.control_context.wheel_ff_current_limit;
+        let current_limited = max_current > current_limit;
+        if current_limited {
+            let scale = current_limit / max_current;
+            target_currents *= scale;
+            self.body_accel_out_fric_comp *= scale;
+        }
+        let accel_clamped = accel_clamped || current_limited;
         let max_step = WHEEL_CURRENT_SLOPE_LIMIT_A_PER_S * self.control_context.dt;
         for i in 0..4 {
             let step = (target_currents[i] - self.wheel_current_out[i]).clamp(-max_step, max_step);

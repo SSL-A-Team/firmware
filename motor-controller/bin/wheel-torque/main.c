@@ -77,16 +77,23 @@ static bool current_limited = false;
 
 // kP saturation point: MAX_CURR_WHEEL_TURNING / (v_body_m_s / WHEEL_RADIUS_M)
 //   = 6300 mA / (1.0 m/s / 0.030 m) = 6300 / 33.33 = 189.0 mA/(rad/s) saturates at 1.0 m/s body error
-const PidConstants_t vel_velcur_controller_constants = {
-    .kP = 5.0f,
-    .kI = 50.0f,
+// P-only wheel velocity loop after TIGERs Mannheim (Firmware main2019/dev/motors.c:
+// velKi = 0, velAntiJitter = 1.5 rad/s). No integrator, so the four wheels hold no
+// state that can fight in the drive's null space at rest. Gains are writable from
+// the control board via CCM_PARAM_VEL_CONTROLLER_*.
+static PidConstants_t vel_velcur_controller_constants = {
+    .kP = 500.0f,  // mA / (rad/s)
+    .kI = 0.0f,
     .kD = 0.0f,
     .kI_max = 500.0f,
     .kI_min = -500.0f,
-    .anti_jitter_thresh = (float) M_PI / 2.0f,
+    .anti_jitter_thresh = 1.5f,  // rad/s
 };
 
 static Pid_t vel_velcur_controller;
+// Total commanded wheel current limit (mA) in CURRENT / VELOCITY_CURRENT modes,
+// applied before the hardware limits. Writable via CCM_PARAM_MOTION_CURRENT_LIMIT.
+static float motion_current_limit_ma = 2000.0f;
 static float vel_cur_component = 0.0;
 
 // legacy velocity control model
@@ -134,6 +141,7 @@ static void update_wheel_vel_est();
 static void update_current_sense_telemetry();
 static float do_vel_control();
 static void do_vel_cur_control();
+static int16_t clamp_motion_current(float current_ma);
 
 static void update_errors();
 static void read_packets();
@@ -328,7 +336,7 @@ int main() {
                 pwm6step_set_voltage((int16_t) motor_command_packet.setpoint);
                 break;
             case CCM_MCT_CURRENT:
-                int16_t motor_current = motor_command_packet.current_setpoint_ma;
+                int16_t motor_current = clamp_motion_current(motor_command_packet.current_setpoint_ma);
                 motor_current = apply_current_limits(motor_current);
 
                 response_packet.current_telemetry.current_setpoint_ma = motor_current;
@@ -344,7 +352,7 @@ int main() {
                 do_vel_cur_control();
 
                 // add the feedforward current to the velocity PID output
-                int16_t joint_motor_current = motor_command_packet.current_setpoint_ma + (int16_t) vel_cur_component;
+                int16_t joint_motor_current = clamp_motion_current((float) motor_command_packet.current_setpoint_ma + vel_cur_component);
                 joint_motor_current = apply_current_limits(joint_motor_current);
 
                 response_packet.current_telemetry.current_setpoint_ma = joint_motor_current;
@@ -458,8 +466,40 @@ static void read_packets() {
 
             motor_command_packet = command_packet.data.motion;
         } else if (command_packet.type == CCM_CMD_PARAMS) {
-            // just sends the firmware hash back by default for now
-            params_return_packet_requested = true;
+            CcmParameterPacket param = command_packet.data.param;
+            if (param.parameter_operation == CCM_PARAMOP_WRITE) {
+                float v = param.value.val_f32;
+                bool changed = true;
+                switch (param.parameter) {
+                    case CCM_PARAM_VEL_CONTROLLER_GAIN_P:
+                        changed = vel_velcur_controller_constants.kP != v;
+                        vel_velcur_controller_constants.kP = v;
+                        break;
+                    case CCM_PARAM_VEL_CONTROLLER_GAIN_I:
+                        changed = vel_velcur_controller_constants.kI != v;
+                        vel_velcur_controller_constants.kI = v;
+                        break;
+                    case CCM_PARAM_VEL_CONTROLLER_ANTIJITTER:
+                        changed = vel_velcur_controller_constants.anti_jitter_thresh != v;
+                        vel_velcur_controller_constants.anti_jitter_thresh = v;
+                        break;
+                    case CCM_PARAM_MOTION_CURRENT_LIMIT:
+                        if (v >= 0.0f && v <= (float) MAX_CURR_WHEEL_TURNING) {
+                            motion_current_limit_ma = v;
+                        }
+                        changed = false;
+                        break;
+                    default:
+                        changed = false;
+                        break;
+                }
+                if (changed) {
+                    vel_velcur_controller.eI = 0.0f;
+                }
+            } else {
+                // reads just send the firmware hash back for now
+                params_return_packet_requested = true;
+            }
         }
     }
 }
@@ -489,6 +529,15 @@ static void update_current_sense_telemetry() {
     cs_telemetry.vel_est_used_drads = pwm6step_get_vel_est_used_drads();
     cs_telemetry.duty_arr = pwm6step_get_mean_duty_arr();
     cs_telemetry.cs_flags = pwm6step_get_current_sense_flags();
+}
+
+static int16_t clamp_motion_current(float current_ma) {
+    if (current_ma > motion_current_limit_ma) {
+        current_ma = motion_current_limit_ma;
+    } else if (current_ma < -motion_current_limit_ma) {
+        current_ma = -motion_current_limit_ma;
+    }
+    return (int16_t) current_ma;
 }
 
 static void do_vel_cur_control() {

@@ -400,6 +400,28 @@ impl<
         }
     }
 
+    /// Write an f32 parameter on the motor controller (fire and forget; callers
+    /// re-send periodically).
+    pub fn send_param_write_f32(&mut self, parameter: CcmParameter::Type, value: f32) {
+        unsafe {
+            let mut cmd: CcmCommand = { MaybeUninit::zeroed().assume_init() };
+
+            cmd.type_ = CCM_CMD_PARAMS;
+            cmd.crc32 = 0;
+            cmd.data.param.parameter = parameter;
+            cmd.data.param.parameter_operation = CcmParameterOperation::CCM_PARAMOP_WRITE;
+            cmd.data.param.parameter_direction = CcmParameterDirection::CCM_PARAMDIR_COMMAND;
+            cmd.data.param.value.val_f32 = value;
+
+            let struct_bytes = core::slice::from_raw_parts(
+                (&cmd as *const CcmCommand) as *const u8,
+                core::mem::size_of::<CcmCommand>(),
+            );
+
+            self.stm32_uart_interface.send_or_discard_data(struct_bytes);
+        }
+    }
+
     pub fn send_motion_command(&mut self) {
         unsafe {
             let mut cmd: CcmCommand = { MaybeUninit::zeroed().assume_init() };
