@@ -191,24 +191,26 @@ fn rx_accum_next_event(accum: &mut Vec<u8, RX_ACCUM_LEN>) -> Option<(usize, usiz
 
         // The module can emit the response to a concurrent binary write
         // ("\r\n+USOWB:<id>,<len>\r\nOK\r\n") between the event header and its
-        // payload. Splice it out so the payload is contiguous again.
-        let pending = &accum[data_start..];
-        let ack_prefix_len = USOWB_ACK_PREFIX.len().min(pending.len());
-        if pending[..ack_prefix_len] == USOWB_ACK_PREFIX[..ack_prefix_len] {
-            if pending.len() < USOWB_ACK_PREFIX.len() {
-                return None;
-            }
-            let window = &pending[..pending.len().min(USOWB_ACK_MAX_LEN)];
-            match window.windows(USOWB_ACK_SUFFIX.len()).position(|w| w == USOWB_ACK_SUFFIX) {
+        // payload or inside the payload. Splice it out so the payload is contiguous.
+        let window_end = accum.len().min(data_start + data_len + USOWB_ACK_MAX_LEN);
+        if let Some(rel) = accum[data_start..window_end]
+            .windows(USOWB_ACK_PREFIX.len())
+            .position(|w| w == USOWB_ACK_PREFIX)
+        {
+            let ack_start = data_start + rel;
+            let ack_window = &accum[ack_start..accum.len().min(ack_start + USOWB_ACK_MAX_LEN)];
+            match ack_window
+                .windows(USOWB_ACK_SUFFIX.len())
+                .position(|w| w == USOWB_ACK_SUFFIX)
+            {
                 Some(pos) => {
-                    rx_accum_remove(accum, data_start, pos + USOWB_ACK_SUFFIX.len());
+                    rx_accum_remove(accum, ack_start, pos + USOWB_ACK_SUFFIX.len());
                     continue;
                 }
-                None if pending.len() < USOWB_ACK_MAX_LEN => return None,
+                None if ack_window.len() < USOWB_ACK_MAX_LEN => return None,
                 None => {}
             }
         }
-
         let data_end = data_start + data_len;
         if data_len == 0 || data_end > RX_ACCUM_LEN {
             rx_accum_consume(accum, 1);
