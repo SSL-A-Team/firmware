@@ -95,6 +95,7 @@ static Pid_t vel_velcur_controller;
 static float motion_current_limit_ma = 2000.0f;
 static float vel_cur_component = 0.0;
 static IIRFilter_t encoder_filter;
+static uint32_t enc_prev_pwm_periods = 0;
 
 // legacy velocity control model
 static GainScheduledPid_t vel_pid;
@@ -537,9 +538,19 @@ static void read_packets() {
 static void update_wheel_vel_est() {
     int32_t enc_delta = quadenc_get_encoder_delta();
     float rads_delta = mm_enc_ticks_to_rad(&df45_model, enc_delta);
+    // Divide by the measured interval, not the nominal 1 ms: an overrunning loop
+    // iteration (the main loop competes with the 40 kHz current ISR) otherwise
+    // inflates the speed by the overrun ratio (measured up to 1.5x while driving).
+    uint32_t pwm_periods = pwm6step_get_pwm_period_count();
+    uint32_t elapsed_periods = pwm_periods - enc_prev_pwm_periods;
+    enc_prev_pwm_periods = pwm_periods;
+    if (elapsed_periods == 0) {
+        elapsed_periods = PWM_FREQ_HZ / 1000;
+    }
+    float dt_s = (float) elapsed_periods * (1.0f / (float) PWM_FREQ_HZ);
     // 1 ms encoder delta (as TIGERs), low-passed: our 4000 tick/rev encoder quantizes the
     // 1 ms speed to 1.57 rad/s, which the P loop turns into broadband current noise.
-    float enc_vel_rads = discrete_time_derivative(rads_delta, VELOCITY_LOOP_RATE_S);
+    float enc_vel_rads = rads_delta / dt_s;
     float enc_rad_s_filt = iir_filter_update(&encoder_filter, enc_vel_rads);
 
     // set the value
