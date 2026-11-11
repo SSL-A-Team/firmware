@@ -120,6 +120,7 @@ void pwm6step_set_output_current_limit(int16_t output_current_limit_ma);
 
 // timekeeping
 bool pwm6step_1ms_flag();
+uint32_t pwm6step_get_pwm_period_count();
 
 // hall velocity estimate
 bool pwm6step_hall_rps_estimate_valid();
