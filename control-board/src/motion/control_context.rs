@@ -102,6 +102,9 @@ pub struct ControlContext {
     pub wheel_vel_fb: Vector4f,
     /// Feed-forward wheel current limit (A)
     pub wheel_ff_current_limit: f32,
+    /// Effective per-wheel feed-forward current limits (A) after thermal derating;
+    /// set by the control task each tick from `WheelThermalBudget`.
+    pub wheel_ff_current_limits: Vector4f,
     /// Divergence thresholds: [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
     pub tracking_divergence_thresh: Vector4f,
     /// Active trajectory. t=0 is always "now" (updated via tick each control tick).
@@ -154,6 +157,7 @@ impl ControlContext {
             pose_fb_w: controller_params::POSE_FB_W,
             wheel_vel_fb: controller_params::WHEEL_VEL_FB,
             wheel_ff_current_limit: controller_params::WHEEL_FF_CURRENT_LIMIT_A,
+            wheel_ff_current_limits: Vector4f::repeat(controller_params::WHEEL_FF_CURRENT_LIMIT_A),
             tracking_divergence_thresh: controller_params::TRACKING_DIVERGENCE_THRESHOLD,
             trajectory: None,
             prev_cmd: None,

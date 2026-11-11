@@ -412,6 +412,7 @@ impl<
         let mut last_loop_start_time: Option<Instant> = None;
         let mut ticks_since_trace_print = 0;
         let mut motors_locked_out = false;
+        let mut wheel_thermal = crate::motion::wheel_thermal::WheelThermalBudget::new();
         #[cfg(feature = "hf-capture")]
         let mut hf_capture = super::hf_capture::HfCapture::new();
 
@@ -540,6 +541,18 @@ impl<
             if self.last_command.reset_controller() != 0 {
                 robot_controller.reset();
             }
+
+            // Thermal derating of the feed-forward current limits from the currents
+            // the motors actually applied (feed-forward + velocity loop).
+            let applied_currents = Vector4f::new(
+                self.motor_fl.read_current_setpoint_ma() as f32,
+                self.motor_bl.read_current_setpoint_ma() as f32,
+                self.motor_br.read_current_setpoint_ma() as f32,
+                self.motor_fr.read_current_setpoint_ma() as f32,
+            ) * 1e-3;
+            wheel_thermal.update(&applied_currents, DEFAULT_CONTROL_DT_US as f32 * 1e-6);
+            robot_controller.control_context.wheel_ff_current_limits =
+                wheel_thermal.ff_limits(robot_controller.control_context.wheel_ff_current_limit);
 
             match robot_controller.control_update(
                 self.last_command,

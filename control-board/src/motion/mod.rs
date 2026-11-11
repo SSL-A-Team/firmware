@@ -6,5 +6,6 @@ pub mod control_context;
 pub mod maneuvers;
 pub mod pid;
 pub mod robot_model;
+pub mod wheel_thermal;
 
 pub mod params;

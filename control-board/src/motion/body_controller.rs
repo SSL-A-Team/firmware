@@ -205,17 +205,25 @@ impl BodyController {
         // Coulomb ramp would pass that straight into the current, so low-pass it here.
         self.friction_vel_local_filt +=
             (twist_local - self.friction_vel_local_filt) * self.friction_vel_alpha;
-        let ff_accel_local =
-            robot_model.feedforward_local_accel(self.friction_vel_local_filt, accel_local);
+        // Friction and acceleration parts of the feed-forward, each already divided
+        // by the output efficiency (TIGERs: (acc + F_fric/m) / efficiency).
+        let fric_accel_local =
+            robot_model.feedforward_local_accel(self.friction_vel_local_filt, Vector3f::zeros());
+        let accel_ff_local = robot_model.feedforward_local_accel(Vector3f::zeros(), accel_local);
 
-        // Clamp body-level acceleration before converting to wheel torques.
-        let clamped_local = Vector3f::new(
-            ff_accel_local.x.clamp(-BODY_ACCEL_CLAMP_LINEAR, BODY_ACCEL_CLAMP_LINEAR),
-            ff_accel_local.y.clamp(-BODY_ACCEL_CLAMP_LINEAR, BODY_ACCEL_CLAMP_LINEAR),
-            ff_accel_local.z.clamp(-BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_ANGULAR),
+        // Clamp the body-level acceleration before converting to wheel torques.
+        let clamped_accel_local = Vector3f::new(
+            accel_ff_local
+                .x
+                .clamp(-BODY_ACCEL_CLAMP_LINEAR, BODY_ACCEL_CLAMP_LINEAR),
+            accel_ff_local
+                .y
+                .clamp(-BODY_ACCEL_CLAMP_LINEAR, BODY_ACCEL_CLAMP_LINEAR),
+            accel_ff_local
+                .z
+                .clamp(-BODY_ACCEL_CLAMP_ANGULAR, BODY_ACCEL_CLAMP_ANGULAR),
         );
-        let accel_clamped = clamped_local != ff_accel_local;
-        self.body_accel_out_fric_comp = z_rotation_mat(output_heading) * clamped_local;
+        let accel_clamped = clamped_accel_local != accel_ff_local;
 
         let body_xy = SVector::<f32, 2>::new(self.body_twist_out.x, self.body_twist_out.y);
         let vel_cmd_global =
@@ -227,18 +235,44 @@ impl BodyController {
             };
         self.wheel_vel_out = robot_model.transform_vel2wheel_local() * (to_local * vel_cmd_global);
 
-        // Scale the body acceleration uniformly (direction preserved) so no
-        // wheel's feed-forward current exceeds the limit.
-        let mut target_currents = robot_model
-            .torques_to_currents(robot_model.transform_accel2wheel_local() * clamped_local);
-        let max_current = target_currents.amax();
-        let current_limit = self.control_context.wheel_ff_current_limit;
-        let current_limited = max_current > current_limit;
-        if current_limited {
-            let scale = current_limit / max_current;
-            target_currents *= scale;
-            self.body_accel_out_fric_comp *= scale;
+        // Fit the feed-forward into the per-wheel current budgets (thermally derated,
+        // see wheel_thermal.rs) at the body level:
+        // friction compensation first (it is what lets the robot move at all), then
+        // the largest uniform scale s in [0, 1] of the acceleration vector for which
+        // every wheel stays within the limit. Direction is preserved, and unlike
+        // scaling the sum, saturation never eats the friction compensation.
+        let accel_to_current = |a: &Vector3f| {
+            robot_model.torques_to_currents(robot_model.transform_accel2wheel_local() * a)
+        };
+        let i_fric = accel_to_current(&fric_accel_local);
+        let i_accel = accel_to_current(&clamped_accel_local);
+        let limits = self.control_context.wheel_ff_current_limits;
+        let mut fric_scale: f32 = 1.0;
+        for i in 0..4 {
+            if i_fric[i].abs() > limits[i] {
+                fric_scale = fric_scale.min(limits[i] / i_fric[i].abs());
+            }
         }
+        let (fric_scale, accel_scale) = if fric_scale < 1.0 {
+            (fric_scale, 0.0)
+        } else {
+            let mut s: f32 = 1.0;
+            for i in 0..4 {
+                let headroom = if i_accel[i] > 0.0 {
+                    limits[i] - i_fric[i]
+                } else {
+                    limits[i] + i_fric[i]
+                };
+                if i_accel[i].abs() * s > headroom {
+                    s = headroom / i_accel[i].abs();
+                }
+            }
+            (1.0, s.clamp(0.0, 1.0))
+        };
+        let current_limited = fric_scale < 1.0 || accel_scale < 1.0;
+        let target_currents = i_fric * fric_scale + i_accel * accel_scale;
+        self.body_accel_out_fric_comp = z_rotation_mat(output_heading)
+            * (fric_accel_local * fric_scale + clamped_accel_local * accel_scale);
         let accel_clamped = accel_clamped || current_limited;
         let max_step = WHEEL_CURRENT_SLOPE_LIMIT_A_PER_S * self.control_context.dt;
         for i in 0..4 {
