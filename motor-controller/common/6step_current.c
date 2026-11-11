@@ -997,7 +997,31 @@ static void set_duty_cycle(uint16_t duty_cycle) {
  * 
  * @param duty_cycle_arr 
  */
+/**
+ * @brief re-select the commutation pattern after the output is enabled or the
+ * commanded direction changes.
+ *
+ * The pattern is otherwise only updated on a hall edge. A stalled rotor makes no
+ * edges, so after a direction change while enabled it would keep driving the old
+ * direction's pattern, i.e. produce torque the wrong way until it is pushed past
+ * a hall edge (seen as wheels holding ~1-1.5 A while the robot does not move).
+ * The hall ISR also commutes, so do this with interrupts off.
+ */
+static void refresh_commutation_if_needed(bool was_enabled, MotorDirection_t prev_direction) {
+    if (!motor_output_enabled) {
+        return;
+    }
+
+    if (!was_enabled || commanded_motor_direction != prev_direction) {
+        __disable_irq();
+        perform_commutation_cycle();
+        trigger_commutation();
+        __enable_irq();
+    }
+}
+
 void pwm6step_set_duty_cycle(int16_t duty_cycle) {
+    MotorDirection_t prev_direction = commanded_motor_direction;
     if (duty_cycle < 0) {
         pwm6step_set_direction(COUNTER_CLOCKWISE);
     } else {
@@ -1012,10 +1036,7 @@ void pwm6step_set_duty_cycle(int16_t duty_cycle) {
     motor_output_enabled = (duty_cycle_abs > 0);
     set_duty_cycle(duty_cycle_abs);
 
-    if (!was_enabled && motor_output_enabled) {
-        perform_commutation_cycle();
-        trigger_commutation();
-    }
+    refresh_commutation_if_needed(was_enabled, prev_direction);
 }
 
 void pwm6step_set_duty_cycle_f(float duty_cycle_pct) {
@@ -1046,6 +1067,7 @@ static void set_voltage(uint16_t voltage_mv) {
 }
 
 void pwm6step_set_voltage(int16_t voltage_mv) {
+    MotorDirection_t prev_direction = commanded_motor_direction;
     if (voltage_mv < 0) {
         pwm6step_set_direction(COUNTER_CLOCKWISE);
     } else {
@@ -1060,10 +1082,7 @@ void pwm6step_set_voltage(int16_t voltage_mv) {
     motor_output_enabled = (abs_voltage_mv > 0);
     set_voltage(abs_voltage_mv);
 
-    if (!was_enabled && motor_output_enabled) {
-        perform_commutation_cycle();
-        trigger_commutation();
-    }
+    refresh_commutation_if_needed(was_enabled, prev_direction);
 }
 
 static void set_current(uint16_t current_ma) {
@@ -1073,6 +1092,7 @@ static void set_current(uint16_t current_ma) {
 }
 
 void pwm6step_set_current(int16_t current_ma) {
+    MotorDirection_t prev_direction = commanded_motor_direction;
     if (current_ma < 0) {
         pwm6step_set_direction(COUNTER_CLOCKWISE);
     } else if (current_ma > 0) {
@@ -1086,10 +1106,7 @@ void pwm6step_set_current(int16_t current_ma) {
     motor_output_enabled = (abs_current_ma > 0);
     set_current(abs_current_ma);
 
-    if (!was_enabled && motor_output_enabled) {
-        perform_commutation_cycle();
-        trigger_commutation();
-    }
+    refresh_commutation_if_needed(was_enabled, prev_direction);
 }
 
 uint32_t pwm6step_get_pwm_period_count() {
