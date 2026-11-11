@@ -4,6 +4,7 @@ use crate::motion::params::controller_params::{
     TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL,
 };
 use crate::motion::accel_trajectory::AccelTrajectory;
+use crate::motion::velocity_ramp::{VelocityFrame, VelocityRamp};
 use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
 use ateam_common_packets::radio::ManeuverCommand;
 use ateam_controls::defaults::{DEFAULT_EKF_BUFF_LEN, DEFAULT_VISION_BUFF_LEN, EKF_INPUT_LEN, EKF_MEAS_LEN, EKF_STATE_LEN};
@@ -14,7 +15,7 @@ use ateam_controls::pivot_trajectory::PivotTrajectory;
 use ateam_controls::robot_model::{RobotModel, RobotPhysicalParams};
 use ateam_controls::trajectory::Trajectory;
 use ateam_controls::{
-    ControlsError, Vector3f, Vector4f, Vector6f, Vector8f,
+    z_rotation_mat, ControlsError, Vector3f, Vector4f, Vector6f, Vector8f,
 };
 use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
 use core::f32::consts::PI;
@@ -23,6 +24,11 @@ use libm::{fabsf, hypotf, remainderf, sqrtf};
 use nalgebra::{SMatrix, SVector};
 
 pub(crate) const VISION_ACTIVE_TIMEOUT_S: f32 = 0.5;
+
+/// Fraction of the feasible acceleration planners may use (rest is feedback headroom).
+pub const FEASIBLE_ACCEL_MARGIN: f32 = 0.8;
+/// Floor for the planned linear acceleration (m/s^2) so a fully derated robot still moves.
+pub const MIN_PLANNED_ACCEL_LINEAR: f32 = 0.3;
 
 /// All trajectory types the firmware can track.
 ///
@@ -33,6 +39,7 @@ pub enum TrackedTrajectory {
     Pivot(PivotTrajectory),
     Linear(LinearTrajectory),
     Accel(AccelTrajectory),
+    VelocityRamp(VelocityRamp),
 }
 
 impl Trajectory for TrackedTrajectory {
@@ -42,6 +49,7 @@ impl Trajectory for TrackedTrajectory {
             Self::Pivot(t) => t.tick(dt),
             Self::Linear(t) => t.tick(dt),
             Self::Accel(t) => t.tick(dt),
+            Self::VelocityRamp(t) => t.tick(dt),
         }
     }
 
@@ -51,6 +59,7 @@ impl Trajectory for TrackedTrajectory {
             Self::Pivot(t) => t.sample(),
             Self::Linear(t) => t.sample(),
             Self::Accel(t) => t.sample(),
+            Self::VelocityRamp(t) => t.sample(),
         }
     }
 }
@@ -122,10 +131,13 @@ pub struct ControlContext {
     /// State-estimate velocity in the robot's local frame [vx, vy, w], for telemetry.
     pub state_estimate_vel_local: Vector3f,
     /// Divergence-recovery state machine. `Recovering` engages active braking and
-    /// holds it until the wheels stop, then resets the controller.
+    /// holds it until the wheels stop, then resets the trajectory.
     pub tracking_divergence_state: TrackingDivergenceState,
     /// Consecutive ticks the wheels have been near rest while recovering.
     pub tracking_recovery_at_rest_ticks: u32,
+    /// Vision state on the previous tick, to reset the trajectory when vision
+    /// comes (back) online and the estimate jumps to it.
+    last_vision_active: bool,
 }
 
 impl ControlContext {
@@ -168,6 +180,7 @@ impl ControlContext {
             state_estimate_vel_local: Vector3f::zeros(),
             tracking_divergence_state: TrackingDivergenceState::Normal,
             tracking_recovery_at_rest_ticks: 0,
+            last_vision_active: false,
         }
     }
 
@@ -250,6 +263,15 @@ impl ControlContext {
         self.state_estimate = state_est;
         self.state_estimate_vel_local = self.state_estimator.get_vel_local();
 
+        // TIGERs `CtrlPantheraUpdate`: when vision comes online the estimate jumps
+        // to it, so restart the trajectory from the new estimate instead of tracking
+        // the jump.
+        let vision_active = self.state_estimator.vision_active();
+        if vision_active && !self.last_vision_active {
+            self.reset_trajectory();
+        }
+        self.last_vision_active = vision_active;
+
         Ok(state_prediction)
     }
 
@@ -273,7 +295,7 @@ impl ControlContext {
     ///   robot off course) trips into `Recovering`.
     /// - Recovering: active braking is commanded until all wheels stay below
     ///   `RECOVERY_AT_REST_WHEEL_SPEED` for `RECOVERY_AT_REST_TICKS`, then the
-    ///   controller is reset (replanning from the fresh state estimate) and
+    ///   trajectory is reset (replanning from the current state estimate) and
     ///   normal operation resumes. Uses raw encoder wheel speeds, not the KF
     ///   estimate, since divergence implies the estimate is unreliable.
     pub fn update_tracking_divergence_recovery(&mut self, wheel_vel_meas: Vector4f) -> bool {
@@ -301,8 +323,13 @@ impl ControlContext {
                     self.tracking_recovery_at_rest_ticks = 0;
                 }
                 if self.tracking_recovery_at_rest_ticks >= TRACKING_DIVERGENCE_RECOVERY_REST_TICKS {
-                    self.reset(); // returns to Normal, clears trajectory
-                    defmt::warn!("recovery complete, controller reset");
+                    // Only the trajectory: reinitializing the state estimator here
+                    // would drop the vision lock, and the pose jump when vision
+                    // reseeds could trip another divergence.
+                    self.reset_trajectory();
+                    self.tracking_divergence_state = TrackingDivergenceState::Normal;
+                    self.tracking_recovery_at_rest_ticks = 0;
+                    defmt::warn!("recovery complete, trajectory reset");
                     false
                 } else {
                     true
@@ -353,6 +380,12 @@ impl ControlContext {
         // snap to the estimate here: doing so would zero the tracking error and
         // prevent the divergence-recovery state machine from ever detecting a
         // collision.
+        // TIGERs `CtrlPantheraUpdate`: restart the trajectory from the estimate when
+        // the XY position feedback would saturate (error > POS_MAX / POS_K), rather
+        // than chasing a trajectory the robot cannot follow.
+        if !self.trajectory_open_loop && self.xy_feedback_saturated() {
+            self.trajectory = None;
+        }
         let seed_from_traj = !self.trajectory_open_loop;
         self.plan_if_needed(cmd, seed_from_traj, make_traj)?;
         self.trajectory_open_loop = false;
@@ -361,17 +394,19 @@ impl ControlContext {
             .trajectory
             .as_ref()
             .ok_or(ControlsError::InvalidInput)?;
-        let (traj_state, traj_accel) = traj.sample();
-
-        let setpoints = self.calc_tracking_setpoints(traj_state, traj_accel)?;
+        let (traj_state, mut traj_accel) = traj.sample();
 
         // Advance the trajectory's internal clock by dt.
         // After this, traj.sample() returns the state at the start of the next tick.
+        let dt = self.dt;
         if let Some(traj) = &mut self.trajectory {
-            traj.tick(self.dt);
+            traj.tick(dt);
+            // TIGERs `TrajBangBangUpdate`: angular acceleration as the mean over the
+            // step, so bang-bang segment switches don't produce full-scale spikes.
+            traj_accel.z = (traj.sample().0[5] - traj_state[5]) / dt;
         }
 
-        Ok(setpoints)
+        self.calc_tracking_setpoints(traj_state, traj_accel)
     }
 
     /// Plan or continue a trajectory and drive it open loop: the setpoints are
@@ -397,8 +432,10 @@ impl ControlContext {
             .trajectory
             .as_mut()
             .ok_or(ControlsError::InvalidInput)?;
-        if let TrackedTrajectory::Accel(t) = traj {
-            t.set_body_heading(heading);
+        match traj {
+            TrackedTrajectory::Accel(t) => t.set_body_heading(heading),
+            TrackedTrajectory::VelocityRamp(t) => t.set_body_heading(heading),
+            _ => {}
         }
         let (traj_state, traj_accel) = traj.sample();
         traj.tick(self.dt);
@@ -407,6 +444,74 @@ impl ControlContext {
             body_twist: traj_state.fixed_rows::<3>(3).into(),
             body_accel: traj_accel,
         })
+    }
+
+    /// Velocity maneuvers, after TIGERs `DRIVE_MODE_LOCAL_VEL` (ctrl_panthera.c
+    /// `controlXY` / `controlW`): ramp toward `target` (in `frame`) at the
+    /// direction's feasible acceleration (capped at `traj_max_accel_linear`) and
+    /// output the ramp's velocity and acceleration. No position feedback: only P
+    /// on the angular rate error (`POSE_FB_W` VEL_K).
+    pub fn run_vel_track(
+        &mut self,
+        cmd: ManeuverCommand,
+        frame: VelocityFrame,
+        target: Vector3f,
+        max_vel_linear: f32,
+        max_vel_angular: f32,
+        max_accel_linear: f32,
+        max_accel_angular: f32,
+    ) -> Result<ManeuverSetpoints, ControlsError> {
+        let mut target = target;
+        let v = hypotf(target.x, target.y);
+        if v > max_vel_linear {
+            target.x *= max_vel_linear / v;
+            target.y *= max_vel_linear / v;
+        }
+        target.z = target.z.clamp(-max_vel_angular, max_vel_angular);
+
+        // Capability-aware linear acceleration along the ramp direction, seeded the
+        // same way `run_traj_open_loop` seeds a replan.
+        let heading = self.state_estimate.z;
+        let dt = self.dt;
+        let seed_vel: Vector3f = match self.trajectory.as_ref() {
+            Some(t) => t.sample().0.fixed_rows::<3>(3).into(),
+            None => self.state_estimate.fixed_rows::<3>(3).into(),
+        };
+        let target_global = match frame {
+            VelocityFrame::Global => target,
+            VelocityFrame::Local => z_rotation_mat(heading) * target,
+        };
+        let dv_local = z_rotation_mat(-heading) * (target_global - seed_vel);
+        let feasible = self.feasible_linear_accel(SVector::<f32, 2>::new(dv_local.x, dv_local.y));
+        let accel_linear =
+            max_accel_linear.min((FEASIBLE_ACCEL_MARGIN * feasible).max(MIN_PLANNED_ACCEL_LINEAR));
+        let make = |seed: Vector6f| {
+            Ok(TrackedTrajectory::VelocityRamp(VelocityRamp::new(
+                seed,
+                heading,
+                frame,
+                target,
+                accel_linear,
+                max_accel_angular,
+                dt,
+            )))
+        };
+        let mut setpoints = self.run_traj_open_loop(cmd, make)?;
+        let k_vel_w = self.pose_fb_w[3];
+        setpoints.body_twist.z += (setpoints.body_twist.z - self.state_estimate[5]) * k_vel_w;
+        Ok(setpoints)
+    }
+
+    fn xy_feedback_saturated(&self) -> bool {
+        let Some(traj) = self.trajectory.as_ref() else {
+            return false;
+        };
+        let (k, max) = (self.pose_fb_xy[0], self.pose_fb_xy[1]);
+        if k <= 0.0 {
+            return false;
+        }
+        let traj_pos = traj.sample().0;
+        hypotf(traj_pos.x - self.state_estimate.x, traj_pos.y - self.state_estimate.y) > max / k
     }
 
     /// Replan when there is no trajectory or `cmd` changed. The seed is the

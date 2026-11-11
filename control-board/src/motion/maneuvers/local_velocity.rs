@@ -1,9 +1,10 @@
-use crate::motion::control_context::{ControlContext, ManeuverSetpoints, TrackedTrajectory};
+use crate::motion::control_context::{ControlContext, ManeuverSetpoints};
+use crate::motion::velocity_ramp::VelocityFrame;
 use crate::motion::maneuvers::MotionManeuver;
 use ateam_common_packets::bindings::ExtendedLocalVelocityTelemetry;
 use ateam_common_packets::radio::{ManeuverCommand, ManeuverExtendedTelemetry};
-use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
-use ateam_controls::{z_rotation_mat, ControlsError};
+use ateam_controls::bangbang_trajectory::TrajectoryParams;
+use ateam_controls::ControlsError;
 
 pub struct LocalVelocityManeuver;
 
@@ -25,30 +26,28 @@ impl MotionManeuver for LocalVelocityManeuver {
             return Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off));
         };
 
-        let default_params = TrajectoryParams::default();
-        let traj_params = TrajectoryParams {
-            max_vel_linear: default_params.max_vel_linear,
-            max_vel_angular: default_params.max_vel_angular,
-            max_accel_linear: if c.max_linear_acc != 0.0 {
-                c.max_linear_acc
-            } else {
-                default_params.max_accel_linear
-            },
-            max_accel_angular: if c.max_angular_acc != 0.0 {
-                c.max_angular_acc
-            } else {
-                default_params.max_accel_angular
-            },
+        // TIGERs-style velocity ramp: velocity and acceleration feed-forward only,
+        // no position feedback (see ControlContext::run_vel_track).
+        let p = TrajectoryParams::default();
+        let max_accel_linear = if c.max_linear_acc != 0.0 {
+            c.max_linear_acc
+        } else {
+            p.max_accel_linear
         };
-        // Rotate local-frame target twist into the global frame using the
-        // current KF heading estimate.
-        let theta = ctx.state_estimate.z;
-        let global_target_twist = z_rotation_mat(theta) * c.as_vec3f();
-
-        let setpoints = ctx.run_traj_track(cmd, |seed| {
-            let traj = BangBangTraj3D::from_target_twist(seed, global_target_twist, traj_params)?;
-            Ok(TrackedTrajectory::BangBang(traj))
-        })?;
+        let max_accel_angular = if c.max_angular_acc != 0.0 {
+            c.max_angular_acc
+        } else {
+            p.max_accel_angular
+        };
+        let setpoints = ctx.run_vel_track(
+            cmd,
+            VelocityFrame::Local,
+            c.as_vec3f(),
+            p.max_vel_linear,
+            p.max_vel_angular,
+            max_accel_linear,
+            max_accel_angular,
+        )?;
 
         let telem = ManeuverExtendedTelemetry::LocalVelocity(ExtendedLocalVelocityTelemetry {
             cmd_echo: c,

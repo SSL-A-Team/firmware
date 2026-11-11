@@ -1,14 +1,12 @@
-use crate::motion::control_context::{ControlContext, ManeuverSetpoints, TrackedTrajectory};
+use crate::motion::control_context::{
+    ControlContext, ManeuverSetpoints, TrackedTrajectory, FEASIBLE_ACCEL_MARGIN,
+    MIN_PLANNED_ACCEL_LINEAR,
+};
 use crate::motion::maneuvers::MotionManeuver;
 use ateam_common_packets::bindings::ExtendedGlobalPositionTelemetry;
 use ateam_common_packets::radio::{ManeuverCommand, ManeuverExtendedTelemetry};
 use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
 use ateam_controls::ControlsError;
-
-/// Fraction of the feasible acceleration the planner may use (rest is feedback headroom).
-const FEASIBLE_ACCEL_MARGIN: f32 = 0.8;
-/// Floor for the planned linear acceleration (m/s^2) so a fully derated robot still moves.
-const MIN_PLANNED_ACCEL_LINEAR: f32 = 0.3;
 
 pub struct GlobalPositionManeuver;
 
