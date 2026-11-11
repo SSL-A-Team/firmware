@@ -1,5 +1,5 @@
 use crate::motion::params::controller_params::{
-    ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE,
+    ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE, FF_ACCEL_LOOKAHEAD_S, TRAJ_RESET_ERROR_XY,
     TRACKING_DIVERGENCE_RECOVERY_REST_TICKS,
     TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL,
 };
@@ -391,8 +391,9 @@ impl ControlContext {
         // prevent the divergence-recovery state machine from ever detecting a
         // collision.
         // TIGERs `CtrlPantheraUpdate`: restart the trajectory from the estimate when
-        // the XY position feedback would saturate (error > POS_MAX / POS_K), rather
-        // than chasing a trajectory the robot cannot follow.
+        // the XY tracking error gets large (TIGERs: when the position feedback would
+        // saturate, POS_MAX / POS_K = 0.25 m), rather than chasing a trajectory the
+        // robot cannot follow. See TRAJ_RESET_ERROR_XY.
         if !self.trajectory_open_loop && self.xy_feedback_saturated() {
             self.trajectory = None;
         }
@@ -411,9 +412,27 @@ impl ControlContext {
         let dt = self.dt;
         if let Some(traj) = &mut self.trajectory {
             traj.tick(dt);
-            // TIGERs `TrajBangBangUpdate`: angular acceleration as the mean over the
-            // step, so bang-bang segment switches don't produce full-scale spikes.
-            traj_accel.z = (traj.sample().0[5] - traj_state[5]) / dt;
+            if let TrackedTrajectory::BangBang(t) = traj {
+                // Feed-forward acceleration as the mean over a short lookahead of the
+                // current trajectory. Replanning every tick toward a slowly moving
+                // target makes a time-optimal profile brake and re-accelerate at full
+                // acceleration on alternate ticks; its instantaneous acceleration then
+                // chatters at +/- the limit while the mean is the small acceleration
+                // actually needed. Generalizes TIGERs' one-step mean for orientation.
+                // XY only: averaging the angular profile this long blurred real
+                // rotations (heading tracking 0.8 -> 2.7 deg on 90 deg moves); small
+                // heading-target changes are already low-passed (OrientTargetLag).
+                let mut lookahead = *t;
+                lookahead.tick(FF_ACCEL_LOOKAHEAD_S - dt);
+                let v_end = lookahead.sample().0;
+                traj_accel.x = (v_end[3] - traj_state[3]) / FF_ACCEL_LOOKAHEAD_S;
+                traj_accel.y = (v_end[4] - traj_state[4]) / FF_ACCEL_LOOKAHEAD_S;
+                traj_accel.z = (t.sample().0[5] - traj_state[5]) / dt;
+            } else {
+                // TIGERs `TrajBangBangUpdate`: angular acceleration as the mean over
+                // the step, so segment switches don't produce full-scale spikes.
+                traj_accel.z = (traj.sample().0[5] - traj_state[5]) / dt;
+            }
         }
 
         self.calc_tracking_setpoints(traj_state, traj_accel)
@@ -516,12 +535,9 @@ impl ControlContext {
         let Some(traj) = self.trajectory.as_ref() else {
             return false;
         };
-        let (k, max) = (self.pose_fb_xy[0], self.pose_fb_xy[1]);
-        if k <= 0.0 {
-            return false;
-        }
         let traj_pos = traj.sample().0;
-        hypotf(traj_pos.x - self.state_estimate.x, traj_pos.y - self.state_estimate.y) > max / k
+        hypotf(traj_pos.x - self.state_estimate.x, traj_pos.y - self.state_estimate.y)
+            > TRAJ_RESET_ERROR_XY
     }
 
     /// Replan when there is no trajectory or `cmd` changed. The seed is the

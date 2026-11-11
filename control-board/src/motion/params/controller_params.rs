@@ -82,6 +82,18 @@ pub const FRICTION_VEL_LPF_HZ: f32 = 15.0;
 /// heading loop oscillate at 2-8 Hz.
 pub const YAW_RATE_FB_LPF_HZ: f32 = 40.0;
 
+/// Lookahead (s) over which the XY trajectory feed-forward acceleration is averaged,
+/// (v(t + T) - v(t)) / T on the current bang-bang trajectory. With a target that
+/// moves every packet (joystick position mode, path following), per-tick replanning
+/// made the instantaneous acceleration chatter at +/- the limit.
+pub const FF_ACCEL_LOOKAHEAD_S: f32 = 0.02;
+
+/// XY tracking error (m) beyond which the position trajectory restarts from the
+/// estimate (TIGERs `CtrlPantheraUpdate`). TIGERs derive it as POS_MAX / POS_K
+/// (2.0 / 8 = 0.25 m); with our lowered POSE_FB_XY MAX that ratio is 3.75 cm, which
+/// restarted the trajectory (a visible snap) during ordinary joystick moves.
+pub const TRAJ_RESET_ERROR_XY: f32 = 0.10;
+
 /// Maximum magnitude of the body-level acceleration output [linear (m/s²), angular (rad/s²)].
 /// The feed-forward output acceleration (local frame, friction and efficiency
 /// applied) is clamped per axis to these limits before conversion to wheel torques.
