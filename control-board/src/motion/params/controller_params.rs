@@ -21,9 +21,9 @@ pub const POSE_FB_XY: Vector3f = Vector3f::new(8.0, 0.3, 0.01);
 /// [POS_K (1/s), POS_MAX (rad/s), ANTI_JITTER (rad), VEL_K]:
 /// w += clamp(POS_K * theta_err, POS_MAX) + VEL_K * (w_traj - w_est).
 /// Radio-tunable as `POSE_FB_W`.
-// POS_MAX lowered from TIGERs' 8 rad/s while bringing up. VEL_K lowered from TIGERs'
-// 2: through the gyro and the Coulomb ramp it closed a loop that rang at ~12 Hz.
-pub const POSE_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 0.5);
+// POS_MAX lowered from TIGERs' 8 rad/s while bringing up. VEL_K = 2 as TIGERs (0.5
+// performed the same once the motor commutation bug was fixed).
+pub const POSE_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 2.0);
 
 /// Wheel velocity loop on the motor controllers [KP (mA/(rad/s)), KI (mA/rad),
 /// ANTI_JITTER (rad/s), MAX_CURRENT (A)]. P-only like TIGERs (velKi = 0).
@@ -31,18 +31,13 @@ pub const POSE_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 0.5);
 /// motor's I2T budget keeps the long-term average at its continuous rating.
 /// Radio-tunable as `WHEEL_VEL_FB`; periodically re-sent to the motors.
 ///
-/// TIGERs' velKp = 300 mA per encoder tick per 1 ms (23040 ticks/rev, 0.27 rad/s per
-/// tick), i.e. ~1.1 A/(rad/s), with the same DF45 motor. Our 4000 tick/rev encoder is
-/// 1.57 rad/s per tick at 1 ms, so their gain would put ~1.7 A of quantization noise on
-/// the current; KP = 200 keeps the same ~0.3 A per tick. Higher gains ring when a wheel
-/// unloads or slips (measured: +/-1.2 A current std at 500 vs +/-0.2 A at 150-200).
-/// A free (unloaded) wheel has ~3.5 ms current-to-acceleration delay, leaving ~18 deg
-/// phase margin at KP 200 (50-67 Hz limit cycles in 1 kHz captures); KP 100 with the
-/// motor's 100 Hz speed low-pass keeps ~40 deg and halves the current noise.
-/// KP 50-70 cut the >20 Hz current noise a further 30-50% but degraded heading tracking
-/// on combined 0.2 m + 90 deg moves (2.5-3.7 deg RMS vs ~2.0 deg); KP 30 also degraded
-/// XY tracking (square: 52 vs ~35 mm RMS).
-pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(100.0, 0.0, 1.5, 2.5);
+/// TIGERs' velKp = 300 mA per encoder tick per 1 ms (23040 ticks/rev), ~1.1 A/(rad/s).
+/// Ours is in mA/(rad/s). Measured on robot 2 with 1 kHz captures after fixing the
+/// motor's speed scaling and stale-commutation bugs (which had caused the earlier
+/// 50-67 Hz ringing): no instability up to 400; >20 Hz current noise 0.03 A at 100,
+/// ~0.1 A at 200, ~0.15 A at 300. Heading tracking on 0.2 m + 90 deg moves: 3.0 deg
+/// RMS at 100, 1.4 at 200, 0.9-1.35 at 300. Hold accuracy (3-6 mm) is independent of KP.
+pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(200.0, 0.0, 1.5, 2.5);
 
 /// Maximum feed-forward wheel current (A). The body acceleration output is
 /// scaled uniformly so no wheel's feed-forward current exceeds this. Radio-tunable
@@ -59,10 +54,8 @@ pub const WHEEL_FF_CURRENT_LIMIT_A: f32 = 2.5;
 pub const TRACKING_DIVERGENCE_THRESHOLD: Vector4f = Vector4f::new(1.0, 1.57, 5.0, 10.0);
 
 /// Maximum wheel current change per second for the feed-forward torque output
-/// (TIGERs `CtrlPantheraUpdate`: 0.5 A per 1 ms control tick). Lowered to 50 A/s:
-/// at TIGERs' rate the feed-forward steps at move start and Coulomb direction changes
-/// spin up our least-loaded wheel (front-right/back-left diagonal) and yaw the robot.
-pub const WHEEL_CURRENT_SLOPE_LIMIT_A_PER_S: f32 = 50.0;
+/// (TIGERs `CtrlPantheraUpdate`: 0.5 A per 1 ms control tick).
+pub const WHEEL_CURRENT_SLOPE_LIMIT_A_PER_S: f32 = 500.0;
 
 /// Low-pass cutoff (Hz) on the commanded velocity fed to the friction model only.
 /// The Coulomb ramp (ateam_controls FRICTION_*_RAMP) is a steep gain on that velocity,

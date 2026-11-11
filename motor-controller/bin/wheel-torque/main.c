@@ -81,7 +81,7 @@ static bool current_limited = false;
 // state that can fight in the drive's null space at rest. Gains are writable from
 // the control board via CCM_PARAM_VEL_CONTROLLER_*.
 static PidConstants_t vel_velcur_controller_constants = {
-    .kP = 100.0f,  // mA / (rad/s); see WHEEL_VEL_FB in control-board controller_params.rs
+    .kP = 200.0f,  // mA / (rad/s); see WHEEL_VEL_FB in control-board controller_params.rs
     .kI = 0.0f,
     .kD = 0.0f,
     .kI_max = 500.0f,
