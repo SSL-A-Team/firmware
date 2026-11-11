@@ -5,6 +5,11 @@ use ateam_common_packets::radio::{ManeuverCommand, ManeuverExtendedTelemetry};
 use ateam_controls::bangbang_trajectory::{BangBangTraj3D, TrajectoryParams};
 use ateam_controls::ControlsError;
 
+/// Fraction of the feasible acceleration the planner may use (rest is feedback headroom).
+const FEASIBLE_ACCEL_MARGIN: f32 = 0.8;
+/// Floor for the planned linear acceleration (m/s^2) so a fully derated robot still moves.
+const MIN_PLANNED_ACCEL_LINEAR: f32 = 0.3;
+
 pub struct GlobalPositionManeuver;
 
 impl GlobalPositionManeuver {
@@ -51,6 +56,21 @@ impl MotionManeuver for GlobalPositionManeuver {
             },
         };
         let target_pose = c.as_vec3f();
+
+        // Capability-aware acceleration limit: never plan more linear acceleration
+        // than the motors can deliver along the travel direction (in the robot frame,
+        // over the headings it passes through), leaving headroom for feedback. Keeps
+        // the trajectory trackable instead of running away and being chased by the
+        // position feedback (overspeed), while forward moves keep full capability.
+        let mut traj_params = traj_params;
+        let est = ctx.state_estimate;
+        let delta_xy =
+            nalgebra::SVector::<f32, 2>::new(target_pose.x - est[0], target_pose.y - est[1]);
+        if delta_xy.norm() > 0.005 {
+            let feasible = ctx.feasible_linear_accel_for_move(delta_xy, est[2], target_pose.z);
+            let limit = (FEASIBLE_ACCEL_MARGIN * feasible).max(MIN_PLANNED_ACCEL_LINEAR);
+            traj_params.max_accel_linear = traj_params.max_accel_linear.min(limit);
+        }
 
         let setpoints = ctx.run_traj_track(cmd, |seed| {
             let traj = BangBangTraj3D::from_target_pose(seed, target_pose, traj_params)?;

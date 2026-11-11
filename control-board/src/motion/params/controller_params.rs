@@ -37,15 +37,21 @@ pub const POSE_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 2.0);
 /// 50-67 Hz ringing): no instability up to 400; >20 Hz current noise 0.03 A at 100,
 /// ~0.1 A at 200, ~0.15 A at 300. Heading tracking on 0.2 m + 90 deg moves: 3.0 deg
 /// RMS at 100, 1.4 at 200, 0.9-1.35 at 300. Hold accuracy (3-6 mm) is independent of KP.
-pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(200.0, 0.0, 1.5, 2.5);
+/// MAX_CURRENT 3.0 A: 0.3 A of loop authority above the feed-forward limit. Above
+/// ~2.5 A per wheel the encoders lose rigid-body consistency (wheel slip on carpet),
+/// so a 4 A cap only bought slip: sideways 2 m/s^2 moves tracked 13-19 mm at 4 A vs
+/// 13-14 mm at 3 A, with less current noise.
+pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(200.0, 0.0, 1.5, 3.0);
 
 /// Maximum feed-forward wheel current (A). The body acceleration output is
 /// scaled uniformly so no wheel's feed-forward current exceeds this. Radio-tunable
 /// as `WHEEL_FF_CURRENT_LIMIT`.
-// Robot 2 cap sweep (plateau_profile.py): 2.0 A stalls sideways motion; 3.0 A gains
-// nothing over 2.5 A (sideways is traction-limited, wheels spin out), and 3-4 A with
-// kP 500 caused wheel slip and an unstable wheel loop. 2.5 A leaves transient headroom.
-pub const WHEEL_FF_CURRENT_LIMIT_A: f32 = 2.5;
+// Sized to traction, not to the motor (DF45M 7 A peak): on robot 2 the null-space
+// residual of the four encoder speeds (slip) stays ~0.01 m/s up to 2.5 A per wheel and
+// grows 2-10x between 2.5 and 4 A in forward, sideways and combined moves. The
+// planner's acceleration limit is derived from this limit (capability-aware planning),
+// and the per-wheel thermal model derates it on sustained use.
+pub const WHEEL_FF_CURRENT_LIMIT_A: f32 = 2.7;
 
 /// [ERROR_POS_LINEAR (m), ERROR_POS_ANGULAR (rad), ERROR_VEL_LINEAR (m/s), ERROR_VEL_ANGULAR (rad/s)]
 /// Trajectory-vs-estimate errors above which closed-loop tracking is considered

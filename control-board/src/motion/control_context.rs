@@ -445,6 +445,62 @@ impl ControlContext {
     // Private helpers
     // -----------------------------------------------------------------------
 
+    /// Largest linear acceleration (m/s^2) the output stage can deliver along the
+    /// local direction `dir_local` while already moving that way: the same
+    /// friction-first fit as `BodyController` (full Coulomb compensation, then the
+    /// largest acceleration that keeps every wheel within its thermally derated
+    /// feed-forward current limit). Strongly direction dependent on an omni robot
+    /// (robot 2: ~2.6 m/s^2 forward vs ~1.1 m/s^2 sideways at 3.5 A).
+    pub fn feasible_linear_accel(&self, dir_local: SVector<f32, 2>) -> f32 {
+        let n = dir_local.norm();
+        if n < 1e-6 {
+            return f32::INFINITY;
+        }
+        let u = Vector3f::new(dir_local.x / n, dir_local.y / n, 0.0);
+        let m = &self.robot_model;
+        let to_currents = |a: Vector3f| m.torques_to_currents(m.transform_accel2wheel_local() * a);
+        let i_fric = to_currents(m.feedforward_local_accel(u * 0.5, Vector3f::zeros()));
+        let i_unit = to_currents(m.feedforward_local_accel(Vector3f::zeros(), u));
+        let limits = self.wheel_ff_current_limits;
+        let mut s = f32::INFINITY;
+        for i in 0..4 {
+            if fabsf(i_unit[i]) < 1e-6 {
+                continue;
+            }
+            let headroom = if i_unit[i] > 0.0 {
+                limits[i] - i_fric[i]
+            } else {
+                limits[i] + i_fric[i]
+            };
+            s = s.min(headroom / fabsf(i_unit[i]));
+        }
+        s.max(0.0)
+    }
+
+    /// Feasible linear acceleration for a straight move by `delta_xy` (global) while
+    /// the heading turns from `heading_from` to `heading_to`: the minimum of
+    /// `feasible_linear_accel` over headings sampled along the turn.
+    pub fn feasible_linear_accel_for_move(
+        &self,
+        delta_xy: SVector<f32, 2>,
+        heading_from: f32,
+        heading_to: f32,
+    ) -> f32 {
+        const SAMPLES: usize = 5;
+        let turn = remainderf(heading_to - heading_from, 2.0 * PI);
+        let mut a = f32::INFINITY;
+        for k in 0..SAMPLES {
+            let h = heading_from + turn * (k as f32) / ((SAMPLES - 1) as f32);
+            let (sn, cs) = (libm::sinf(h), libm::cosf(h));
+            let local = SVector::<f32, 2>::new(
+                cs * delta_xy.x + sn * delta_xy.y,
+                -sn * delta_xy.x + cs * delta_xy.y,
+            );
+            a = a.min(self.feasible_linear_accel(local));
+        }
+        a
+    }
+
     /// PID+FF trajectory tracking: compute body-frame setpoints from the
     /// trajectory's current position/velocity/acceleration sample.
     fn calc_tracking_setpoints(
