@@ -15,7 +15,7 @@ use ateam_controls::pivot_trajectory::PivotTrajectory;
 use ateam_controls::robot_model::{RobotModel, RobotPhysicalParams};
 use ateam_controls::trajectory::Trajectory;
 use ateam_controls::{
-    z_rotation_mat, ControlsError, Vector3f, Vector4f, Vector6f, Vector8f,
+    ControlsError, Vector3f, Vector4f, Vector6f, Vector8f,
 };
 use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
 use core::f32::consts::PI;
@@ -476,8 +476,8 @@ impl ControlContext {
     }
 
     /// Velocity maneuvers, after TIGERs `DRIVE_MODE_LOCAL_VEL` (ctrl_panthera.c
-    /// `controlXY` / `controlW`): ramp toward `target` (in `frame`) at the
-    /// direction's feasible acceleration (capped at `traj_max_accel_linear`) and
+    /// `controlXY` / `controlW`): ramp toward `target` (in `frame`) at
+    /// `max_accel_linear` / `max_accel_angular` and
     /// output the ramp's velocity and acceleration. No position feedback: only P
     /// on the angular rate error (`POSE_FB_W` VEL_K).
     pub fn run_vel_track(
@@ -498,22 +498,13 @@ impl ControlContext {
         }
         target.z = target.z.clamp(-max_vel_angular, max_vel_angular);
 
-        // Capability-aware linear acceleration along the ramp direction, seeded the
-        // same way `run_traj_open_loop` seeds a replan.
+        // No capability cap here (unlike position tracking): without position
+        // feedback nothing chases a ramp the robot can't follow, and the output
+        // stage's friction-first saturation keeps the acceleration direction, so the
+        // robot simply accelerates as hard as the wheels allow.
         let heading = self.state_estimate.z;
         let dt = self.dt;
-        let seed_vel: Vector3f = match self.trajectory.as_ref() {
-            Some(t) => t.sample().0.fixed_rows::<3>(3).into(),
-            None => self.state_estimate.fixed_rows::<3>(3).into(),
-        };
-        let target_global = match frame {
-            VelocityFrame::Global => target,
-            VelocityFrame::Local => z_rotation_mat(heading) * target,
-        };
-        let dv_local = z_rotation_mat(-heading) * (target_global - seed_vel);
-        let feasible = self.feasible_linear_accel(SVector::<f32, 2>::new(dv_local.x, dv_local.y));
-        let accel_linear =
-            max_accel_linear.min((FEASIBLE_ACCEL_MARGIN * feasible).max(MIN_PLANNED_ACCEL_LINEAR));
+        let accel_linear = max_accel_linear;
         let make = |seed: Vector6f| {
             Ok(TrackedTrajectory::VelocityRamp(VelocityRamp::new(
                 seed,
