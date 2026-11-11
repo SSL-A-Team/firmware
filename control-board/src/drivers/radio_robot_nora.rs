@@ -3,11 +3,13 @@ use ateam_common_packets::bindings::{
     HelloRequest, HelloResponse, ParameterCommand, RadioData, RadioHeader, RadioPacket,
 };
 use ateam_common_packets::radio::DataPacket;
+use ateam_lib_stm32::ateam_lib_crossarch::stream_deframer::{FrameCheck, StreamDeframer};
 use ateam_lib_stm32::drivers::radio::nora_w36x::{
-    NoraRadioError, NoraW36x, SocketConnection, WifiAuth, DataMode,
+    NoraRadioError, NoraW36x, SocketConnection, TransparentLinkType, WifiAuth, DataMode,
 };
 use ateam_lib_stm32::drivers::radio::w36x::at_protocol::SocketProtocol;
 use ateam_lib_stm32::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
+use core::cell::{Cell, RefCell};
 use core::fmt::Write;
 use core::mem::size_of;
 use credentials::WifiCredential;
@@ -25,6 +27,59 @@ use super::radio_robot::TeamColor;
 const MULTICAST_IP: &str = "224.4.20.69";
 const MULTICAST_PORT: u16 = 42069;
 const LOCAL_PORT: u16 = 42069;
+
+// Holds up to two max-size packets so a partial frame plus a following full frame fit.
+// The size is a literal in the type: a const item path there makes RobotRadioNora invariant over 'a.
+type TmDeframer = StreamDeframer<1048>;
+const _: () = assert!(TmDeframer::CAPACITY >= 2 * size_of::<RadioPacket>());
+// A partial frame older than this is assumed to be corrupt (lost bytes) and dropped.
+const TM_PARTIAL_FRAME_TIMEOUT: Duration = Duration::from_millis(50);
+
+/// How unicast data is exchanged with the radio once software is connected.
+/// The hello handshake always uses binary (AT) mode.
+#[derive(Clone, Copy, PartialEq, Debug, Format)]
+pub enum NoraLinkMode {
+    /// AT+USOWB writes and +UESODB direct binary receive events.
+    Binary,
+    /// AT+UTM on the unicast UDP socket: raw UART <-> UDP passthrough.
+    Transparent,
+}
+
+/// Validates an A-Team radio packet at the head of a transparent mode byte stream.
+/// Frame length is derived from the command code; header data_length must agree.
+fn tm_frame_check(buf: &[u8]) -> FrameCheck {
+    const HEADER_SIZE: usize = size_of::<RadioHeader>();
+    const CMD_CODE_OFFSET: usize = 4;
+    const DATA_LEN_OFFSET: usize = 6;
+
+    if buf.len() <= CMD_CODE_OFFSET {
+        return FrameCheck::NeedMore;
+    }
+
+    let payload_size = match buf[CMD_CODE_OFFSET] {
+        CommandCode::CC_CONTROL => size_of::<BasicControl>(),
+        CommandCode::CC_ROBOT_PARAMETER_COMMAND => size_of::<ParameterCommand>(),
+        CommandCode::CC_HELLO_RESP => size_of::<HelloResponse>(),
+        _ => return FrameCheck::Invalid,
+    };
+
+    if buf.len() < HEADER_SIZE {
+        return FrameCheck::NeedMore;
+    }
+
+    let data_length =
+        u16::from_le_bytes([buf[DATA_LEN_OFFSET], buf[DATA_LEN_OFFSET + 1]]) as usize;
+    if data_length != payload_size {
+        return FrameCheck::Invalid;
+    }
+
+    let total = HEADER_SIZE + payload_size;
+    if buf.len() < total {
+        FrameCheck::NeedMore
+    } else {
+        FrameCheck::Complete(total)
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Debug, Format)]
 pub enum RobotRadioNoraError {
@@ -47,6 +102,7 @@ pub enum RobotRadioNoraError {
     DisconnectFailed,
 
     SocketMissing,
+    TransparentModeActive,
 
     SoftwareConnectAckHeaderInvalid,
     SoftwareHelloHeaderInvalid,
@@ -87,6 +143,9 @@ pub struct RobotRadioNora<
     use_flow_control: bool,
     socket: Option<SocketConnection>,
     fire_and_forget_sends: bool,
+    link_mode: NoraLinkMode,
+    tm_deframer: RefCell<TmDeframer>,
+    tm_last_rx: Cell<Instant>,
 }
 
 impl<
@@ -104,6 +163,7 @@ impl<
         write_queue: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
         reset_pin: Peri<'static, AnyPin>,
         use_flow_control: bool,
+        link_mode: NoraLinkMode,
     ) -> RobotRadioNora<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, DEBUG_UART_QUEUES> {
         let reset_pin = Output::new(reset_pin, Level::High, Speed::Medium);
         let radio = NoraW36x::new(read_queue, write_queue, uart);
@@ -114,7 +174,28 @@ impl<
             socket: None,
             use_flow_control,
             fire_and_forget_sends: false,
+            link_mode,
+            tm_deframer: RefCell::new(StreamDeframer::new()),
+            tm_last_rx: Cell::new(Instant::now()),
         }
+    }
+
+    pub fn link_mode(&self) -> NoraLinkMode {
+        self.link_mode
+    }
+
+    /// True once the unicast link has entered transparent mode. AT commands (socket
+    /// close, wifi disconnect, ...) are unavailable until the radio is reset.
+    pub fn is_transparent(&self) -> bool {
+        self.nora_driver.is_transparent()
+    }
+
+    /// Leave transparent mode via the +++ escape sequence (takes > 2s with default guards).
+    /// The robot task recovers via hardware reset instead; this is for tools/tests.
+    pub async fn exit_transparent_mode(&mut self) -> Result<(), RobotRadioNoraError> {
+        self.nora_driver.exit_transparent_mode().await?;
+        self.tm_deframer.borrow_mut().clear();
+        Ok(())
     }
 
     pub fn get_startup_uart_config(&self) -> usart::Config {
@@ -186,6 +267,10 @@ impl<
 
         defmt::trace!("Radio UART Startup received");
 
+        // The module rebooted: old sockets are gone and it is back in AT mode.
+        self.socket = None;
+        self.tm_deframer.borrow_mut().clear();
+
         //defmt::trace!("increasing link speed");
         //// NORA config_uart only takes baudrate and flow control (no data_bits/parity params)
         //if self
@@ -227,6 +312,13 @@ impl<
     }
 
     pub async fn disconnect_network(&mut self) -> Result<(), RobotRadioNoraError> {
+        if self.nora_driver.is_transparent() {
+            // AT commands can't be issued in transparent mode; caller must reset the radio.
+            defmt::warn!("cannot disconnect network in transparent mode, radio reset required");
+            self.socket = None;
+            return Err(RobotRadioNoraError::TransparentModeActive);
+        }
+
         let mut had_error = false;
         if let Some(socket) = self.socket.take() {
             defmt::debug!("closing socket..");
@@ -353,11 +445,37 @@ impl<
             .connect_socket(socket_id, addr.as_str(), port, SocketProtocol::UDP)
             .await?;
 
+        if self.link_mode == NoraLinkMode::Transparent {
+            // UART data now goes to the connected peer; received datagrams are written raw to UART.
+            let mut res = self
+                .nora_driver
+                .enter_transparent_mode(TransparentLinkType::Udp, socket.socket_id)
+                .await;
+            if res.is_err() {
+                defmt::warn!("AT+UTM with UDP link type rejected, retrying with generic socket type");
+                res = self
+                    .nora_driver
+                    .enter_transparent_mode(TransparentLinkType::Socket, socket.socket_id)
+                    .await;
+            }
+            if let Err(e) = res {
+                defmt::error!("failed to enter transparent mode: {:?}", e);
+                let _ = self.nora_driver.close_socket(socket.socket_id).await;
+                return Err(e.into());
+            }
+            self.tm_deframer.borrow_mut().clear();
+            self.tm_last_rx.set(Instant::now());
+        }
+
         self.socket = Some(socket);
         Ok(())
     }
 
     pub async fn close_peer(&mut self) -> Result<(), RobotRadioNoraError> {
+        if self.nora_driver.is_transparent() {
+            defmt::warn!("cannot close peer in transparent mode, radio reset required");
+            return Err(RobotRadioNoraError::TransparentModeActive);
+        }
         if let Some(socket) = &self.socket {
             self.nora_driver.close_socket(socket.socket_id).await?;
             self.socket = None;
@@ -373,7 +491,9 @@ impl<
 
     pub async fn send_data(&self, data: &[u8]) -> Result<(), RobotRadioNoraError> {
         if let Some(socket) = &self.socket {
-            if self.fire_and_forget_sends {
+            if self.nora_driver.is_transparent() {
+                self.nora_driver.send_raw(data)?;
+            } else if self.fire_and_forget_sends {
                 self.nora_driver.send_data_no_ack(socket.socket_id, data).await?;
             } else {
                 self.nora_driver.send_data(socket.socket_id, data).await?;
@@ -407,6 +527,9 @@ impl<
         FN: FnOnce(&[u8]) -> RET,
     {
         if self.socket.is_some() {
+            if self.nora_driver.is_transparent() {
+                return self.read_frame_transparent(fn_read);
+            }
             if self.nora_driver.can_read_data() {
                 // In direct binary mode, +UESODB/+UESODBF events contain inline data.
                 // We can read and return it synchronously — no async AT+USORB needed.
@@ -431,6 +554,56 @@ impl<
             defmt::trace!("socket was none");
             Err(RobotRadioNoraError::SocketMissing)
         }
+    }
+
+    /// Drain raw UART chunks into the deframer and return the next complete A-Team packet.
+    fn read_frame_transparent<RET, FN>(
+        &self,
+        fn_read: FN,
+    ) -> Result<Option<RET>, RobotRadioNoraError>
+    where
+        FN: FnOnce(&[u8]) -> RET,
+    {
+        let mut deframer = self.tm_deframer.borrow_mut();
+
+        loop {
+            let now = Instant::now();
+            let res = self.nora_driver.try_read_raw(|chunk| {
+                if !deframer.is_empty() && now - self.tm_last_rx.get() > TM_PARTIAL_FRAME_TIMEOUT {
+                    defmt::warn!("dropping stale partial frame ({} bytes)", deframer.len());
+                    deframer.clear();
+                }
+                if deframer.push(chunk).is_err() {
+                    defmt::warn!("transparent mode deframer overflow, buffered data dropped");
+                }
+            });
+            match res {
+                Ok(Some(())) => self.tm_last_rx.set(now),
+                Ok(None) => break,
+                Err(NoraRadioError::ReadLowLevelBufferBusy) => break,
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        let resyncs_before = deframer.resync_count();
+        let ret = deframer.next_frame(tm_frame_check, fn_read);
+        let dropped = deframer.resync_count().wrapping_sub(resyncs_before);
+        if dropped > 0 {
+            defmt::debug!("transparent mode resync dropped {} bytes", dropped);
+        }
+        Ok(ret)
+    }
+
+    /// Transparent mode only: read one raw UART chunk without A-Team deframing.
+    /// Chunk boundaries follow UART idle detection, not peer datagram boundaries.
+    pub fn read_raw_nonblocking<RET, FN>(
+        &self,
+        fn_read: FN,
+    ) -> Result<Option<RET>, RobotRadioNoraError>
+    where
+        FN: FnOnce(&[u8]) -> RET,
+    {
+        Ok(self.nora_driver.try_read_raw(fn_read)?)
     }
 
     pub async fn send_ack(&self, nack: bool) -> Result<(), RobotRadioNoraError> {

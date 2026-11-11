@@ -19,7 +19,7 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 use crate::{
     create_error_telemetry_from_string,
     drivers::radio_robot::TeamColor,
-    drivers::radio_robot_nora::RobotRadioNora,
+    drivers::radio_robot_nora::{NoraLinkMode, RobotRadioNora},
     pins::*,
     robot_state::SharedRobotState,
     tasks::dotstar_task::{ControlBoardLedCommand, RadioStatusLedCommand},
@@ -55,6 +55,9 @@ macro_rules! create_radio_nora_task {
 }
 
 pub const RADIO_LOOP_RATE_MS: u64 = 10;
+
+/// Unicast data path once connected to software. The hello handshake always uses binary mode.
+pub const RADIO_NORA_LINK_MODE: NoraLinkMode = NoraLinkMode::Transparent;
 
 pub const RADIO_MAX_TX_PACKET_SIZE: usize = 448;
 pub const RADIO_TX_BUF_DEPTH: usize = 4;
@@ -183,6 +186,7 @@ impl<
             radio_tx_uart_queue,
             radio_reset_pin,
             robot_state.hw_wifi_driver_use_flow_control(),
+            RADIO_NORA_LINK_MODE,
         );
 
         let radio_ndet = Input::new(radio_ndet_pin, Pull::None);
@@ -233,8 +237,13 @@ impl<
                         || cur_robot_state.hw_robot_team_is_blue
                             != last_robot_state.hw_robot_team_is_blue)
                 {
-                    // Enter connected network state (disconnecting)
-                    self.connection_state = RadioConnectionState::ConnectedNetwork;
+                    if self.radio.is_transparent() {
+                        // No AT commands in transparent mode, reset the radio and reconnect.
+                        self.connection_state = RadioConnectionState::ConnectedPhys;
+                    } else {
+                        // Enter connected network state (disconnecting)
+                        self.connection_state = RadioConnectionState::ConnectedNetwork;
+                    }
                     defmt::info!("shell state change triggering software reconnect");
                 }
 
@@ -245,15 +254,20 @@ impl<
                 {
                     defmt::info!("dip state change triggering wifi network change");
 
-                    if self.radio.disconnect_network().await.is_err() {
-                        // this is really only an error if we think we're connected
-                        // this separation is really poorly handled right now
-                        // TODO move all statefulness down into driver
-                        defmt::error!("failed to cleanly disconnect - consider radio reboot");
-                    }
+                    if self.radio.is_transparent() {
+                        // No AT commands in transparent mode, reset the radio and reconnect.
+                        self.connection_state = RadioConnectionState::ConnectedPhys;
+                    } else {
+                        if self.radio.disconnect_network().await.is_err() {
+                            // this is really only an error if we think we're connected
+                            // this separation is really poorly handled right now
+                            // TODO move all statefulness down into driver
+                            defmt::error!("failed to cleanly disconnect - consider radio reboot");
+                        }
 
-                    // Go back to reset the full network flow.
-                    self.connection_state = RadioConnectionState::ConnectedUart;
+                        // Go back to reset the full network flow.
+                        self.connection_state = RadioConnectionState::ConnectedUart;
+                    }
                 }
             }
 
@@ -514,11 +528,14 @@ impl<
                 let start_time = Instant::now();
                 self.radio.close_peer().await.unwrap();
 
-                self.radio
-                    .open_unicast(hello.ipv4, hello.port)
-                    .await
-                    .expect("failed to open unicast port");
-                defmt::info!("unicast open");
+                if let Err(e) = self.radio.open_unicast(hello.ipv4, hello.port).await {
+                    defmt::error!("failed to open unicast port: {}", e);
+                    return Err(());
+                }
+                defmt::info!(
+                    "unicast open ({})",
+                    self.radio.link_mode()
+                );
 
                 let end_time = Instant::now();
                 defmt::info!(

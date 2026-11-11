@@ -12,7 +12,8 @@ use ateam_lib_crossarch::queue;
 use super::at_protocol::{ATEvent, ATResponse, AtPacketError, SocketProtocol};
 
 /// Parsed AT packet from UART — either a command response or an unsolicited result code (URC).
-/// NORA-W36 is always in AT command mode (no EDM).
+/// NORA-W36 does not use EDM. It runs in AT command mode, optionally switching a single link to
+/// transparent mode (AT+UTM), where UART bytes are raw peer data and this parser is not used.
 #[derive(defmt::Format)]
 pub enum NoraPacket<'a> {
     Response(ATResponse<'a>),
@@ -37,6 +38,8 @@ pub enum NoraRadioError {
     SocketReadFailed,
     HostNameTooLong,
     SsidTooLong,
+    TransparentModeActive,
+    NotInTransparentMode,
 }
 
 impl From<AtPacketError> for NoraRadioError {
@@ -66,6 +69,21 @@ pub enum DataMode {
     DirectBinaryMode = 2,
 }
 
+/// Link type for AT+UTM.
+/// The 3.5.0 docs disagree: the AT command reference lists 0=SPS, 1=Socket, while the user
+/// guide lists 0=SPS, 1=TCP socket, 2=UDP socket. Callers should fall back from `Udp` to
+/// `Socket` if the module rejects the former.
+#[derive(Copy, Clone, PartialEq, Debug, Format)]
+#[repr(u8)]
+pub enum TransparentLinkType {
+    Sps = 0,
+    Socket = 1,
+    Udp = 2,
+}
+
+const TM_DEFAULT_PRE_GUARD_MS: u16 = 1000;
+const TM_DEFAULT_POST_GUARD_MS: u16 = 1000;
+
 pub struct NoraW36x<
     'a,
     const LEN_TX: usize,
@@ -78,6 +96,9 @@ pub struct NoraW36x<
     writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
     uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
     data_mode: Cell<DataMode>,
+    transparent: Cell<bool>,
+    tm_pre_guard_ms: Cell<u16>,
+    tm_post_guard_ms: Cell<u16>,
 }
 
 impl<
@@ -99,6 +120,9 @@ impl<
             writer,
             uart,
             data_mode: Cell::new(DataMode::BufferedMode),
+            transparent: Cell::new(false),
+            tm_pre_guard_ms: Cell::new(TM_DEFAULT_PRE_GUARD_MS),
+            tm_post_guard_ms: Cell::new(TM_DEFAULT_POST_GUARD_MS),
         }
     }
 
@@ -122,6 +146,11 @@ impl<
                 .await?;
 
             if found {
+                // The module always boots into AT mode with default settings
+                // (persistent TM via AT+UTMP is not used).
+                self.transparent.set(false);
+                self.tm_pre_guard_ms.set(TM_DEFAULT_PRE_GUARD_MS);
+                self.tm_post_guard_ms.set(TM_DEFAULT_POST_GUARD_MS);
                 return Ok(());
             }
         }
@@ -184,6 +213,126 @@ impl<
 
     pub fn data_mode(&self) -> DataMode {
         self.data_mode.get()
+    }
+
+    pub fn is_transparent(&self) -> bool {
+        self.transparent.get()
+    }
+
+    /// Configure transparent mode escape timing.
+    /// Uses AT+UTMES=<pre_timeout>,<post_timeout>,<escape_timeout> (ms; defaults 1000,1000,200).
+    /// Must be called in AT mode.
+    pub async fn set_transparent_escape_timing(
+        &self,
+        pre_timeout_ms: u16,
+        post_timeout_ms: u16,
+        escape_timeout_ms: u16,
+    ) -> Result<(), NoraRadioError> {
+        let mut str: String<32> = String::new();
+        write!(str, "AT+UTMES={pre_timeout_ms},{post_timeout_ms},{escape_timeout_ms}")
+            .or(Err(NoraRadioError::CommandConstructionFailed))?;
+        self.send_command(str.as_str()).await?;
+        self.read_ok().await?;
+        self.tm_pre_guard_ms.set(pre_timeout_ms);
+        self.tm_post_guard_ms.set(post_timeout_ms);
+        Ok(())
+    }
+
+    /// Enter transparent mode on an existing connection.
+    /// Uses AT+UTM=<link_type>,<handle>. After OK, all UART bytes are forwarded unmodified
+    /// to/from the peer and no AT commands or URCs are processed until the escape sequence.
+    /// For UDP, UART data is sent to the socket's connected (or last AT+USOST*) destination.
+    pub async fn enter_transparent_mode(
+        &self,
+        link_type: TransparentLinkType,
+        handle: u8,
+    ) -> Result<(), NoraRadioError> {
+        let link_num = link_type as u8;
+        let mut str: String<16> = String::new();
+        write!(str, "AT+UTM={link_num},{handle}")
+            .or(Err(NoraRadioError::CommandConstructionFailed))?;
+        self.send_command(str.as_str()).await?;
+        self.read_ok().await?;
+        self.transparent.set(true);
+        defmt::debug!("NoraW36x - entered transparent mode ({}, {})", link_type, handle);
+        Ok(())
+    }
+
+    /// Leave transparent mode with the `+++` escape sequence.
+    /// The module requires silence of at least the configured pre/post guard times around
+    /// the sequence, so this takes > pre + post guard time (2s with defaults).
+    /// Callers must not enqueue any other UART data while this runs.
+    pub async fn exit_transparent_mode(&self) -> Result<(), NoraRadioError> {
+        if !self.transparent.get() {
+            return Err(NoraRadioError::NotInTransparentMode);
+        }
+
+        const GUARD_MARGIN_MS: u64 = 100;
+        Timer::after_millis(self.tm_pre_guard_ms.get() as u64 + GUARD_MARGIN_MS).await;
+
+        // Discard any peer data received before the escape so it isn't mistaken for the OK.
+        while self.reader.try_dequeue().is_ok() {}
+
+        if self.writer.enqueue_copy(b"+++").is_err() {
+            return Err(NoraRadioError::SendCommandLowLevelBufferFull);
+        }
+
+        // OK is emitted after the post guard. Peer data may still arrive until then, so check
+        // each UART chunk individually rather than accumulating.
+        let wait_ok = async {
+            loop {
+                let done = self
+                    .reader
+                    .dequeue(|buf| buf.windows(4).any(|w| w == b"OK\r\n"))
+                    .await;
+                if done {
+                    break;
+                }
+            }
+        };
+        let timeout_ms = self.tm_post_guard_ms.get() as u64 + 1000;
+        match select(wait_ok, Timer::after_millis(timeout_ms)).await {
+            embassy_futures::select::Either::First(_) => {
+                self.transparent.set(false);
+                defmt::debug!("NoraW36x - exited transparent mode");
+                Ok(())
+            }
+            embassy_futures::select::Either::Second(_) => {
+                defmt::warn!("NoraW36x - transparent mode escape timed out");
+                Err(NoraRadioError::OperationTimedOut)
+            }
+        }
+    }
+
+    /// Write raw bytes to the peer while in transparent mode (no AT framing, no ack).
+    pub fn send_raw(&self, data: &[u8]) -> Result<(), NoraRadioError> {
+        if !self.transparent.get() {
+            return Err(NoraRadioError::NotInTransparentMode);
+        }
+        if data.is_empty() || data.len() > LEN_TX {
+            return Err(NoraRadioError::CommandConstructionFailed);
+        }
+        self.writer
+            .enqueue_copy(data)
+            .or(Err(NoraRadioError::SendCommandLowLevelBufferFull))
+    }
+
+    /// Non-blocking read of one raw UART chunk while in transparent mode.
+    /// Chunk boundaries follow UART idle detection and need not match peer datagrams.
+    /// Returns Ok(None) if nothing is queued.
+    pub fn try_read_raw<RET, FN>(&self, fn_read: FN) -> Result<Option<RET>, NoraRadioError>
+    where
+        FN: FnOnce(&[u8]) -> RET,
+    {
+        if !self.transparent.get() {
+            return Err(NoraRadioError::NotInTransparentMode);
+        }
+        match self.reader.try_dequeue() {
+            Ok(buf) => Ok(Some(fn_read(buf.data()))),
+            Err(queue::Error::QueueEmpty) => Ok(None),
+            Err(queue::Error::QueueFull) => Ok(None),
+            Err(queue::Error::InProgress) => Err(NoraRadioError::ReadLowLevelBufferBusy),
+        }
     }
 
     /// Set the host name on the NORA-W36 module.
@@ -541,6 +690,9 @@ impl<
     ///   followed by the raw data bytes. No \r terminator is used.
     /// - The response is +USOWB:<socket_handle>,<written_length>.
     pub async fn send_data(&self, socket_handle: u8, data: &[u8]) -> Result<(), NoraRadioError> {
+        if self.transparent.get() {
+            return Err(NoraRadioError::TransparentModeActive);
+        }
         let data_len = data.len() as u16;
 
         if data_len == 0 || data_len > 1460 {
@@ -584,6 +736,9 @@ impl<
     /// Only safe to use when no other AT command response is expected before the ack drains
     /// (i.e. the connected data-phase loop, not during handshake or socket setup).
     pub async fn send_data_no_ack(&self, socket_handle: u8, data: &[u8]) -> Result<(), NoraRadioError> {
+        if self.transparent.get() {
+            return Err(NoraRadioError::TransparentModeActive);
+        }
         let data_len = data.len() as u16;
         if data_len == 0 || data_len > 1460 {
             defmt::error!("data length out of range: {}, must be between 1 and 1460", data_len);
@@ -971,7 +1126,13 @@ impl<
     }
 
     /// Send an AT command string over UART with \r terminator.
+    /// Refused in transparent mode, where the bytes would be forwarded to the peer.
     pub async fn send_command(&self, cmd: &str) -> Result<(), NoraRadioError> {
+        if self.transparent.get() {
+            defmt::warn!("NoraW36x - refusing AT command in transparent mode: {}", cmd);
+            return Err(NoraRadioError::TransparentModeActive);
+        }
+
         let res = self.writer.enqueue(|buf| {
             buf[..cmd.len()].clone_from_slice(cmd.as_bytes());
             buf[cmd.len()] = b'\r';

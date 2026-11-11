@@ -6,3 +6,4 @@ pub mod filter;
 pub mod math;
 pub mod power;
 pub mod queue;
+pub mod stream_deframer;

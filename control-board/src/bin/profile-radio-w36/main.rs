@@ -8,6 +8,11 @@
 // echo loop: any UDP payload received is immediately sent back to the host.
 // No A-Team packet parsing is performed.
 //
+// Link mode: PROFILE_LINK_MODE selects binary (AT+USOWB / +UESODB) or transparent
+// (AT+UTM raw UART passthrough) for the echo phase. The hello handshake always uses
+// binary mode. In transparent mode each raw UART chunk is echoed as-is; a payload split
+// across UART idle boundaries is echoed as multiple datagrams.
+//
 // Payload size: 512 bytes.
 // Constraint: RobotRadioNora::read_data uses AT+USORB with a fixed
 // read length of size_of::<RadioPacket>() = 524 bytes. Sending packets
@@ -18,7 +23,7 @@
 
 use ateam_control_board::{
     drivers::radio_robot::TeamColor,
-    drivers::radio_robot_nora::RobotRadioNora,
+    drivers::radio_robot_nora::{NoraLinkMode, RobotRadioNora},
     get_system_config, SystemIrqs, DEBUG_RADIO_UART_QUEUES,
 };
 use ateam_lib_stm32::{
@@ -42,6 +47,8 @@ use defmt_rtt as _;
 // Match DIP switch 3 default (true = flow control enabled).
 // Set false if DIP switch 3 is off on your board.
 pub const USE_FLOW_CONTROL: bool = true;
+
+pub const PROFILE_LINK_MODE: NoraLinkMode = NoraLinkMode::Transparent;
 
 // 512-byte payload; AT protocol framing overhead for TX is ~15 bytes,
 // for RX (AT+USORB response) is ~20 bytes. Use 600 for comfortable margin.
@@ -133,6 +140,7 @@ async fn main(_main_spawner: embassy_executor::Spawner) {
         RADIO_NORA_PROF_IDLE_BUFFERED_UART.get_uart_write_queue(),
         p.PD7.into(),
         USE_FLOW_CONTROL,
+        PROFILE_LINK_MODE,
     );
 
     defmt::info!("UART queues started, entering connection loop");
@@ -210,20 +218,27 @@ async fn main(_main_spawner: embassy_executor::Spawner) {
                 let _ = radio.disconnect_network().await;
                 continue 'net;
             }
-            defmt::info!("unicast open, entering echo loop");
+            defmt::info!("unicast open ({}), entering echo loop", radio.link_mode());
 
             // --- Echo loop ---
-            // Radio is in direct binary mode (AT+USORM=2): data arrives as +UESODBF URCs.
-            // read_data uses AT+USORB (buffered mode) and will fail. Poll read_data_nonblocking
-            // instead, which reads from the direct-binary event queue.
+            // Binary mode: radio is in direct binary mode (AT+USORM=2), data arrives as
+            // +UESODBF URCs. read_data uses AT+USORB (buffered mode) and will fail, so poll
+            // read_data_nonblocking, which reads from the direct-binary event queue.
+            // Transparent mode: read raw UART chunks (payload has no A-Team header to deframe).
+            let copy_payload = |data: &[u8]| {
+                let mut buf = [0u8; PROFILE_PAYLOAD_SIZE];
+                let n = data.len().min(PROFILE_PAYLOAD_SIZE);
+                buf[..n].copy_from_slice(&data[..n]);
+                (buf, n)
+            };
             loop {
                 let result = loop {
-                    match radio.read_data_nonblocking(|data| {
-                        let mut buf = [0u8; PROFILE_PAYLOAD_SIZE];
-                        let n = data.len().min(PROFILE_PAYLOAD_SIZE);
-                        buf[..n].copy_from_slice(&data[..n]);
-                        (buf, n)
-                    }) {
+                    let read = if radio.is_transparent() {
+                        radio.read_raw_nonblocking(copy_payload)
+                    } else {
+                        radio.read_data_nonblocking(copy_payload)
+                    };
+                    match read {
                         Ok(Some(val)) => break Ok(val),
                         Ok(None) => Timer::after_millis(1).await,
                         Err(e) => break Err(e),
