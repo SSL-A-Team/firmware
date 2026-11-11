@@ -138,6 +138,9 @@ pub struct ControlContext {
     /// Vision state on the previous tick, to reset the trajectory when vision
     /// comes (back) online and the estimate jumps to it.
     last_vision_active: bool,
+    /// Low-passed yaw rate (rad/s) for the angular rate feedback (YAW_RATE_FB_LPF_HZ).
+    yaw_rate_fb: f32,
+    yaw_rate_fb_alpha: f32,
 }
 
 impl ControlContext {
@@ -181,6 +184,11 @@ impl ControlContext {
             tracking_divergence_state: TrackingDivergenceState::Normal,
             tracking_recovery_at_rest_ticks: 0,
             last_vision_active: false,
+            yaw_rate_fb: 0.0,
+            yaw_rate_fb_alpha: {
+                let tau = 1.0 / (2.0 * PI * controller_params::YAW_RATE_FB_LPF_HZ);
+                dt / (tau + dt)
+            },
         }
     }
 
@@ -266,6 +274,8 @@ impl ControlContext {
         // TIGERs `CtrlPantheraUpdate`: when vision comes online the estimate jumps
         // to it, so restart the trajectory from the new estimate instead of tracking
         // the jump.
+        self.yaw_rate_fb += (self.state_estimate[5] - self.yaw_rate_fb) * self.yaw_rate_fb_alpha;
+
         let vision_active = self.state_estimator.vision_active();
         if vision_active && !self.last_vision_active {
             self.reset_trajectory();
@@ -498,7 +508,7 @@ impl ControlContext {
         };
         let mut setpoints = self.run_traj_open_loop(cmd, make)?;
         let k_vel_w = self.pose_fb_w[3];
-        setpoints.body_twist.z += (setpoints.body_twist.z - self.state_estimate[5]) * k_vel_w;
+        setpoints.body_twist.z += (setpoints.body_twist.z - self.yaw_rate_fb) * k_vel_w;
         Ok(setpoints)
     }
 
@@ -643,7 +653,7 @@ impl ControlContext {
             [self.pose_fb_w[0], self.pose_fb_w[1], self.pose_fb_w[2], self.pose_fb_w[3]];
         let err_w = remainderf(traj_pos.z - pose_estimate.z, 2.0 * PI);
         let pos_fb_w = (err_w * k_w).clamp(-max_w, max_w);
-        let vel_fb_w = (traj_vel.z - state_estimate[5]) * k_vel_w;
+        let vel_fb_w = (traj_vel.z - self.yaw_rate_fb) * k_vel_w;
         let scale_w = anti_jitter_scale(fabsf(err_w), aj_w);
 
         let twist_out = Vector3f::new(

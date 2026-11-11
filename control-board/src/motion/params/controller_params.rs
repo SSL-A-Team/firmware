@@ -69,6 +69,19 @@ pub const WHEEL_CURRENT_SLOPE_LIMIT_A_PER_S: f32 = 500.0;
 /// on the wheel current targets. Not in TIGERs.
 pub const FRICTION_VEL_LPF_HZ: f32 = 15.0;
 
+/// First-order low-pass corner (Hz) on the measured yaw rate used by the angular
+/// rate feedback (`POSE_FB_W` VEL_K). The yaw-rate estimate is close to raw gyro
+/// and carries ~0.02-0.03 rad/s of 8-60 Hz content while driving (sensor/roller
+/// vibration plus a lightly damped ~15 Hz rate-loop mode); with VEL_K = 2 it went
+/// doubled into the angular command, the wheel velocity setpoints (x2.7) and the
+/// angular friction compensation. TIGERs feed back their (smoother) EKF velocity.
+/// Robot 2, 1 kHz captures driving +/-0.15 m at 0.3 m/s: 40 Hz cuts the wheel
+/// velocity setpoint content to 0.081 (8-20 Hz) / 0.040 (>20 Hz) rad/s from 0.115 /
+/// 0.067 with unchanged hold damping and heading tracking. 15 Hz cut more but its
+/// lag let holds ring (gyro std 0.04 vs 0.006 rad/s); lowering VEL_K to 1 made the
+/// heading loop oscillate at 2-8 Hz.
+pub const YAW_RATE_FB_LPF_HZ: f32 = 40.0;
+
 /// Maximum magnitude of the body-level acceleration output [linear (m/s²), angular (rad/s²)].
 /// The feed-forward output acceleration (local frame, friction and efficiency
 /// applied) is clamped per axis to these limits before conversion to wheel torques.
