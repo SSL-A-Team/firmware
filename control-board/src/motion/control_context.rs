@@ -26,7 +26,9 @@ use nalgebra::{SMatrix, SVector};
 pub(crate) const VISION_ACTIVE_TIMEOUT_S: f32 = 0.5;
 
 /// Fraction of the feasible acceleration planners may use (rest is feedback headroom).
-pub const FEASIBLE_ACCEL_MARGIN: f32 = 0.8;
+/// 0.9 with the identified efficiency (0.75): same time-to-target as 0.8 with the
+/// optimistic 0.85, with ~25% less tracking error.
+pub const FEASIBLE_ACCEL_MARGIN: f32 = 0.9;
 /// Floor for the planned linear acceleration (m/s^2) so a fully derated robot still moves.
 pub const MIN_PLANNED_ACCEL_LINEAR: f32 = 0.3;
 
