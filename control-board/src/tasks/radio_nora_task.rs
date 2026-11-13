@@ -64,7 +64,10 @@ const SESSION_RESET_RX_SETTLE_MS: u64 = 20;
 pub const RADIO_MAX_TX_PACKET_SIZE: usize =
     ateam_common_packets::MAX_ROBOT_TX_PACKET_SIZE + NORA_USOWB_WIRE_OVERHEAD;
 pub const RADIO_TX_BUF_DEPTH: usize = 4;
-pub const RADIO_MAX_RX_PACKET_SIZE: usize = 256;
+// Each DMA read must end on line idle: when a burst fills the buffer, bytes that
+// arrive before the next read is armed are lost (3.3 us/byte at 3 Mbaud) and the
+// stream desyncs. At 256 bytes about 1 command packet per second failed its CRC.
+pub const RADIO_MAX_RX_PACKET_SIZE: usize = 1024;
 // NORA-W36x at 3 Mbaud emits each AT response as many tiny idle-separated
 // fragments; a shallow queue overflows (silently dropping fragments) while
 // the thread-mode consumer is preempted by the control loop.
@@ -618,6 +621,10 @@ impl<
         }
 
         // write outbound packets
+        // At most one extended telemetry packet (the latest) per radio loop: bursts
+        // of these ~570 byte packets above ~100 Hz jam the NORA-W36 (it stops both
+        // directions for seconds and the session has to be rebuilt).
+        let mut extended = None;
         loop {
             if let Some(telemetry) = self.telemetry_subscriber.try_next_message_pure() {
                 match telemetry {
@@ -626,16 +633,7 @@ impl<
                     }
                     TelemetryPacket::Extended(control) => {
                         if self.shared_robot_state.get_radio_send_extended_telem() {
-                            if self
-                                .radio
-                                .send_control_debug_telemetry(control)
-                                .await
-                                .is_err()
-                            {
-                                defmt::warn!(
-                                    "RadioNoraTask - failed to send control debug telemetry packet"
-                                );
-                            }
+                            extended = Some(control);
                         }
                     }
                     TelemetryPacket::ParameterCommandResponse(pc_resp) => {
@@ -653,6 +651,12 @@ impl<
                 }
             } else {
                 break;
+            }
+        }
+
+        if let Some(control) = extended {
+            if self.radio.send_control_debug_telemetry(control).await.is_err() {
+                defmt::warn!("RadioNoraTask - failed to send control debug telemetry packet");
             }
         }
 

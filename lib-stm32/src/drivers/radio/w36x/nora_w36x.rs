@@ -84,7 +84,7 @@ pub struct NoraW36x<
     rx_accum: RefCell<Vec<u8, RX_ACCUM_LEN>>,
 }
 
-const RX_ACCUM_LEN: usize = 1024;
+const RX_ACCUM_LEN: usize = 2048;
 const UESODB_PREFIX: &[u8] = b"+UESODB";
 // Longest header between the event prefix and the 0x01 marker (+UESODBF carries ip,port).
 const UESODB_MAX_HEADER_LEN: usize = 64;

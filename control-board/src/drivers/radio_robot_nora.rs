@@ -754,15 +754,15 @@ impl<
                     Ok(pkt) => {
                         return Ok(Some(pkt));
                     }
-                    Err(_) => {
-                        defmt::debug!("got AT packet but wasn't A-Team");
+                    Err(e) => {
+                        defmt::warn!("radio: undecodable data packet: {:?}", e);
                         return Err(());
                     }
                 },
                 None => return Ok(None),
             },
             Err(err_res) => {
-                defmt::debug!("radio in invalid state {:?}", err_res);
+                defmt::warn!("radio: read failed: {:?}", err_res);
                 return Err(());
             }
         }
