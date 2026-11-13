@@ -56,6 +56,15 @@ pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(400.0, 0.0, 1.5, 4.0);
 // growing slip (null-space residual p95 0.15 -> 0.30 m/s at 4 A) for little gain.
 pub const WHEEL_FF_CURRENT_LIMIT_A: f32 = 3.5;
 
+/// Wheel slip feed-forward ((rad/s)/A): each wheel's velocity setpoint is raised by
+/// this times its feed-forward current. Radio-tunable as `WHEEL_SLIP_COMP`.
+// Robot 2 on carpet: wheel speed exceeds the vision/KF body speed by ~1.1 rad/s at
+// 1 A, 1.6 at 2 A, 2.4 at 3.2 A (both signs). Without compensation the body lagged
+// 13-20 mm behind 0.2 m trajectories (error ~ slip / POSE_FB_XY K). 0.2 m moves:
+// 0 -> 1.2 cut XY track RMS forward 10 -> 7 mm, sideways 13.8 -> 7.1 mm, replan
+// test 9.4 -> 6.5 mm, and arrival 0.05-0.1 s sooner; 1.6 was similar.
+pub const WHEEL_SLIP_COMP: f32 = 1.2;
+
 /// [ERROR_POS_LINEAR (m), ERROR_POS_ANGULAR (rad), ERROR_VEL_LINEAR (m/s), ERROR_VEL_ANGULAR (rad/s)]
 /// Trajectory-vs-estimate errors above which closed-loop tracking is considered
 /// diverged, triggering divergence recovery (active brake, then reset).

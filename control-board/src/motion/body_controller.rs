@@ -281,6 +281,10 @@ impl BodyController {
         }
         self.wheel_torque_out =
             self.wheel_current_out * robot_model.get_params().motor_torque_constant_nmpa;
+        // Under load the wheel surface outruns the ground (omni rollers on carpet),
+        // roughly in proportion to the wheel force. Without this the wheel velocity
+        // loop holds the wheel at the kinematic setpoint and the body falls behind.
+        self.wheel_vel_out += self.wheel_current_out * self.control_context.wheel_slip_comp;
 
         if !matches!(ENC_LAG_MODE, EncLagMode::Disabled) {
             self.control_context.enc_lag.step(&body_xy);

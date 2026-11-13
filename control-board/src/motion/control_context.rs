@@ -113,6 +113,8 @@ pub struct ControlContext {
     pub wheel_vel_fb: Vector4f,
     /// Feed-forward wheel current limit (A)
     pub wheel_ff_current_limit: f32,
+    /// Wheel slip feed-forward ((rad/s)/A, see controller_params::WHEEL_SLIP_COMP)
+    pub wheel_slip_comp: f32,
     /// Effective per-wheel feed-forward current limits (A) after thermal derating;
     /// set by the control task each tick from `WheelThermalBudget`.
     pub wheel_ff_current_limits: Vector4f,
@@ -174,6 +176,7 @@ impl ControlContext {
             pose_fb_w: controller_params::POSE_FB_W,
             wheel_vel_fb: controller_params::WHEEL_VEL_FB,
             wheel_ff_current_limit: controller_params::WHEEL_FF_CURRENT_LIMIT_A,
+            wheel_slip_comp: controller_params::WHEEL_SLIP_COMP,
             wheel_ff_current_limits: Vector4f::repeat(controller_params::WHEEL_FF_CURRENT_LIMIT_A),
             tracking_divergence_thresh: controller_params::TRACKING_DIVERGENCE_THRESHOLD,
             trajectory: None,
@@ -724,6 +727,7 @@ impl ControlContext {
             ParameterName::POSE_FB_W => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::WHEEL_VEL_FB => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::WHEEL_FF_CURRENT_LIMIT => Some(ParameterDataFormat::F32),
+            ParameterName::WHEEL_SLIP_COMP => Some(ParameterDataFormat::F32),
             ParameterName::VISION_SEED_SAMPLES => Some(ParameterDataFormat::F32),
             _ => None,
         }
@@ -792,6 +796,9 @@ impl ControlContext {
             }
             ParameterName::WHEEL_FF_CURRENT_LIMIT => {
                 reply.data.f32_ = self.wheel_ff_current_limit;
+            }
+            ParameterName::WHEEL_SLIP_COMP => {
+                reply.data.f32_ = self.wheel_slip_comp;
             }
             _ => unreachable!(),
         }
@@ -936,6 +943,12 @@ impl ControlContext {
                 let v = unsafe { cmd.data.f32_ };
                 if v.is_finite() && v >= 0.0 {
                     self.wheel_ff_current_limit = v;
+                }
+            }
+            ParameterName::WHEEL_SLIP_COMP => {
+                let v = unsafe { cmd.data.f32_ };
+                if v.is_finite() && (0.0..=3.0).contains(&v) {
+                    self.wheel_slip_comp = v;
                 }
             }
             _ => unreachable!(),
