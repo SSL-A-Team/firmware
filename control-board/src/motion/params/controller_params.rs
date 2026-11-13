@@ -37,21 +37,24 @@ pub const POSE_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 2.0);
 /// 50-67 Hz ringing): no instability up to 400; >20 Hz current noise 0.03 A at 100,
 /// ~0.1 A at 200, ~0.15 A at 300. Heading tracking on 0.2 m + 90 deg moves: 3.0 deg
 /// RMS at 100, 1.4 at 200, 0.9-1.35 at 300. Hold accuracy (3-6 mm) is independent of KP.
-/// MAX_CURRENT 3.0 A: 0.3 A of loop authority above the feed-forward limit. Above
-/// ~2.5 A per wheel the encoders lose rigid-body consistency (wheel slip on carpet),
-/// so a 4 A cap only bought slip: sideways 2 m/s^2 moves tracked 13-19 mm at 4 A vs
-/// 13-14 mm at 3 A, with less current noise.
-pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(200.0, 0.0, 1.5, 3.0);
+/// KP 400 (Nov 12, wheel velocity loop enabled): vs 200, streamed-target position
+/// tracking 7.8 -> 5.3 mm / 0.80 -> 0.58 deg RMS and heading holds without stiction
+/// stalls; 600 only added current noise. >20 Hz current noise ~0.28 A RMS (encoder
+/// speed quantization x KP), thermally negligible.
+/// MAX_CURRENT 4.0 A: 0.5 A of loop authority above the feed-forward limit; 4.5 A
+/// mostly added wheel slip.
+pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(400.0, 0.0, 1.5, 4.0);
 
 /// Maximum feed-forward wheel current (A). The body acceleration output is
 /// scaled uniformly so no wheel's feed-forward current exceeds this. Radio-tunable
 /// as `WHEEL_FF_CURRENT_LIMIT`.
-// Sized to traction, not to the motor (DF45M 7 A peak): on robot 2 the null-space
-// residual of the four encoder speeds (slip) stays ~0.01 m/s up to 2.5 A per wheel and
-// grows 2-10x between 2.5 and 4 A in forward, sideways and combined moves. The
-// planner's acceleration limit is derived from this limit (capability-aware planning),
-// and the per-wheel thermal model derates it on sustained use.
-pub const WHEEL_FF_CURRENT_LIMIT_A: f32 = 2.7;
+// DF45M024053-A2: 2.36 A rated, 7 A peak; the wheel firmware clamps at 6.3 A and
+// enforces I2T, and wheel_thermal.rs derates the feed-forward first on sustained use.
+// Robot 2, 0.2 m position moves at 3 m/s^2 (wheel velocity loop on): 2.7 A ->
+// 3.5 A cut time-to-target forward 0.83-1.35 -> 0.70-0.79 s, sideways 1.16-1.22 ->
+// 0.88-0.92 s, diagonal ~1.4 -> ~1.1 s. Above ~3.5 A per wheel the encoders show
+// growing slip (null-space residual p95 0.15 -> 0.30 m/s at 4 A) for little gain.
+pub const WHEEL_FF_CURRENT_LIMIT_A: f32 = 3.5;
 
 /// [ERROR_POS_LINEAR (m), ERROR_POS_ANGULAR (rad), ERROR_VEL_LINEAR (m/s), ERROR_VEL_ANGULAR (rad/s)]
 /// Trajectory-vs-estimate errors above which closed-loop tracking is considered
