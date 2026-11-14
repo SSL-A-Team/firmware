@@ -72,6 +72,9 @@ impl Trajectory for TrackedTrajectory {
 pub struct ManeuverSetpoints {
     pub body_twist: Vector3f,
     pub body_accel: Vector3f,
+    /// Part of `body_twist.z` that is yaw-rate (gyro) feedback. Kept out of the
+    /// friction compensation input, where it turned gyro noise into accel jitter.
+    pub rate_fb_w: f32,
 }
 
 impl ManeuverSetpoints {
@@ -79,6 +82,7 @@ impl ManeuverSetpoints {
         Self {
             body_twist: Vector3f::zeros(),
             body_accel: Vector3f::zeros(),
+            rate_fb_w: 0.0,
         }
     }
 }
@@ -477,6 +481,7 @@ impl ControlContext {
         Ok(ManeuverSetpoints {
             body_twist: traj_state.fixed_rows::<3>(3).into(),
             body_accel: traj_accel,
+            rate_fb_w: 0.0,
         })
     }
 
@@ -682,6 +687,7 @@ impl ControlContext {
         Ok(ManeuverSetpoints {
             body_twist: twist_out,
             body_accel: accel_out,
+            rate_fb_w: vel_fb_w * scale_w,
         })
     }
 

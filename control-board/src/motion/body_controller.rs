@@ -159,6 +159,7 @@ impl BodyController {
             .update_tracking_divergence_recovery(wheel_vel_meas);
 
         self.body_twist_out = setpoints.body_twist;
+        let rate_fb_w = setpoints.rate_fb_w;
         self.body_accel_out = setpoints.body_accel;
 
         // SSL stop state: clamp linear speed after control policy output so feedback
@@ -203,8 +204,11 @@ impl BodyController {
         let accel_local: Vector3f = to_local * self.body_accel_out;
         // The commanded velocity carries the feedback terms (gyro / pose noise); the steep
         // Coulomb ramp would pass that straight into the current, so low-pass it here.
+        // Yaw-rate feedback is excluded: within the Coulomb ramp it acted as ~26 rad/s^2
+        // per rad/s of gyro noise (angular accel jitter 2.1 -> 0.7 rad/s^2 without it).
+        let twist_fric_local = twist_local - Vector3f::new(0.0, 0.0, rate_fb_w);
         self.friction_vel_local_filt +=
-            (twist_local - self.friction_vel_local_filt) * self.friction_vel_alpha;
+            (twist_fric_local - self.friction_vel_local_filt) * self.friction_vel_alpha;
         // Friction and acceleration parts of the feed-forward, each already divided
         // by the output efficiency (TIGERs: (acc + F_fric/m) / efficiency).
         let fric_accel_local =
