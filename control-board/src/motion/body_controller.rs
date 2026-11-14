@@ -281,10 +281,13 @@ impl BodyController {
         }
         self.wheel_torque_out =
             self.wheel_current_out * robot_model.get_params().motor_torque_constant_nmpa;
-        // Under load the wheel surface outruns the ground (omni rollers on carpet),
-        // roughly in proportion to the wheel force. Without this the wheel velocity
-        // loop holds the wheel at the kinematic setpoint and the body falls behind.
-        self.wheel_vel_out += self.wheel_current_out * self.control_context.wheel_slip_comp;
+        // Under linear load the wheel surface outruns the ground (omni rollers on
+        // carpet), roughly in proportion to the wheel force. Without this the wheel
+        // velocity loop holds the wheel at the kinematic setpoint and the body falls
+        // behind. Rotation shows no such slip, so only the linear part counts.
+        let applied_local = fric_accel_local * fric_scale + clamped_accel_local * accel_scale;
+        let i_linear = accel_to_current(&Vector3f::new(applied_local.x, applied_local.y, 0.0));
+        self.wheel_vel_out += i_linear * self.control_context.wheel_slip_comp;
 
         if !matches!(ENC_LAG_MODE, EncLagMode::Disabled) {
             self.control_context.enc_lag.step(&body_xy);
