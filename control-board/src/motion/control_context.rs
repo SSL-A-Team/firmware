@@ -528,7 +528,9 @@ impl ControlContext {
         };
         let mut setpoints = self.run_traj_open_loop(cmd, make)?;
         let k_vel_w = self.pose_fb_w[3];
-        setpoints.body_twist.z += (setpoints.body_twist.z - self.yaw_rate_fb) * k_vel_w;
+        let rate_fb_w = (setpoints.body_twist.z - self.yaw_rate_fb) * k_vel_w;
+        setpoints.body_twist.z += rate_fb_w;
+        setpoints.rate_fb_w = rate_fb_w;
         Ok(setpoints)
     }
 
