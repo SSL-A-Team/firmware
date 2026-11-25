@@ -119,7 +119,8 @@ impl MotionManeuver for GlobalPositionManeuver {
         let est = ctx.state_estimate;
         let delta_xy =
             nalgebra::SVector::<f32, 2>::new(target_pose.x - est[0], target_pose.y - est[1]);
-        if delta_xy.norm() > 0.005 {
+        // The tdp-ablation-nocap build skips the cap (TDP_2027_EXPERIMENTS.md, E6).
+        if !cfg!(feature = "tdp-ablation-nocap") && delta_xy.norm() > 0.005 {
             let feasible = ctx.feasible_linear_accel_for_move(delta_xy, est[2], target_pose.z);
             let limit = (FEASIBLE_ACCEL_MARGIN * feasible).max(MIN_PLANNED_ACCEL_LINEAR);
             traj_params.max_accel_linear = traj_params.max_accel_linear.min(limit);

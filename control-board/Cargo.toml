@@ -64,6 +64,12 @@ default = []
 no-private-credentials = ["credentials/no-private-credentials"]
 # 1 kHz control-loop signal capture streamed over defmt (tasks/hf_capture.rs)
 hf-capture = []
+# TDP 2027 ablation builds (TDP_2027_EXPERIMENTS.md, E6). Never ship these.
+# nocap: position-mode planner ignores the feasible-acceleration cap.
+tdp-ablation-nocap = []
+# clip: nocap, and the feed-forward current is clipped per wheel instead of the
+# friction-first, direction-preserving budget.
+tdp-ablation-clip = ["tdp-ablation-nocap"]
 
 [dev-dependencies]
 defmt-test = "0.4.0"

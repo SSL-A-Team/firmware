@@ -79,6 +79,13 @@ async fn main(main_spawner: embassy_executor::Spawner) {
 
     defmt::info!("embassy HAL configured.");
 
+    // TDP 2027 ablation builds (TDP_2027_EXPERIMENTS.md, E6): say so loudly at every boot.
+    if cfg!(feature = "tdp-ablation-clip") {
+        defmt::warn!("TDP ABLATION BUILD: clip (no planner cap, per-wheel FF clipping). Do not ship.");
+    } else if cfg!(feature = "tdp-ablation-nocap") {
+        defmt::warn!("TDP ABLATION BUILD: nocap (no planner cap). Do not ship.");
+    }
+
     defmt::info!(
         "firmware  hash={:02x}{:02x}{:02x}{:02x} dirty={}",
         gv::FIRMWARE_HASH[0],

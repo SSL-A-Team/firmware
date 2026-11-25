@@ -274,7 +274,18 @@ impl BodyController {
             (1.0, s.clamp(0.0, 1.0))
         };
         let current_limited = fric_scale < 1.0 || accel_scale < 1.0;
-        let target_currents = i_fric * fric_scale + i_accel * accel_scale;
+        let target_currents = if cfg!(feature = "tdp-ablation-clip") {
+            // Ablation build only (TDP_2027_EXPERIMENTS.md, E6): clip each wheel on its
+            // own, which bends the acceleration direction and adds yaw under saturation.
+            // Telemetry and slip compensation below still see the budget's scales.
+            let mut clipped = i_fric + i_accel;
+            for i in 0..4 {
+                clipped[i] = clipped[i].clamp(-limits[i], limits[i]);
+            }
+            clipped
+        } else {
+            i_fric * fric_scale + i_accel * accel_scale
+        };
         self.body_accel_out_fric_comp = z_rotation_mat(output_heading)
             * (fric_accel_local * fric_scale + clamped_accel_local * accel_scale);
         let accel_clamped = accel_clamped || current_limited;
