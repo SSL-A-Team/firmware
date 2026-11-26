@@ -23,8 +23,10 @@ use embassy_stm32::{
 };
 use embassy_time::Instant;
 
+pub mod crc;
 pub mod git_version;
 pub mod image_hash;
+pub mod imu_calibration;
 pub mod motor;
 // pub mod stspin_motor; // disabled: uses removed stspin bindings, no active users
 pub mod parameter_interface;

@@ -4,6 +4,7 @@
 
 use embassy_executor::InterruptExecutor;
 use embassy_futures::select::{self, Either3};
+use embassy_stm32::gpio::{Input, Pull};
 use embassy_stm32::interrupt;
 use embassy_sync::pubsub::{PubSubChannel, WaitResult};
 
@@ -13,6 +14,7 @@ use ateam_control_board::{
     create_dotstar_task, create_imu_task, create_io_task, get_system_config,
     pins::{AccelDataPubSub, GyroDataPubSub, LedCommandPubSub, TelemetryPubSub},
     robot_state::SharedRobotState,
+    tasks::imu_task::{build_imu, run_boot_maintenance, ImuBootAction},
 };
 
 use embassy_time::Timer;
@@ -22,6 +24,11 @@ use static_cell::ConstStaticCell;
 
 static ROBOT_STATE: ConstStaticCell<SharedRobotState> =
     ConstStaticCell::new(SharedRobotState::new());
+
+/// Bench-test override: when `Some`, forces the IMU boot action instead of reading the
+/// enter/back buttons, so each maintenance path can be flashed and exercised without
+/// physically holding a button. Leave `None` for production.
+const FORCE_BOOT_ACTION: Option<ImuBootAction> = None;
 
 static GYRO_DATA_CHANNEL: GyroDataPubSub = PubSubChannel::new();
 static ACCEL_DATA_CHANNEL: AccelDataPubSub = PubSubChannel::new();
@@ -45,6 +52,38 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     defmt::info!("embassy HAL configured.");
 
     let robot_state = ROBOT_STATE.take();
+
+    // IMU boot maintenance: hold ENTER to calibrate, hold BACK to erase (or use
+    // FORCE_BOOT_ACTION). Runs before spawning the imu task, then halts; reboot to run
+    // the normal validation. See the control binary for the rationale.
+    let enter_held = Input::new(p.PE11, Pull::Up).is_low();
+    let back_held = Input::new(p.PE10, Pull::Up).is_low();
+    let boot_action = FORCE_BOOT_ACTION.unwrap_or(if enter_held {
+        ImuBootAction::Calibrate
+    } else if back_held {
+        ImuBootAction::EraseCalibration
+    } else {
+        ImuBootAction::Normal
+    });
+    defmt::info!("IMU boot action: {}", boot_action);
+
+    if boot_action != ImuBootAction::Normal {
+        let led_command_subscriber = LED_COMMAND_PUBSUB.subscriber().unwrap();
+        create_dotstar_task!(main_spawner, led_command_subscriber, p);
+        let imu_led_publisher = LED_COMMAND_PUBSUB.publisher().unwrap();
+
+        let mut imu = build_imu(
+            p.SPI1, p.PA5, p.PA7, p.PA6, p.DMA2_CH7, p.DMA2_CH6, p.PA4,
+        );
+        let mut flash = embassy_stm32::flash::Flash::new_blocking(p.FLASH);
+
+        run_boot_maintenance(&mut imu, &mut flash, &imu_led_publisher, boot_action).await;
+
+        defmt::info!("IMU boot maintenance complete; halted. Reboot to run normally.");
+        loop {
+            Timer::after_millis(1000).await;
+        }
+    }
 
     ////////////////////////
     //  setup task pools  //
@@ -83,43 +122,153 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         p
     );
 
+    defmt::info!("=====================================================");
+    defmt::info!("IMU hardware test / on-chip calibration validation");
+    defmt::info!("Normal boot loads the calibration from flash; if none");
+    defmt::info!("is stored the IMU stays INOP. To (re)calibrate or erase,");
+    defmt::info!("hold ENTER (calibrate) or BACK (erase) at boot -> the IMU");
+    defmt::info!("does the work then halts; reboot to run normally. Keep");
+    defmt::info!("the robot UPRIGHT and STATIONARY on a level surface while");
+    defmt::info!("calibrating. This loop verifies the published data is");
+    defmt::info!("bias-corrected once calibrated.");
+    defmt::info!("=====================================================");
+
+    validate_imu(
+        &mut imu_gyro_data_subscriber,
+        &mut imu_accel_data_subscriber,
+    )
+    .await;
+}
+
+/// Number of gyro (and, separately, accel) samples averaged per validation report.
+/// ~0.5 s at the 1600 Hz IMU ODR.
+const VALIDATION_WINDOW_SAMPLES: u32 = 800;
+
+/// Stationary gyro bias must average below this magnitude on every axis (rad/s).
+const GYRO_STATIONARY_THRESH_RADS: f32 = 0.03;
+/// Upright accel X/Y bias must average below this magnitude (m/s^2).
+const ACCEL_XY_THRESH_MPS2: f32 = 0.7;
+/// Upright accel Z must average within this band (m/s^2) around gravity (~9.81).
+const ACCEL_Z_MIN_MPS2: f32 = 8.0;
+const ACCEL_Z_MAX_MPS2: f32 = 11.5;
+
+/// Consumes published gyro/accel data and periodically reports, for a stationary
+/// upright robot, whether the on-chip bias correction is producing near-zero gyro
+/// and near-zero accel X/Y with accel Z near gravity. Prints PASS/FAIL each window.
+async fn validate_imu(
+    gyro_sub: &mut ateam_control_board::pins::GyroDataSubscriber,
+    accel_sub: &mut ateam_control_board::pins::AccelDataSubscriber,
+) {
+    let mut gyro_stats = AxisStats::new();
+    let mut accel_stats = AxisStats::new();
+
     loop {
         match select::select3(
-            imu_gyro_data_subscriber.next_message(),
-            imu_accel_data_subscriber.next_message(),
-            Timer::after_millis(1000),
+            gyro_sub.next_message(),
+            accel_sub.next_message(),
+            Timer::after_millis(2000),
         )
         .await
         {
             Either3::First(gyro_data) => match gyro_data {
                 WaitResult::Lagged(amnt) => {
-                    defmt::warn!("publishing gyro data lagged by {}", amnt);
+                    defmt::warn!("gyro data lagged by {}", amnt);
                 }
                 WaitResult::Message(msg) => {
-                    defmt::info!(
-                        "got gyro data (x: {}, y: {}, z: {})",
-                        msg[1],
-                        msg[1],
-                        msg[2]
-                    );
+                    gyro_stats.add(msg[0], msg[1], msg[2]);
+                    if gyro_stats.count >= VALIDATION_WINDOW_SAMPLES {
+                        let (mx, my, mz) = gyro_stats.means();
+                        let pass = mx.abs() < GYRO_STATIONARY_THRESH_RADS
+                            && my.abs() < GYRO_STATIONARY_THRESH_RADS
+                            && mz.abs() < GYRO_STATIONARY_THRESH_RADS;
+                        defmt::info!(
+                            "GYRO   mean=[{}, {}, {}] rad/s  peak=[{}, {}, {}]  -> {}",
+                            mx,
+                            my,
+                            mz,
+                            gyro_stats.peak_x,
+                            gyro_stats.peak_y,
+                            gyro_stats.peak_z,
+                            if pass { "PASS (near zero)" } else { "FAIL (bias/motion?)" }
+                        );
+                        gyro_stats.reset();
+                    }
                 }
             },
             Either3::Second(accel_data) => match accel_data {
                 WaitResult::Lagged(amnt) => {
-                    defmt::warn!("publishing accel data lagged by {}", amnt);
+                    defmt::warn!("accel data lagged by {}", amnt);
                 }
                 WaitResult::Message(msg) => {
-                    defmt::info!(
-                        "got accel data (x: {}, y: {}, z: {})",
-                        msg[0],
-                        msg[1],
-                        msg[2]
-                    );
+                    accel_stats.add(msg[0], msg[1], msg[2]);
+                    if accel_stats.count >= VALIDATION_WINDOW_SAMPLES {
+                        let (mx, my, mz) = accel_stats.means();
+                        let pass = mx.abs() < ACCEL_XY_THRESH_MPS2
+                            && my.abs() < ACCEL_XY_THRESH_MPS2
+                            && mz > ACCEL_Z_MIN_MPS2
+                            && mz < ACCEL_Z_MAX_MPS2;
+                        defmt::info!(
+                            "ACCEL  mean=[{}, {}, {}] m/s^2 (X/Y~0, Z~9.81)  -> {}",
+                            mx,
+                            my,
+                            mz,
+                            if pass {
+                                "PASS"
+                            } else {
+                                "FAIL (bias/tilt/motion?)"
+                            }
+                        );
+                        accel_stats.reset();
+                    }
                 }
             },
             Either3::Third(_) => {
-                defmt::warn!("receiving timed out.");
+                defmt::warn!("no IMU data received for 2s (still calibrating or IMU inop?)");
             }
         }
+    }
+}
+
+/// Running per-axis mean and peak-magnitude accumulator over a validation window.
+struct AxisStats {
+    sum_x: f32,
+    sum_y: f32,
+    sum_z: f32,
+    peak_x: f32,
+    peak_y: f32,
+    peak_z: f32,
+    count: u32,
+}
+
+impl AxisStats {
+    fn new() -> Self {
+        Self {
+            sum_x: 0.0,
+            sum_y: 0.0,
+            sum_z: 0.0,
+            peak_x: 0.0,
+            peak_y: 0.0,
+            peak_z: 0.0,
+            count: 0,
+        }
+    }
+
+    fn add(&mut self, x: f32, y: f32, z: f32) {
+        self.sum_x += x;
+        self.sum_y += y;
+        self.sum_z += z;
+        self.peak_x = self.peak_x.max(x.abs());
+        self.peak_y = self.peak_y.max(y.abs());
+        self.peak_z = self.peak_z.max(z.abs());
+        self.count += 1;
+    }
+
+    fn means(&self) -> (f32, f32, f32) {
+        let n = self.count.max(1) as f32;
+        (self.sum_x / n, self.sum_y / n, self.sum_z / n)
+    }
+
+    fn reset(&mut self) {
+        *self = Self::new();
     }
 }
