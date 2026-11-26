@@ -51,7 +51,6 @@ static uart_logging_status_tx_t uart_logging_status_send;
 static bool params_return_packet_requested = false;
 
 // encoder filter
-static IIRFilter_t encoder_filter;
 
 // motor model
 static MotorModel_t df45_model;
@@ -77,17 +76,25 @@ static bool current_limited = false;
 
 // kP saturation point: MAX_CURR_WHEEL_TURNING / (v_body_m_s / WHEEL_RADIUS_M)
 //   = 6300 mA / (1.0 m/s / 0.030 m) = 6300 / 33.33 = 189.0 mA/(rad/s) saturates at 1.0 m/s body error
-const PidConstants_t vel_velcur_controller_constants = {
-    .kP = 5.0f,
-    .kI = 50.0f,
+// P-only wheel velocity loop (KI = 0, anti-jitter 1.5 rad/s). No integrator, so the four wheels hold no
+// state that can fight in the drive's null space at rest. Gains are writable from
+// the control board via CCM_PARAM_VEL_CONTROLLER_*.
+static PidConstants_t vel_velcur_controller_constants = {
+    .kP = 200.0f,  // mA / (rad/s); see WHEEL_VEL_FB in control-board controller_params.rs
+    .kI = 0.0f,
     .kD = 0.0f,
     .kI_max = 500.0f,
     .kI_min = -500.0f,
-    .anti_jitter_thresh = (float) M_PI / 2.0f,
+    .anti_jitter_thresh = 1.5f,  // rad/s
 };
 
 static Pid_t vel_velcur_controller;
+// Total commanded wheel current limit (mA) in CURRENT / VELOCITY_CURRENT modes,
+// applied before the hardware limits. Writable via CCM_PARAM_MOTION_CURRENT_LIMIT.
+static float motion_current_limit_ma = 2000.0f;
 static float vel_cur_component = 0.0;
+static IIRFilter_t encoder_filter;
+static uint32_t enc_prev_pwm_periods = 0;
 
 // legacy velocity control model
 static GainScheduledPid_t vel_pid;
@@ -134,6 +141,8 @@ static void update_wheel_vel_est();
 static void update_current_sense_telemetry();
 static float do_vel_control();
 static void do_vel_cur_control();
+static int16_t clamp_motion_current(float current_ma);
+static void update_current_i2t();
 
 static void update_errors();
 static void read_packets();
@@ -182,9 +191,8 @@ int main() {
 
     quadenc_setup();
     quadenc_reset_encoder_delta();
+    iir_filter_init(&encoder_filter, iir_filter_alpha_from_cutoff_hz(ENCODER_VEL_LPF_HZ, VELOCITY_LOOP_RATE_S));
 
-    // setup the velocity filter
-    iir_filter_init(&encoder_filter, iir_filter_alpha_from_cutoff_hz(200.0f, VELOCITY_LOOP_RATE_S));
 
     ////////////////////////////////////
     //  Current Sense Initialization  //
@@ -328,7 +336,7 @@ int main() {
                 pwm6step_set_voltage((int16_t) motor_command_packet.setpoint);
                 break;
             case CCM_MCT_CURRENT:
-                int16_t motor_current = motor_command_packet.current_setpoint_ma;
+                int16_t motor_current = clamp_motion_current(motor_command_packet.current_setpoint_ma);
                 motor_current = apply_current_limits(motor_current);
 
                 response_packet.current_telemetry.current_setpoint_ma = motor_current;
@@ -344,7 +352,7 @@ int main() {
                 do_vel_cur_control();
 
                 // add the feedforward current to the velocity PID output
-                int16_t joint_motor_current = motor_command_packet.current_setpoint_ma + (int16_t) vel_cur_component;
+                int16_t joint_motor_current = clamp_motion_current((float) motor_command_packet.current_setpoint_ma + vel_cur_component);
                 joint_motor_current = apply_current_limits(joint_motor_current);
 
                 response_packet.current_telemetry.current_setpoint_ma = joint_motor_current;
@@ -352,6 +360,8 @@ int main() {
 
                 break;
         }
+
+        update_current_i2t();
 
         response_packet.velocity_telemetry.vel_setpoint_rads = motor_command_packet.setpoint;
         response_packet.current_telemetry.bus_voltage_mv = pwm6step_get_vbus_voltage();
@@ -383,19 +393,46 @@ static bool allow_motor_to_run() {
         && uart_logging_status_send == UART_LOGGING_OK;
 }
 
+// I2T accumulator above the continuous current limit (A^2*s), see CURRENT_I2T_BUDGET_A2S.
+static float current_i2t_a2s = 0.0f;
+// Current applied this loop (mA), 0 when not in a current mode.
+static int16_t i2t_applied_current_ma = 0;
+
+static void update_current_i2t() {
+    const float i_a = (float) i2t_applied_current_ma * 1e-3f;
+    const float i_cont_a = (float) MAX_CURR_WHEEL_NOT_TURNING * 1e-3f;
+    current_i2t_a2s += (i_a * i_a - i_cont_a * i_cont_a) * VELOCITY_LOOP_RATE_S;
+    if (current_i2t_a2s < 0.0f) {
+        current_i2t_a2s = 0.0f;
+    } else if (current_i2t_a2s > CURRENT_I2T_BUDGET_A2S) {
+        current_i2t_a2s = CURRENT_I2T_BUDGET_A2S;
+    }
+    i2t_applied_current_ma = 0;
+}
+
 static int16_t apply_current_limits(int16_t desired_current) {
     int16_t applied_current = desired_current;
+
+    // Thermal budget spent: continuous limit at any speed.
+    if (current_i2t_a2s >= CURRENT_I2T_BUDGET_A2S) {
+        if (applied_current > MAX_CURR_WHEEL_NOT_TURNING) {
+            applied_current = (int16_t) MAX_CURR_WHEEL_NOT_TURNING;
+        } else if (applied_current < -MAX_CURR_WHEEL_NOT_TURNING) {
+            applied_current = (int16_t) -MAX_CURR_WHEEL_NOT_TURNING;
+        }
+    }
+    desired_current = applied_current;
 
     // enforce hard current limits based on wheel velocity. If wheel is not turning at all
     // do not allow current above 90% of the max continuous rated current
     if (fabsf(response_packet.velocity_telemetry.wheel_vel_rads) < WHEEL_TURNING_VEL_THRESH_RADS) {
-        if (desired_current > MAX_CURR_WHEEL_NOT_TURNING) {
-            applied_current = (int16_t) MAX_CURR_WHEEL_NOT_TURNING;
+        if (desired_current > MAX_CURR_WHEEL_BOOST) {
+            applied_current = (int16_t) MAX_CURR_WHEEL_BOOST;
             current_limited = true;
         }
 
-        if (desired_current < -MAX_CURR_WHEEL_NOT_TURNING) {
-            applied_current = (int16_t) -MAX_CURR_WHEEL_NOT_TURNING;
+        if (desired_current < -MAX_CURR_WHEEL_BOOST) {
+            applied_current = (int16_t) -MAX_CURR_WHEEL_BOOST;
             current_limited = true;
         }
 
@@ -414,6 +451,7 @@ static int16_t apply_current_limits(int16_t desired_current) {
         current_limited = false;
     }
 
+    i2t_applied_current_ma = applied_current;
     return applied_current;
 }
 
@@ -458,8 +496,40 @@ static void read_packets() {
 
             motor_command_packet = command_packet.data.motion;
         } else if (command_packet.type == CCM_CMD_PARAMS) {
-            // just sends the firmware hash back by default for now
-            params_return_packet_requested = true;
+            CcmParameterPacket param = command_packet.data.param;
+            if (param.parameter_operation == CCM_PARAMOP_WRITE) {
+                float v = param.value.val_f32;
+                bool changed = true;
+                switch (param.parameter) {
+                    case CCM_PARAM_VEL_CONTROLLER_GAIN_P:
+                        changed = vel_velcur_controller_constants.kP != v;
+                        vel_velcur_controller_constants.kP = v;
+                        break;
+                    case CCM_PARAM_VEL_CONTROLLER_GAIN_I:
+                        changed = vel_velcur_controller_constants.kI != v;
+                        vel_velcur_controller_constants.kI = v;
+                        break;
+                    case CCM_PARAM_VEL_CONTROLLER_ANTIJITTER:
+                        changed = vel_velcur_controller_constants.anti_jitter_thresh != v;
+                        vel_velcur_controller_constants.anti_jitter_thresh = v;
+                        break;
+                    case CCM_PARAM_MOTION_CURRENT_LIMIT:
+                        if (v >= 0.0f && v <= (float) MAX_CURR_WHEEL_TURNING) {
+                            motion_current_limit_ma = v;
+                        }
+                        changed = false;
+                        break;
+                    default:
+                        changed = false;
+                        break;
+                }
+                if (changed) {
+                    vel_velcur_controller.eI = 0.0f;
+                }
+            } else {
+                // reads just send the firmware hash back for now
+                params_return_packet_requested = true;
+            }
         }
     }
 }
@@ -467,10 +537,19 @@ static void read_packets() {
 static void update_wheel_vel_est() {
     int32_t enc_delta = quadenc_get_encoder_delta();
     float rads_delta = mm_enc_ticks_to_rad(&df45_model, enc_delta);
-    // float enc_vel_rad_s = quadenc_delta_to_w(enc_delta, VELOCITY_LOOP_RATE_S);
-    float enc_vel_rads = discrete_time_derivative(rads_delta, VELOCITY_LOOP_RATE_S);
-
-    // filter the recovered velocity
+    // Divide by the measured interval, not the nominal 1 ms: an overrunning loop
+    // iteration (the main loop competes with the 40 kHz current ISR) otherwise
+    // inflates the speed by the overrun ratio (measured up to 1.5x while driving).
+    uint32_t pwm_periods = pwm6step_get_pwm_period_count();
+    uint32_t elapsed_periods = pwm_periods - enc_prev_pwm_periods;
+    enc_prev_pwm_periods = pwm_periods;
+    if (elapsed_periods == 0) {
+        elapsed_periods = PWM_FREQ_HZ / 1000;
+    }
+    float dt_s = (float) elapsed_periods * (1.0f / (float) PWM_FREQ_HZ);
+    // 1 ms encoder delta, low-passed: our 4000 tick/rev encoder quantizes the
+    // 1 ms speed to 1.57 rad/s, which the P loop turns into broadband current noise.
+    float enc_vel_rads = rads_delta / dt_s;
     float enc_rad_s_filt = iir_filter_update(&encoder_filter, enc_vel_rads);
 
     // set the value
@@ -489,6 +568,15 @@ static void update_current_sense_telemetry() {
     cs_telemetry.vel_est_used_drads = pwm6step_get_vel_est_used_drads();
     cs_telemetry.duty_arr = pwm6step_get_mean_duty_arr();
     cs_telemetry.cs_flags = pwm6step_get_current_sense_flags();
+}
+
+static int16_t clamp_motion_current(float current_ma) {
+    if (current_ma > motion_current_limit_ma) {
+        current_ma = motion_current_limit_ma;
+    } else if (current_ma < -motion_current_limit_ma) {
+        current_ma = -motion_current_limit_ma;
+    }
+    return (int16_t) current_ma;
 }
 
 static void do_vel_cur_control() {
@@ -559,8 +647,8 @@ static void update_errors() {
     response_packet.undervoltage_error = false;
     response_packet.overvoltage_error = false;
 
-    // torque limiting
-    response_packet.torque_limited = false;
+    // torque limiting: I2T thermal budget spent, current held to the continuous limit
+    response_packet.torque_limited = current_i2t_a2s >= CURRENT_I2T_BUDGET_A2S;
 
     // loop time
     response_packet.control_loop_time_error = slipped_control_frame_count > 10;

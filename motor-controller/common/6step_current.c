@@ -466,6 +466,14 @@ static size_t voltage_filter_index = 0;
 
 static uint16_t current_filter[32];
 static size_t current_filter_ind = 0;
+static uint32_t current_filter_sum = 0;
+// free-running count of PWM periods (current-loop ISR invocations), a timebase for
+// the main loop that stays correct when a loop iteration overruns 1 ms
+static volatile uint32_t pwm_period_count = 0;
+static uint32_t voltage_filter_sum = 0;
+// MAX_DUTYCYCLE_COMMAND / vbus in S0F16, refreshed once per ms so apply_voltage()
+// needs no software divide per PWM period
+static uint32_t duty_per_mv_s0f16 = 0;
 
 #define CURRENT_FILTER_LEN (sizeof(current_filter) / sizeof(current_filter[0]))
 #define VOLTAGE_FILTER_LEN (sizeof(voltage_filter) / sizeof(voltage_filter[0]))
@@ -629,14 +637,13 @@ void DMA1_Channel1_IRQHandler() {
     // this is a 2.2kHz bandwidth filter with sampling freq of 40kHz
 
     // filter current
+    // running sum: O(1) per sample instead of re-summing all taps (this ISR runs at
+    // 40 kHz on an M0 and was using ~75% of the CPU)
+    current_filter_sum += (uint32_t) current_measurement - current_filter[current_filter_ind];
     current_filter[current_filter_ind++] = (uint16_t) current_measurement;
     current_filter_ind &= (CURRENT_FILTER_LEN - 1);
 
-    Uint32FixedPoint_t avg_current = 0;
-    for (size_t i = 0; i < CURRENT_FILTER_LEN; i++) {
-        avg_current += current_filter[i];
-    }
-    avg_current /= CURRENT_FILTER_LEN;
+    Uint32FixedPoint_t avg_current = current_filter_sum / CURRENT_FILTER_LEN;
 
     measured_current = avg_current;
 
@@ -645,14 +652,11 @@ void DMA1_Channel1_IRQHandler() {
     uint16_t vbus_mv = currsen_get_vbus_voltage_mv();
     // measured_vbus_voltage = vbus_mv;
 
+    voltage_filter_sum += (uint32_t) vbus_mv - voltage_filter[voltage_filter_index];
     voltage_filter[voltage_filter_index++] = vbus_mv;
     voltage_filter_index &= (VOLTAGE_FILTER_LEN - 1);
 
-    uint32_t average_bus_voltage = 0;
-    for (size_t i = 0; i < VOLTAGE_FILTER_LEN; i++) {
-        average_bus_voltage += voltage_filter[i];
-    }
-    average_bus_voltage /= VOLTAGE_FILTER_LEN;
+    uint32_t average_bus_voltage = voltage_filter_sum / VOLTAGE_FILTER_LEN;
 
     measured_vbus_voltage = average_bus_voltage;
 
@@ -722,11 +726,15 @@ void DMA1_Channel1_IRQHandler() {
 #endif
     cs_alt_tap_samples++;
 
+    pwm_period_count++;
     adc_callback_ctr++;
     if (adc_callback_ctr == PWM_FREQ_HZ / 1000) {
         flag_1ms = true;
 
         cs_update_estimates((uint16_t) avg_current);
+        if (measured_vbus_voltage > 0) {
+            duty_per_mv_s0f16 = ((uint32_t) MAX_DUTYCYCLE_COMMAND << 16) / (uint32_t) measured_vbus_voltage;
+        }
 
         adc_callback_ctr = 0;
         double_buffer_ind = (double_buffer_ind + 1) & 0x1;
@@ -989,7 +997,31 @@ static void set_duty_cycle(uint16_t duty_cycle) {
  * 
  * @param duty_cycle_arr 
  */
+/**
+ * @brief re-select the commutation pattern after the output is enabled or the
+ * commanded direction changes.
+ *
+ * The pattern is otherwise only updated on a hall edge. A stalled rotor makes no
+ * edges, so after a direction change while enabled it would keep driving the old
+ * direction's pattern, i.e. produce torque the wrong way until it is pushed past
+ * a hall edge (seen as wheels holding ~1-1.5 A while the robot does not move).
+ * The hall ISR also commutes, so do this with interrupts off.
+ */
+static void refresh_commutation_if_needed(bool was_enabled, MotorDirection_t prev_direction) {
+    if (!motor_output_enabled) {
+        return;
+    }
+
+    if (!was_enabled || commanded_motor_direction != prev_direction) {
+        __disable_irq();
+        perform_commutation_cycle();
+        trigger_commutation();
+        __enable_irq();
+    }
+}
+
 void pwm6step_set_duty_cycle(int16_t duty_cycle) {
+    MotorDirection_t prev_direction = commanded_motor_direction;
     if (duty_cycle < 0) {
         pwm6step_set_direction(COUNTER_CLOCKWISE);
     } else {
@@ -1004,10 +1036,7 @@ void pwm6step_set_duty_cycle(int16_t duty_cycle) {
     motor_output_enabled = (duty_cycle_abs > 0);
     set_duty_cycle(duty_cycle_abs);
 
-    if (!was_enabled && motor_output_enabled) {
-        perform_commutation_cycle();
-        trigger_commutation();
-    }
+    refresh_commutation_if_needed(was_enabled, prev_direction);
 }
 
 void pwm6step_set_duty_cycle_f(float duty_cycle_pct) {
@@ -1022,7 +1051,7 @@ void pwm6step_set_duty_cycle_f(float duty_cycle_pct) {
 
 static void apply_voltage(uint16_t voltage_mv) {
     // scale from mv to max duty
-    uint32_t voltage_scaled_to_dc = (uint16_t) ((uint32_t) voltage_mv * MAX_DUTYCYCLE_COMMAND / (uint32_t) measured_vbus_voltage);
+    uint32_t voltage_scaled_to_dc = ((uint32_t) voltage_mv * duty_per_mv_s0f16) >> 16;
     set_duty_cycle(voltage_scaled_to_dc);
 }
 
@@ -1038,6 +1067,7 @@ static void set_voltage(uint16_t voltage_mv) {
 }
 
 void pwm6step_set_voltage(int16_t voltage_mv) {
+    MotorDirection_t prev_direction = commanded_motor_direction;
     if (voltage_mv < 0) {
         pwm6step_set_direction(COUNTER_CLOCKWISE);
     } else {
@@ -1052,10 +1082,7 @@ void pwm6step_set_voltage(int16_t voltage_mv) {
     motor_output_enabled = (abs_voltage_mv > 0);
     set_voltage(abs_voltage_mv);
 
-    if (!was_enabled && motor_output_enabled) {
-        perform_commutation_cycle();
-        trigger_commutation();
-    }
+    refresh_commutation_if_needed(was_enabled, prev_direction);
 }
 
 static void set_current(uint16_t current_ma) {
@@ -1065,6 +1092,7 @@ static void set_current(uint16_t current_ma) {
 }
 
 void pwm6step_set_current(int16_t current_ma) {
+    MotorDirection_t prev_direction = commanded_motor_direction;
     if (current_ma < 0) {
         pwm6step_set_direction(COUNTER_CLOCKWISE);
     } else if (current_ma > 0) {
@@ -1078,10 +1106,11 @@ void pwm6step_set_current(int16_t current_ma) {
     motor_output_enabled = (abs_current_ma > 0);
     set_current(abs_current_ma);
 
-    if (!was_enabled && motor_output_enabled) {
-        perform_commutation_cycle();
-        trigger_commutation();
-    }
+    refresh_commutation_if_needed(was_enabled, prev_direction);
+}
+
+uint32_t pwm6step_get_pwm_period_count() {
+    return pwm_period_count;
 }
 
 bool pwm6step_1ms_flag() {
