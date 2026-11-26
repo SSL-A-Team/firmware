@@ -1,9 +1,10 @@
+use core::cell::{Cell, RefCell};
 use core::fmt::Write;
 use defmt::Format;
 use embassy_futures::select::select;
 use embassy_stm32::usart;
-use embassy_time::Timer;
-use heapless::String;
+use embassy_time::{Instant, Timer};
+use heapless::{String, Vec};
 
 use crate::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
 use ateam_lib_crossarch::queue;
@@ -58,6 +59,13 @@ pub struct SocketConnection {
     pub socket_id: u8,
 }
 
+#[derive(Copy, Clone, PartialEq, Debug, Format)]
+#[repr(u8)]
+pub enum DataMode {
+    BufferedMode = 0,
+    DirectBinaryMode = 2,
+}
+
 pub struct NoraW36x<
     'a,
     const LEN_TX: usize,
@@ -69,6 +77,150 @@ pub struct NoraW36x<
     reader: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
     writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
     uart: &'a IdleBufferedUart<LEN_RX, DEPTH_RX, LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
+    data_mode: Cell<DataMode>,
+    // Data-phase receive stream. The UART is idle-line framed and the module pauses
+    // mid-event, so +UESODB events arrive split across buffers, prefixed with \r\n, or
+    // packed behind write acks. Events are reassembled here from the byte stream.
+    rx_accum: RefCell<Vec<u8, RX_ACCUM_LEN>>,
+}
+
+const RX_ACCUM_LEN: usize = 2048;
+const UESODB_PREFIX: &[u8] = b"+UESODB";
+// Longest header between the event prefix and the 0x01 marker (+UESODBF carries ip,port).
+const UESODB_MAX_HEADER_LEN: usize = 64;
+
+// Write ack the module may interleave inside a +UESODB event (see rx_accum_next_event).
+const USOWB_ACK_PREFIX: &[u8] = b"\r\n+USOWB:";
+const USOWB_ACK_SUFFIX: &[u8] = b"\r\nOK\r\n";
+const USOWB_ACK_MAX_LEN: usize = 32;
+
+/// True if `accum` holds an OK terminating a command response. The OK that ends a
+/// "+USOWB:<id>,<len>" write ack (from an earlier fire-and-forget send) does not count:
+/// those can arrive late and would otherwise complete the wrong command.
+fn has_command_ok(accum: &[u8]) -> bool {
+    let mut search_from = 0;
+    while let Some(pos) = accum[search_from..].windows(4).position(|w| w == b"OK\r\n") {
+        let ok_at = search_from + pos;
+        let before = &accum[..ok_at];
+        let before = before.strip_suffix(b"\r\n").unwrap_or(before);
+        let line_start = before
+            .windows(2)
+            .rposition(|w| w == b"\r\n")
+            .map_or(0, |p| p + 2);
+        if !before[line_start..].starts_with(b"+USOWB:") {
+            return true;
+        }
+        search_from = ok_at + 4;
+    }
+    false
+}
+
+/// Remove `n` bytes starting at `at` from the accumulator.
+fn rx_accum_remove(accum: &mut Vec<u8, RX_ACCUM_LEN>, at: usize, n: usize) {
+    let n = n.min(accum.len() - at);
+    let remaining = accum.len() - n;
+    accum.copy_within(at + n.., at);
+    accum.truncate(remaining);
+}
+
+/// Drop the first `n` bytes of the accumulator.
+fn rx_accum_consume(accum: &mut Vec<u8, RX_ACCUM_LEN>, n: usize) {
+    let n = n.min(accum.len());
+    let remaining = accum.len() - n;
+    accum.copy_within(n.., 0);
+    accum.truncate(remaining);
+}
+
+/// Find the next complete +UESODB / +UESODBF event in the accumulator.
+///
+/// Bytes before the event (\r\n, write acks, OK, other URCs) are discarded. Returns the
+/// payload range of a complete event at the front of the accumulator, or None if more
+/// bytes are needed. A trailing partial event is kept for the next call.
+fn rx_accum_next_event(accum: &mut Vec<u8, RX_ACCUM_LEN>) -> Option<(usize, usize)> {
+    loop {
+        let Some(start) = accum.windows(UESODB_PREFIX.len()).position(|w| w == UESODB_PREFIX) else {
+            // Keep a tail that could be the start of a prefix split across buffers.
+            let keep = accum.len().min(UESODB_PREFIX.len() - 1);
+            let drop = accum.len() - keep;
+            rx_accum_consume(accum, drop);
+            return None;
+        };
+        if start > 0 {
+            rx_accum_consume(accum, start);
+        }
+
+        // +UESODB:<socket_id><01><len_hi><len_lo><data>
+        // +UESODBF:<socket_id>,<remote_ip>,<remote_port><01><len_hi><len_lo><data>
+        let header_start = match (accum.get(7), accum.get(8)) {
+            (None, _) => return None,
+            (Some(b':'), _) => 8,
+            (Some(b'F'), None) => return None,
+            (Some(b'F'), Some(b':')) => 9,
+            _ => {
+                rx_accum_consume(accum, 1);
+                continue;
+            }
+        };
+
+        let mut marker = None;
+        let mut corrupt = false;
+        for (i, &b) in accum[header_start..].iter().enumerate().take(UESODB_MAX_HEADER_LEN) {
+            if b == 0x01 {
+                marker = Some(header_start + i);
+                break;
+            }
+            if !(0x20..=0x7E).contains(&b) {
+                corrupt = true;
+                break;
+            }
+        }
+        let marker = match marker {
+            Some(m) if !corrupt => m,
+            None if !corrupt && accum.len() - header_start < UESODB_MAX_HEADER_LEN => return None,
+            _ => {
+                rx_accum_consume(accum, 1);
+                continue;
+            }
+        };
+
+        if accum.len() < marker + 3 {
+            return None;
+        }
+        let data_len = ((accum[marker + 1] as usize) << 8) | (accum[marker + 2] as usize);
+        let data_start = marker + 3;
+
+        // The module can emit the response to a concurrent binary write
+        // ("\r\n+USOWB:<id>,<len>\r\nOK\r\n") between the event header and its
+        // payload or inside the payload. Splice it out so the payload is contiguous.
+        let window_end = accum.len().min(data_start + data_len + USOWB_ACK_MAX_LEN);
+        if let Some(rel) = accum[data_start..window_end]
+            .windows(USOWB_ACK_PREFIX.len())
+            .position(|w| w == USOWB_ACK_PREFIX)
+        {
+            let ack_start = data_start + rel;
+            let ack_window = &accum[ack_start..accum.len().min(ack_start + USOWB_ACK_MAX_LEN)];
+            match ack_window
+                .windows(USOWB_ACK_SUFFIX.len())
+                .position(|w| w == USOWB_ACK_SUFFIX)
+            {
+                Some(pos) => {
+                    rx_accum_remove(accum, ack_start, pos + USOWB_ACK_SUFFIX.len());
+                    continue;
+                }
+                None if ack_window.len() < USOWB_ACK_MAX_LEN => return None,
+                None => {}
+            }
+        }
+        let data_end = data_start + data_len;
+        if data_len == 0 || data_end > RX_ACCUM_LEN {
+            rx_accum_consume(accum, 1);
+            continue;
+        }
+        if accum.len() < data_end {
+            return None;
+        }
+        return Some((data_start, data_end));
+    }
 }
 
 impl<
@@ -80,6 +232,8 @@ impl<
         const DEBUG_UART_QUEUES: bool,
     > NoraW36x<'a, LEN_TX, LEN_RX, DEPTH_TX, DEPTH_RX, DEBUG_UART_QUEUES>
 {
+    const AT_RESPONSE_TIMEOUT_MS: u64 = 3000;
+
     pub fn new(
         reader: &'a UartReadQueue<LEN_RX, DEPTH_RX, DEBUG_UART_QUEUES>,
         writer: &'a UartWriteQueue<LEN_TX, DEPTH_TX, DEBUG_UART_QUEUES>,
@@ -89,6 +243,8 @@ impl<
             reader,
             writer,
             uart,
+            data_mode: Cell::new(DataMode::BufferedMode),
+            rx_accum: RefCell::new(Vec::new()),
         }
     }
 
@@ -97,17 +253,24 @@ impl<
     }
 
     pub async fn wait_startup(&self) -> Result<(), NoraRadioError> {
-        self.reader
-            .dequeue(|buf| {
-                if let NoraPacket::Response(ATResponse::Other("+STARTUP")) =
-                    self.parse_packet(buf)?
-                {
-                    Ok(())
-                } else {
-                    Err(NoraRadioError::ReadDataInvalid)
-                }
-            })
-            .await
+        loop {
+            let found = self
+                .reader
+                .dequeue(|buf| {
+                    defmt::debug!("wait_startup buf: {:?}", buf);
+                    // Skip everything that isn't +STARTUP: pre-boot URCs, split fragments,
+                    // unknown events. Outer select() in connect_uart() provides the timeout.
+                    Ok::<bool, NoraRadioError>(matches!(
+                        self.parse_packet(buf),
+                        Ok(NoraPacket::Event(ATEvent::Startup))
+                    ))
+                })
+                .await?;
+
+            if found {
+                return Ok(());
+            }
+        }
     }
 
     /// Drain one queued packet from the read buffer (discard it).
@@ -144,7 +307,7 @@ impl<
     ) -> Result<(), NoraRadioError> {
         let mut str: String<32> = String::new();
         let flow_control = if flow_control { 1 } else { 0 };
-        write!(&mut str, "AT+USYUS={baudrate},{flow_control},1")
+        write!(&mut str, "AT+USYUS={baudrate},{flow_control},0")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
@@ -155,12 +318,18 @@ impl<
     /// Uses AT+USORM=<receive_mode>
     ///   - 0: Buffered mode (default) — +UESODA event, then AT+USORB to read
     ///   - 2: Direct binary mode — +UESODB/+UESODBF events with inline data
-    pub async fn set_socket_receive_mode(&self, mode: u8) -> Result<(), NoraRadioError> {
+    pub async fn set_socket_receive_mode(&self, mode: DataMode) -> Result<(), NoraRadioError> {
+        let mode_num = mode as u8;
         let mut str: String<12> = String::new();
-        write!(&mut str, "AT+USORM={mode}").or(Err(NoraRadioError::CommandConstructionFailed))?;
+        write!(&mut str, "AT+USORM={mode_num}").or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
         self.read_ok().await?;
+        self.data_mode.set(mode);
         Ok(())
+    }
+
+    pub fn data_mode(&self) -> DataMode {
+        self.data_mode.get()
     }
 
     /// Set the host name on the NORA-W36 module.
@@ -275,6 +444,11 @@ impl<
                                     run = false;
                                 } else if let NoraPacket::Response(ATResponse::Ok(_)) = packet {
                                     run = false;
+                                } else if let NoraPacket::Event(
+                                    ATEvent::Empty | ATEvent::Startup,
+                                ) = packet
+                                {
+                                    // framing artifact, skip
                                 } else {
                                     defmt::warn!("got unexpected packet: {}", packet);
                                 }
@@ -342,6 +516,7 @@ impl<
                             defmt::warn!("nora - got WifiLinkDown during initial connect. handle: {}, reason: {}", wlan_handle, reason);
                             link_up = false;
                         }
+                        NoraPacket::Event(ATEvent::Empty | ATEvent::Startup) => {}
                         other => {
                             defmt::error!("nora - connect_wifi: unsupported packet: {}", other);
                             return Err(NoraRadioError::AtEventUnsupported);
@@ -362,34 +537,41 @@ impl<
     ///
     /// Returns the socket ID assigned by the module.
     pub async fn create_socket(&self, protocol: SocketProtocol) -> Result<u8, NoraRadioError> {
+        self.clear_rx_accum();
         let mut str: String<16> = String::new();
         let proto_num = protocol as u8;
-        write!(str, "AT+USOCR={proto_num}").or(Err(NoraRadioError::CommandConstructionFailed))?;
+        write!(str, "AT+USOCR={proto_num},0").or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
-        defmt::trace!("Socket creation request sent.");
+        defmt::debug!("create_socket: command sent ({})", str.as_str());
 
-        // Response: +USOCR:<socket_handle>\r\nOK\r\n
         let socket_handle = self
-            .reader
-            .dequeue(|buf| match self.parse_packet(buf)? {
-                NoraPacket::Response(ATResponse::Ok(resp)) => {
-                    if let Some(i) = resp.find("+USOCR:") {
-                        resp[i + 7..]
-                            .trim()
-                            .parse::<u8>()
-                            .or(Err(NoraRadioError::SocketCreationFailed))
-                    } else {
-                        Err(NoraRadioError::SocketCreationFailed)
+            .read_response_raw::<64, _, _>(|accum| {
+                if accum.windows(5).any(|w| w == b"ERROR") {
+                    return Some(Err(NoraRadioError::SocketCreationFailed));
+                }
+                if let Some(start) = accum.windows(7).position(|w| w == b"+USOCR:") {
+                    let after = &accum[start + 7..];
+                    let end = after
+                        .iter()
+                        .position(|&b| b == b'\r' || b == b'\n')
+                        .unwrap_or(after.len());
+                    if end > 0 {
+                        if let Ok(s) = core::str::from_utf8(&after[..end]) {
+                            if let Ok(id) = s.trim().parse::<u8>() {
+                                // Wait for trailing OK\r\n so it isn't left in the queue
+                                if !has_command_ok(accum) {
+                                    return None;
+                                }
+                                return Some(Ok(id));
+                            }
+                        }
                     }
                 }
-                _ => Err(NoraRadioError::SocketCreationFailed),
+                None
             })
             .await?;
 
-        defmt::trace!(
-            "Socket creation response received, socket handle: {}",
-            socket_handle
-        );
+        defmt::debug!("create_socket: socket handle {}", socket_handle);
         Ok(socket_handle)
     }
 
@@ -432,17 +614,30 @@ impl<
 
         // TCP requires waiting for +UESOC URC confirming connection; UDP does not.
         if protocol == SocketProtocol::TCP {
-            self.reader
-                .dequeue(|buf| match self.parse_packet(buf)? {
-                    NoraPacket::Event(ATEvent::SocketConnected { socket_id: sid })
-                        if sid == socket_handle =>
-                    {
-                        defmt::trace!("Socket connect command accepted for TCP");
-                        Ok(())
-                    }
-                    _ => Err(NoraRadioError::SocketConnectionFailed),
-                })
-                .await?;
+            loop {
+                let done = self
+                    .reader
+                    .dequeue(|buf| {
+                        match self.parse_packet(buf) {
+                            Ok(NoraPacket::Event(ATEvent::SocketConnected { socket_id: sid }))
+                                if sid == socket_handle =>
+                            {
+                                defmt::trace!("Socket connect command accepted for TCP");
+                                Ok(true)
+                            }
+                            Ok(NoraPacket::Response(ATResponse::Error)) => {
+                                Err(NoraRadioError::SocketConnectionFailed)
+                            }
+                            Ok(NoraPacket::Event(ATEvent::Empty | ATEvent::Startup)) => Ok(false),
+                            Ok(_) => Ok(false),
+                            Err(_) => Ok(false), // echo fragment, skip
+                        }
+                    })
+                    .await?;
+                if done {
+                    break;
+                }
+            }
         } else {
             defmt::trace!("No socket connection confirmation needed for UDP");
         }
@@ -452,43 +647,39 @@ impl<
         })
     }
 
+    /// Bind a socket to a specific local port.
+    /// AT+USOB=<socket_handle>,<local_port>
+    /// Must be called after create_socket and before connect_socket or send.
+    pub async fn bind_socket(&self, socket_handle: u8, local_port: u16) -> Result<(), NoraRadioError> {
+        let mut str: String<24> = String::new();
+        write!(str, "AT+USOB={socket_handle},{local_port}")
+            .or(Err(NoraRadioError::CommandConstructionFailed))?;
+        self.send_command(str.as_str()).await?;
+        defmt::debug!("bind_socket: socket {} bound to port {}", socket_handle, local_port);
+        self.read_ok().await
+    }
+
     /// Close a socket.
     /// Uses AT+USOCL=<socket_handle>
+    /// NORA-W36x returns OK for explicit close; +UESOCL is only unsolicited (remote peer close).
     pub async fn close_socket(&self, socket_handle: u8) -> Result<(), NoraRadioError> {
+        self.clear_rx_accum();
         let mut str: String<16> = String::new();
         write!(str, "AT+USOCL={socket_handle}")
             .or(Err(NoraRadioError::CommandConstructionFailed))?;
         self.send_command(str.as_str()).await?;
 
-        let mut ok = false;
-        let mut socket_closed = false;
-
-        while !ok || !socket_closed {
-            self.reader
-                .dequeue(|buf| {
-                    match self.parse_packet(buf)? {
-                        NoraPacket::Event(ATEvent::SocketClosed { socket_id: sid })
-                            if sid == socket_handle =>
-                        {
-                            defmt::debug!("nora - close socket - ATEvent::SocketClosed");
-                            socket_closed = true;
-                        }
-                        NoraPacket::Response(ATResponse::Ok("")) => {
-                            defmt::debug!("nora - close socket - ATResponse::Ok");
-                            ok = true;
-                        }
-                        other => {
-                            defmt::warn!("nora - close_socket: unsupported packet: {}", other);
-                            return Err(NoraRadioError::SocketCloseFailed);
-                        }
-                    };
-
-                    Ok(())
-                })
-                .await?;
-        }
-
-        Ok(())
+        self.read_response_raw::<64, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                return Some(Err(NoraRadioError::SocketCloseFailed));
+            }
+            if has_command_ok(accum) {
+                defmt::debug!("nora - close socket - OK");
+                return Some(Ok(()));
+            }
+            None
+        })
+        .await
     }
 
     /// Write binary data to a socket.
@@ -530,38 +721,87 @@ impl<
             return Err(NoraRadioError::SendCommandLowLevelBufferFull);
         }
 
-        // Read +USOWB:<socket_handle>,<written_length>\r\nOK\r\n response and validate written length.
-        self.reader
-            .dequeue(|buf| {
-                defmt::trace!("send_data response: {:?}", buf);
-                match self.parse_packet(buf)? {
-                    NoraPacket::Response(ATResponse::Ok(resp)) => {
-                        if let Some(i) = resp.find("+USOWB:") {
-                            let payload = &resp[i + 7..];
-                            let mut parts = payload.splitn(2, ',');
-                            let _handle = parts.next();
-                            if let Some(len_str) = parts.next() {
-                                if let Ok(written) = len_str.trim().parse::<usize>() {
-                                    if written != data.len() {
-                                        defmt::warn!(
-                                            "AT+USOWB: written length {} does not match intended length {}",
-                                            written,
-                                            data.len()
-                                        );
-                                    }
-                                    return Ok(());
-                                }
-                            }
-                        }
-                        Err(NoraRadioError::SocketWriteFailed)
-                    }
-                    _ => Err(NoraRadioError::SocketWriteFailed),
-                }
-            })
-            .await?;
+        let ack_t0 = Instant::now();
+        let r = self.wait_send_ack(data.len()).await;
+        defmt::trace!("NoraW36x - wait_send_ack took {}us", (Instant::now() - ack_t0).as_micros());
+        r
+    }
 
+    /// Write binary data to a socket without waiting for the +USOWB acknowledgement.
+    /// The ack arrives later and will be silently consumed by try_read_data_binary.
+    /// Only safe to use when no other AT command response is expected before the ack drains
+    /// (i.e. the connected data-phase loop, not during handshake or socket setup).
+    pub async fn send_data_no_ack(&self, socket_handle: u8, data: &[u8]) -> Result<(), NoraRadioError> {
+        let data_len = data.len() as u16;
+        if data_len == 0 || data_len > 1460 {
+            defmt::error!("data length out of range: {}, must be between 1 and 1460", data_len);
+            return Err(NoraRadioError::CommandConstructionFailed);
+        }
+        let mut cmd: String<24> = String::new();
+        write!(cmd, "AT+USOWB={socket_handle}").or(Err(NoraRadioError::CommandConstructionFailed))?;
+        let res = self.writer.enqueue(|buf| {
+            let cmd_bytes = cmd.as_bytes();
+            let cmd_len = cmd_bytes.len();
+            buf[..cmd_len].copy_from_slice(cmd_bytes);
+            buf[cmd_len] = 0x01;
+            buf[cmd_len + 1] = (data_len >> 8) as u8;
+            buf[cmd_len + 2] = (data_len & 0xFF) as u8;
+            buf[cmd_len + 3..cmd_len + 3 + data.len()].copy_from_slice(data);
+            cmd_len + 3 + data.len()
+        });
+        if res.is_err() {
+            return Err(NoraRadioError::SendCommandLowLevelBufferFull);
+        }
         Ok(())
     }
+
+    async fn wait_send_ack(&self, intended_len: usize) -> Result<(), NoraRadioError> {
+        // Read +USOWB:<socket_handle>,<written_length>\r\nOK\r\n response and validate written length.
+        // Must also see OK\r\n before returning so the trailing OK is not left in the queue.
+        // 100ms timeout guards against NORA becoming unresponsive (socket failure, firmware hang).
+        let ack_future = self.read_response_raw::<64, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                return Some(Err(NoraRadioError::SocketWriteFailed));
+            }
+            if let Some(start) = accum.windows(7).position(|w| w == b"+USOWB:") {
+                let after = &accum[start + 7..];
+                if let Some(comma) = after.iter().position(|&b| b == b',') {
+                    let len_bytes = &after[comma + 1..];
+                    let end = len_bytes
+                        .iter()
+                        .position(|&b| b == b'\r' || b == b'\n')
+                        .unwrap_or(len_bytes.len());
+                    if end > 0 {
+                        if let Ok(s) = core::str::from_utf8(&len_bytes[..end]) {
+                            if let Ok(written) = s.trim().parse::<usize>() {
+                                if !accum.windows(4).any(|w| w == b"OK\r\n") {
+                                    return None;
+                                }
+                                if written != intended_len {
+                                    defmt::warn!(
+                                        "AT+USOWB: written {} != intended {}",
+                                        written,
+                                        intended_len
+                                    );
+                                }
+                                return Some(Ok(()));
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        });
+        match select(ack_future, Timer::after_millis(7)).await {
+            embassy_futures::select::Either::First(r) => r?,
+            embassy_futures::select::Either::Second(_) => {
+                defmt::warn!("NoraW36x - wait_send_ack timed out (NORA unresponsive)");
+                return Err(NoraRadioError::OperationTimedOut);
+            }
+        }
+        Ok(())
+    }
+
 
     /// Read binary data from a socket.
     /// Uses AT+USORB=<socket_handle>,<length>
@@ -572,7 +812,7 @@ impl<
     /// The `{binary_data}` uses the u-blox binary format: 0x01 (SOH), MSB of length, LSB of length,
     /// followed by the raw data bytes.
     pub async fn read_data<RET, FN>(
-        &'a self,
+        &self,
         socket_handle: u8,
         max_length: u16,
         fn_read: FN,
@@ -628,14 +868,26 @@ impl<
         Ok(ret)
     }
 
-    pub fn can_read_data(&'a self) -> bool {
-        self.reader.can_dequque()
+    pub fn can_read_data(&self) -> bool {
+        self.reader.can_dequque() || !self.rx_accum.borrow().is_empty()
+    }
+
+    /// Discard any partially received data events (e.g. when the socket changes).
+    pub fn clear_rx_accum(&self) {
+        self.rx_accum.borrow_mut().clear();
+    }
+
+    /// Discard everything received so far (accumulator and queued UART buffers), e.g.
+    /// stale write acks from fire-and-forget sends before issuing new commands.
+    pub fn discard_pending_rx(&self) {
+        self.clear_rx_accum();
+        while self.reader.try_dequeue().is_ok() {}
     }
 
     /// Try to read a queued +UESODA URC indicating data is available.
     /// Returns the socket_id and length of available data, or an error if nothing queued.
     /// Used in buffered mode (AT+USORM=0).
-    pub fn try_read_data_ready(&'a self) -> Result<(u8, u16), NoraRadioError> {
+    pub fn try_read_data_ready(&self) -> Result<(u8, u16), NoraRadioError> {
         match self.reader.try_dequeue() {
             Ok(buf) => match self.parse_packet(buf.data()) {
                 Ok(NoraPacket::Event(ATEvent::SocketDataAvailable { socket_id, length })) => {
@@ -658,40 +910,249 @@ impl<
         }
     }
 
-    /// Try to read inline binary data from a queued +UESODB or +UESODBF event.
+    /// Try to read inline binary data from a +UESODB or +UESODBF event.
     /// Used in direct binary mode (AT+USORM=2).
-    /// Returns the data via the provided callback, or None if no data is queued.
+    /// Queued UART buffers are reassembled into a byte stream (see `rx_accum`) so events
+    /// split across buffers or packed behind other output are not lost. Returns the data
+    /// of the next complete event via the provided callback, or None if none is complete.
     pub fn try_read_data_binary<RET, FN>(
-        &'a self,
+        &self,
         fn_read: FN,
     ) -> Result<Option<RET>, NoraRadioError>
     where
         FN: FnOnce(&[u8]) -> RET,
     {
-        match self.reader.try_dequeue() {
-            Ok(buf) => match self.parse_packet(buf.data()) {
-                Ok(NoraPacket::Event(ATEvent::SocketDataBinary { socket_id: _, data })) => {
-                    Ok(Some(fn_read(data)))
-                }
-                Ok(NoraPacket::Event(ATEvent::SocketDataBinaryFrom {
-                    socket_id: _, data, ..
-                })) => Ok(Some(fn_read(data))),
-                other => {
-                    defmt::warn!("NoraW36x - expected binary data event, got {:?}", other);
-                    Err(NoraRadioError::ReadDataInvalid)
-                }
-            },
-            Err(queue::Error::QueueFull) => {
-                defmt::warn!("NoraW36x - ReadLowLevelBufferEmpty - QueueFull");
-                Err(NoraRadioError::ReadLowLevelBufferEmpty)
+        loop {
+            let event = rx_accum_next_event(&mut self.rx_accum.borrow_mut());
+            if let Some((data_start, data_end)) = event {
+                let ret = fn_read(&self.rx_accum.borrow()[data_start..data_end]);
+                rx_accum_consume(&mut self.rx_accum.borrow_mut(), data_end);
+                return Ok(Some(ret));
             }
-            Err(queue::Error::QueueEmpty) => {
-                defmt::warn!("NoraW36x - ReadLowLevelBufferEmpty - QueueEmpty");
-                Err(NoraRadioError::ReadLowLevelBufferEmpty)
+
+            match self.reader.try_dequeue() {
+                Ok(buf) => {
+                    let mut accum = self.rx_accum.borrow_mut();
+                    if accum.extend_from_slice(buf.data()).is_err() {
+                        defmt::warn!(
+                            "NoraW36x - receive stream overflow, discarding {} bytes",
+                            accum.len()
+                        );
+                        accum.clear();
+                        let _ = accum.extend_from_slice(buf.data());
+                    }
+                }
+                Err(queue::Error::QueueEmpty) => return Ok(None),
+                Err(queue::Error::QueueFull) => {
+                    defmt::warn!("NoraW36x - ReadLowLevelBufferEmpty - QueueFull");
+                    return Err(NoraRadioError::ReadLowLevelBufferEmpty);
+                }
+                Err(queue::Error::InProgress) => {
+                    defmt::error!("NoraW36x - ReadLowLevelBufferBusy");
+                    return Err(NoraRadioError::ReadLowLevelBufferBusy);
+                }
             }
-            Err(queue::Error::InProgress) => {
-                defmt::error!("NoraW36x - ReadLowLevelBufferBusy");
-                Err(NoraRadioError::ReadLowLevelBufferBusy)
+        }
+    }
+
+    /// Read manufacturer identification string (AT+CGMI).
+    /// Response has no prefix — typically "u-blox".
+    pub async fn read_manufacturer(&self) -> Result<String<32>, NoraRadioError> {
+        self.send_command("AT+CGMI").await?;
+        self.read_response_raw::<128, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                return Some(Err(NoraRadioError::ReadDataInvalid));
+            }
+            if !has_command_ok(accum) {
+                return None;
+            }
+            let s = match ATResponse::new(accum) {
+                Ok(ATResponse::Ok(s)) => s,
+                _ => return Some(Err(NoraRadioError::ReadDataInvalid)),
+            };
+            let mut out: String<32> = String::new();
+            if out.push_str(s.trim().trim_matches('"')).is_err() {
+                return Some(Err(NoraRadioError::CommandConstructionFailed));
+            }
+            Some(Ok(out))
+        })
+        .await
+    }
+
+    /// Read model identification string (AT+CGMM).
+    /// Response has no prefix — e.g. "NORA-W36-OINK".
+    pub async fn read_model(&self) -> Result<String<32>, NoraRadioError> {
+        self.send_command("AT+CGMM").await?;
+        self.read_response_raw::<128, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                return Some(Err(NoraRadioError::ReadDataInvalid));
+            }
+            if !has_command_ok(accum) {
+                return None;
+            }
+            let s = match ATResponse::new(accum) {
+                Ok(ATResponse::Ok(s)) => s,
+                _ => return Some(Err(NoraRadioError::ReadDataInvalid)),
+            };
+            let mut out: String<32> = String::new();
+            if out.push_str(s.trim().trim_matches('"')).is_err() {
+                return Some(Err(NoraRadioError::CommandConstructionFailed));
+            }
+            Some(Ok(out))
+        })
+        .await
+    }
+
+    /// Read firmware version string (AT+CGMR).
+    /// Response has no prefix — e.g. "3.4.1".
+    pub async fn read_firmware_version(&self) -> Result<String<32>, NoraRadioError> {
+        self.send_command("AT+CGMR").await?;
+        self.read_response_raw::<128, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                return Some(Err(NoraRadioError::ReadDataInvalid));
+            }
+            if !has_command_ok(accum) {
+                return None;
+            }
+            let s = match ATResponse::new(accum) {
+                Ok(ATResponse::Ok(s)) => s,
+                _ => return Some(Err(NoraRadioError::ReadDataInvalid)),
+            };
+            let mut out: String<32> = String::new();
+            if out.push_str(s.trim().trim_matches('"')).is_err() {
+                return Some(Err(NoraRadioError::CommandConstructionFailed));
+            }
+            Some(Ok(out))
+        })
+        .await
+    }
+
+    /// Read current UART settings (AT+USYUS?).
+    /// Returns (baud_rate, flow_control_enabled).
+    pub async fn read_uart_settings(&self) -> Result<(u32, bool), NoraRadioError> {
+        self.send_command("AT+USYUS?").await?;
+        self.read_response_raw::<128, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                return Some(Err(NoraRadioError::ReadDataInvalid));
+            }
+            if !has_command_ok(accum) {
+                return None;
+            }
+            let s = match ATResponse::new(accum) {
+                Ok(ATResponse::Ok(s)) => s,
+                _ => return Some(Err(NoraRadioError::ReadDataInvalid)),
+            };
+            let payload = s.trim().trim_start_matches("+USYUS:");
+            let mut parts = payload.splitn(2, ',');
+            let baud: u32 = match parts.next().and_then(|x| x.trim().parse().ok()) {
+                Some(v) => v,
+                None => return Some(Err(NoraRadioError::ReadDataInvalid)),
+            };
+            let flow: u8 = match parts.next().and_then(|x| x.trim().parse().ok()) {
+                Some(v) => v,
+                None => return Some(Err(NoraRadioError::ReadDataInvalid)),
+            };
+            Some(Ok((baud, flow != 0)))
+        })
+        .await
+    }
+
+    /// Store current configuration to persistent memory (AT&W).
+    pub async fn store_config(&self) -> Result<(), NoraRadioError> {
+        self.send_command("AT&W").await?;
+        self.read_ok().await
+    }
+
+    /// Read current Wi-Fi regulatory domain (AT+UWRD?).
+    /// 0=World, 1=ETSI, 2=FCC, 3=IC/ISED — see AT command spec for full list.
+    pub async fn read_regulatory_domain(&self) -> Result<u8, NoraRadioError> {
+        self.send_command("AT+UWRD?").await?;
+        self.read_response_raw::<64, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                defmt::warn!("read_regulatory_domain: AT+UWRD? returned ERROR");
+                return Some(Err(NoraRadioError::ReadDataInvalid));
+            }
+            if !has_command_ok(accum) {
+                return None;
+            }
+            let s = match ATResponse::new(accum) {
+                Ok(ATResponse::Ok(s)) => s,
+                _ => {
+                    defmt::warn!("read_regulatory_domain: ATResponse::new failed");
+                    return Some(Err(NoraRadioError::ReadDataInvalid));
+                }
+            };
+            let val_str = s.trim().trim_start_matches("+UWRD:").trim().trim_matches('"');
+            match val_str.parse::<u8>() {
+                Ok(v) => Some(Ok(v)),
+                Err(_) => {
+                    defmt::warn!("read_regulatory_domain: parse failed on {:?}", val_str);
+                    Some(Err(NoraRadioError::ReadDataInvalid))
+                }
+            }
+        })
+        .await
+    }
+
+    /// Set Wi-Fi regulatory domain (AT+UWRD=<domain>).
+    /// Call store_config() to persist. Must be set before starting AP or Station.
+    pub async fn set_regulatory_domain(&self, domain: u8) -> Result<(), NoraRadioError> {
+        let mut cmd: String<16> = String::new();
+        write!(&mut cmd, "AT+UWRD={domain}")
+            .or(Err(NoraRadioError::CommandConstructionFailed))?;
+        self.send_command(cmd.as_str()).await?;
+        self.read_ok().await
+    }
+
+    /// Restore factory defaults (AT+USYFR).
+    /// Requires store_config() + radio reboot to take effect.
+    /// Resets all settings; removes certificates and BT bonding info.
+    pub async fn factory_restore(&self) -> Result<(), NoraRadioError> {
+        self.send_command("AT+USYFR").await?;
+        self.read_ok().await
+    }
+
+    /// Accumulate raw UART bytes across multiple idle-triggered DMA transfers until the
+    /// provided predicate signals completion. The predicate receives the full accumulated
+    /// buffer on every new chunk and returns `Some(result)` when done, `None` to keep going.
+    /// N is the accumulation buffer capacity in bytes; excess bytes are silently dropped.
+    async fn read_response_raw<const N: usize, T, F>(
+        &self,
+        mut f: F,
+    ) -> Result<T, NoraRadioError>
+    where
+        F: FnMut(&[u8]) -> Option<Result<T, NoraRadioError>>,
+    {
+        let mut accum: Vec<u8, N> = Vec::new();
+        let read_fut = async {
+            loop {
+                self.reader
+                    .dequeue(|buf| {
+                        defmt::trace!("read_response_raw: {:?}", buf);
+                        // Data events can arrive while waiting for a response; keep the
+                        // newest bytes so a trailing OK/ERROR is never dropped on overflow.
+                        let buf = &buf[buf.len().saturating_sub(N)..];
+                        let overflow = (accum.len() + buf.len()).saturating_sub(N);
+                        if overflow > 0 {
+                            let remaining = accum.len() - overflow;
+                            accum.copy_within(overflow.., 0);
+                            accum.truncate(remaining);
+                        }
+                        let _ = accum.extend_from_slice(buf);
+                    })
+                    .await;
+                if let Some(result) = f(&accum) {
+                    return result;
+                }
+            }
+        };
+        // A lost or desynced response (e.g. a late +USOWB ack consumed by the wrong
+        // reader) must not hang the caller forever; surface it so the task can reset.
+        match select(read_fut, Timer::after_millis(Self::AT_RESPONSE_TIMEOUT_MS)).await {
+            embassy_futures::select::Either::First(r) => r,
+            embassy_futures::select::Either::Second(_) => {
+                defmt::warn!("NoraW36x - AT response timed out");
+                Err(NoraRadioError::OperationTimedOut)
             }
         }
     }
@@ -711,87 +1172,20 @@ impl<
         Ok(())
     }
 
-    /// Read packets until an OK or ERROR AT response is received.
-    /// Non-response packets (events/URCs) are consumed and ignored.
+    /// Accumulate raw bytes until `OK\r\n` or `ERROR` appears.
+    /// Any interleaved URCs (WiFi events, socket events) are included in the buffer
+    /// but do not affect the outcome — only the terminal OK/ERROR matters.
     async fn read_ok(&self) -> Result<(), NoraRadioError> {
-        let mut res = Err(NoraRadioError::ReadDataInvalid);
-        loop {
-            let brk = self
-                .reader
-                .dequeue(|buf| {
-                    let brk = if let Ok(packet) = self.parse_packet(buf) {
-                        match packet {
-                            NoraPacket::Response(at_resp) => match at_resp {
-                                ATResponse::Ok(_) => {
-                                    res = Ok(());
-                                    true
-                                }
-                                ATResponse::Error => return true,
-                                ATResponse::Other(_) => {
-                                    defmt::debug!("unhandled ATResponse in read_ok()");
-                                    false
-                                }
-                            },
-                            NoraPacket::Event(at_event) => {
-                                match at_event {
-                                    ATEvent::SocketConnected { socket_id: _ } => false,
-                                    ATEvent::SocketClosed { socket_id: _ } => false,
-                                    ATEvent::SocketDataAvailable {
-                                        socket_id: _,
-                                        length: _,
-                                    } => false,
-                                    // TODO: In direct binary mode, +UESODB/+UESODBF events
-                                    // arriving during AT command processing will be dropped here.
-                                    // This is acceptable during init (no connections yet) and
-                                    // during send_data (brief window). For robustness, consider
-                                    // a side-buffer to stash data events.
-                                    ATEvent::SocketDataBinary { .. } => {
-                                        defmt::warn!("dropping +UESODB data event in read_ok()");
-                                        false
-                                    }
-                                    ATEvent::SocketDataBinaryFrom { .. } => {
-                                        defmt::warn!("dropping +UESODBF data event in read_ok()");
-                                        false
-                                    }
-                                    ATEvent::WifiLinkUp {
-                                        wlan_handle: _,
-                                        bssid: _,
-                                        channel: _,
-                                    } => false,
-                                    ATEvent::WifiLinkDown {
-                                        wlan_handle: _,
-                                        reason: _,
-                                    } => false,
-                                    ATEvent::WifiAccessPointUp => false,
-                                    ATEvent::WifiAccessPointDown => false,
-                                    ATEvent::WifiAccessPointStationAssociated { mac_addr: _ } => {
-                                        false
-                                    }
-                                    ATEvent::WifiAccessPointStationDisassociated {
-                                        mac_addr: _,
-                                    } => false,
-                                    ATEvent::StationNetworkUp => false,
-                                    ATEvent::StationNetworkDown => false,
-                                    ATEvent::AccessPointNetworkUp => false,
-                                    ATEvent::AccessPointNetworkDown => false,
-                                }
-                            }
-                        }
-                    } else {
-                        defmt::debug!("read ok could not parse packet");
-                        false
-                    };
-
-                    brk
-                })
-                .await;
-
-            if brk {
-                break;
+        self.read_response_raw::<256, _, _>(|accum| {
+            if accum.windows(5).any(|w| w == b"ERROR") {
+                return Some(Err(NoraRadioError::ReadDataInvalid));
             }
-        }
-
-        res
+            if has_command_ok(accum) {
+                return Some(Ok(()));
+            }
+            None
+        })
+        .await
     }
 
     /// Parse a raw UART buffer into either an AT response or an AT event (URC).
