@@ -6,7 +6,7 @@ use ateam_common_packets::radio::{ManeuverCommand, ManeuverExtendedTelemetry};
 use ateam_controls::ControlsError;
 
 /// Integrates the commanded global-frame acceleration into the trajectory and commands
-/// its twist and acceleration directly, with no pose feedback.
+/// its velocity and acceleration directly, with no position feedback.
 pub struct GlobalAccelerationOpenLoopManeuver;
 
 impl GlobalAccelerationOpenLoopManeuver {

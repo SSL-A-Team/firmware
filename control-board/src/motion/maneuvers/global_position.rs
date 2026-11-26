@@ -107,7 +107,7 @@ impl MotionManeuver for GlobalPositionManeuver {
         };
         let mut c_filt = c;
         c_filt.global_theta = remainderf(theta, 2.0 * PI);
-        let target_pose = c_filt.as_vec3f();
+        let target_pos = c_filt.as_vec3f();
 
         // Capability-aware acceleration limit: never plan more linear acceleration
         // than the motors can deliver along the travel direction (in the robot frame,
@@ -117,9 +117,9 @@ impl MotionManeuver for GlobalPositionManeuver {
         let mut traj_params = traj_params;
         let est = ctx.state_estimate;
         let delta_xy =
-            nalgebra::SVector::<f32, 2>::new(target_pose.x - est[0], target_pose.y - est[1]);
+            nalgebra::SVector::<f32, 2>::new(target_pos.x - est[0], target_pos.y - est[1]);
         if delta_xy.norm() > 0.005 {
-            let feasible = ctx.feasible_linear_accel_for_move(delta_xy, est[2], target_pose.z);
+            let feasible = ctx.feasible_linear_accel_for_move(delta_xy, est[2], target_pos.z);
             let limit = (FEASIBLE_ACCEL_MARGIN * feasible).max(MIN_PLANNED_ACCEL_LINEAR);
             traj_params.max_accel_linear = traj_params.max_accel_linear.min(limit);
         }
@@ -127,7 +127,7 @@ impl MotionManeuver for GlobalPositionManeuver {
         // Replan whenever the filtered target moves, not just when the raw one does.
         let cmd_filt = ManeuverCommand::GlobalPosition(c_filt);
         let setpoints = ctx.run_traj_track(cmd_filt, |seed| {
-            let traj = BangBangTraj3D::from_target_pos(seed, target_pose, traj_params)?;
+            let traj = BangBangTraj3D::from_target_pos(seed, target_pos, traj_params)?;
             Ok(TrackedTrajectory::BangBang(traj))
         })?;
 

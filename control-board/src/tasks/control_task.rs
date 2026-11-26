@@ -403,7 +403,7 @@ impl<
 
         let mut _cmd_mode = BodyControlMode::BCM_OFF;
         let mut _cmd = BodyControlCommand::default();
-        let mut last_vision_pose_meas = Vector3f::default();
+        let mut last_vision_pos_meas = Vector3f::default();
         let mut last_vision_t_capture_host_us: u64 = 0;
         let mut vision_update = false;
         let mut ticks_since_control_packet = 0;
@@ -466,7 +466,7 @@ impl<
 
                         _cmd_mode = latest_control.body_control_mode;
                         _cmd = latest_control.cmd;
-                        last_vision_pose_meas = latest_control.vision_position_update.into();
+                        last_vision_pos_meas = latest_control.vision_position_update.into();
                         last_vision_t_capture_host_us = (latest_control.vision_capture_us_hi as u64) << 32 | (latest_control.vision_capture_us_lo as u64);
                         vision_update = latest_control.vision_update() != 0;
 
@@ -556,7 +556,7 @@ impl<
 
             match robot_controller.control_update(
                 self.last_command,
-                last_vision_pose_meas,
+                last_vision_pos_meas,
                 last_vision_t_capture_host_us,
                 vision_update,
                 wheel_vel_meas,
@@ -762,7 +762,7 @@ impl<
                 let tick = ctrl_seq_number as i16;
                 let gyro = self.last_imu_gyro_theta;
                 let state = robot_controller.control_context.state_estimate;
-                let u = robot_controller.body_twist_out;
+                let u = robot_controller.body_vel_out;
                 let (mfl, mbl, mbr, mfr) = (&self.motor_fl, &self.motor_bl, &self.motor_br, &self.motor_fr);
                 hf_capture.tick(|| {
                     [

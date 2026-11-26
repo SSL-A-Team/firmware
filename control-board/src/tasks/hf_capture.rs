@@ -14,7 +14,7 @@ const START_DELAY_TICKS: u32 = 3800;
 const DUMP_EVERY_TICKS: u32 = 10;
 
 /// Signals per sample, stored as i16 with fixed scales:
-/// 0 tick (wraps), 1 gyro z [mrad/s], 2-4 KF pose x,y [0.1 mm], theta [0.1 mrad],
+/// 0 tick (wraps), 1 gyro z [mrad/s], 2-4 KF position x,y [0.1 mm], theta [0.1 mrad],
 /// 5-8 wheel speed meas [0.01 rad/s], 9-12 wheel speed setpoint sent [0.01 rad/s],
 /// 13-16 FF current sent [mA], 17-20 motor total current setpoint [mA],
 /// 21-23 body velocity output u (global) [mm/s, mm/s, mrad/s]

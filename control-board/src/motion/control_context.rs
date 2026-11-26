@@ -70,9 +70,9 @@ impl Trajectory for TrackedTrajectory {
 /// `body_controller` applies friction compensation and wheel transforms.
 #[derive(Copy, Clone, Default)]
 pub struct ManeuverSetpoints {
-    pub body_twist: Vector3f,
+    pub body_vel: Vector3f,
     pub body_accel: Vector3f,
-    /// Part of `body_twist.z` that is yaw-rate (gyro) feedback. Kept out of the
+    /// Part of `body_vel.z` that is yaw-rate (gyro) feedback. Kept out of the
     /// friction compensation input, where it turned gyro noise into accel jitter.
     pub rate_fb_w: f32,
 }
@@ -80,7 +80,7 @@ pub struct ManeuverSetpoints {
 impl ManeuverSetpoints {
     pub fn zero() -> Self {
         Self {
-            body_twist: Vector3f::zeros(),
+            body_vel: Vector3f::zeros(),
             body_accel: Vector3f::zeros(),
             rate_fb_w: 0.0,
         }
@@ -109,10 +109,10 @@ pub enum TrackingDivergenceState {
 pub struct ControlContext {
     pub robot_model: RobotModel,
     pub state_estimator: StateEstimator<DEFAULT_EKF_BUFF_LEN, DEFAULT_VISION_BUFF_LEN>,
-    /// XY position feedback [K, MAX, ANTI_JITTER] (see controller_params::POSE_FB_XY)
-    pub pose_fb_xy: Vector3f,
-    /// Angular feedback [POS_K, POS_MAX, ANTI_JITTER, VEL_K] (see controller_params::POSE_FB_W)
-    pub pose_fb_w: Vector4f,
+    /// XY position feedback [K, MAX, ANTI_JITTER] (see controller_params::POS_FB_XY)
+    pub pos_fb_xy: Vector3f,
+    /// Angular feedback [POS_K, POS_MAX, ANTI_JITTER, VEL_K] (see controller_params::POS_FB_W)
+    pub pos_fb_w: Vector4f,
     /// Wheel velocity loop [KP, KI, ANTI_JITTER, MAX_CURRENT], forwarded to the motor controllers
     pub wheel_vel_fb: Vector4f,
     /// Feed-forward wheel current limit (A)
@@ -176,8 +176,8 @@ impl ControlContext {
             robot_model: RobotModel::new(RobotPhysicalParams::default())
                 .expect("Failed to create RobotModel, check that parameters are valid"),
             state_estimator: StateEstimator::<DEFAULT_EKF_BUFF_LEN, DEFAULT_VISION_BUFF_LEN>::default(),
-            pose_fb_xy: controller_params::POSE_FB_XY,
-            pose_fb_w: controller_params::POSE_FB_W,
+            pos_fb_xy: controller_params::POS_FB_XY,
+            pos_fb_w: controller_params::POS_FB_W,
             wheel_vel_fb: controller_params::WHEEL_VEL_FB,
             wheel_ff_current_limit: controller_params::WHEEL_FF_CURRENT_LIMIT_A,
             wheel_slip_comp: controller_params::WHEEL_SLIP_COMP,
@@ -231,11 +231,11 @@ impl ControlContext {
     }
 
     /// Run KF vision handling, measurement construction, and state update.
-    /// Returns the EKF buffer-horizon state for telemetry: global pose, then
+    /// Returns the EKF buffer-horizon state for telemetry: global position, then
     /// velocity in the robot's local frame.
     pub fn update_state_estimate(
         &mut self,
-        vision_pose_meas: Vector3f,
+        vision_pos_meas: Vector3f,
         vision_t_capture_host_us: u64,
         vision_update: bool,
         wheel_vel_meas: Vector4f,
@@ -253,7 +253,7 @@ impl ControlContext {
         let sample;
         let vision = if vision_update {
             sample = VisionSample {
-                meas: vision_pose_meas,
+                meas: vision_pos_meas,
                 t_capture_host_us: vision_t_capture_host_us,
             };
             Some(&sample)
@@ -294,7 +294,7 @@ impl ControlContext {
         Ok(state_prediction)
     }
 
-    /// Heading used to rotate the global commanded twist/accel into the local
+    /// Heading used to rotate the global commanded velocity/accel into the local
     /// frame for the wheel outputs: the estimate advanced by half a control
     /// period, compensating the rotation during the period.
     pub fn output_heading(&self) -> f32 {
@@ -343,7 +343,7 @@ impl ControlContext {
                 }
                 if self.tracking_recovery_at_rest_ticks >= TRACKING_DIVERGENCE_RECOVERY_REST_TICKS {
                     // Only the trajectory: reinitializing the state estimator here
-                    // would drop the vision lock, and the pose jump when vision
+                    // would drop the vision lock, and the position jump when vision
                     // reseeds could trip another divergence.
                     self.reset_trajectory();
                     self.tracking_divergence_state = TrackingDivergenceState::Normal;
@@ -447,7 +447,7 @@ impl ControlContext {
     }
 
     /// Plan or continue a trajectory and drive it open loop: the setpoints are
-    /// the trajectory's own twist and acceleration, with no pose feedback.
+    /// the trajectory's own velocity and acceleration, with no position feedback.
     ///
     /// Replans under the same rule as `run_traj_track`, seeded from the current
     /// trajectory state if one exists (open or closed loop), else the estimate.
@@ -478,7 +478,7 @@ impl ControlContext {
         traj.tick(self.dt);
 
         Ok(ManeuverSetpoints {
-            body_twist: traj_state.fixed_rows::<3>(3).into(),
+            body_vel: traj_state.fixed_rows::<3>(3).into(),
             body_accel: traj_accel,
             rate_fb_w: 0.0,
         })
@@ -487,7 +487,7 @@ impl ControlContext {
     /// Velocity maneuvers: ramp toward `target` (in `frame`) at
     /// `max_accel_linear` / `max_accel_angular` and
     /// output the ramp's velocity and acceleration. No position feedback: only P
-    /// on the angular rate error (`POSE_FB_W` VEL_K).
+    /// on the angular rate error (`POS_FB_W` VEL_K).
     pub fn run_vel_track(
         &mut self,
         cmd: ManeuverCommand,
@@ -525,9 +525,9 @@ impl ControlContext {
             )))
         };
         let mut setpoints = self.run_traj_open_loop(cmd, make)?;
-        let k_vel_w = self.pose_fb_w[3];
-        let rate_fb_w = (setpoints.body_twist.z - self.yaw_rate_fb) * k_vel_w;
-        setpoints.body_twist.z += rate_fb_w;
+        let k_vel_w = self.pos_fb_w[3];
+        let rate_fb_w = (setpoints.body_vel.z - self.yaw_rate_fb) * k_vel_w;
+        setpoints.body_vel.z += rate_fb_w;
         setpoints.rate_fb_w = rate_fb_w;
         Ok(setpoints)
     }
@@ -645,14 +645,14 @@ impl ControlContext {
         // trajectory feed-forward only. Both fade to zero inside the
         // anti-jitter thresholds so the outputs are exactly zero at rest.
         let state_estimate = self.state_estimate;
-        let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
+        let pos_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
         let traj_pos: Vector3f = traj_state.fixed_rows::<3>(0).into();
         let traj_vel: Vector3f = traj_state.fixed_rows::<3>(3).into();
 
         // XY: P on position, clamped in magnitude, then anti-jitter scaled.
-        let [k_xy, max_xy, aj_xy] = [self.pose_fb_xy[0], self.pose_fb_xy[1], self.pose_fb_xy[2]];
-        let err_x = traj_pos.x - pose_estimate.x;
-        let err_y = traj_pos.y - pose_estimate.y;
+        let [k_xy, max_xy, aj_xy] = [self.pos_fb_xy[0], self.pos_fb_xy[1], self.pos_fb_xy[2]];
+        let err_x = traj_pos.x - pos_estimate.x;
+        let err_y = traj_pos.y - pos_estimate.y;
         let err_xy = hypotf(err_x, err_y);
         let mut fb_x = err_x * k_xy;
         let mut fb_y = err_y * k_xy;
@@ -666,13 +666,13 @@ impl ControlContext {
         // W: P on orientation (clamped) plus P on angular velocity, anti-jitter
         // scaled by the orientation error.
         let [k_w, max_w, aj_w, k_vel_w] =
-            [self.pose_fb_w[0], self.pose_fb_w[1], self.pose_fb_w[2], self.pose_fb_w[3]];
-        let err_w = remainderf(traj_pos.z - pose_estimate.z, 2.0 * PI);
+            [self.pos_fb_w[0], self.pos_fb_w[1], self.pos_fb_w[2], self.pos_fb_w[3]];
+        let err_w = remainderf(traj_pos.z - pos_estimate.z, 2.0 * PI);
         let pos_fb_w = (err_w * k_w).clamp(-max_w, max_w);
         let vel_fb_w = (traj_vel.z - self.yaw_rate_fb) * k_vel_w;
         let scale_w = anti_jitter_scale(fabsf(err_w), aj_w);
 
-        let twist_out = Vector3f::new(
+        let vel_out = Vector3f::new(
             traj_vel.x + fb_x * scale_xy,
             traj_vel.y + fb_y * scale_xy,
             traj_vel.z + (pos_fb_w + vel_fb_w) * scale_w,
@@ -684,7 +684,7 @@ impl ControlContext {
         );
 
         Ok(ManeuverSetpoints {
-            body_twist: twist_out,
+            body_vel: vel_out,
             body_accel: accel_out,
             rate_fb_w: vel_fb_w * scale_w,
         })
@@ -695,24 +695,24 @@ impl ControlContext {
             Some(t) => t.sample().0,
             None => return false,
         };
-        let traj_state_pose: Vector3f = traj_state.fixed_rows::<3>(0).into();
-        let traj_state_twist: Vector3f = traj_state.fixed_rows::<3>(3).into();
-        let pose_estimate: Vector3f = self.state_estimate.fixed_rows::<3>(0).into();
-        let twist_estimate: Vector3f = self.state_estimate.fixed_rows::<3>(3).into();
-        let linear_pose_error = hypotf(
-            traj_state_pose.x - pose_estimate.x,
-            traj_state_pose.y - pose_estimate.y,
+        let traj_state_pos: Vector3f = traj_state.fixed_rows::<3>(0).into();
+        let traj_state_vel: Vector3f = traj_state.fixed_rows::<3>(3).into();
+        let pos_estimate: Vector3f = self.state_estimate.fixed_rows::<3>(0).into();
+        let vel_estimate: Vector3f = self.state_estimate.fixed_rows::<3>(3).into();
+        let linear_pos_error = hypotf(
+            traj_state_pos.x - pos_estimate.x,
+            traj_state_pos.y - pos_estimate.y,
         );
-        let angular_pose_error = fabsf(remainderf(traj_state_pose.z - pose_estimate.z, 2.0 * PI));
-        let linear_twist_error = hypotf(
-            traj_state_twist.x - twist_estimate.x,
-            traj_state_twist.y - twist_estimate.y,
+        let angular_pos_error = fabsf(remainderf(traj_state_pos.z - pos_estimate.z, 2.0 * PI));
+        let linear_vel_error = hypotf(
+            traj_state_vel.x - vel_estimate.x,
+            traj_state_vel.y - vel_estimate.y,
         );
-        let angular_twist_error = fabsf(traj_state_twist.z - twist_estimate.z);
-        linear_pose_error > self.tracking_divergence_thresh[0]
-            || angular_pose_error > self.tracking_divergence_thresh[1]
-            || linear_twist_error > self.tracking_divergence_thresh[2]
-            || angular_twist_error > self.tracking_divergence_thresh[3]
+        let angular_vel_error = fabsf(traj_state_vel.z - vel_estimate.z);
+        linear_pos_error > self.tracking_divergence_thresh[0]
+            || angular_pos_error > self.tracking_divergence_thresh[1]
+            || linear_vel_error > self.tracking_divergence_thresh[2]
+            || angular_vel_error > self.tracking_divergence_thresh[3]
     }
 
     // -----------------------------------------------------------------------
@@ -786,10 +786,10 @@ impl ControlContext {
                 reply.data.f32_ = self.state_estimator.vision_filter.get_params().seed_samples as f32;
             }
             ParameterName::FB_POS_LINEAR => {
-                reply.data.vec3_f32 = self.pose_fb_xy.into();
+                reply.data.vec3_f32 = self.pos_fb_xy.into();
             }
             ParameterName::FB_POS_ANGULAR => {
-                reply.data.vec4_f32 = self.pose_fb_w.into();
+                reply.data.vec4_f32 = self.pos_fb_w.into();
             }
             ParameterName::FB_WHEEL_VEL => {
                 reply.data.vec4_f32 = self.wheel_vel_fb.into();
@@ -922,13 +922,13 @@ impl ControlContext {
             ParameterName::FB_POS_LINEAR => {
                 let v = unsafe { cmd.data.vec3_f32 };
                 if v.iter().all(|x| x.is_finite() && *x >= 0.0) {
-                    self.pose_fb_xy = Vector3f::new(v[0], v[1], v[2]);
+                    self.pos_fb_xy = Vector3f::new(v[0], v[1], v[2]);
                 }
             }
             ParameterName::FB_POS_ANGULAR => {
                 let v = unsafe { cmd.data.vec4_f32 };
                 if v.iter().all(|x| x.is_finite() && *x >= 0.0) {
-                    self.pose_fb_w = Vector4f::new(v[0], v[1], v[2], v[3]);
+                    self.pos_fb_w = Vector4f::new(v[0], v[1], v[2], v[3]);
                 }
             }
             ParameterName::FB_WHEEL_VEL => {

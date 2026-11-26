@@ -6,7 +6,7 @@ use ateam_common_packets::radio::{ManeuverCommand, ManeuverExtendedTelemetry};
 use ateam_controls::ControlsError;
 
 /// Integrates the commanded robot-frame acceleration into the trajectory and tracks it
-/// closed loop (pose PID + feedforward), like the velocity and position maneuvers.
+/// closed loop (position PID + feedforward), like the velocity and position maneuvers.
 pub struct LocalAccelerationManeuver;
 
 impl LocalAccelerationManeuver {

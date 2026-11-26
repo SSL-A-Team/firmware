@@ -19,7 +19,7 @@ pub enum VelocityFrame {
 
 pub struct VelocityRamp {
     frame: VelocityFrame,
-    /// Integrated global pose (telemetry only, no feedback is applied on it).
+    /// Integrated global position (telemetry only, no feedback is applied on it).
     pos: Vector3f,
     /// Current velocity in `frame`.
     vel: Vector3f,
@@ -31,7 +31,7 @@ pub struct VelocityRamp {
 }
 
 impl VelocityRamp {
-    /// Start from `seed` (global pose and velocity) with heading `body_heading`.
+    /// Start from `seed` (global position and velocity) with heading `body_heading`.
     pub fn new(
         seed: Vector6f,
         body_heading: f32,

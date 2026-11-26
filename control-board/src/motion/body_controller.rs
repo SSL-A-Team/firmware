@@ -24,7 +24,7 @@ use nalgebra::SVector;
 pub struct BodyController {
     pub control_context: ControlContext,
     pub maneuver_manager: ManeuverManager,
-    pub body_twist_out: Vector3f,
+    pub body_vel_out: Vector3f,
     pub body_accel_out: Vector3f,
     pub wheel_vel_out: Vector4f,
     pub wheel_torque_out: Vector4f,
@@ -46,7 +46,7 @@ impl BodyController {
             control_context: ControlContext::new(dt),
             maneuver_manager: ManeuverManager::new(),
             vision_hold: false,
-            body_twist_out: Vector3f::default(),
+            body_vel_out: Vector3f::default(),
             body_accel_out: Vector3f::default(),
             wheel_vel_out: Vector4f::default(),
             wheel_torque_out: Vector4f::default(),
@@ -64,7 +64,7 @@ impl BodyController {
     pub fn reset(&mut self) {
         self.control_context.reset();
         self.maneuver_manager.reset();
-        self.body_twist_out = Vector3f::default();
+        self.body_vel_out = Vector3f::default();
         self.body_accel_out = Vector3f::default();
         self.wheel_vel_out = Vector4f::default();
         self.wheel_torque_out = Vector4f::default();
@@ -95,7 +95,7 @@ impl BodyController {
     pub fn control_update(
         &mut self,
         last_command: BasicControl,
-        vision_pose_meas: Vector3f,
+        vision_pos_meas: Vector3f,
         vision_t_capture_host_us: u64,
         vision_update: bool,
         wheel_vel_meas: Vector4f,
@@ -107,7 +107,7 @@ impl BodyController {
         let t_start = Instant::now();
 
         let state_prediction = self.control_context.update_state_estimate(
-            vision_pose_meas,
+            vision_pos_meas,
             vision_t_capture_host_us,
             vision_update,
             wheel_vel_meas,
@@ -123,7 +123,7 @@ impl BodyController {
         // that requires vision while vision is inactive, the control task ignores the
         // maneuver outputs and commands the active brake instead. Progressing the
         // maneuver anyway would keep advancing its trajectory clock and publish
-        // telemetry (trajectory pose/vel, commanded twist/accel, maneuver state)
+        // telemetry (trajectory position/vel, commanded velocity/accel, maneuver state)
         // implying motion the robot is not performing, which is confusing to
         // observe. Hold the maneuver in a reset state and emit zero setpoints;
         // when the state clears, the maneuver re-enters and replans from the
@@ -155,38 +155,38 @@ impl BodyController {
         self.control_context
             .update_tracking_divergence_recovery(wheel_vel_meas);
 
-        self.body_twist_out = setpoints.body_twist;
+        self.body_vel_out = setpoints.body_vel;
         let rate_fb_w = setpoints.rate_fb_w;
         self.body_accel_out = setpoints.body_accel;
 
         // SSL stop state: clamp linear speed after control policy output so feedback
         // loops cannot overshoot to recover trajectory error.
         if last_command.game_state_in_stop() != 0 {
-            let linear_speed = self.body_twist_out.xy().norm();
+            let linear_speed = self.body_vel_out.xy().norm();
             if linear_speed > STOP_STATE_LINEAR_SPEED_LIMIT {
                 let scale = STOP_STATE_LINEAR_SPEED_LIMIT / linear_speed;
-                self.body_twist_out.x *= scale;
-                self.body_twist_out.y *= scale;
+                self.body_vel_out.x *= scale;
+                self.body_vel_out.y *= scale;
             }
         }
 
         // Clamp body-level velocity before converting to wheel velocity setpoints.
-        let twist_clamped_x = self
-            .body_twist_out
+        let vel_clamped_x = self
+            .body_vel_out
             .x
             .clamp(-BODY_VEL_CLAMP_LINEAR, BODY_VEL_CLAMP_LINEAR);
-        let twist_clamped_y = self
-            .body_twist_out
+        let vel_clamped_y = self
+            .body_vel_out
             .y
             .clamp(-BODY_VEL_CLAMP_LINEAR, BODY_VEL_CLAMP_LINEAR);
-        let twist_clamped_z = self
-            .body_twist_out
+        let vel_clamped_z = self
+            .body_vel_out
             .z
             .clamp(-BODY_VEL_CLAMP_ANGULAR, BODY_VEL_CLAMP_ANGULAR);
-        let vel_clamped = twist_clamped_x != self.body_twist_out.x
-            || twist_clamped_y != self.body_twist_out.y
-            || twist_clamped_z != self.body_twist_out.z;
-        self.body_twist_out = Vector3f::new(twist_clamped_x, twist_clamped_y, twist_clamped_z);
+        let vel_clamped = vel_clamped_x != self.body_vel_out.x
+            || vel_clamped_y != self.body_vel_out.y
+            || vel_clamped_z != self.body_vel_out.z;
+        self.body_vel_out = Vector3f::new(vel_clamped_x, vel_clamped_y, vel_clamped_z);
 
         // Feed-forward output stage: in the local frame (heading
         // advanced by half a period), add the friction compensation for the
@@ -196,15 +196,15 @@ impl BodyController {
         let output_heading = self.control_context.output_heading();
         let to_local = z_rotation_mat(-output_heading);
         let robot_model = &self.control_context.robot_model;
-        let twist_local: Vector3f = to_local * self.body_twist_out;
+        let vel_local: Vector3f = to_local * self.body_vel_out;
         let accel_local: Vector3f = to_local * self.body_accel_out;
-        // The commanded velocity carries the feedback terms (gyro / pose noise); the steep
+        // The commanded velocity carries the feedback terms (gyro / position noise); the steep
         // Coulomb ramp would pass that straight into the current, so low-pass it here.
         // Yaw-rate feedback is excluded: within the Coulomb ramp it acted as ~26 rad/s^2
         // per rad/s of gyro noise (angular accel jitter 2.1 -> 0.7 rad/s^2 without it).
-        let twist_fric_local = twist_local - Vector3f::new(0.0, 0.0, rate_fb_w);
+        let vel_fric_local = vel_local - Vector3f::new(0.0, 0.0, rate_fb_w);
         self.friction_vel_local_filt +=
-            (twist_fric_local - self.friction_vel_local_filt) * self.friction_vel_alpha;
+            (vel_fric_local - self.friction_vel_local_filt) * self.friction_vel_alpha;
         // Friction and acceleration parts of the feed-forward, each already divided
         // by the output efficiency ((acc + F_fric/m) / efficiency).
         let fric_accel_local =
@@ -225,13 +225,13 @@ impl BodyController {
         );
         let accel_clamped = clamped_accel_local != accel_ff_local;
 
-        let body_xy = SVector::<f32, 2>::new(self.body_twist_out.x, self.body_twist_out.y);
+        let body_xy = SVector::<f32, 2>::new(self.body_vel_out.x, self.body_vel_out.y);
         let vel_cmd_global =
             if matches!(ENC_LAG_MODE, EncLagMode::FeedforwardOnly | EncLagMode::Full) {
                 let compensated_xy = self.control_context.enc_lag.invert(&body_xy);
-                Vector3f::new(compensated_xy.x, compensated_xy.y, self.body_twist_out.z)
+                Vector3f::new(compensated_xy.x, compensated_xy.y, self.body_vel_out.z)
             } else {
-                self.body_twist_out
+                self.body_vel_out
             };
         self.wheel_vel_out = robot_model.transform_vel2wheel_local() * (to_local * vel_cmd_global);
 
@@ -304,9 +304,9 @@ impl BodyController {
         let vision_update = matches!(applied_vision, Some((_, _, true)));
         let vision_old = matches!(applied_vision, Some((_, _, false)));
         let vision_insert_age_us = applied_vision.map(|(_, age_us, _)| age_us).unwrap_or(0);
-        let vision_pose = applied_vision
+        let vision_pos = applied_vision
             .map(|(meas, _, _)| meas)
-            .unwrap_or(vision_pose_meas);
+            .unwrap_or(vision_pos_meas);
 
         let traj_sample = self.control_context.trajectory.as_ref().map(|t| t.sample());
         self.debug_telemetry = BodyControlExtendedTelemetry {
@@ -320,7 +320,7 @@ impl BodyController {
             vision_insert_age_us,
             imu_gyro_w: imu_gyro_theta_meas,
             imu_accel_xy: [imu_accel_x_meas, imu_accel_y_meas],
-            vision_pos: vision_pose.into(),
+            vision_pos: vision_pos.into(),
             pos_ekf: state_prediction.fixed_rows::<3>(0).into(),
             vel_ekf: state_prediction.fixed_rows::<3>(3).into(),
             pos_est: self
@@ -342,7 +342,7 @@ impl BodyController {
                 })
                 .unwrap_or_default(),
             traj_accel: accel_local.into(),
-            vel_u: self.body_twist_out.into(),
+            vel_u: self.body_vel_out.into(),
             accel_u: accel_u_local.into(),
             ..self.debug_telemetry
         };

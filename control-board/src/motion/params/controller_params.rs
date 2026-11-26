@@ -11,17 +11,17 @@ use embassy_time::Duration;
 // feedback and the acceleration feed-forward are scaled linearly to zero.
 
 /// [K (1/s), MAX (m/s), ANTI_JITTER (m)]: v_xy += clamp(K * pos_err_xy, MAX).
-/// Radio-tunable as `POSE_FB_XY`.
+/// Radio-tunable as `POS_FB_XY`.
 // MAX lowered from 2.0 m/s while bringing up (a 0.3 m vision jump otherwise
 // commands 2 m/s; see controls/analysis/feedback_sim.py).
-pub const POSE_FB_XY: Vector3f = Vector3f::new(8.0, 0.3, 0.01);
+pub const POS_FB_XY: Vector3f = Vector3f::new(8.0, 0.3, 0.01);
 
 /// [POS_K (1/s), POS_MAX (rad/s), ANTI_JITTER (rad), VEL_K]:
 /// w += clamp(POS_K * theta_err, POS_MAX) + VEL_K * (w_traj - w_est).
-/// Radio-tunable as `POSE_FB_W`.
+/// Radio-tunable as `POS_FB_W`.
 // POS_MAX lowered from 8 rad/s while bringing up. VEL_K = 2 (0.5 performed the
 // same once the motor commutation bug was fixed).
-pub const POSE_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 2.0);
+pub const POS_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 2.0);
 
 /// Wheel velocity loop on the motor controllers [KP (mA/(rad/s)), KI (mA/rad),
 /// ANTI_JITTER (rad/s), MAX_CURRENT (A)]. P-only (KI = 0).
@@ -57,7 +57,7 @@ pub const WHEEL_FF_CURRENT_LIMIT_A: f32 = 3.5;
 /// this times the linear (force, not torque) part of its feed-forward current. Radio-tunable as `WHEEL_SLIP_COMP`.
 // Robot 2 on carpet: wheel speed exceeds the vision/KF body speed by ~1.1 rad/s at
 // 1 A, 1.6 at 2 A, 2.4 at 3.2 A (both signs). Without compensation the body lagged
-// 13-20 mm behind 0.2 m trajectories (error ~ slip / POSE_FB_XY K). 0.2 m moves:
+// 13-20 mm behind 0.2 m trajectories (error ~ slip / POS_FB_XY K). 0.2 m moves:
 // 0 -> 1.2 cut XY track RMS forward 10 -> 7 mm, sideways 13.8 -> 7.1 mm, replan
 // test 9.4 -> 6.5 mm, and arrival 0.05-0.1 s sooner; 1.6 was similar. Rotation:
 // excess wheel speed ~0 at any current (fit -0.1), so torque current is excluded.
@@ -75,12 +75,12 @@ pub const WHEEL_CURRENT_SLOPE_LIMIT_A_PER_S: f32 = 500.0;
 
 /// Low-pass cutoff (Hz) on the commanded velocity fed to the friction model only.
 /// The Coulomb ramp (ateam_controls FRICTION_*_RAMP) is a steep gain on that velocity,
-/// which contains gyro/pose feedback noise; unfiltered it put ~0.1 A of 8-60 Hz ripple
+/// which contains gyro/position feedback noise; unfiltered it put ~0.1 A of 8-60 Hz ripple
 /// on the wheel current targets.
 pub const FRICTION_VEL_LPF_HZ: f32 = 15.0;
 
 /// First-order low-pass corner (Hz) on the measured yaw rate used by the angular
-/// rate feedback (`POSE_FB_W` VEL_K). The yaw-rate estimate is close to raw gyro
+/// rate feedback (`POS_FB_W` VEL_K). The yaw-rate estimate is close to raw gyro
 /// and carries ~0.02-0.03 rad/s of 8-60 Hz content while driving (sensor/roller
 /// vibration plus a lightly damped ~15 Hz rate-loop mode); with VEL_K = 2 it went
 /// doubled into the angular command, the wheel velocity setpoints (x2.7) and the
@@ -100,7 +100,7 @@ pub const FF_ACCEL_LOOKAHEAD_S: f32 = 0.02;
 
 /// XY tracking error (m) beyond which the position trajectory restarts from the
 /// estimate. Deriving it as POS_MAX / POS_K (where the position feedback saturates)
-/// gives 3.75 cm with the lowered POSE_FB_XY MAX, which
+/// gives 3.75 cm with the lowered POS_FB_XY MAX, which
 /// restarted the trajectory (a visible snap) during ordinary joystick moves.
 pub const TRAJ_RESET_ERROR_XY: f32 = 0.10;
 
