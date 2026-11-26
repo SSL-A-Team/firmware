@@ -197,6 +197,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             _bitfield_align_1: Default::default(),
 
             vision_position_update: [0.0, 0.0, 0.0], // No vision updates
+            vision_capture_us_hi: 0,
+            vision_capture_us_lo: 0,
 
             body_control_mode: BodyControlMode::BCM_LOCAL_VELOCITY,
             kick_request: KickRequest::KR_ARM,

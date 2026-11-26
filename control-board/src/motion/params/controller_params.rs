@@ -1,87 +1,113 @@
-use ateam_controls::{Vector2f, Vector3f, Vector4f, Vector5f};
+use ateam_controls::{Vector3f, Vector4f};
 use embassy_time::Duration;
-use nalgebra::Matrix3x5;
 
-// PID gains per row: [Kp, Ki, Kd, Ki_err_min, Ki_err_max]
+//////////////////////////////////
+//  trajectory tracking control  //
+//////////////////////////////////
 
-//////////////////////////////
-//  current feedback gains  //
-//////////////////////////////
+// Trajectory tracking feedback. Position error is fed into the velocity setpoint (the
+// wheel velocity loops do the correcting); the wheel torque path carries only the
+// trajectory acceleration feed-forward. Inside the anti-jitter threshold both the
+// feedback and the acceleration feed-forward are scaled linearly to zero.
 
-const LINEAR_POSE_PID_GAINS: Vector5f = Vector5f::new(300.0, 0.0, 7.0, 0.0, 0.0);
-const ANGULAR_POSE_PID_GAINS: Vector5f = Vector5f::new(400.0, 0.0, 30.0, 0.0, 0.0);
+/// [K (1/s), MAX (m/s), ANTI_JITTER (m)]: v_xy += clamp(K * pos_err_xy, MAX).
+/// Radio-tunable as `POSE_FB_XY`.
+// MAX lowered from 2.0 m/s while bringing up (a 0.3 m vision jump otherwise
+// commands 2 m/s; see controls/analysis/feedback_sim.py).
+pub const POSE_FB_XY: Vector3f = Vector3f::new(8.0, 0.3, 0.01);
 
-pub fn pose_pid_gains() -> Matrix3x5<f32> {
-    Matrix3x5::from_rows(&[
-        LINEAR_POSE_PID_GAINS.transpose(),
-        LINEAR_POSE_PID_GAINS.transpose(),
-        ANGULAR_POSE_PID_GAINS.transpose(),
-    ])
-}
+/// [POS_K (1/s), POS_MAX (rad/s), ANTI_JITTER (rad), VEL_K]:
+/// w += clamp(POS_K * theta_err, POS_MAX) + VEL_K * (w_traj - w_est).
+/// Radio-tunable as `POSE_FB_W`.
+// POS_MAX lowered from 8 rad/s while bringing up. VEL_K = 2 (0.5 performed the
+// same once the motor commutation bug was fixed).
+pub const POSE_FB_W: Vector4f = Vector4f::new(8.0, 2.0, 0.01, 2.0);
 
-/// Per-axis anti-jitter thresholds for the body pose PID controller, in the
-/// same units as the pose error: [x (m), y (m), theta (rad)]. When the
-/// absolute pose error on an axis is below the threshold, the PID output for
-/// that axis is linearly scaled toward zero, matching the fixed-point PI
-/// anti-jitter behavior on the motor controllers.
-pub const POSE_PID_ANTI_JITTER_THRESH: Vector3f = Vector3f::new(0.001, 0.001, 0.01);
-
-/// Acceleration (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
-/// Scales traj accel and PID feedback respectively in the wheel torque feedforward.
-pub const POSE_ACCEL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
-
-/// Velocity path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN].
-/// Scales traj velocity and PID feedback (× dt) respectively in the wheel velocity setpoint.
-/// Only active when POSE_VEL_MODE includes feedforward or feedback.
-pub const POSE_VEL_GAIN: Vector2f = Vector2f::new(1.0, 1.0);
-
-/// Pose velocity setpoint mode.
+/// Wheel velocity loop on the motor controllers [KP (mA/(rad/s)), KI (mA/rad),
+/// ANTI_JITTER (rad/s), MAX_CURRENT (A)]. P-only (KI = 0).
+/// MAX_CURRENT caps the total (feed-forward + loop) wheel current on the motor; the
+/// motor's I2T budget keeps the long-term average at its continuous rating.
+/// Radio-tunable as `WHEEL_VEL_FB`; periodically re-sent to the motors.
 ///
-/// Controls what forms the wheel velocity setpoint.
-/// `Disabled`: integrate accel output from estimated twist (original behavior).
-/// `FeedforwardOnly`: trajectory velocity directly as the setpoint base, no PID correction.
-/// `FeedbackOnly`: integration base plus vel-gain-scaled PID correction term.
-/// `Full`: trajectory velocity base plus vel-gain-scaled PID correction.
-#[derive(PartialEq, Eq)]
-pub enum PoseVelMode {
-    Disabled,
-    FeedforwardOnly,
-    FeedbackOnly,
-    Full,
-}
+/// KP is in mA/(rad/s). Measured on robot 2 with 1 kHz captures after fixing the
+/// motor's speed scaling and stale-commutation bugs (which had caused the earlier
+/// 50-67 Hz ringing): no instability up to 400; >20 Hz current noise 0.03 A at 100,
+/// ~0.1 A at 200, ~0.15 A at 300. Heading tracking on 0.2 m + 90 deg moves: 3.0 deg
+/// RMS at 100, 1.4 at 200, 0.9-1.35 at 300. Hold accuracy (3-6 mm) is independent of KP.
+/// KP 400 (Nov 12, wheel velocity loop enabled): vs 200, streamed-target position
+/// tracking 7.8 -> 5.3 mm / 0.80 -> 0.58 deg RMS and heading holds without stiction
+/// stalls; 600 only added current noise. >20 Hz current noise ~0.28 A RMS (encoder
+/// speed quantization x KP), thermally negligible.
+/// MAX_CURRENT 4.0 A: 0.5 A of loop authority above the feed-forward limit; 4.5 A
+/// mostly added wheel slip.
+pub const WHEEL_VEL_FB: Vector4f = Vector4f::new(400.0, 0.0, 1.5, 4.0);
 
-pub const POSE_VEL_MODE: PoseVelMode = PoseVelMode::FeedforwardOnly;
+/// Maximum feed-forward wheel current (A). The body acceleration output is
+/// scaled uniformly so no wheel's feed-forward current exceeds this. Radio-tunable
+/// as `WHEEL_FF_CURRENT_LIMIT`.
+// DF45M024053-A2: 2.36 A rated, 7 A peak; the wheel firmware clamps at 6.3 A and
+// enforces I2T, and wheel_thermal.rs derates the feed-forward first on sustained use.
+// Robot 2, 0.2 m position moves at 3 m/s^2 (wheel velocity loop on): 2.7 A ->
+// 3.5 A cut time-to-target forward 0.83-1.35 -> 0.70-0.79 s, sideways 1.16-1.22 ->
+// 0.88-0.92 s, diagonal ~1.4 -> ~1.1 s. Above ~3.5 A per wheel the encoders show
+// growing slip (null-space residual p95 0.15 -> 0.30 m/s at 4 A) for little gain.
+pub const WHEEL_FF_CURRENT_LIMIT_A: f32 = 3.5;
 
-/// Pose acceleration (torque feedforward) mode.
-///
-/// Controls what contributes to the wheel torque feedforward via the accel path.
-/// `Disabled`: zero accel output.
-/// `FeedforwardOnly`: trajectory acceleration only, no PID feedback.
-/// `FeedbackOnly`: PID feedback acceleration only, no trajectory accel.
-/// `Full`: trajectory acceleration plus PID feedback (original behavior).
-#[derive(PartialEq, Eq)]
-pub enum PoseAccelMode {
-    Disabled,
-    FeedforwardOnly,
-    FeedbackOnly,
-    Full,
-}
+/// Wheel slip feed-forward ((rad/s)/A): each wheel's velocity setpoint is raised by
+/// this times the linear (force, not torque) part of its feed-forward current. Radio-tunable as `WHEEL_SLIP_COMP`.
+// Robot 2 on carpet: wheel speed exceeds the vision/KF body speed by ~1.1 rad/s at
+// 1 A, 1.6 at 2 A, 2.4 at 3.2 A (both signs). Without compensation the body lagged
+// 13-20 mm behind 0.2 m trajectories (error ~ slip / POSE_FB_XY K). 0.2 m moves:
+// 0 -> 1.2 cut XY track RMS forward 10 -> 7 mm, sideways 13.8 -> 7.1 mm, replan
+// test 9.4 -> 6.5 mm, and arrival 0.05-0.1 s sooner; 1.6 was similar. Rotation:
+// excess wheel speed ~0 at any current (fit -0.1), so torque current is excluded.
+pub const WHEEL_SLIP_COMP: f32 = 1.2;
 
-pub const POSE_ACCEL_MODE: PoseAccelMode = PoseAccelMode::FeedbackOnly;
+/// [ERROR_POS_LINEAR (m), ERROR_POS_ANGULAR (rad), ERROR_VEL_LINEAR (m/s), ERROR_VEL_ANGULAR (rad/s)]
+/// Trajectory-vs-estimate errors above which closed-loop tracking is considered
+/// diverged, triggering divergence recovery (active brake, then reset).
+/// Radio-tunable as `TRACKING_DIVERGENCE_THRESHOLD`.
+pub const TRACKING_DIVERGENCE_THRESHOLD: Vector4f = Vector4f::new(1.0, 1.57, 5.0, 10.0);
 
-/// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
-/// Thresholds for when to recompute the trajectory
-pub const TRACKING_ERROR_THRESHOLD: Vector4f = Vector4f::new(1.0, 1.57, 5.0, 10.0);
+/// Maximum wheel current change per second for the feed-forward torque output
+/// (0.5 A per 1 ms control tick).
+pub const WHEEL_CURRENT_SLOPE_LIMIT_A_PER_S: f32 = 500.0;
 
-/// Only applies friction compensation when the absolute value of the
-/// velocity/acceleration is above the corresponding threshold in
-/// FRICTION_COMP_GATING, to avoid unstable state at 0 velocity
-/// [LINEAR_VEL_THRESHOLD, LINEAR_ACCEL_THRESHOLD, ANGULAR_VEL_THRESHOLD, ANGULAR_ACCEL_THRESHOLD]
-pub const FRICTION_COMP_GATING: Vector4f = Vector4f::new(0.1, 0.5, 0.5, 1.0);
+/// Low-pass cutoff (Hz) on the commanded velocity fed to the friction model only.
+/// The Coulomb ramp (ateam_controls FRICTION_*_RAMP) is a steep gain on that velocity,
+/// which contains gyro/pose feedback noise; unfiltered it put ~0.1 A of 8-60 Hz ripple
+/// on the wheel current targets.
+pub const FRICTION_VEL_LPF_HZ: f32 = 15.0;
+
+/// First-order low-pass corner (Hz) on the measured yaw rate used by the angular
+/// rate feedback (`POSE_FB_W` VEL_K). The yaw-rate estimate is close to raw gyro
+/// and carries ~0.02-0.03 rad/s of 8-60 Hz content while driving (sensor/roller
+/// vibration plus a lightly damped ~15 Hz rate-loop mode); with VEL_K = 2 it went
+/// doubled into the angular command, the wheel velocity setpoints (x2.7) and the
+/// angular friction compensation.
+/// Robot 2, 1 kHz captures driving +/-0.15 m at 0.3 m/s: 40 Hz cuts the wheel
+/// velocity setpoint content to 0.081 (8-20 Hz) / 0.040 (>20 Hz) rad/s from 0.115 /
+/// 0.067 with unchanged hold damping and heading tracking. 15 Hz cut more but its
+/// lag let holds ring (gyro std 0.04 vs 0.006 rad/s); lowering VEL_K to 1 made the
+/// heading loop oscillate at 2-8 Hz.
+pub const YAW_RATE_FB_LPF_HZ: f32 = 40.0;
+
+/// Lookahead (s) over which the XY trajectory feed-forward acceleration is averaged,
+/// (v(t + T) - v(t)) / T on the current bang-bang trajectory. With a target that
+/// moves every packet (joystick position mode, path following), per-tick replanning
+/// made the instantaneous acceleration chatter at +/- the limit.
+pub const FF_ACCEL_LOOKAHEAD_S: f32 = 0.02;
+
+/// XY tracking error (m) beyond which the position trajectory restarts from the
+/// estimate. Deriving it as POS_MAX / POS_K (where the position feedback saturates)
+/// gives 3.75 cm with the lowered POSE_FB_XY MAX, which
+/// restarted the trajectory (a visible snap) during ordinary joystick moves.
+pub const TRAJ_RESET_ERROR_XY: f32 = 0.10;
 
 /// Maximum magnitude of the body-level acceleration output [linear (m/s²), angular (rad/s²)].
-/// The friction-compensated acceleration is clamped to these limits before conversion
-/// to wheel torques. Prevents runaway current commands from large PID errors.
+/// The feed-forward output acceleration (local frame, friction and efficiency
+/// applied) is clamped per axis to these limits before conversion to wheel torques.
+/// Prevents runaway current commands from large PID errors.
 pub const BODY_ACCEL_CLAMP_LINEAR: f32 = 20.0; // m/s²
 pub const BODY_ACCEL_CLAMP_ANGULAR: f32 = 100.0; // rad/s²
 
@@ -118,15 +144,14 @@ pub const STOP_STATE_LINEAR_SPEED_LIMIT: f32 = 1.25; // m/s (SSL rule limit: 1.5
 /// threshold (via PidController anti-jitter) to avoid fighting encoder
 /// quantization noise near rest.
 ///
-/// BRAKE_MAX_CURRENT_A must stay below MAX_CURRENT_MA / 1000 (2.5 A).
+/// BRAKE_MAX_CURRENT_A must stay below MAX_CURRENT_MA / 1000 (5 A).
 pub const BRAKE_KP: f32 = 0.01; // A / (rad/s)
 pub const BRAKE_ANTI_JITTER_RADS: f32 = 5.0; // rad/s
 pub const BRAKE_MAX_CURRENT_A: f32 = 1.0; // A
 
 /// Trajectory divergence recovery: per-wheel speed (rad/s) below which all
 /// wheels are considered stopped, and the number of consecutive ticks they must
-/// stay below it for active braking to be "finished" (1 kHz, 100 ticks = 100
-/// ms). Once stopped, the controller resets and resumes from the fresh state
+/// stay below it for active braking to be "finished" (1 kHz, 1 tick = 1 ms). Once stopped, the controller resets and resumes from the fresh state
 /// estimate.
 pub const TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL: f32 = 50.0; // rad/s
 pub const TRACKING_DIVERGENCE_RECOVERY_REST_TICKS: u32 = 1;
@@ -162,7 +187,7 @@ pub const ENC_LAG_MODE: EncLagMode = EncLagMode::Disabled;
 //
 //   base_radius = v_max * (N_miss * T_vision + T_latency) + slack
 //
-//   v_max      = 3.0 m/s  (DEFAULT_KF_MAX_VEL_LINEAR)
+//   v_max      = 3.0 m/s  (DEFAULT_MAX_VEL_LINEAR)
 //   N_miss     = 3         consecutive missed vision packets tolerated
 //   T_vision   = 1/60 s   SSL-Vision camera rate
 //   T_latency  = 0.150 s  measured worst-case camera→KF pipeline latency
@@ -177,19 +202,6 @@ pub const ENC_LAG_MODE: EncLagMode = EncLagMode::Disabled;
 // the robot must receive SEED_SAMPLES consecutive vision measurements whose
 // positional standard deviation is below the threshold before the KF is seeded,
 // implicitly requiring the robot to be near-stationary at boot.
-
-const VISION_GATE_V_MAX_M_PER_S: f32 = 3.0;
-const VISION_GATE_N_MISS: u32 = 3;
-const VISION_GATE_T_VISION_S: f32 = 1.0 / 60.0;
-const VISION_GATE_T_LATENCY_S: f32 = 0.150;
-const VISION_GATE_SLACK_M: f32 = 0.005;
-
-pub const VISION_SEED_SAMPLES: u32 = 20;
-pub const VISION_SEED_POS_STD_THRESH_M: f32 = 0.03;
-pub const VISION_GATE_BASE_RADIUS_M: f32 = VISION_GATE_V_MAX_M_PER_S
-    * (VISION_GATE_N_MISS as f32 * VISION_GATE_T_VISION_S + VISION_GATE_T_LATENCY_S)
-    + VISION_GATE_SLACK_M;
-pub const VISION_GATE_EXPAND_RATE_M_PER_S: f32 = 2.0;
 
 // Encoder lag model physical parameters.
 // K[i]:       DC gain per axis (dimensionless).

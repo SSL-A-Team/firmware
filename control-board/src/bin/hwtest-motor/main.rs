@@ -133,7 +133,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     );
 
     const WHEEL_VEL_CONTROL_ENABLED: bool = false;
-    const WHEEL_TORQUE_CONTROL_ENABLED: bool = true;
 
     let mut vel: f32 = 0.0;
     let mut ctr: usize = 0;
@@ -157,7 +156,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 0, // game_state_in_halt
                 0,
                 WHEEL_VEL_CONTROL_ENABLED.into(),
-                WHEEL_TORQUE_CONTROL_ENABLED.into(),
                 0,
                 0,
                 0,
@@ -165,6 +163,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             _bitfield_align_1: Default::default(),
 
             vision_position_update: [0.0, 0.0, 0.0],
+            vision_capture_us_hi: 0,
+            vision_capture_us_lo: 0,
 
             body_control_mode: BodyControlMode::BCM_LOCAL_VELOCITY,
             kick_request: KickRequest::KR_DISABLE,

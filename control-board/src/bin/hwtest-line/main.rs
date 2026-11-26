@@ -288,9 +288,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         while let Some(pkt) = telemetry_subscriber.try_next_message_pure() {
             if let TelemetryPacket::Basic(b) = pkt {
                 mock_vision_pose = [
-                    b.kf_body_pos_estimate[0] as f32 / 1000.0,
-                    b.kf_body_pos_estimate[1] as f32 / 1000.0,
-                    b.kf_body_pos_estimate[2] as f32 / 1000.0,
+                    b.pos_est[0] as f32 / 1000.0,
+                    b.pos_est[1] as f32 / 1000.0,
+                    b.pos_est[2] as f32 / 1000.0,
                 ];
             }
         }
@@ -382,7 +382,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 0, // game_state_in_halt
                 0, // emergency_stop
                 1, // wheel_vel_control_enabled
-                1, // wheel_torque_control_enabled
                 1, // vision_update (mocked from KF estimate — line following requires vision)
                 0, // reset_controller
                 0, // reserved1
@@ -390,6 +389,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             _bitfield_align_1: Default::default(),
 
             vision_position_update: mock_vision_pose,
+            vision_capture_us_hi: 0,
+            vision_capture_us_lo: 0,
 
             body_control_mode,
             kick_request: KickRequest::KR_DISABLE,

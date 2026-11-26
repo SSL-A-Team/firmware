@@ -247,7 +247,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 0,             // game_state_in_halt
                 ebrake as u32, // emergency_stop — engages ActiveBrakeController
                 1,             // wheel_vel_control_enabled
-                1,             // wheel_torque_control_enabled
                 0,             // vision_update (local velocity needs no vision)
                 0,             // reset_controller
                 0,             // reserved1
@@ -255,6 +254,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             _bitfield_align_1: Default::default(),
 
             vision_position_update: [0.0, 0.0, 0.0],
+            vision_capture_us_hi: 0,
+            vision_capture_us_lo: 0,
 
             // Keep a non-OFF mode with motion enabled so the control task routes
             // through the active brake rather than the packet-timeout hard stop.
