@@ -138,6 +138,9 @@ pub struct ControlContext {
     pub state_estimate: Vector6f,
     /// State-estimate velocity in the robot's local frame [vx, vy, w], for telemetry.
     pub state_estimate_vel_local: Vector3f,
+    /// IMU input used by the state estimator on the last update, with the learned
+    /// accelerometer bias removed: [accel_x, accel_y, gyro_w], for telemetry.
+    pub imu_input: Vector3f,
     /// Divergence-recovery state machine. `Recovering` engages active braking and
     /// holds it until the wheels stop, then resets the trajectory.
     pub tracking_divergence_state: TrackingDivergenceState,
@@ -190,6 +193,7 @@ impl ControlContext {
             dt,
             state_estimate: Vector6f::zeros(),
             state_estimate_vel_local: Vector3f::zeros(),
+            imu_input: Vector3f::zeros(),
             tracking_divergence_state: TrackingDivergenceState::Normal,
             tracking_recovery_at_rest_ticks: 0,
             last_vision_active: false,
@@ -279,6 +283,7 @@ impl ControlContext {
         state_est.fixed_rows_mut::<3>(3).copy_from(&self.state_estimator.get_vel());
         self.state_estimate = state_est;
         self.state_estimate_vel_local = self.state_estimator.get_vel_local();
+        self.imu_input = self.state_estimator.get_imu_input();
 
         // When vision comes online the estimate jumps
         // to it, so restart the trajectory from the new estimate instead of tracking

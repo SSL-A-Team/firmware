@@ -318,8 +318,9 @@ impl BodyController {
             ),
             _reserved2: Default::default(),
             vision_insert_age_us,
-            imu_gyro_w: imu_gyro_theta_meas,
-            imu_accel_xy: [imu_accel_x_meas, imu_accel_y_meas],
+            // Corrected IMU measurements as used by the state estimator.
+            imu_gyro_w: self.control_context.imu_input.z,
+            imu_accel_xy: [self.control_context.imu_input.x, self.control_context.imu_input.y],
             vision_pos: vision_pos.into(),
             pos_ekf: state_prediction.fixed_rows::<3>(0).into(),
             vel_ekf: state_prediction.fixed_rows::<3>(3).into(),
