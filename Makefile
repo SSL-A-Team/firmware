@@ -118,27 +118,7 @@ define create-kicker-board-rust-targets
 	cd $1/ && \
 	cargo build --target thumbv7em-none-eabihf --release --bin $2
 
-.PHONY: .$1-$2-embed-hash
-.$1-$2-embed-hash: .$1-$2-cargo-build
-	python util/embed_img_hash.py --bin $1/target/thumbv7em-none-eabihf/release/$2
-
-$1/target/thumbv7em-none-eabihf/release/$2.bin: .$1-$2-embed-hash
-	echo; \
-	echo "Updating $1--$2 flat binary output:"; \
-	elf_path="$1/target/thumbv7em-none-eabihf/release/$2"; \
-	bin_path="$1/target/thumbv7em-none-eabihf/release/$2.bin"; \
-	tmp_path="$1/target/thumbv7em-none-eabihf/release/$2.tmp.bin"; \
-	arm-none-eabi-objcopy -Obinary $$$${elf_path} $$$${tmp_path}; \
-	if ! cmp -s $$$${tmp_path} $$$${bin_path}; then \
-	    echo "$2.bin has new changes!"; \
-	    mv $$$${tmp_path} $$$${bin_path}; \
-	else \
-	    echo "$2.bin unchanged!"; \
-	    rm $$$${tmp_path}; \
-	fi; \
-	echo; \
-
-$1--$2: $1/target/thumbv7em-none-eabihf/release/$2.bin
+$1--$2: .$1-$2-cargo-build
 $1--all:: $1--$2
 
 $1--$2--run: $1--$2
@@ -170,27 +150,7 @@ define create-control-board-rust-targets
 	cd $1/ && \
 	cargo build $(additional_control_cargo_flags) --target thumbv7em-none-eabihf --release --bin $2
 
-.PHONY: .$1-$2-embed-hash
-.$1-$2-embed-hash: .$1-$2-cargo-build
-	python util/embed_img_hash.py --bin $1/target/thumbv7em-none-eabihf/release/$2
-
-$1/target/thumbv7em-none-eabihf/release/$2.bin: .$1-$2-embed-hash
-	echo; \
-	echo "Updating $1--$2 flat binary output:"; \
-	elf_path="$1/target/thumbv7em-none-eabihf/release/$2"; \
-	bin_path="$1/target/thumbv7em-none-eabihf/release/$2.bin"; \
-	tmp_path="$1/target/thumbv7em-none-eabihf/release/$2.tmp.bin"; \
-	arm-none-eabi-objcopy -Obinary $$$${elf_path} $$$${tmp_path}; \
-	if ! cmp -s $$$${tmp_path} $$$${bin_path}; then \
-	    echo "$2.bin has new changes!"; \
-	    mv $$$${tmp_path} $$$${bin_path}; \
-	else \
-	    echo "$2.bin unchanged!"; \
-	    rm $$$${tmp_path}; \
-	fi; \
-	echo; \
-
-$1--$2: $1/target/thumbv7em-none-eabihf/release/$2.bin
+$1--$2: .$1-$2-cargo-build
 $1--all:: $1--$2
 
 $1--$2--run: $1--$2

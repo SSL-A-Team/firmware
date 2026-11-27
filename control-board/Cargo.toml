@@ -152,3 +152,7 @@ harness = false
 name = "drivetrain-test"
 harness = false
 
+[build-dependencies]
+md-5 = "0.11.0"
+object = { version = "0.41.0", default-features = false, features = ["read_core", "elf", "std"] }
+
