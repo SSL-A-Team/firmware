@@ -11,8 +11,11 @@
 use std::env;
 use std::fs::File;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+include!("../util/fw_image_build.rs");
+include!("../util/fw_image_elf_build.rs");
 
 fn main() {
     // Put `memory.x` in our output directory and ensure it's
@@ -34,6 +37,24 @@ fn main() {
     println!("cargo:rustc-link-arg-bins=-Tlink.x");
     println!("cargo:rustc-link-arg-bins=-Tdefmt.x");
 
+    // Peripheral firmware images flashed by the control board (see
+    // util/fw_image_build.rs and the include_* macros in src/lib.rs).
+    println!("cargo:rerun-if-changed=../util/fw_image_build.rs");
+    println!("cargo:rerun-if-changed=../util/fw_image_elf_build.rs");
+    let wheel_hash = prepare_fw_image(
+        Path::new("../motor-controller/build/bin/wheel-torque.bin"),
+        "wheel-torque.bin",
+        b"WheelImgHashWeel",
+    );
+    let kicker_bin_dir = Path::new("../kicker-board/target/thumbv7em-none-eabihf/release");
+    let kicker_hash =
+        prepare_fw_image_from_elf(&kicker_bin_dir.join("kicker"), "kicker.bin", b"KickrImgHashKick");
+    prepare_fw_image_from_elf(&kicker_bin_dir.join("hwtest-coms"), "hwtest-coms.bin", b"KickrImgHashKick");
+    write_fw_image_hash_consts(
+        "fw_image_hashes.rs",
+        &[("WHEEL_IMG_HASH", wheel_hash), ("KICKER_IMG_HASH", kicker_hash)],
+    );
+
     // Embed git hashes and dirty flags for all three repos so the firmware
     // can report its exact provenance in the HelloRequest packet.
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
@@ -43,23 +64,17 @@ fn main() {
         .canonicalize()
         .expect("firmware root must exist");
 
-    // Register precise git file watches so the build script reruns only when
-    // the git state of any repo actually changes, not on every source edit.
-    let git_dirs = [
-        firmware_root.join(".git"),
-        firmware_root.join(".git/modules/controls"),
-        firmware_root.join(".git/modules/software-communication"),
-    ];
-
-    for git_dir in &git_dirs {
-        register_git_rerun(git_dir);
-    }
-
     let work_dirs = [
         firmware_root.clone(),
         firmware_root.join("controls"),
         firmware_root.join("software-communication"),
     ];
+
+    // Register precise git file watches so the build script reruns only when
+    // the git state of any repo actually changes, not on every source edit.
+    for work_dir in &work_dirs {
+        register_git_rerun(work_dir);
+    }
 
     let env_prefixes = ["GIT_FIRMWARE", "GIT_CONTROLS", "GIT_COMS"];
 
@@ -70,31 +85,47 @@ fn main() {
     }
 }
 
-// Emit rerun-if-changed for the files inside a git directory that change when
-// commits are made or the working tree is modified.  Watching only these files
-// (rather than the whole source tree) keeps incremental builds fast.
-fn register_git_rerun(git_dir: &PathBuf) {
-    let head = git_dir.join("HEAD");
-    println!("cargo:rerun-if-changed={}", head.display());
+// Emit rerun-if-changed for the git files that change when commits are made,
+// the checkout moves or files are staged. Paths are resolved with
+// `git rev-parse --git-path` so worktrees (where `.git` is a file) and
+// submodules (git dir under the superproject's modules/) work. Only existing
+// files are watched: cargo treats a missing rerun-if-changed path as always
+// changed, which would rebuild the crate on every build.
+fn register_git_rerun(work_dir: &Path) {
+    let git = |args: &[&str]| -> Option<String> {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(work_dir)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())?;
+        String::from_utf8(out.stdout).ok().map(|s| s.trim().to_string())
+    };
 
-    // HEAD is a symbolic ref in normal operation; also watch the branch file
-    // so a new commit on the current branch triggers a rerun.
-    if let Ok(content) = std::fs::read_to_string(&head) {
-        if let Some(ref_path) = content.trim().strip_prefix("ref: ") {
-            let ref_file = git_dir.join(ref_path);
-            println!("cargo:rerun-if-changed={}", ref_file.display());
-        }
+    let mut watched = vec![
+        "HEAD".to_string(),
+        // Updated on every commit/checkout/reset, even when the branch ref
+        // itself lives in packed-refs and has no loose ref file to watch.
+        "logs/HEAD".to_string(),
+        "packed-refs".to_string(),
+        // Changes on `git add` / `git reset`, for the dirty flag.
+        "index".to_string(),
+    ];
+    if let Some(branch_ref) = git(&["symbolic-ref", "-q", "HEAD"]) {
+        watched.push(branch_ref);
     }
 
-    // packed-refs is updated by `git gc` and can hold the tip of any branch.
-    println!(
-        "cargo:rerun-if-changed={}",
-        git_dir.join("packed-refs").display()
-    );
-
-    // The index changes on `git add` / `git reset`; watching it lets us detect
-    // whether the working tree has staged changes at build time.
-    println!("cargo:rerun-if-changed={}", git_dir.join("index").display());
+    for name in &watched {
+        let Some(rel) = git(&["rev-parse", "--git-path", name]) else {
+            continue;
+        };
+        // Relative results are relative to work_dir; join keeps absolute ones.
+        let path = work_dir.join(rel);
+        if path.exists() {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
 }
 
 // Returns (40-char hex hash, is_dirty).  Falls back to an all-zero hash and

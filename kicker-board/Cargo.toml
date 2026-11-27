@@ -96,3 +96,6 @@ harness = false
 name = "kicker"
 test = false
 harness = false
+
+[build-dependencies]
+md-5 = "0.11.0"

@@ -105,13 +105,13 @@ pub mod colors {
 macro_rules! include_external_cpp_bin {
     ($var_name:ident, $bin_file:literal) => {
         pub static $var_name: &[u8; include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../motor-controller/build/bin/",
+            env!("OUT_DIR"),
+            "/",
             $bin_file
         ))
          .len()] = include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../motor-controller/build/bin/",
+            env!("OUT_DIR"),
+            "/",
             $bin_file
         ));
     };
@@ -121,13 +121,13 @@ macro_rules! include_external_cpp_bin {
 macro_rules! include_kicker_bin {
     ($var_name:ident, $bin_file:literal) => {
         pub static $var_name: &[u8; include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../kicker-board/target/thumbv7em-none-eabihf/release/",
+            env!("OUT_DIR"),
+            "/",
             $bin_file
         ))
          .len()] = include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../kicker-board/target/thumbv7em-none-eabihf/release/",
+            env!("OUT_DIR"),
+            "/",
             $bin_file
         ));
     };
