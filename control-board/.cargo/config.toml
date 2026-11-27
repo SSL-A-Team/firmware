@@ -4,6 +4,9 @@ target = "thumbv7em-none-eabihf"
 [target.thumbv7em-none-eabihf]
 # runner = 'probe-rs run --chip STM32H723ZGTx --connect-under-reset'
 runner = 'probe-rs run --preverify --chip STM32H723ZGTx'
+# STM32H723 has a double-precision FPU (FPv5-D16). The target defaults to single-precision only,
+# which makes all f64 math (including libm's f32 trig internals) soft-float. cortex-m7 enables fp64.
+rustflags = ["-C", "target-cpu=cortex-m7"]
 
 
 [env]

@@ -15,12 +15,12 @@ use ateam_controls::pivot_trajectory::PivotTrajectory;
 use ateam_controls::robot_model::{RobotModel, RobotPhysicalParams};
 use ateam_controls::trajectory::Trajectory;
 use ateam_controls::{
-    ControlsError, Vector3f, Vector4f, Vector6f, Vector8f,
+    sqrtf, ControlsError, Vector3f, Vector4f, Vector6f, Vector8f,
 };
 use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
 use core::f32::consts::PI;
 use embassy_time::{Duration, Instant};
-use libm::{fabsf, hypotf, remainderf, sqrtf};
+use libm::{fabsf, hypotf, remainderf};
 use nalgebra::{SMatrix, SVector};
 
 pub(crate) const VISION_ACTIVE_TIMEOUT_S: f32 = 0.5;
