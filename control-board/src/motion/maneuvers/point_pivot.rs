@@ -32,7 +32,6 @@ impl MotionManeuver for PointPivotManeuver {
             c.orbit_radius,
             c.inset_angle,
             c.direction,
-            c.compute_inset_angle,
         );
         let setpoints = ctx.run_traj_track(cmd, |seed| {
             let traj =

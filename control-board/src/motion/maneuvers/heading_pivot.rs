@@ -32,7 +32,6 @@ impl MotionManeuver for HeadingPivotManeuver {
             c.orbit_radius,
             c.inset_angle,
             c.direction,
-            c.compute_inset_angle,
         );
         let setpoints = ctx.run_traj_track(cmd, |seed| {
             let traj = PivotTrajectory::from_target_heading(seed, c.global_theta, traj_params)?;

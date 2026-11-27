@@ -34,7 +34,6 @@ pub(crate) fn build_pivot_params(
     orbit_radius: f32,
     inset_angle: f32,
     direction: PivotDirection::Type,
-    compute_inset_angle: u8,
 ) -> PivotParams {
     let default_params = PivotParams::default();
     let direction = if direction == PivotDirection::PIVOT_DIRECTION_BACKWARD {
@@ -59,7 +58,6 @@ pub(crate) fn build_pivot_params(
             default_params.orbit_radius
         },
         inset_angle,
-        compute_inset_angle: compute_inset_angle != 0,
         direction,
     }
 }
