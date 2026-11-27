@@ -56,10 +56,22 @@ macro_rules! create_radio_nora_task {
 
 pub const RADIO_LOOP_RATE_MS: u64 = 10;
 
-pub const RADIO_MAX_TX_PACKET_SIZE: usize = 448;
+// AT+USOWB=<socket> (max 11 bytes) + SOH + 2-byte length header
+const NORA_USOWB_WIRE_OVERHEAD: usize = 14;
+/// Time to let in-flight fire-and-forget write acks arrive before resetting the
+/// software session.
+const SESSION_RESET_RX_SETTLE_MS: u64 = 20;
+pub const RADIO_MAX_TX_PACKET_SIZE: usize =
+    ateam_common_packets::MAX_ROBOT_TX_PACKET_SIZE + NORA_USOWB_WIRE_OVERHEAD;
 pub const RADIO_TX_BUF_DEPTH: usize = 4;
-pub const RADIO_MAX_RX_PACKET_SIZE: usize = 256;
-pub const RADIO_RX_BUF_DEPTH: usize = 4;
+// Each DMA read must end on line idle: when a burst fills the buffer, bytes that
+// arrive before the next read is armed are lost (3.3 us/byte at 3 Mbaud) and the
+// stream desyncs. At 256 bytes about 1 command packet per second failed its CRC.
+pub const RADIO_MAX_RX_PACKET_SIZE: usize = 1024;
+// NORA-W36x at 3 Mbaud emits each AT response as many tiny idle-separated
+// fragments; a shallow queue overflows (silently dropping fragments) while
+// the thread-mode consumer is preempted by the control loop.
+pub const RADIO_RX_BUF_DEPTH: usize = 32;
 
 static_idle_buffered_uart!(RADIO_NORA, RADIO_MAX_RX_PACKET_SIZE, RADIO_RX_BUF_DEPTH, RADIO_MAX_TX_PACKET_SIZE, RADIO_TX_BUF_DEPTH, DEBUG_RADIO_UART_QUEUES, #[link_section = ".axisram.buffers"]);
 
@@ -118,6 +130,9 @@ impl<
 {
     const RETRY_DELAY_MS: u64 = 1000;
     const RESPONSE_FROM_PC_TIMEOUT_MS: u64 = 1000;
+    /// Hello retry period; the bridge answers in ~100 ms, so retry quickly to rejoin
+    /// soon after the link comes back.
+    const HELLO_RESPONSE_TIMEOUT_MS: u64 = 300;
     const UART_CONNECT_TIMEOUT_MS: u64 = 8000;
 
     pub fn new(
@@ -216,6 +231,8 @@ impl<
             tx_ctr &= 0x03;
 
             let loop_start_time = Instant::now();
+            let connected_at_loop_start =
+                self.connection_state == RadioConnectionState::Connected;
             let loop_invocation_dead_time = loop_start_time - last_loop_term_time;
             if loop_start_time - last_loop_term_time > Duration::from_millis(11) {
                 defmt::warn!("radio loop scheuling lagged. Expected ~10ms between loop invocations, but got {:?}us", loop_invocation_dead_time.as_micros());
@@ -223,7 +240,6 @@ impl<
 
             // Keep a local flag of radio issues.
             let mut radio_inop_flag_local = false;
-            let mut radio_network_fail_local = false;
             // check for hardware config changes that affect radio connection
 
             let cur_robot_state = self.shared_robot_state.get_state();
@@ -234,9 +250,8 @@ impl<
                         || cur_robot_state.hw_robot_team_is_blue
                             != last_robot_state.hw_robot_team_is_blue)
                 {
-                    // Enter connected network state (disconnecting)
-                    self.connection_state = RadioConnectionState::ConnectedNetwork;
                     defmt::info!("shell state change triggering software reconnect");
+                    self.connection_state = self.reset_software_session().await;
                 }
 
                 // We are at least connected on UART and the wifi network id changed
@@ -326,7 +341,7 @@ impl<
                         .is_err()
                     {
                         // If network connection failed, go back up to verify UART.
-                        radio_network_fail_local = true;
+
                         self.connection_state = RadioConnectionState::ConnectedPhys;
                         self.led_command_pub
                             .publish(ControlBoardLedCommand::Radio(
@@ -363,7 +378,7 @@ impl<
                                 .await;
                         } else {
                             // Software didn't respond to our hello, it may not be started yet.
-                            radio_network_fail_local = true;
+    
                             self.connection_state = RadioConnectionState::ConnectedNetwork;
                             self.led_command_pub
                                 .publish(ControlBoardLedCommand::Radio(
@@ -372,7 +387,7 @@ impl<
                                 .await;
                         }
                     } else {
-                        radio_network_fail_local = true;
+
                         // If network connection failed, go back up to verify UART.
                         self.connection_state = RadioConnectionState::ConnectedPhys;
                         self.led_command_pub
@@ -388,16 +403,21 @@ impl<
                     let _ = self.process_packets(tx_ctr).await;
                     // if we're stably connected, process packets at 100Hz
 
-                    // If timeout have elapsed since we last got a packet,
-                    // reboot the robot (unless we had a shutdown request).
+                    // If timeout have elapsed since we last got a packet, drop the
+                    // software session and go back to sending hellos (unless we had a
+                    // shutdown request).
                     let cur_time = Instant::now();
                     if !cur_robot_state.shutdown_requested
                         && Instant::duration_since(&cur_time, self.last_software_packet).as_millis()
                             > Self::RESPONSE_FROM_PC_TIMEOUT_MS
                     {
-                        defmt::warn!("software timeout - rebooting...");
-                        Timer::after_millis(100).await;
-                        cortex_m::peripheral::SCB::sys_reset();
+                        defmt::warn!("software timeout - reconnecting");
+                        self.connection_state = self.reset_software_session().await;
+                        self.led_command_pub
+                            .publish(ControlBoardLedCommand::Radio(
+                                RadioStatusLedCommand::ConnectedNetwork,
+                            ))
+                            .await;
                     }
                 }
             }
@@ -414,19 +434,17 @@ impl<
             if radio_inop_flag_local {
                 // If hardware problems is present, adds a delay.
                 Timer::after_millis(Self::RETRY_DELAY_MS).await;
-            } else if radio_network_fail_local {
-                // If network problems is present, adds a delay.
-                Timer::after_millis(Self::RESPONSE_FROM_PC_TIMEOUT_MS).await;
             }
 
             last_robot_state = cur_robot_state;
 
             let loop_end_time = Instant::now();
             let loop_execution_time = loop_end_time - loop_start_time;
-            if loop_execution_time > Duration::from_millis(2)
-                && self.connection_state == RadioConnectionState::Connected
-            {
-                defmt::warn!("radio loop is connected and taking >2ms to complete (it may be interrupted by higher priority tasks). This is >20% of an execution frame. Loop execution time {:?}", loop_execution_time);
+            // Skip the iteration that completes the connection: it includes the
+            // hello handshake.
+            if loop_execution_time > Duration::from_millis(10) && connected_at_loop_start {
+                // delay is probably due to delay in ack from the module. This task async awaits the module ack, so it's not hanging up the system.
+                defmt::warn!("radio loop is connected and taking >10ms to complete (it may be interrupted by higher priority tasks). This is >100% of an execution frame. Did transmit ack pile up in a brust transfer? Loop execution time {:?}", loop_execution_time.as_micros());
             }
 
             last_loop_term_time = Instant::now();
@@ -485,6 +503,31 @@ impl<
         return Ok(());
     }
 
+    /// Drop the software session (unicast peer) and reopen the hello socket, keeping
+    /// the WiFi link. Returns the state to continue from: `ConnectedNetwork` to
+    /// re-send hellos, or `ConnectedUart` to redo the network connection if the
+    /// sockets could not be reset.
+    async fn reset_software_session(&mut self) -> RadioConnectionState {
+        // Fire-and-forget write acks may still be in flight; let them arrive and drop
+        // them so they are not taken as responses to the socket commands below.
+        self.radio.set_fire_and_forget_sends(false);
+        Timer::after_millis(SESSION_RESET_RX_SETTLE_MS).await;
+        self.radio.discard_pending_rx();
+
+        let res = match self.radio.close_peer().await {
+            Ok(()) => self.radio.open_multicast().await.map_err(|e| ("open hello socket", e)),
+            Err(e) => Err(("close peer", e)),
+        };
+        match res {
+            Ok(()) => RadioConnectionState::ConnectedNetwork,
+            Err((step, e)) => {
+                defmt::warn!("could not reset the software session ({}: {}), reconnecting network", step, e);
+                let _ = self.radio.disconnect_network().await;
+                RadioConnectionState::ConnectedUart
+            }
+        }
+    }
+
     async fn connect_software(&mut self, robot_id: u8, is_blue: bool) -> Result<bool, ()> {
         defmt::info!("sending hello");
 
@@ -501,7 +544,7 @@ impl<
 
         let hello = self
             .radio
-            .wait_hello(Duration::from_millis(Self::RESPONSE_FROM_PC_TIMEOUT_MS))
+            .wait_hello(Duration::from_millis(Self::HELLO_RESPONSE_TIMEOUT_MS))
             .await;
         match hello {
             Ok(hello) => {
@@ -515,12 +558,19 @@ impl<
                 );
 
                 let start_time = Instant::now();
-                self.radio.close_peer().await.unwrap();
+                // Socket state is uncertain if either step fails, so return Err to
+                // re-establish the network connection instead of retrying the hello.
+                if let Err(e) = self.radio.close_peer().await {
+                    defmt::warn!("failed to close multicast peer: {}", e);
+                    return Err(());
+                }
 
-                self.radio
-                    .open_unicast(hello.ipv4, hello.port)
-                    .await
-                    .expect("failed to open unicast port");
+                if let Err(e) = self.radio.open_unicast(hello.ipv4, hello.port).await {
+                    defmt::warn!("failed to open unicast port: {}", e);
+                    return Err(());
+                }
+                // Data phase: don't block on per-write acks (they're drained by the read loop).
+                self.radio.set_fire_and_forget_sends(true);
                 defmt::info!("unicast open");
 
                 let end_time = Instant::now();
@@ -566,10 +616,15 @@ impl<
                 }
             } else {
                 defmt::warn!("RadioNoraTask - error reading data packet");
+                break;
             }
         }
 
         // write outbound packets
+        // At most one extended telemetry packet (the latest) per radio loop: bursts
+        // of these ~570 byte packets above ~100 Hz jam the NORA-W36 (it stops both
+        // directions for seconds and the session has to be rebuilt).
+        let mut extended = None;
         loop {
             if let Some(telemetry) = self.telemetry_subscriber.try_next_message_pure() {
                 match telemetry {
@@ -578,16 +633,7 @@ impl<
                     }
                     TelemetryPacket::Extended(control) => {
                         if self.shared_robot_state.get_radio_send_extended_telem() {
-                            if self
-                                .radio
-                                .send_control_debug_telemetry(control)
-                                .await
-                                .is_err()
-                            {
-                                defmt::warn!(
-                                    "RadioNoraTask - failed to send control debug telemetry packet"
-                                );
-                            }
+                            extended = Some(control);
                         }
                     }
                     TelemetryPacket::ParameterCommandResponse(pc_resp) => {
@@ -608,15 +654,21 @@ impl<
             }
         }
 
+        if let Some(control) = extended {
+            if self.radio.send_control_debug_telemetry(control).await.is_err() {
+                defmt::warn!("RadioNoraTask - failed to send control debug telemetry packet");
+            }
+        }
+
         // always send the latest telemetry
-        if tx_ctr == 0 {
+        // if tx_ctr == 0 {
             self.last_basic_telemetry.transmission_sequence_number = self.seq_number as u8;
             self.seq_number = (self.seq_number + 1) & 0x00FF;
 
             if let Err(e) = self.radio.send_telemetry(self.last_basic_telemetry).await {
                 defmt::warn!("RadioNoraTask - failed to send basic telem packet {:?}", e);
             }
-        }
+        // }
 
         return Ok(());
     }
@@ -624,7 +676,8 @@ impl<
 
 pub fn startup_uart_config() -> usart::Config {
     let mut radio_uart_config = usart::Config::default();
-    radio_uart_config.baudrate = 115_200;
+    // radio_uart_config.baudrate = 115_200;
+    radio_uart_config.baudrate = 3_000_000;
     radio_uart_config.data_bits = DataBits::DataBits8;
     radio_uart_config.stop_bits = StopBits::STOP1;
     radio_uart_config.parity = Parity::ParityNone;

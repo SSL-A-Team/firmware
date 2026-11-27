@@ -2,9 +2,10 @@ use ateam_common_packets::bindings::{
     self, BasicControl, BasicTelemetry, CommandCode, ErrorTelemetry, ExtendedTelemetry,
     HelloRequest, HelloResponse, ParameterCommand, RadioData, RadioHeader, RadioPacket,
 };
+use crate::crc::crc32;
 use ateam_common_packets::radio::DataPacket;
 use ateam_lib_stm32::drivers::radio::nora_w36x::{
-    NoraRadioError, NoraW36x, SocketConnection, WifiAuth,
+    NoraRadioError, NoraW36x, SocketConnection, WifiAuth, DataMode,
 };
 use ateam_lib_stm32::drivers::radio::w36x::at_protocol::SocketProtocol;
 use ateam_lib_stm32::uart::queue::{IdleBufferedUart, UartReadQueue, UartWriteQueue};
@@ -24,7 +25,6 @@ use super::radio_robot::TeamColor;
 
 const MULTICAST_IP: &str = "224.4.20.69";
 const MULTICAST_PORT: u16 = 42069;
-#[allow(dead_code)]
 const LOCAL_PORT: u16 = 42069;
 
 #[derive(Clone, Copy, PartialEq, Debug, Format)]
@@ -55,6 +55,7 @@ pub enum RobotRadioNoraError {
     ControlPacketDecodeInvalid,
     ParameterPacketDecodeInvalid,
     PacketTypeUnknown,
+    PacketCrcMismatch,
 }
 
 impl From<NoraRadioError> for RobotRadioNoraError {
@@ -87,6 +88,7 @@ pub struct RobotRadioNora<
     #[allow(dead_code)]
     use_flow_control: bool,
     socket: Option<SocketConnection>,
+    fire_and_forget_sends: bool,
 }
 
 impl<
@@ -113,12 +115,13 @@ impl<
             reset_pin,
             socket: None,
             use_flow_control,
+            fire_and_forget_sends: false,
         }
     }
 
     pub fn get_startup_uart_config(&self) -> usart::Config {
         let mut startup_radio_uart_config = usart::Config::default();
-        startup_radio_uart_config.baudrate = 115_200;
+        startup_radio_uart_config.baudrate = 3_000_000;
         startup_radio_uart_config.data_bits = DataBits::DataBits8;
         startup_radio_uart_config.stop_bits = StopBits::STOP1;
         startup_radio_uart_config.parity = Parity::ParityNone;
@@ -128,7 +131,7 @@ impl<
 
     pub fn get_highspeed_uart_config(&self) -> usart::Config {
         let mut highspeed_radio_uart_config = usart::Config::default();
-        highspeed_radio_uart_config.baudrate = 921_600;
+        highspeed_radio_uart_config.baudrate = 3_000_000;
         highspeed_radio_uart_config.stop_bits = StopBits::STOP1;
         highspeed_radio_uart_config.data_bits = DataBits::DataBits8;
         // NORA-W36 AT+USYUS only configures baudrate and flow control;
@@ -140,14 +143,14 @@ impl<
 
     pub async fn connect_uart(&mut self) -> Result<(), RobotRadioNoraError> {
         // reset host uart config to match the startup config before resetting the radio
-        if self
-            .nora_driver
-            .update_host_uart_config(self.get_startup_uart_config())
-            .await
-            .is_err()
-        {
-            defmt::debug!("failed to reset host uart to startup config.");
-        }
+        // if self
+        //     .nora_driver
+        //     .update_host_uart_config(self.get_startup_uart_config())
+        //     .await
+        //     .is_err()
+        // {
+        //     defmt::debug!("failed to reset host uart to startup config.");
+        // }
 
         defmt::trace!("Will reset the radio for baseline.");
         // reset the radio so we can listen for the startup event
@@ -167,7 +170,7 @@ impl<
         defmt::trace!("Waiting for radio startup with timeout.");
         match select(
             self.nora_driver.wait_startup(),
-            Timer::after(Duration::from_millis(2500)),
+            Timer::after(Duration::from_millis(5000)),
         )
         .await
         {
@@ -216,7 +219,7 @@ impl<
         // NORA-W36x does not use EDM mode - it stays in AT command mode.
         // Enable direct binary mode for inline data delivery in +UESODB/+UESODBF events
         // (replaces the 2-step buffered approach of +UESODA then AT+USORB).
-        if self.nora_driver.set_socket_receive_mode(2).await.is_err() {
+        if self.nora_driver.set_socket_receive_mode(DataMode::DirectBinaryMode).await.is_err() {
             defmt::debug!("error setting direct binary receive mode");
             return Err(RobotRadioNoraError::ConnectUartBadRadioConfigUpdate);
         }
@@ -309,20 +312,22 @@ impl<
     }
 
     pub async fn open_multicast(&mut self) -> Result<(), RobotRadioNoraError> {
-        // NORA uses socket-based connections: create a UDP socket, then connect to multicast
+        // Create an unconnected socket bound to LOCAL_PORT. Unconnected so it receives
+        // from any source (HelloResponse comes from software's unicast address).
+        // Bound to LOCAL_PORT so software knows exactly which port to reply to.
+        // send_hello creates its own temporary connected TX socket for the multicast send.
         let socket_id = self
             .nora_driver
             .create_socket(SocketProtocol::UDP)
             .await
             .map_err(|_| RobotRadioNoraError::OpenSocketError)?;
 
-        let socket = self
-            .nora_driver
-            .connect_socket(socket_id, MULTICAST_IP, MULTICAST_PORT, SocketProtocol::UDP)
+        self.nora_driver
+            .bind_socket(socket_id, LOCAL_PORT)
             .await
-            .map_err(|_| RobotRadioNoraError::OpenMulticastError)?;
+            .map_err(|_| RobotRadioNoraError::OpenSocketError)?;
 
-        self.socket = Some(socket);
+        self.socket = Some(SocketConnection { socket_id });
         Ok(())
     }
 
@@ -337,6 +342,11 @@ impl<
         let socket_id = self
             .nora_driver
             .create_socket(SocketProtocol::UDP)
+            .await
+            .map_err(|_| RobotRadioNoraError::OpenSocketError)?;
+
+        self.nora_driver
+            .bind_socket(socket_id, LOCAL_PORT)
             .await
             .map_err(|_| RobotRadioNoraError::OpenSocketError)?;
 
@@ -359,17 +369,29 @@ impl<
         }
     }
 
+    /// Discard all pending receive data (see `NoraW36x::discard_pending_rx`).
+    pub fn discard_pending_rx(&self) {
+        self.nora_driver.discard_pending_rx();
+    }
+
+    pub fn set_fire_and_forget_sends(&mut self, enabled: bool) {
+        self.fire_and_forget_sends = enabled;
+    }
+
     pub async fn send_data(&self, data: &[u8]) -> Result<(), RobotRadioNoraError> {
         if let Some(socket) = &self.socket {
-            // NORA send_data is async and takes socket_id
-            self.nora_driver.send_data(socket.socket_id, data).await?;
+            if self.fire_and_forget_sends {
+                self.nora_driver.send_data_no_ack(socket.socket_id, data).await?;
+            } else {
+                self.nora_driver.send_data(socket.socket_id, data).await?;
+            }
             Ok(())
         } else {
             Err(RobotRadioNoraError::SocketMissing)
         }
     }
 
-    pub async fn read_data<RET, FN>(&'a self, fn_read: FN) -> Result<RET, RobotRadioNoraError>
+    pub async fn read_data<RET, FN>(&self, fn_read: FN) -> Result<RET, RobotRadioNoraError>
     where
         FN: FnOnce(&[u8]) -> RET,
     {
@@ -384,34 +406,33 @@ impl<
         }
     }
 
-    fn read_data_nonblocking<RET, FN>(
-        &'a self,
-        fn_read: FN,
+    pub fn read_data_nonblocking<RET, FN>(
+        &self,
+        mut fn_read: FN,
     ) -> Result<Option<RET>, RobotRadioNoraError>
     where
-        FN: FnOnce(&[u8]) -> RET,
+        FN: FnMut(&[u8]) -> RET,
     {
         if self.socket.is_some() {
-            if self.nora_driver.can_read_data() {
-                // In direct binary mode, +UESODB/+UESODBF events contain inline data.
-                // We can read and return it synchronously — no async AT+USORB needed.
-                match self.nora_driver.try_read_data_binary(fn_read) {
-                    Ok(Some(ret)) => Ok(Some(ret)),
-                    Ok(None) => Ok(None),
-                    Err(NoraRadioError::ReadLowLevelBufferEmpty) => Ok(None),
+            // In direct binary mode, +UESODB/+UESODBF events contain inline data.
+            // Fire-and-forget write acks arrive as many small non-data fragments at
+            // 3 Mbaud, so drain those here rather than stalling the read loop on them.
+            while self.nora_driver.can_read_data() {
+                match self.nora_driver.try_read_data_binary(&mut fn_read) {
+                    Ok(Some(ret)) => return Ok(Some(ret)),
+                    Ok(None) => return Ok(None),
+                    Err(NoraRadioError::ReadLowLevelBufferEmpty) => return Ok(None),
                     Err(NoraRadioError::ReadDataInvalid) => {
-                        // Non-data event in the queue (e.g. connection event) — skip it
                         defmt::trace!("non-data event in queue, skipping");
-                        Ok(None)
+                        continue;
                     }
                     Err(e) => {
                         defmt::trace!("try_read_data_binary failed: {:?}", e);
-                        Err(RobotRadioNoraError::DriverError(e))
+                        return Err(RobotRadioNoraError::DriverError(e));
                     }
                 }
-            } else {
-                Ok(None)
             }
+            Ok(None)
         } else {
             defmt::trace!("socket was none");
             Err(RobotRadioNoraError::SocketMissing)
@@ -499,7 +520,25 @@ impl<
                 size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloRequest>(),
             )
         };
-        self.send_data(packet_bytes).await?;
+
+        // Temporary connected TX socket for the multicast send.
+        // self.socket is the unconnected RX socket (bound to LOCAL_PORT) and stays open.
+        // AT+USOWB requires a connected socket; after send close TX immediately.
+        // Software must reply to LOCAL_PORT (not the hello source port) for the
+        // unconnected RX socket to receive the HelloResponse.
+        let tx_id = self
+            .nora_driver
+            .create_socket(SocketProtocol::UDP)
+            .await
+            .map_err(|_| RobotRadioNoraError::OpenSocketError)?;
+        let tx = self
+            .nora_driver
+            .connect_socket(tx_id, MULTICAST_IP, MULTICAST_PORT, SocketProtocol::UDP)
+            .await
+            .map_err(|_| RobotRadioNoraError::OpenMulticastError)?;
+        let send_result = self.nora_driver.send_data(tx.socket_id, packet_bytes).await;
+        let _ = self.nora_driver.close_socket(tx.socket_id).await;
+        send_result?;
 
         Ok(())
     }
@@ -622,26 +661,29 @@ impl<
                 continue;
             }
 
+            const PACKET_SIZE: usize =
+                size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloResponse>();
+
             match self.nora_driver.try_read_data_binary(|data| {
                 defmt::trace!("wait_hello read data: {:?}", data);
-                const PACKET_SIZE: usize =
-                    size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<HelloResponse>();
-                if data.len() != PACKET_SIZE {
-                    return Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid);
-                }
-
                 let mut data_copy = [0u8; size_of::<RadioPacket>()];
-                data_copy[0..PACKET_SIZE].clone_from_slice(&data[0..PACKET_SIZE]);
-
-                let packet = unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
-
-                if packet.header.command_code != CommandCode::CC_HELLO_RESP {
-                    return Err(RobotRadioNoraError::SoftwareHelloHeaderInvalid);
-                }
-
-                Ok(unsafe { packet.data.hello_response })
+                let n = data.len().min(size_of::<RadioPacket>());
+                data_copy[..n].copy_from_slice(&data[..n]);
+                (data.len(), data_copy)
             }) {
-                Ok(Some(result)) => return result,
+                Ok(Some((data_len, data_copy))) => {
+                    if data_len != PACKET_SIZE {
+                        defmt::warn!("wait_hello: unexpected packet size {}, skipping", data_len);
+                        continue;
+                    }
+                    let packet =
+                        unsafe { &*(&data_copy as *const _ as *const RadioPacket) };
+                    if packet.header.command_code != CommandCode::CC_HELLO_RESP {
+                        defmt::warn!("wait_hello: unexpected command code, skipping");
+                        continue;
+                    }
+                    return Ok(unsafe { packet.data.hello_response });
+                }
                 Ok(None) => {
                     Timer::after_millis(1).await;
                     continue;
@@ -664,6 +706,13 @@ impl<
             size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<BasicControl>();
         const PARAMERTER_PACKET_SIZE: usize =
             size_of::<RadioPacket>() - size_of::<RadioData>() + size_of::<ParameterCommand>();
+
+        // The header's crc32 covers everything after it (set by the radio bridge).
+        if (data.len() == CONTROL_PACKET_SIZE || data.len() == PARAMERTER_PACKET_SIZE)
+            && u32::from_le_bytes([data[0], data[1], data[2], data[3]]) != crc32(&data[4..])
+        {
+            return Err(RobotRadioNoraError::PacketCrcMismatch);
+        }
 
         if data.len() == CONTROL_PACKET_SIZE {
             let mut data_copy = [0u8; size_of::<RadioPacket>()];
@@ -705,15 +754,15 @@ impl<
                     Ok(pkt) => {
                         return Ok(Some(pkt));
                     }
-                    Err(_) => {
-                        defmt::debug!("got AT packet but wasn't A-Team");
+                    Err(e) => {
+                        defmt::warn!("radio: undecodable data packet: {:?}", e);
                         return Err(());
                     }
                 },
                 None => return Ok(None),
             },
             Err(err_res) => {
-                defmt::debug!("radio in invalid state {:?}", err_res);
+                defmt::warn!("radio: read failed: {:?}", err_res);
                 return Err(());
             }
         }

@@ -15,6 +15,8 @@ impl PointLineManeuver {
 }
 
 impl MotionManeuver for PointLineManeuver {
+    const REQUIRES_VISION: bool = true;
+
     fn entry(&mut self, _cmd: ManeuverCommand, _ctx: &mut ControlContext) {}
 
     fn update(
@@ -25,13 +27,6 @@ impl MotionManeuver for PointLineManeuver {
         let ManeuverCommand::PointLine(c) = cmd else {
             return Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off));
         };
-
-        // Vision required: disable wheels and return zero setpoints until a
-        // fresh vision sample arrives.
-        if !ctx.vision_active() {
-            ctx.wheels_disabled = true;
-            return Ok((ManeuverSetpoints::zero(), ManeuverExtendedTelemetry::Off));
-        }
 
         let params = build_linear_params(
             c.max_vel_colinear,

@@ -1,9 +1,11 @@
 pub mod global_acceleration;
+pub mod global_acceleration_open_loop;
 pub mod global_position;
 pub mod global_velocity;
 pub mod heading_line;
 pub mod heading_pivot;
 pub mod local_acceleration;
+pub mod local_acceleration_open_loop;
 pub mod local_velocity;
 pub mod point_line;
 pub mod point_pivot;
@@ -17,11 +19,13 @@ use ateam_controls::pivot_trajectory::{PivotDirection as TrajPivotDirection, Piv
 use ateam_controls::ControlsError;
 
 use crate::motion::maneuvers::global_acceleration::GlobalAccelerationManeuver;
+use crate::motion::maneuvers::global_acceleration_open_loop::GlobalAccelerationOpenLoopManeuver;
 use crate::motion::maneuvers::global_position::GlobalPositionManeuver;
 use crate::motion::maneuvers::global_velocity::GlobalVelocityManeuver;
 use crate::motion::maneuvers::heading_line::HeadingLineManeuver;
 use crate::motion::maneuvers::heading_pivot::HeadingPivotManeuver;
 use crate::motion::maneuvers::local_acceleration::LocalAccelerationManeuver;
+use crate::motion::maneuvers::local_acceleration_open_loop::LocalAccelerationOpenLoopManeuver;
 use crate::motion::maneuvers::local_velocity::LocalVelocityManeuver;
 use crate::motion::maneuvers::point_line::PointLineManeuver;
 use crate::motion::maneuvers::point_pivot::PointPivotManeuver;
@@ -116,6 +120,10 @@ pub(crate) fn build_linear_params(
 }
 
 pub trait MotionManeuver {
+    /// Maneuver can only run with active vision. While vision is inactive and
+    /// this maneuver is commanded, the body controller holds it and active-brakes.
+    const REQUIRES_VISION: bool = false;
+
     fn entry(&mut self, cmd: ManeuverCommand, ctx: &mut ControlContext);
 
     fn update(
@@ -127,6 +135,29 @@ pub trait MotionManeuver {
     fn reset(&mut self);
 }
 
+/// Whether the maneuver for `cmd` requires active vision (`REQUIRES_VISION`).
+/// Decided from the command so it holds even before the maneuver is constructed.
+pub fn requires_vision(cmd: &ManeuverCommand) -> bool {
+    match cmd {
+        ManeuverCommand::Off => false,
+        ManeuverCommand::GlobalPosition(_) => GlobalPositionManeuver::REQUIRES_VISION,
+        ManeuverCommand::GlobalVelocity(_) => GlobalVelocityManeuver::REQUIRES_VISION,
+        ManeuverCommand::LocalVelocity(_) => LocalVelocityManeuver::REQUIRES_VISION,
+        ManeuverCommand::GlobalAcceleration(_) => GlobalAccelerationManeuver::REQUIRES_VISION,
+        ManeuverCommand::LocalAcceleration(_) => LocalAccelerationManeuver::REQUIRES_VISION,
+        ManeuverCommand::GlobalAccelerationOpenLoop(_) => {
+            GlobalAccelerationOpenLoopManeuver::REQUIRES_VISION
+        }
+        ManeuverCommand::LocalAccelerationOpenLoop(_) => {
+            LocalAccelerationOpenLoopManeuver::REQUIRES_VISION
+        }
+        ManeuverCommand::HeadingPivot(_) => HeadingPivotManeuver::REQUIRES_VISION,
+        ManeuverCommand::PointPivot(_) => PointPivotManeuver::REQUIRES_VISION,
+        ManeuverCommand::HeadingLine(_) => HeadingLineManeuver::REQUIRES_VISION,
+        ManeuverCommand::PointLine(_) => PointLineManeuver::REQUIRES_VISION,
+    }
+}
+
 enum ActiveManeuver {
     Off,
     GlobalPosition(GlobalPositionManeuver),
@@ -134,6 +165,8 @@ enum ActiveManeuver {
     LocalVelocity(LocalVelocityManeuver),
     GlobalAcceleration(GlobalAccelerationManeuver),
     LocalAcceleration(LocalAccelerationManeuver),
+    GlobalAccelerationOpenLoop(GlobalAccelerationOpenLoopManeuver),
+    LocalAccelerationOpenLoop(LocalAccelerationOpenLoopManeuver),
     HeadingPivot(HeadingPivotManeuver),
     PointPivot(PointPivotManeuver),
     HeadingLine(HeadingLineManeuver),
@@ -156,6 +189,12 @@ impl ActiveManeuver {
             ManeuverCommand::LocalAcceleration(_) => {
                 Self::LocalAcceleration(LocalAccelerationManeuver::new())
             }
+            ManeuverCommand::GlobalAccelerationOpenLoop(_) => {
+                Self::GlobalAccelerationOpenLoop(GlobalAccelerationOpenLoopManeuver::new())
+            }
+            ManeuverCommand::LocalAccelerationOpenLoop(_) => {
+                Self::LocalAccelerationOpenLoop(LocalAccelerationOpenLoopManeuver::new())
+            }
             ManeuverCommand::HeadingPivot(_) => Self::HeadingPivot(HeadingPivotManeuver::new()),
             ManeuverCommand::PointPivot(_) => Self::PointPivot(PointPivotManeuver::new()),
             ManeuverCommand::HeadingLine(_) => Self::HeadingLine(HeadingLineManeuver::new()),
@@ -172,6 +211,8 @@ impl ActiveManeuver {
             Self::LocalVelocity(s) => s.reset(),
             Self::GlobalAcceleration(s) => s.reset(),
             Self::LocalAcceleration(s) => s.reset(),
+            Self::GlobalAccelerationOpenLoop(s) => s.reset(),
+            Self::LocalAccelerationOpenLoop(s) => s.reset(),
             Self::HeadingPivot(s) => s.reset(),
             Self::PointPivot(s) => s.reset(),
             Self::HeadingLine(s) => s.reset(),
@@ -187,6 +228,8 @@ impl ActiveManeuver {
             Self::LocalVelocity(s) => s.entry(cmd, ctx),
             Self::GlobalAcceleration(s) => s.entry(cmd, ctx),
             Self::LocalAcceleration(s) => s.entry(cmd, ctx),
+            Self::GlobalAccelerationOpenLoop(s) => s.entry(cmd, ctx),
+            Self::LocalAccelerationOpenLoop(s) => s.entry(cmd, ctx),
             Self::HeadingPivot(s) => s.entry(cmd, ctx),
             Self::PointPivot(s) => s.entry(cmd, ctx),
             Self::HeadingLine(s) => s.entry(cmd, ctx),
@@ -206,6 +249,8 @@ impl ActiveManeuver {
             Self::LocalVelocity(s) => s.update(cmd, ctx),
             Self::GlobalAcceleration(s) => s.update(cmd, ctx),
             Self::LocalAcceleration(s) => s.update(cmd, ctx),
+            Self::GlobalAccelerationOpenLoop(s) => s.update(cmd, ctx),
+            Self::LocalAccelerationOpenLoop(s) => s.update(cmd, ctx),
             Self::HeadingPivot(s) => s.update(cmd, ctx),
             Self::PointPivot(s) => s.update(cmd, ctx),
             Self::HeadingLine(s) => s.update(cmd, ctx),
@@ -240,9 +285,11 @@ impl ManeuverManager {
     ) -> Result<(ManeuverSetpoints, ManeuverExtendedTelemetry), ControlsError> {
         let maneuver_cmd = cmd.get_maneuver_command();
         if cmd.body_control_mode != self.prev_mode {
+            // The trajectory is kept across maneuver changes: the new maneuver's
+            // command differs from the stored one, so run_traj_track replans
+            // seeded from the current trajectory state (continuous handoff).
             self.prev_mode = cmd.body_control_mode;
             self.active.reset();
-            ctx.reset_trajectory();
             self.active = ActiveManeuver::from_maneuver_command(&maneuver_cmd);
             self.active.entry_cmd(maneuver_cmd, ctx);
         }

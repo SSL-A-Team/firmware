@@ -1,27 +1,36 @@
 use crate::motion::params::controller_params::{
-    EncLagMode, PoseAccelMode, PoseVelMode, ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON,
-    ENC_LAG_T_SLOPE, POSE_ACCEL_MODE, POSE_VEL_MODE, TRACKING_DIVERGENCE_RECOVERY_REST_TICKS,
-    TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL, VISION_GATE_BASE_RADIUS_M,
-    VISION_GATE_EXPAND_RATE_M_PER_S, VISION_SEED_POS_STD_THRESH_M, VISION_SEED_SAMPLES,
+    ENC_LAG_K, ENC_LAG_MODE, ENC_LAG_T_HORIZON, ENC_LAG_T_SLOPE, FF_ACCEL_LOOKAHEAD_S, TRAJ_RESET_ERROR_XY,
+    TRACKING_DIVERGENCE_RECOVERY_REST_TICKS,
+    TRACKING_DIVERGENCE_RECOVERY_REST_WHEEL_VEL,
 };
-use crate::motion::pid::PidController;
+use crate::motion::accel_trajectory::AccelTrajectory;
+use crate::motion::velocity_ramp::{VelocityFrame, VelocityRamp};
 use ateam_common_packets::bindings::{ParameterCommand, ParameterDataFormat, ParameterName};
 use ateam_common_packets::radio::ManeuverCommand;
+use ateam_controls::defaults::{DEFAULT_EKF_BUFF_LEN, DEFAULT_VISION_BUFF_LEN, EKF_INPUT_LEN, EKF_MEAS_LEN, EKF_STATE_LEN};
+use ateam_controls::state_estimation::{BufferedEKF, Odometer, StateEstimator, VisionFilter, VisionSample};
 use ateam_controls::bangbang_trajectory::BangBangTraj3D;
 use ateam_controls::linear_trajectory::LinearTrajectory;
 use ateam_controls::pivot_trajectory::PivotTrajectory;
-use ateam_controls::robot_model::{KalmanFilterParams, RobotModel, RobotPhysicalParams};
+use ateam_controls::robot_model::{RobotModel, RobotPhysicalParams};
 use ateam_controls::trajectory::Trajectory;
 use ateam_controls::{
-    z_rotation_mat, ControlsError, Vector2f, Vector3f, Vector4f, Vector6f, Vector8f,
+    sqrtf, ControlsError, Vector3f, Vector4f, Vector6f, Vector8f,
 };
 use ateam_lib_stm32::model::{FirstOrderLag, FirstOrderLagParams};
 use core::f32::consts::PI;
-use embassy_time::Duration;
-use libm::{fabsf, hypotf, remainderf, sqrtf};
-use nalgebra::SVector;
+use embassy_time::{Duration, Instant};
+use libm::{fabsf, hypotf, remainderf};
+use nalgebra::{SMatrix, SVector};
 
 pub(crate) const VISION_ACTIVE_TIMEOUT_S: f32 = 0.5;
+
+/// Fraction of the feasible acceleration planners may use (rest is feedback headroom).
+/// 0.9 with the identified efficiency (0.75): same time-to-target as 0.8 with the
+/// optimistic 0.85, with ~25% less tracking error.
+pub const FEASIBLE_ACCEL_MARGIN: f32 = 0.9;
+/// Floor for the planned linear acceleration (m/s^2) so a fully derated robot still moves.
+pub const MIN_PLANNED_ACCEL_LINEAR: f32 = 0.3;
 
 /// All trajectory types the firmware can track.
 ///
@@ -31,6 +40,8 @@ pub enum TrackedTrajectory {
     BangBang(BangBangTraj3D),
     Pivot(PivotTrajectory),
     Linear(LinearTrajectory),
+    Accel(AccelTrajectory),
+    VelocityRamp(VelocityRamp),
 }
 
 impl Trajectory for TrackedTrajectory {
@@ -39,6 +50,8 @@ impl Trajectory for TrackedTrajectory {
             Self::BangBang(t) => t.tick(dt),
             Self::Pivot(t) => t.tick(dt),
             Self::Linear(t) => t.tick(dt),
+            Self::Accel(t) => t.tick(dt),
+            Self::VelocityRamp(t) => t.tick(dt),
         }
     }
 
@@ -47,6 +60,8 @@ impl Trajectory for TrackedTrajectory {
             Self::BangBang(t) => t.sample(),
             Self::Pivot(t) => t.sample(),
             Self::Linear(t) => t.sample(),
+            Self::Accel(t) => t.sample(),
+            Self::VelocityRamp(t) => t.sample(),
         }
     }
 }
@@ -55,66 +70,21 @@ impl Trajectory for TrackedTrajectory {
 /// `body_controller` applies friction compensation and wheel transforms.
 #[derive(Copy, Clone, Default)]
 pub struct ManeuverSetpoints {
-    pub body_twist: Vector3f,
+    pub body_vel: Vector3f,
     pub body_accel: Vector3f,
+    /// Part of `body_vel.z` that is yaw-rate (gyro) feedback. Kept out of the
+    /// friction compensation input, where it turned gyro noise into accel jitter.
+    pub rate_fb_w: f32,
 }
 
 impl ManeuverSetpoints {
     pub fn zero() -> Self {
         Self {
-            body_twist: Vector3f::zeros(),
+            body_vel: Vector3f::zeros(),
             body_accel: Vector3f::zeros(),
+            rate_fb_w: 0.0,
         }
     }
-}
-
-/// Startup seeding and steady-state tracking state for the vision outlier gate.
-///
-/// On boot the gate starts in `Seeding`, collecting vision samples until the
-/// position estimates are stable enough to trust. Once seeded it transitions to
-/// `Tracking`, where each incoming vision measurement is compared against the
-/// KF's predicted position. Measurements outside the gate are rejected as
-/// outliers; the gate expands over time so a robot that has been physically
-/// repositioned can eventually re-enter and be accepted.
-pub enum VisionGateState {
-    /// Collecting initial vision samples. Transitions to `Tracking` once
-    /// `VISION_SEED_SAMPLES` samples have been received and their positional
-    /// standard deviation is below `VISION_SEED_POS_STD_THRESH_M`.
-    Seeding {
-        n: u32,
-        pos_sum: Vector2f,
-        pos_sq_sum: Vector2f,
-    },
-    /// Gate is active. Measurements within `VISION_GATE_BASE_RADIUS_M +
-    /// VISION_GATE_EXPAND_RATE_M_PER_S * time_since_last_valid_s` of the KF
-    /// predicted position are accepted; others are rejected and the expansion
-    /// timer advances.
-    Tracking { time_since_last_valid_s: f32 },
-}
-
-impl Default for VisionGateState {
-    fn default() -> Self {
-        VisionGateState::Seeding {
-            n: 0,
-            pos_sum: Vector2f::zeros(),
-            pos_sq_sum: Vector2f::zeros(),
-        }
-    }
-}
-
-/// Notable vision gate events reported to the caller each tick via
-/// `ControlContext::last_gate_event`. Reset to `None` on normal ticks.
-/// Used by `control_task` to emit `ErrorTelemetry` over radio.
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub enum VisionGateEvent {
-    None,
-    /// Seed stability check failed — robot was not stationary, restarting.
-    SeedReset,
-    /// First outlier rejection after a valid tracking period (start of a burst).
-    /// Subsequent rejections in the same burst are suppressed to avoid spam.
-    FirstReject,
-    /// Measurement accepted after gate expansion — robot was physically repositioned.
-    AcceptJump,
 }
 
 /// Trajectory-divergence recovery state. A large unexpected tracking error
@@ -131,28 +101,6 @@ pub enum TrackingDivergenceState {
     Recovering,
 }
 
-/// Internal gate decision for a single vision tick. Computed with only
-/// `vision_gate` borrowed, then applied once that borrow ends.
-enum GateAction {
-    /// Still accumulating seed samples — no update to KF.
-    Accumulate,
-    /// Seed samples collected but variance check failed — restart accumulator.
-    SeedReset,
-    /// Seed stable — snap KF to vision and transition to Tracking.
-    SeedComplete,
-    /// Measurement within base radius — pass to KF update normally.
-    Accept,
-    /// Measurement outside base radius but within expanded gate — snap KF
-    /// to vision and reset velocity to encoder-implied.
-    AcceptJump,
-    /// First outlier rejection since the last valid update — emit telemetry once.
-    FirstReject,
-    /// Subsequent outlier rejection in the same burst — suppress telemetry.
-    Reject,
-    /// No vision packet this tick.
-    NoVision,
-}
-
 /// Controller infrastructure passed into each maneuver on every tick.
 ///
 /// Owns the KF/robot-model, trajectory state, PID, and encoder-lag model.
@@ -160,34 +108,50 @@ enum GateAction {
 /// tracking helpers.
 pub struct ControlContext {
     pub robot_model: RobotModel,
-    pub pose_pid_controller: PidController<3>,
-    /// Accel (torque) path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
-    pub pose_accel_gain: Vector2f,
-    /// Velocity setpoint path gains: [FEEDFORWARD_GAIN, FEEDBACK_GAIN]
-    pub pose_vel_gain: Vector2f,
-    /// [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
-    pub tracking_error_thresh: Vector4f,
-    /// [LINEAR_VEL_THRESHOLD, LINEAR_ACCEL_THRESHOLD, ANGULAR_VEL_THRESHOLD, ANGULAR_ACCEL_THRESHOLD]
-    pub friction_comp_gating: Vector4f,
+    pub state_estimator: StateEstimator<DEFAULT_EKF_BUFF_LEN, DEFAULT_VISION_BUFF_LEN>,
+    /// XY position feedback [K, MAX, ANTI_JITTER] (see controller_params::POS_FB_XY)
+    pub pos_fb_xy: Vector3f,
+    /// Angular feedback [POS_K, POS_MAX, ANTI_JITTER, VEL_K] (see controller_params::POS_FB_W)
+    pub pos_fb_w: Vector4f,
+    /// Wheel velocity loop [KP, KI, ANTI_JITTER, MAX_CURRENT], forwarded to the motor controllers
+    pub wheel_vel_fb: Vector4f,
+    /// Feed-forward wheel current limit (A)
+    pub wheel_ff_current_limit: f32,
+    /// Wheel slip feed-forward ((rad/s)/A, see controller_params::WHEEL_SLIP_COMP)
+    pub wheel_slip_comp: f32,
+    /// Effective per-wheel feed-forward current limits (A) after thermal derating;
+    /// set by the control task each tick from `WheelThermalBudget`.
+    pub wheel_ff_current_limits: Vector4f,
+    /// Divergence thresholds: [ERROR_POS_LINEAR, ERROR_POS_ANGULAR, ERROR_VEL_LINEAR, ERROR_VEL_ANGULAR]
+    pub tracking_divergence_thresh: Vector4f,
     /// Active trajectory. t=0 is always "now" (updated via tick each control tick).
     pub trajectory: Option<TrackedTrajectory>,
     /// Last command stored by `run_traj_track`, used to detect command changes.
     pub prev_cmd: Option<ManeuverCommand>,
+    /// True while the trajectory is driven open loop (`run_traj_open_loop`). Its
+    /// state is not corrected toward the estimate, so it is excluded from
+    /// divergence detection and not used to seed closed-loop tracking.
+    pub trajectory_open_loop: bool,
     pub enc_lag: FirstOrderLag<2>,
     pub dt: f32,
-    /// Cached KF state estimate — updated each tick before maneuver dispatch.
+    /// Cached KF state estimate (global frame) — updated each tick before maneuver dispatch.
     pub state_estimate: Vector6f,
-    pub time_since_vision_update_s: f32,
-    pub vision_gate: VisionGateState,
-    /// Notable gate event from the most recent `update_state_estimate` call.
-    /// Reset to `None` every tick; set when a reportable condition occurs.
-    pub last_gate_event: VisionGateEvent,
-    pub wheels_disabled: bool,
+    /// State-estimate velocity in the robot's local frame [vx, vy, w], for telemetry.
+    pub state_estimate_vel_local: Vector3f,
+    /// IMU input used by the state estimator on the last update, with the learned
+    /// accelerometer bias removed: [accel_x, accel_y, gyro_w], for telemetry.
+    pub imu_input: Vector3f,
     /// Divergence-recovery state machine. `Recovering` engages active braking and
-    /// holds it until the wheels stop, then resets the controller.
+    /// holds it until the wheels stop, then resets the trajectory.
     pub tracking_divergence_state: TrackingDivergenceState,
     /// Consecutive ticks the wheels have been near rest while recovering.
     pub tracking_recovery_at_rest_ticks: u32,
+    /// Vision state on the previous tick, to reset the trajectory when vision
+    /// comes (back) online and the estimate jumps to it.
+    last_vision_active: bool,
+    /// Low-passed yaw rate (rad/s) for the angular rate feedback (YAW_RATE_FB_LPF_HZ).
+    yaw_rate_fb: f32,
+    yaw_rate_fb_alpha: f32,
 }
 
 impl ControlContext {
@@ -212,297 +176,134 @@ impl ControlContext {
         );
 
         Self {
-            robot_model: RobotModel::new(
-                dt,
-                KalmanFilterParams::default(),
-                RobotPhysicalParams::default(),
-            )
-            .expect("Failed to create RobotModel, check that parameters are valid"),
-            pose_pid_controller: PidController::<3>::from_gains_matrix_with_anti_jitter(
-                &controller_params::pose_pid_gains(),
-                Some(controller_params::POSE_PID_ANTI_JITTER_THRESH),
-            ),
-            pose_accel_gain: controller_params::POSE_ACCEL_GAIN,
-            pose_vel_gain: controller_params::POSE_VEL_GAIN,
-            tracking_error_thresh: controller_params::TRACKING_ERROR_THRESHOLD,
-            friction_comp_gating: controller_params::FRICTION_COMP_GATING,
+            robot_model: RobotModel::new(RobotPhysicalParams::default())
+                .expect("Failed to create RobotModel, check that parameters are valid"),
+            state_estimator: StateEstimator::<DEFAULT_EKF_BUFF_LEN, DEFAULT_VISION_BUFF_LEN>::default(),
+            pos_fb_xy: controller_params::POS_FB_XY,
+            pos_fb_w: controller_params::POS_FB_W,
+            wheel_vel_fb: controller_params::WHEEL_VEL_FB,
+            wheel_ff_current_limit: controller_params::WHEEL_FF_CURRENT_LIMIT_A,
+            wheel_slip_comp: controller_params::WHEEL_SLIP_COMP,
+            wheel_ff_current_limits: Vector4f::repeat(controller_params::WHEEL_FF_CURRENT_LIMIT_A),
+            tracking_divergence_thresh: controller_params::TRACKING_DIVERGENCE_THRESHOLD,
             trajectory: None,
             prev_cmd: None,
+            trajectory_open_loop: false,
             enc_lag,
             dt,
             state_estimate: Vector6f::zeros(),
-            time_since_vision_update_s: VISION_ACTIVE_TIMEOUT_S + 1.0,
-            vision_gate: VisionGateState::default(),
-            last_gate_event: VisionGateEvent::None,
-            wheels_disabled: true,
+            state_estimate_vel_local: Vector3f::zeros(),
+            imu_input: Vector3f::zeros(),
             tracking_divergence_state: TrackingDivergenceState::Normal,
             tracking_recovery_at_rest_ticks: 0,
+            last_vision_active: false,
+            yaw_rate_fb: 0.0,
+            yaw_rate_fb_alpha: {
+                let tau = 1.0 / (2.0 * PI * controller_params::YAW_RATE_FB_LPF_HZ);
+                dt / (tau + dt)
+            },
         }
     }
 
     pub fn vision_active(&self) -> bool {
-        self.time_since_vision_update_s <= VISION_ACTIVE_TIMEOUT_S
+        self.state_estimator.vision_active()
+    }
+
+    pub fn applied_vision_measurement(&self) -> Option<(Vector3f, u32, bool)> {
+        self.state_estimator.applied_vision()
     }
 
     pub fn reset(&mut self) {
-        self.robot_model.reset();
-        self.pose_pid_controller.reset();
+        self.state_estimator.init(
+            SVector::<f32, 3>::zeros(),
+            SVector::<f32, 3>::zeros(),
+        );
         self.trajectory = None;
         self.prev_cmd = None;
-        self.time_since_vision_update_s = VISION_ACTIVE_TIMEOUT_S + 1.0;
-        self.vision_gate = VisionGateState::default();
-        self.last_gate_event = VisionGateEvent::None;
+        self.trajectory_open_loop = false;
         self.enc_lag.reset();
-        self.wheels_disabled = true;
         self.tracking_divergence_state = TrackingDivergenceState::Normal;
         self.tracking_recovery_at_rest_ticks = 0;
     }
 
-    /// Clear trajectory and command history without touching the PID or KF.
-    ///
-    /// Called by `ManeuverManager` on mode change to ensure the next tick
-    /// replans from the current state estimate.
+    /// Clear trajectory and command history without touching the PID or KF,
+    /// so the next tracking maneuver replans from the current state estimate.
     pub fn reset_trajectory(&mut self) {
         self.trajectory = None;
         self.prev_cmd = None;
+        self.trajectory_open_loop = false;
     }
 
     /// Run KF vision handling, measurement construction, and state update.
-    /// Returns the pre-update state prediction used for telemetry.
+    /// Returns the EKF buffer-horizon state for telemetry: global position, then
+    /// velocity in the robot's local frame.
     pub fn update_state_estimate(
         &mut self,
-        vision_pose_meas: Vector3f,
+        vision_pos_meas: Vector3f,
+        vision_t_capture_host_us: u64,
         vision_update: bool,
         wheel_vel_meas: Vector4f,
         imu_gyro_theta_meas: f32,
+        imu_accel_x_meas: f32,
+        imu_accel_y_meas: f32,
     ) -> Result<Vector6f, ControlsError> {
-        // Capture the KF's current predicted position before any snap so the gate
-        // compares against dead-reckoned state, not a freshly-overwritten value.
-        let predicted_state = self.robot_model.get_state();
 
-        // [1] Outlier gate: classify this vision tick.
-        //
-        // Gate is XY-only. Theta outliers are not rejected here because heading
-        // errors from wheel slip are common and the controller handles them.
-        //
-        // Accumulator mutations happen inside the match; KF and state-machine
-        // mutations happen after so `vision_gate` is not borrowed when calling
-        // into `robot_model`.
-        let gate_action = if vision_update {
-            match &mut self.vision_gate {
-                VisionGateState::Seeding {
-                    n,
-                    pos_sum,
-                    pos_sq_sum,
-                } => {
-                    *n += 1;
-                    pos_sum.x += vision_pose_meas.x;
-                    pos_sum.y += vision_pose_meas.y;
-                    pos_sq_sum.x += vision_pose_meas.x * vision_pose_meas.x;
-                    pos_sq_sum.y += vision_pose_meas.y * vision_pose_meas.y;
+        let imu = SVector::<f32, 3>::new(
+            imu_accel_x_meas,
+            imu_accel_y_meas,
+            imu_gyro_theta_meas,
+        );
 
-                    if *n >= VISION_SEED_SAMPLES {
-                        let nf = *n as f32;
-                        let mean_x = pos_sum.x / nf;
-                        let mean_y = pos_sum.y / nf;
-                        // Variance = E[x²] - (E[x])²
-                        let var_x = pos_sq_sum.x / nf - mean_x * mean_x;
-                        let var_y = pos_sq_sum.y / nf - mean_y * mean_y;
-                        if sqrtf(var_x) < VISION_SEED_POS_STD_THRESH_M
-                            && sqrtf(var_y) < VISION_SEED_POS_STD_THRESH_M
-                        {
-                            GateAction::SeedComplete
-                        } else {
-                            GateAction::SeedReset
-                        }
-                    } else {
-                        GateAction::Accumulate
-                    }
-                }
-                VisionGateState::Tracking {
-                    time_since_last_valid_s,
-                } => {
-                    let dist = hypotf(
-                        vision_pose_meas.x - predicted_state[0],
-                        vision_pose_meas.y - predicted_state[1],
-                    );
-                    // Gate radius expands linearly while no valid update is received,
-                    // allowing a physically repositioned robot to eventually re-enter.
-                    let gate_radius = VISION_GATE_BASE_RADIUS_M
-                        + VISION_GATE_EXPAND_RATE_M_PER_S * *time_since_last_valid_s;
-
-                    if dist < gate_radius {
-                        *time_since_last_valid_s = 0.0;
-                        if dist >= VISION_GATE_BASE_RADIUS_M {
-                            GateAction::AcceptJump
-                        } else {
-                            GateAction::Accept
-                        }
-                    } else {
-                        // Distinguish first rejection from subsequent ones so
-                        // the caller can emit a single telemetry burst event.
-                        let is_first = *time_since_last_valid_s == 0.0;
-                        *time_since_last_valid_s += self.dt;
-                        if is_first {
-                            GateAction::FirstReject
-                        } else {
-                            GateAction::Reject
-                        }
-                    }
-                }
-            }
+        let sample;
+        let vision = if vision_update {
+            sample = VisionSample {
+                meas: vision_pos_meas,
+                t_capture_host_us: vision_t_capture_host_us,
+            };
+            Some(&sample)
         } else {
-            // No vision packet — advance the expansion timer so a robot that
-            // loses vision entirely can still recover when it returns.
-            if let VisionGateState::Tracking {
-                time_since_last_valid_s,
-            } = &mut self.vision_gate
-            {
-                *time_since_last_valid_s += self.dt;
-            }
-            GateAction::NoVision
+            None
         };
 
-        // [2] Apply gate decision: KF snaps and state-machine transitions.
-        //
-        // SeedComplete and AcceptJump both snap position and velocity. SeedComplete
-        // additionally transitions the gate to Tracking. AcceptJump drops any
-        // in-flight trajectory so the controller replans from the new pose
-        // instead of continuing to chase the old one.
-        self.last_gate_event = VisionGateEvent::None;
-        let effective_vision_update = match gate_action {
-            GateAction::SeedComplete | GateAction::AcceptJump => {
-                self.robot_model.kf_set_pose(vision_pose_meas);
-                // Snap KF velocity to directly-measured values.
-                // Linear (vx, vy): encoder-implied via wheel Jacobian.
-                // Angular (ω): gyro, bypassing the Jacobian — lower noise
-                // (0.015 rad/s vs 50 rad/s encoder std) and no wheel-slip error.
-                let mut vel_seed =
-                    self.robot_model.transform_wheel2twist(vision_pose_meas.z) * wheel_vel_meas;
-                vel_seed[2] = imu_gyro_theta_meas;
-                self.robot_model.kf_set_vel(vel_seed);
-                self.trajectory = None;
-                self.prev_cmd = None;
-                self.pose_pid_controller.reset();
-                if matches!(gate_action, GateAction::SeedComplete) {
-                    self.vision_gate = VisionGateState::Tracking {
-                        time_since_last_valid_s: 0.0,
-                    };
-                    defmt::info!("vision gate: seeding complete");
-                } else {
-                    self.last_gate_event = VisionGateEvent::AcceptJump;
-                    defmt::info!("vision gate: large jump accepted");
-                }
-                true
-            }
-            GateAction::SeedReset => {
-                self.vision_gate = VisionGateState::default();
-                self.last_gate_event = VisionGateEvent::SeedReset;
-                defmt::warn!("vision gate: seed stability check failed, restarting");
-                false
-            }
-            GateAction::FirstReject => {
-                self.last_gate_event = VisionGateEvent::FirstReject;
-                defmt::warn!("vision gate: outlier rejected");
-                false
-            }
-            GateAction::Accept => true,
-            GateAction::Reject => {
-                defmt::warn!("vision gate: outlier rejected");
-                false
-            }
-            GateAction::Accumulate | GateAction::NoVision => false,
-        };
+        let encoder_vel = self.robot_model.wheel_to_local_vel(&wheel_vel_meas);
 
-        // [3] Update the vision activity timer used by global-position maneuvers.
-        if effective_vision_update {
-            self.time_since_vision_update_s = 0.0;
-        } else if self.time_since_vision_update_s <= VISION_ACTIVE_TIMEOUT_S {
-            self.time_since_vision_update_s += self.dt;
+        self.state_estimator.tick(
+            Instant::now().as_micros(),
+            &imu,
+            &encoder_vel,
+            vision,
+        ).map_err(|_| ControlsError::SingularMatrix)?;
+
+        let mut state_prediction = SVector::<f32, 6>::zeros();
+        state_prediction.fixed_rows_mut::<3>(0).copy_from(&self.state_estimator.get_pos_buff());
+        state_prediction.fixed_rows_mut::<3>(3).copy_from(&self.state_estimator.get_vel_buff_local());
+
+        let mut state_est = SVector::<f32, 6>::zeros();
+        state_est.fixed_rows_mut::<3>(0).copy_from(&self.state_estimator.get_pos());
+        state_est.fixed_rows_mut::<3>(3).copy_from(&self.state_estimator.get_vel());
+        self.state_estimate = state_est;
+        self.state_estimate_vel_local = self.state_estimator.get_vel_local();
+        self.imu_input = self.state_estimator.get_imu_input();
+
+        // When vision comes online the estimate jumps
+        // to it, so restart the trajectory from the new estimate instead of tracking
+        // the jump.
+        self.yaw_rate_fb += (self.state_estimate[5] - self.yaw_rate_fb) * self.yaw_rate_fb_alpha;
+
+        let vision_active = self.state_estimator.vision_active();
+        if vision_active && !self.last_vision_active {
+            self.reset_trajectory();
         }
-
-        // Capture post-snap / pre-KF-update state for telemetry.
-        let state_prediction = self.robot_model.get_state();
-
-        let measurement: Vector8f = if matches!(
-            ENC_LAG_MODE,
-            EncLagMode::KfCorrectionOnly | EncLagMode::Full
-        ) {
-            let lag_state = self.enc_lag.state();
-            let lag_body = Vector3f::new(lag_state.x, lag_state.y, imu_gyro_theta_meas);
-            let lag_wheel = self.robot_model.transform_twist2wheel(state_prediction[2]) * lag_body;
-            nalgebra::vector![
-                vision_pose_meas.x,
-                vision_pose_meas.y,
-                vision_pose_meas.z,
-                lag_wheel.x,
-                lag_wheel.y,
-                lag_wheel.z,
-                lag_wheel.w,
-                imu_gyro_theta_meas,
-            ]
-        } else {
-            nalgebra::vector![
-                vision_pose_meas.x,
-                vision_pose_meas.y,
-                vision_pose_meas.z,
-                wheel_vel_meas.x,
-                wheel_vel_meas.y,
-                wheel_vel_meas.z,
-                wheel_vel_meas.w,
-                imu_gyro_theta_meas,
-            ]
-        };
-
-        self.robot_model
-            .kf_update(measurement, !effective_vision_update, false, false)?;
-        self.state_estimate = self.robot_model.get_state();
+        self.last_vision_active = vision_active;
 
         Ok(state_prediction)
     }
 
-    /// Compute global-frame friction force from current state and commanded body twist/accel.
-    pub fn compute_friction(&self, body_twist: Vector3f, body_accel: Vector3f) -> Vector3f {
-        let state_estimate = self.state_estimate;
-        let theta = state_estimate.z;
-        let r_glob_to_loc = z_rotation_mat(-theta);
-        let r_loc_to_glob = z_rotation_mat(theta);
-
-        let est_twist_global: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-        let est_twist_local: Vector3f = r_glob_to_loc * est_twist_global;
-        let tgt_twist_local: Vector3f = r_glob_to_loc * body_twist;
-        let cmd_accel_local: Vector3f = r_glob_to_loc * body_accel;
-
-        let lin_vel_mag = hypotf(est_twist_local.x, est_twist_local.y);
-        let lin_accel_mag = hypotf(cmd_accel_local.x, cmd_accel_local.y);
-        let ang_vel_mag = fabsf(est_twist_local.z);
-        let ang_accel_mag = fabsf(cmd_accel_local.z);
-
-        let linear_comp_on = lin_accel_mag >= self.friction_comp_gating[1]
-            || lin_vel_mag >= self.friction_comp_gating[0];
-        let angular_comp_on = ang_accel_mag >= self.friction_comp_gating[3]
-            || ang_vel_mag >= self.friction_comp_gating[2];
-
-        let fric_twist_local = Vector3f::new(
-            if linear_comp_on {
-                tgt_twist_local.x
-            } else {
-                0.0
-            },
-            if linear_comp_on {
-                tgt_twist_local.y
-            } else {
-                0.0
-            },
-            if angular_comp_on {
-                tgt_twist_local.z
-            } else {
-                0.0
-            },
-        );
-
-        let friction_force_local = self.robot_model.compute_friction_force(fric_twist_local);
-        r_loc_to_glob * friction_force_local
+    /// Heading used to rotate the global commanded velocity/accel into the local
+    /// frame for the wheel outputs: the estimate advanced by half a control
+    /// period, compensating the rotation during the period.
+    pub fn output_heading(&self) -> f32 {
+        self.state_estimate.z + self.state_estimate[5] * self.dt * 0.5
     }
 
     // -----------------------------------------------------------------------
@@ -514,17 +315,20 @@ impl ControlContext {
     /// recovering, signalling the control task to command the active brake.
     ///
     /// - Normal: a large unexpected tracking error (an active trajectory whose
-    ///   error exceeds `TRAJ_RECOMPUTE_ERROR`, e.g. a collision knocking the
+    ///   error exceeds `TRACKING_DIVERGENCE_THRESHOLD`, e.g. a collision knocking the
     ///   robot off course) trips into `Recovering`.
     /// - Recovering: active braking is commanded until all wheels stay below
     ///   `RECOVERY_AT_REST_WHEEL_SPEED` for `RECOVERY_AT_REST_TICKS`, then the
-    ///   controller is reset (replanning from the fresh state estimate) and
+    ///   trajectory is reset (replanning from the current state estimate) and
     ///   normal operation resumes. Uses raw encoder wheel speeds, not the KF
     ///   estimate, since divergence implies the estimate is unreliable.
     pub fn update_tracking_divergence_recovery(&mut self, wheel_vel_meas: Vector4f) -> bool {
         match self.tracking_divergence_state {
             TrackingDivergenceState::Normal => {
-                if self.trajectory.is_some() && self.tracking_error_exceeded() {
+                if self.trajectory.is_some()
+                    && !self.trajectory_open_loop
+                    && self.tracking_error_exceeded()
+                {
                     self.tracking_divergence_state = TrackingDivergenceState::Recovering;
                     self.tracking_recovery_at_rest_ticks = 0;
                     defmt::warn!("tracking diverged (possible collision), braking");
@@ -543,8 +347,13 @@ impl ControlContext {
                     self.tracking_recovery_at_rest_ticks = 0;
                 }
                 if self.tracking_recovery_at_rest_ticks >= TRACKING_DIVERGENCE_RECOVERY_REST_TICKS {
-                    self.reset(); // returns to Normal, clears trajectory
-                    defmt::warn!("recovery complete, controller reset");
+                    // Only the trajectory: reinitializing the state estimator here
+                    // would drop the vision lock, and the position jump when vision
+                    // reseeds could trip another divergence.
+                    self.reset_trajectory();
+                    self.tracking_divergence_state = TrackingDivergenceState::Normal;
+                    self.tracking_recovery_at_rest_ticks = 0;
+                    defmt::warn!("recovery complete, trajectory reset");
                     false
                 } else {
                     true
@@ -577,10 +386,11 @@ impl ControlContext {
     /// which brakes and then resets (clearing the trajectory).
     ///
     /// # Seed selection
-    /// - An existing trajectory  → seed from its current `sample()` state
-    ///   (continuous handoff). Snapping to `state_estimate` would mask
+    /// - An existing closed-loop trajectory → seed from its current `sample()`
+    ///   state (continuous handoff). Snapping to `state_estimate` would mask
     ///   divergence from the recovery state machine.
-    /// - No trajectory          → seed from `state_estimate` (snap to reality).
+    /// - No trajectory, or an open-loop one → seed from `state_estimate`
+    ///   (snap to reality; open-loop state was never corrected).
     pub fn run_traj_track<F>(
         &mut self,
         cmd: ManeuverCommand,
@@ -589,18 +399,169 @@ impl ControlContext {
     where
         F: FnOnce(Vector6f) -> Result<TrackedTrajectory, ControlsError>,
     {
-        let should_replan = self.trajectory.is_none() || self.command_changed(&cmd);
+        // Existing closed-loop trajectory → continuous seed from its current state
+        // (before this tick's advance), even if the tracking error is high. Never
+        // snap to the estimate here: doing so would zero the tracking error and
+        // prevent the divergence-recovery state machine from ever detecting a
+        // collision.
+        // Restart the trajectory from the estimate when the XY tracking error gets
+        // large, rather than chasing a trajectory the
+        // robot cannot follow. See TRAJ_RESET_ERROR_XY.
+        if !self.trajectory_open_loop && self.xy_feedback_saturated() {
+            self.trajectory = None;
+        }
+        let seed_from_traj = !self.trajectory_open_loop;
+        self.plan_if_needed(cmd, seed_from_traj, make_traj)?;
+        self.trajectory_open_loop = false;
 
-        if should_replan {
+        let traj = self
+            .trajectory
+            .as_ref()
+            .ok_or(ControlsError::InvalidInput)?;
+        let (traj_state, mut traj_accel) = traj.sample();
+
+        // Advance the trajectory's internal clock by dt.
+        // After this, traj.sample() returns the state at the start of the next tick.
+        let dt = self.dt;
+        if let Some(traj) = &mut self.trajectory {
+            traj.tick(dt);
+            if let TrackedTrajectory::BangBang(t) = traj {
+                // Feed-forward acceleration as the mean over a short lookahead of the
+                // current trajectory. Replanning every tick toward a slowly moving
+                // target makes a time-optimal profile brake and re-accelerate at full
+                // acceleration on alternate ticks; its instantaneous acceleration then
+                // chatters at +/- the limit while the mean is the small acceleration
+                // actually needed. Generalizes the one-step mean used for orientation.
+                // XY only: averaging the angular profile this long blurred real
+                // rotations (heading tracking 0.8 -> 2.7 deg on 90 deg moves); small
+                // heading-target changes are already low-passed (OrientTargetLag).
+                let mut lookahead = *t;
+                lookahead.tick(FF_ACCEL_LOOKAHEAD_S - dt);
+                let v_end = lookahead.sample().0;
+                traj_accel.x = (v_end[3] - traj_state[3]) / FF_ACCEL_LOOKAHEAD_S;
+                traj_accel.y = (v_end[4] - traj_state[4]) / FF_ACCEL_LOOKAHEAD_S;
+                traj_accel.z = (t.sample().0[5] - traj_state[5]) / dt;
+            } else {
+                // Angular acceleration as the mean over
+                // the step, so segment switches don't produce full-scale spikes.
+                traj_accel.z = (traj.sample().0[5] - traj_state[5]) / dt;
+            }
+        }
+
+        self.calc_tracking_setpoints(traj_state, traj_accel)
+    }
+
+    /// Plan or continue a trajectory and drive it open loop: the setpoints are
+    /// the trajectory's own velocity and acceleration, with no position feedback.
+    ///
+    /// Replans under the same rule as `run_traj_track`, seeded from the current
+    /// trajectory state if one exists (open or closed loop), else the estimate.
+    /// Accel trajectories get the state-estimate heading each tick, so
+    /// `AccelFrame::Body` commands follow the robot's estimated frame.
+    pub fn run_traj_open_loop<F>(
+        &mut self,
+        cmd: ManeuverCommand,
+        make_traj: F,
+    ) -> Result<ManeuverSetpoints, ControlsError>
+    where
+        F: FnOnce(Vector6f) -> Result<TrackedTrajectory, ControlsError>,
+    {
+        self.plan_if_needed(cmd, true, make_traj)?;
+        self.trajectory_open_loop = true;
+
+        let heading = self.state_estimate.z;
+        let traj = self
+            .trajectory
+            .as_mut()
+            .ok_or(ControlsError::InvalidInput)?;
+        match traj {
+            TrackedTrajectory::Accel(t) => t.set_body_heading(heading),
+            TrackedTrajectory::VelocityRamp(t) => t.set_body_heading(heading),
+            _ => {}
+        }
+        let (traj_state, traj_accel) = traj.sample();
+        traj.tick(self.dt);
+
+        Ok(ManeuverSetpoints {
+            body_vel: traj_state.fixed_rows::<3>(3).into(),
+            body_accel: traj_accel,
+            rate_fb_w: 0.0,
+        })
+    }
+
+    /// Velocity maneuvers: ramp toward `target` (in `frame`) at
+    /// `max_accel_linear` / `max_accel_angular` and
+    /// output the ramp's velocity and acceleration. No position feedback: only P
+    /// on the angular rate error (`POS_FB_W` VEL_K).
+    pub fn run_vel_track(
+        &mut self,
+        cmd: ManeuverCommand,
+        frame: VelocityFrame,
+        target: Vector3f,
+        max_vel_linear: f32,
+        max_vel_angular: f32,
+        max_accel_linear: f32,
+        max_accel_angular: f32,
+    ) -> Result<ManeuverSetpoints, ControlsError> {
+        let mut target = target;
+        let v = hypotf(target.x, target.y);
+        if v > max_vel_linear {
+            target.x *= max_vel_linear / v;
+            target.y *= max_vel_linear / v;
+        }
+        target.z = target.z.clamp(-max_vel_angular, max_vel_angular);
+
+        // No capability cap here (unlike position tracking): without position
+        // feedback nothing chases a ramp the robot can't follow, and the output
+        // stage's friction-first saturation keeps the acceleration direction, so the
+        // robot simply accelerates as hard as the wheels allow.
+        let heading = self.state_estimate.z;
+        let dt = self.dt;
+        let accel_linear = max_accel_linear;
+        let make = |seed: Vector6f| {
+            Ok(TrackedTrajectory::VelocityRamp(VelocityRamp::new(
+                seed,
+                heading,
+                frame,
+                target,
+                accel_linear,
+                max_accel_angular,
+                dt,
+            )))
+        };
+        let mut setpoints = self.run_traj_open_loop(cmd, make)?;
+        let k_vel_w = self.pos_fb_w[3];
+        let rate_fb_w = (setpoints.body_vel.z - self.yaw_rate_fb) * k_vel_w;
+        setpoints.body_vel.z += rate_fb_w;
+        setpoints.rate_fb_w = rate_fb_w;
+        Ok(setpoints)
+    }
+
+    fn xy_feedback_saturated(&self) -> bool {
+        let Some(traj) = self.trajectory.as_ref() else {
+            return false;
+        };
+        let traj_pos = traj.sample().0;
+        hypotf(traj_pos.x - self.state_estimate.x, traj_pos.y - self.state_estimate.y)
+            > TRAJ_RESET_ERROR_XY
+    }
+
+    /// Replan when there is no trajectory or `cmd` changed. The seed is the
+    /// current trajectory state when `seed_from_traj` and a trajectory exists,
+    /// otherwise the state estimate.
+    fn plan_if_needed<F>(
+        &mut self,
+        cmd: ManeuverCommand,
+        seed_from_traj: bool,
+        make_traj: F,
+    ) -> Result<(), ControlsError>
+    where
+        F: FnOnce(Vector6f) -> Result<TrackedTrajectory, ControlsError>,
+    {
+        if self.trajectory.is_none() || self.command_changed(&cmd) {
             let seed = match self.trajectory.as_ref() {
-                // Existing trajectory → continuous seed from its current state
-                // (before this tick's advance), even if the tracking error is
-                // high. Never snap to the estimate here: doing so would zero the
-                // tracking error and prevent the divergence-recovery state
-                // machine from ever detecting a collision.
-                Some(traj) => traj.sample().0,
-                // No trajectory yet → seed from the state estimate.
-                None => self.state_estimate,
+                Some(traj) if seed_from_traj => traj.sample().0,
+                _ => self.state_estimate,
             };
             match make_traj(seed) {
                 Ok(new_traj) => {
@@ -608,33 +569,74 @@ impl ControlContext {
                 }
                 Err(e) => {
                     self.trajectory = None;
+                    self.prev_cmd = None;
                     return Err(e);
                 }
             }
         }
-
         self.prev_cmd = Some(cmd);
-
-        let traj = self
-            .trajectory
-            .as_ref()
-            .ok_or(ControlsError::InvalidInput)?;
-        let (traj_state, traj_accel) = traj.sample();
-
-        let setpoints = self.calc_tracking_setpoints(traj_state, traj_accel)?;
-
-        // Advance the trajectory's internal clock by dt.
-        // After this, traj.sample() returns the state at the start of the next tick.
-        if let Some(traj) = &mut self.trajectory {
-            traj.tick(self.dt);
-        }
-
-        Ok(setpoints)
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
+
+    /// Largest linear acceleration (m/s^2) the output stage can deliver along the
+    /// local direction `dir_local` while already moving that way: the same
+    /// friction-first fit as `BodyController` (full Coulomb compensation, then the
+    /// largest acceleration that keeps every wheel within its thermally derated
+    /// feed-forward current limit). Strongly direction dependent on an omni robot
+    /// (robot 2: ~2.6 m/s^2 forward vs ~1.1 m/s^2 sideways at 3.5 A).
+    pub fn feasible_linear_accel(&self, dir_local: SVector<f32, 2>) -> f32 {
+        let n = dir_local.norm();
+        if n < 1e-6 {
+            return f32::INFINITY;
+        }
+        let u = Vector3f::new(dir_local.x / n, dir_local.y / n, 0.0);
+        let m = &self.robot_model;
+        let to_currents = |a: Vector3f| m.torques_to_currents(m.transform_accel2wheel_local() * a);
+        let i_fric = to_currents(m.feedforward_local_accel(u * 0.5, Vector3f::zeros()));
+        let i_unit = to_currents(m.feedforward_local_accel(Vector3f::zeros(), u));
+        let limits = self.wheel_ff_current_limits;
+        let mut s = f32::INFINITY;
+        for i in 0..4 {
+            if fabsf(i_unit[i]) < 1e-6 {
+                continue;
+            }
+            let headroom = if i_unit[i] > 0.0 {
+                limits[i] - i_fric[i]
+            } else {
+                limits[i] + i_fric[i]
+            };
+            s = s.min(headroom / fabsf(i_unit[i]));
+        }
+        s.max(0.0)
+    }
+
+    /// Feasible linear acceleration for a straight move by `delta_xy` (global) while
+    /// the heading turns from `heading_from` to `heading_to`: the minimum of
+    /// `feasible_linear_accel` over headings sampled along the turn.
+    pub fn feasible_linear_accel_for_move(
+        &self,
+        delta_xy: SVector<f32, 2>,
+        heading_from: f32,
+        heading_to: f32,
+    ) -> f32 {
+        const SAMPLES: usize = 5;
+        let turn = remainderf(heading_to - heading_from, 2.0 * PI);
+        let mut a = f32::INFINITY;
+        for k in 0..SAMPLES {
+            let h = heading_from + turn * (k as f32) / ((SAMPLES - 1) as f32);
+            let (sn, cs) = (libm::sinf(h), libm::cosf(h));
+            let local = SVector::<f32, 2>::new(
+                cs * delta_xy.x + sn * delta_xy.y,
+                -sn * delta_xy.x + cs * delta_xy.y,
+            );
+            a = a.min(self.feasible_linear_accel(local));
+        }
+        a
+    }
 
     /// PID+FF trajectory tracking: compute body-frame setpoints from the
     /// trajectory's current position/velocity/acceleration sample.
@@ -643,69 +645,53 @@ impl ControlContext {
         traj_state: Vector6f,
         traj_accel: Vector3f,
     ) -> Result<ManeuverSetpoints, ControlsError> {
+        // Trajectory tracking in the global frame. Position
+        // error feeds the velocity setpoint; the acceleration output is the
+        // trajectory feed-forward only. Both fade to zero inside the
+        // anti-jitter thresholds so the outputs are exactly zero at rest.
         let state_estimate = self.state_estimate;
-        let pose_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
-        let twist_estimate: Vector3f = state_estimate.fixed_rows::<3>(3).into();
-
-        let mut traj_pos: Vector3f = traj_state.fixed_rows::<3>(0).into();
+        let pos_estimate: Vector3f = state_estimate.fixed_rows::<3>(0).into();
+        let traj_pos: Vector3f = traj_state.fixed_rows::<3>(0).into();
         let traj_vel: Vector3f = traj_state.fixed_rows::<3>(3).into();
 
-        // Wrap θ to avoid PID over-rotation at the ±π discontinuity.
-        traj_pos.z = pose_estimate.z + remainderf(traj_pos.z - pose_estimate.z, 2.0 * PI);
+        // XY: P on position, clamped in magnitude, then anti-jitter scaled.
+        let [k_xy, max_xy, aj_xy] = [self.pos_fb_xy[0], self.pos_fb_xy[1], self.pos_fb_xy[2]];
+        let err_x = traj_pos.x - pos_estimate.x;
+        let err_y = traj_pos.y - pos_estimate.y;
+        let err_xy = hypotf(err_x, err_y);
+        let mut fb_x = err_x * k_xy;
+        let mut fb_y = err_y * k_xy;
+        let fb_xy = hypotf(fb_x, fb_y);
+        if fb_xy > max_xy && fb_xy > 0.0 {
+            fb_x *= max_xy / fb_xy;
+            fb_y *= max_xy / fb_xy;
+        }
+        let scale_xy = anti_jitter_scale(err_xy, aj_xy);
 
-        let twist_error = traj_vel - twist_estimate;
-        let pos_pid_feedback = self.pose_pid_controller.calculate_with_derivative(
-            &traj_pos,
-            &pose_estimate,
-            &twist_error,
-            self.dt,
+        // W: P on orientation (clamped) plus P on angular velocity, anti-jitter
+        // scaled by the orientation error.
+        let [k_w, max_w, aj_w, k_vel_w] =
+            [self.pos_fb_w[0], self.pos_fb_w[1], self.pos_fb_w[2], self.pos_fb_w[3]];
+        let err_w = remainderf(traj_pos.z - pos_estimate.z, 2.0 * PI);
+        let pos_fb_w = (err_w * k_w).clamp(-max_w, max_w);
+        let vel_fb_w = (traj_vel.z - self.yaw_rate_fb) * k_vel_w;
+        let scale_w = anti_jitter_scale(fabsf(err_w), aj_w);
+
+        let vel_out = Vector3f::new(
+            traj_vel.x + fb_x * scale_xy,
+            traj_vel.y + fb_y * scale_xy,
+            traj_vel.z + (pos_fb_w + vel_fb_w) * scale_w,
+        );
+        let accel_out = Vector3f::new(
+            traj_accel.x * scale_xy,
+            traj_accel.y * scale_xy,
+            traj_accel.z * scale_w,
         );
 
-        let accel_out: Vector3f = {
-            let accel_ff_term = if matches!(
-                POSE_ACCEL_MODE,
-                PoseAccelMode::FeedforwardOnly | PoseAccelMode::Full
-            ) {
-                self.pose_accel_gain[0] * traj_accel
-            } else {
-                Vector3f::zeros()
-            };
-
-            let accel_fb_term = if matches!(
-                POSE_ACCEL_MODE,
-                PoseAccelMode::FeedbackOnly | PoseAccelMode::Full
-            ) {
-                self.pose_accel_gain[1] * pos_pid_feedback
-            } else {
-                Vector3f::zeros()
-            };
-
-            accel_ff_term + accel_fb_term
-        };
-
-        let twist_out: Vector3f = {
-            let vel_ff_term: Vector3f = if matches!(
-                POSE_VEL_MODE,
-                PoseVelMode::FeedforwardOnly | PoseVelMode::Full
-            ) {
-                self.pose_vel_gain[0] * traj_vel
-            } else {
-                (state_estimate.fixed_rows::<3>(3) + accel_out * self.dt).into()
-            };
-
-            let vel_fb_term =
-                if matches!(POSE_VEL_MODE, PoseVelMode::FeedbackOnly | PoseVelMode::Full) {
-                    self.pose_vel_gain[1] * pos_pid_feedback * self.dt
-                } else {
-                    Vector3f::zeros()
-                };
-
-            vel_ff_term + vel_fb_term
-        };
-
         Ok(ManeuverSetpoints {
-            body_twist: twist_out,
+            body_vel: vel_out,
             body_accel: accel_out,
+            rate_fb_w: vel_fb_w * scale_w,
         })
     }
 
@@ -714,24 +700,24 @@ impl ControlContext {
             Some(t) => t.sample().0,
             None => return false,
         };
-        let traj_state_pose: Vector3f = traj_state.fixed_rows::<3>(0).into();
-        let traj_state_twist: Vector3f = traj_state.fixed_rows::<3>(3).into();
-        let pose_estimate: Vector3f = self.state_estimate.fixed_rows::<3>(0).into();
-        let twist_estimate: Vector3f = self.state_estimate.fixed_rows::<3>(3).into();
-        let linear_pose_error = hypotf(
-            traj_state_pose.x - pose_estimate.x,
-            traj_state_pose.y - pose_estimate.y,
+        let traj_state_pos: Vector3f = traj_state.fixed_rows::<3>(0).into();
+        let traj_state_vel: Vector3f = traj_state.fixed_rows::<3>(3).into();
+        let pos_estimate: Vector3f = self.state_estimate.fixed_rows::<3>(0).into();
+        let vel_estimate: Vector3f = self.state_estimate.fixed_rows::<3>(3).into();
+        let linear_pos_error = hypotf(
+            traj_state_pos.x - pos_estimate.x,
+            traj_state_pos.y - pos_estimate.y,
         );
-        let angular_pose_error = fabsf(remainderf(traj_state_pose.z - pose_estimate.z, 2.0 * PI));
-        let linear_twist_error = hypotf(
-            traj_state_twist.x - twist_estimate.x,
-            traj_state_twist.y - twist_estimate.y,
+        let angular_pos_error = fabsf(remainderf(traj_state_pos.z - pos_estimate.z, 2.0 * PI));
+        let linear_vel_error = hypotf(
+            traj_state_vel.x - vel_estimate.x,
+            traj_state_vel.y - vel_estimate.y,
         );
-        let angular_twist_error = fabsf(traj_state_twist.z - twist_estimate.z);
-        linear_pose_error > self.tracking_error_thresh[0]
-            || angular_pose_error > self.tracking_error_thresh[1]
-            || linear_twist_error > self.tracking_error_thresh[2]
-            || angular_twist_error > self.tracking_error_thresh[3]
+        let angular_vel_error = fabsf(traj_state_vel.z - vel_estimate.z);
+        linear_pos_error > self.tracking_divergence_thresh[0]
+            || angular_pos_error > self.tracking_divergence_thresh[1]
+            || linear_vel_error > self.tracking_divergence_thresh[2]
+            || angular_vel_error > self.tracking_divergence_thresh[3]
     }
 
     // -----------------------------------------------------------------------
@@ -740,91 +726,84 @@ impl ControlContext {
 
     pub fn expected_format(name: ParameterName::Type) -> Option<ParameterDataFormat::Type> {
         match name {
-            ParameterName::KF_PROCESS_STD => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::KF_MEASUREMENT_STD => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::KF_MAX_STATE => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::EKF_PROCESS_STD => Some(ParameterDataFormat::VEC3_F32),
+            ParameterName::EKF_MEASUREMENT_STD => Some(ParameterDataFormat::VEC2_F32),
             ParameterName::PHYS_WHEEL => Some(ParameterDataFormat::VEC4_F32),
             ParameterName::PHYS_INERTIA => Some(ParameterDataFormat::VEC2_F32),
-            ParameterName::PHYS_MOTOR_MODEL => Some(ParameterDataFormat::VEC2_F32),
+            ParameterName::PHYS_MOTOR_TORQUE_CONSTANT => Some(ParameterDataFormat::F32),
             ParameterName::PHYS_FRICTION_MODEL => Some(ParameterDataFormat::VEC6_F32),
-            ParameterName::FRICTION_COMP_GATING => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::POSE_CONTROL_GAIN => Some(ParameterDataFormat::VEC2_F32),
-            ParameterName::TRAJ_RECOMPUTE_ERROR => Some(ParameterDataFormat::VEC4_F32),
-            ParameterName::POSE_FB_PIDII_LINEAR => Some(ParameterDataFormat::VEC5_F32),
-            ParameterName::POSE_FB_PIDII_ANGULAR => Some(ParameterDataFormat::VEC5_F32),
+            ParameterName::ERROR_TRACKING_DIVERGENCE_THRESHOLD => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::FB_POS_LINEAR => Some(ParameterDataFormat::VEC3_F32),
+            ParameterName::FB_POS_ANGULAR => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::FB_WHEEL_VEL => Some(ParameterDataFormat::VEC4_F32),
+            ParameterName::FF_WHEEL_CURRENT_LIMIT => Some(ParameterDataFormat::F32),
+            ParameterName::FF_WHEEL_SLIP_COMP => Some(ParameterDataFormat::F32),
+            ParameterName::VISION_SEED_SAMPLES => Some(ParameterDataFormat::F32),
             _ => None,
         }
     }
 
     pub fn read_param(&self, name: ParameterName::Type, reply: &mut ParameterCommand) {
-        let kf = &self.robot_model.kf_params;
-        let phys = &self.robot_model.physical_params;
+        let phys = self.robot_model.get_params();
         match name {
-            ParameterName::KF_PROCESS_STD => {
-                reply.data.vec4_f32 = [
-                    kf.process_noise_std_pos_linear,
-                    kf.process_noise_std_pos_angular,
-                    kf.process_noise_std_vel_linear,
-                    kf.process_noise_std_vel_angular,
+            ParameterName::EKF_PROCESS_STD => {
+                // EKF process covariance Q -> std (sqrt of diagonal variances).
+                // Q diag = [pos_lin, pos_lin, pos_ang, vel_lin, vel_lin].
+                let q = self.state_estimator.ekf.get_params().q;
+                reply.data.vec3_f32 = [
+                    sqrtf(q[(0, 0)]),
+                    sqrtf(q[(2, 2)]),
+                    sqrtf(q[(3, 3)]),
                 ];
             }
-            ParameterName::KF_MEASUREMENT_STD => {
-                reply.data.vec4_f32 = [
-                    kf.measurement_noise_std_vision_pos_linear,
-                    kf.measurement_noise_std_vision_pos_angular,
-                    kf.measurement_noise_std_encoder_vel_angular,
-                    kf.measurement_noise_std_gyro_vel_angular,
-                ];
-            }
-            ParameterName::KF_MAX_STATE => {
-                reply.data.vec4_f32 = [
-                    kf.max_pos_linear,
-                    kf.max_pos_angular,
-                    kf.max_vel_linear,
-                    kf.max_vel_angular,
+            ParameterName::EKF_MEASUREMENT_STD => {
+                // EKF measurement covariance R -> std (sqrt of diagonal
+                // variances). R diag = [vision_lin, vision_lin, vision_ang].
+                let r = self.state_estimator.ekf.get_params().r;
+                reply.data.vec2_f32 = [
+                    sqrtf(r[(0, 0)]),
+                    sqrtf(r[(2, 2)]),
                 ];
             }
             ParameterName::PHYS_WHEEL => {
-                reply.data.vec4_f32 = [phys.alpha, phys.beta, phys.l, phys.r];
+                reply.data.vec4_f32 = [phys.alpha_rad, phys.beta_rad, phys.l_m, phys.r_m];
             }
             ParameterName::PHYS_INERTIA => {
-                reply.data.vec2_f32 = [phys.mass, phys.iz];
+                reply.data.vec2_f32 = [phys.mass_kg, phys.iz_kgm2];
             }
-            ParameterName::PHYS_MOTOR_MODEL => {
-                reply.data.vec2_f32 = [phys.motor_torque_constant, phys.motor_efficiency_factor];
+            ParameterName::PHYS_MOTOR_TORQUE_CONSTANT => {
+                reply.data.f32_ = phys.motor_torque_constant_nmpa;
             }
             ParameterName::PHYS_FRICTION_MODEL => {
                 reply.data.vec6_f32 = [
-                    phys.coulomb_friction_coefficient_linear_x,
-                    phys.coulomb_friction_coefficient_linear_y,
-                    phys.coulomb_friction_coefficient_angular,
-                    phys.viscous_friction_coefficient_linear_x,
-                    phys.viscous_friction_coefficient_linear_y,
-                    phys.viscous_friction_coefficient_angular,
+                    phys.coulomb_xy_n,
+                    phys.viscous_xy_nspm,
+                    phys.coulomb_w_nm,
+                    phys.viscous_w_nmsprad,
+                    phys.efficiency_xy,
+                    phys.efficiency_w,
                 ];
             }
-            ParameterName::FRICTION_COMP_GATING => {
-                reply.data.vec4_f32 = self.friction_comp_gating.into();
+            ParameterName::ERROR_TRACKING_DIVERGENCE_THRESHOLD => {
+                reply.data.vec4_f32 = self.tracking_divergence_thresh.into();
             }
-            ParameterName::POSE_CONTROL_GAIN => {
-                reply.data.vec2_f32 = self.pose_accel_gain.into();
+            ParameterName::VISION_SEED_SAMPLES => {
+                reply.data.f32_ = self.state_estimator.vision_filter.get_params().seed_samples as f32;
             }
-            ParameterName::TRAJ_RECOMPUTE_ERROR => {
-                reply.data.vec4_f32 = self.tracking_error_thresh.into();
+            ParameterName::FB_POS_LINEAR => {
+                reply.data.vec3_f32 = self.pos_fb_xy.into();
             }
-            ParameterName::POSE_FB_PIDII_LINEAR | ParameterName::POSE_FB_PIDII_ANGULAR => {
-                let gain = self.pose_pid_controller.get_gain();
-                let row = match name {
-                    ParameterName::POSE_FB_PIDII_LINEAR => 0,
-                    _ => 2,
-                };
-                reply.data.vec5_f32 = [
-                    gain[(row, 0)],
-                    gain[(row, 1)],
-                    gain[(row, 2)],
-                    gain[(row, 3)],
-                    gain[(row, 4)],
-                ];
+            ParameterName::FB_POS_ANGULAR => {
+                reply.data.vec4_f32 = self.pos_fb_w.into();
+            }
+            ParameterName::FB_WHEEL_VEL => {
+                reply.data.vec4_f32 = self.wheel_vel_fb.into();
+            }
+            ParameterName::FF_WHEEL_CURRENT_LIMIT => {
+                reply.data.f32_ = self.wheel_ff_current_limit;
+            }
+            ParameterName::FF_WHEEL_SLIP_COMP => {
+                reply.data.f32_ = self.wheel_slip_comp;
             }
             _ => unreachable!(),
         }
@@ -832,95 +811,160 @@ impl ControlContext {
 
     pub fn write_param(&mut self, cmd: &ParameterCommand) {
         match cmd.parameter_name {
-            ParameterName::KF_PROCESS_STD => {
-                let v = unsafe { cmd.data.vec4_f32 };
-                let mut kf = self.robot_model.kf_params;
-                kf.process_noise_std_pos_linear = v[0];
-                kf.process_noise_std_pos_angular = v[1];
-                kf.process_noise_std_vel_linear = v[2];
-                kf.process_noise_std_vel_angular = v[3];
-                self.robot_model.update_kf_params(kf);
+            ParameterName::EKF_PROCESS_STD => {
+                // std -> variance (square); build EKF process covariance Q.
+                // Q diag = [pos_lin, pos_lin, pos_ang, vel_lin, vel_lin].
+                let v = unsafe { cmd.data.vec3_f32 };
+                let pos_lin_var = v[0] * v[0];
+                let pos_ang_var = v[1] * v[1];
+                let vel_lin_var = v[2] * v[2];
+
+                let vision_filter_params = self.state_estimator.vision_filter.get_params();
+                let mut ekf_params = self.state_estimator.ekf.get_params();
+                let odometer_params = self.state_estimator.odometer.get_params();
+                ekf_params.q = SMatrix::<f32, EKF_STATE_LEN, EKF_STATE_LEN>::from_diagonal(
+                    &SVector::<f32, EKF_STATE_LEN>::from([
+                        pos_lin_var,
+                        pos_lin_var,
+                        pos_ang_var,
+                        vel_lin_var,
+                        vel_lin_var,
+                    ])
+                );
+                let ekf = BufferedEKF::new(
+                    ekf_params,
+                    SVector::<f32, 3>::zeros(),
+                    SVector::<f32, 3>::zeros(),
+                );
+                let vision_filter = VisionFilter::new(vision_filter_params);
+                let odometer = Odometer::new(odometer_params);
+                self.state_estimator = StateEstimator::new(
+                    ekf,
+                    vision_filter,
+                    odometer,
+                );
+                self.reset();
             }
-            ParameterName::KF_MEASUREMENT_STD => {
-                let v = unsafe { cmd.data.vec4_f32 };
-                let mut kf = self.robot_model.kf_params;
-                kf.measurement_noise_std_vision_pos_linear = v[0];
-                kf.measurement_noise_std_vision_pos_angular = v[1];
-                kf.measurement_noise_std_encoder_vel_angular = v[2];
-                kf.measurement_noise_std_gyro_vel_angular = v[3];
-                self.robot_model.update_kf_params(kf);
-            }
-            ParameterName::KF_MAX_STATE => {
-                let v = unsafe { cmd.data.vec4_f32 };
-                let mut kf = self.robot_model.kf_params;
-                kf.max_pos_linear = v[0];
-                kf.max_pos_angular = v[1];
-                kf.max_vel_linear = v[2];
-                kf.max_vel_angular = v[3];
-                self.robot_model.update_kf_params(kf);
+            ParameterName::EKF_MEASUREMENT_STD => {
+                // std -> variance (square); build EKF measurement covariance R.
+                // R diag = [vision_lin, vision_lin, vision_ang].
+                let v = unsafe { cmd.data.vec2_f32 };
+                let vision_lin_var = v[0] * v[0];
+                let vision_ang_var = v[1] * v[1];
+
+                let vision_filter_params = self.state_estimator.vision_filter.get_params();
+                let mut ekf_params = self.state_estimator.ekf.get_params();
+                let odometer_params = self.state_estimator.odometer.get_params();
+                ekf_params.r = SMatrix::<f32, EKF_MEAS_LEN, EKF_MEAS_LEN>::from_diagonal(
+                    &SVector::<f32, EKF_MEAS_LEN>::from([
+                        vision_lin_var,
+                        vision_lin_var,
+                        vision_ang_var,
+                    ]),
+                );
+                let ekf = BufferedEKF::new(
+                    ekf_params,
+                    SVector::<f32, 3>::zeros(),
+                    SVector::<f32, 3>::zeros(),
+                );
+                let vision_filter = VisionFilter::new(vision_filter_params);
+                let odometer = Odometer::new(odometer_params);
+                self.state_estimator = StateEstimator::new(
+                    ekf,
+                    vision_filter,
+                    odometer,
+                );
+                self.reset();
             }
             ParameterName::PHYS_WHEEL => {
                 let v = unsafe { cmd.data.vec4_f32 };
-                let mut p = self.robot_model.physical_params;
-                p.alpha = v[0];
-                p.beta = v[1];
-                p.l = v[2];
-                p.r = v[3];
-                let _ = self.robot_model.update_physical_params(p);
+                let mut p = self.robot_model.get_params();
+                p.alpha_rad = v[0];
+                p.beta_rad = v[1];
+                p.l_m = v[2];
+                p.r_m = v[3];
+                let _ = self.robot_model.update_params(p);
             }
             ParameterName::PHYS_INERTIA => {
                 let v = unsafe { cmd.data.vec2_f32 };
-                let mut p = self.robot_model.physical_params;
-                p.mass = v[0];
-                p.iz = v[1];
-                let _ = self.robot_model.update_physical_params(p);
+                let mut p = self.robot_model.get_params();
+                p.mass_kg = v[0];
+                p.iz_kgm2 = v[1];
+                let _ = self.robot_model.update_params(p);
             }
-            ParameterName::PHYS_MOTOR_MODEL => {
-                let v = unsafe { cmd.data.vec2_f32 };
-                let mut p = self.robot_model.physical_params;
-                p.motor_torque_constant = v[0];
-                p.motor_efficiency_factor = v[1];
-                let _ = self.robot_model.update_physical_params(p);
+            ParameterName::PHYS_MOTOR_TORQUE_CONSTANT => {
+                let v = unsafe { cmd.data.f32_ };
+                let mut p = self.robot_model.get_params();
+                p.motor_torque_constant_nmpa = v;
+                let _ = self.robot_model.update_params(p);
             }
             ParameterName::PHYS_FRICTION_MODEL => {
                 let v = unsafe { cmd.data.vec6_f32 };
-                let mut p = self.robot_model.physical_params;
-                p.coulomb_friction_coefficient_linear_x = v[0];
-                p.coulomb_friction_coefficient_linear_y = v[1];
-                p.coulomb_friction_coefficient_angular = v[2];
-                p.viscous_friction_coefficient_linear_x = v[3];
-                p.viscous_friction_coefficient_linear_y = v[4];
-                p.viscous_friction_coefficient_angular = v[5];
-                let _ = self.robot_model.update_physical_params(p);
+                let mut p = self.robot_model.get_params();
+                p.coulomb_xy_n = v[0];
+                p.viscous_xy_nspm = v[1];
+                p.coulomb_w_nm = v[2];
+                p.viscous_w_nmsprad = v[3];
+                p.efficiency_xy = v[4];
+                p.efficiency_w = v[5];
+                let _ = self.robot_model.update_params(p);
             }
-            ParameterName::FRICTION_COMP_GATING => {
+            ParameterName::ERROR_TRACKING_DIVERGENCE_THRESHOLD => {
                 let v = unsafe { cmd.data.vec4_f32 };
-                self.friction_comp_gating = Vector4f::new(v[0], v[1], v[2], v[3]);
+                self.tracking_divergence_thresh = Vector4f::new(v[0], v[1], v[2], v[3]);
             }
-            ParameterName::POSE_CONTROL_GAIN => {
-                let v = unsafe { cmd.data.vec2_f32 };
-                self.pose_accel_gain = Vector2f::new(v[0], v[1]);
-            }
-            ParameterName::TRAJ_RECOMPUTE_ERROR => {
-                let v = unsafe { cmd.data.vec4_f32 };
-                self.tracking_error_thresh = Vector4f::new(v[0], v[1], v[2], v[3]);
-            }
-            ParameterName::POSE_FB_PIDII_LINEAR | ParameterName::POSE_FB_PIDII_ANGULAR => {
-                let v = unsafe { cmd.data.vec5_f32 };
-                let mut gain = self.pose_pid_controller.get_gain();
-                if cmd.parameter_name == ParameterName::POSE_FB_PIDII_LINEAR {
-                    for col in 0..5 {
-                        gain[(0, col)] = v[col];
-                        gain[(1, col)] = v[col];
-                    }
+            ParameterName::VISION_SEED_SAMPLES => {
+                let v = unsafe { cmd.data.f32_ };
+                let mut params = self.state_estimator.vision_filter.get_params();
+                params.seed_samples = if v.is_finite() {
+                    (libm::roundf(v) as usize).clamp(1, DEFAULT_VISION_BUFF_LEN)
                 } else {
-                    for col in 0..5 {
-                        gain[(2, col)] = v[col];
-                    }
+                    params.seed_samples
+                };
+                // Takes effect on the next vision reseed (apply_command resets afterwards).
+                self.state_estimator.vision_filter = VisionFilter::new(params);
+            }
+            ParameterName::FB_POS_LINEAR => {
+                let v = unsafe { cmd.data.vec3_f32 };
+                if v.iter().all(|x| x.is_finite() && *x >= 0.0) {
+                    self.pos_fb_xy = Vector3f::new(v[0], v[1], v[2]);
                 }
-                self.pose_pid_controller.set_gain(gain);
+            }
+            ParameterName::FB_POS_ANGULAR => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                if v.iter().all(|x| x.is_finite() && *x >= 0.0) {
+                    self.pos_fb_w = Vector4f::new(v[0], v[1], v[2], v[3]);
+                }
+            }
+            ParameterName::FB_WHEEL_VEL => {
+                let v = unsafe { cmd.data.vec4_f32 };
+                if v.iter().all(|x| x.is_finite() && *x >= 0.0) {
+                    self.wheel_vel_fb = Vector4f::new(v[0], v[1], v[2], v[3].min(6.3));
+                }
+            }
+            ParameterName::FF_WHEEL_CURRENT_LIMIT => {
+                let v = unsafe { cmd.data.f32_ };
+                if v.is_finite() && v >= 0.0 {
+                    self.wheel_ff_current_limit = v;
+                }
+            }
+            ParameterName::FF_WHEEL_SLIP_COMP => {
+                let v = unsafe { cmd.data.f32_ };
+                if v.is_finite() && (0.0..=3.0).contains(&v) {
+                    self.wheel_slip_comp = v;
+                }
             }
             _ => unreachable!(),
         }
+    }
+}
+
+/// Linear 0..1 ramp over
+/// [0, thresh], 1 above it (and always 1 when the threshold is disabled).
+fn anti_jitter_scale(err_abs: f32, thresh: f32) -> f32 {
+    if thresh <= 0.0 {
+        1.0
+    } else {
+        (err_abs / thresh).clamp(0.0, 1.0)
     }
 }

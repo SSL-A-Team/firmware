@@ -1,8 +1,5 @@
 use std::{
-    mem::size_of,
-    net::{IpAddr, Ipv4Addr, UdpSocket},
-    str::FromStr,
-    time::Duration,
+    mem::size_of, net::{IpAddr, Ipv4Addr, UdpSocket}, str::FromStr, time::Duration,
 };
 
 use ateam_common_packets::bindings::{
@@ -73,6 +70,8 @@ fn main() -> std::io::Result<()> {
                 _bitfield_1: Default::default(),
                 _bitfield_align_1: Default::default(),
                 vision_position_update: [0.0, 0.0, 0.0],
+                vision_capture_us_hi: 0,
+                vision_capture_us_lo: 0,
 
                 body_control_mode: BodyControlMode::BCM_LOCAL_VELOCITY,
                 kick_request: KickRequest::KR_ARM,

@@ -2,7 +2,9 @@ use ateam_lib_stm32::drivers::led::apa102::{apa102_buf_len, Apa102};
 use embassy_executor::Spawner;
 
 use embassy_stm32::Peri;
-use smart_leds::colors::{BLACK, BLUE, CYAN, GREEN, ORANGE_RED, PURPLE, RED, VIOLET, YELLOW};
+use smart_leds::colors::{
+    BLACK, BLUE, CYAN, GREEN, MAGENTA, ORANGE_RED, PURPLE, RED, VIOLET, YELLOW,
+};
 
 use crate::{pins::*, MotorIndex};
 
@@ -18,6 +20,7 @@ pub enum MotorStatusLedCommand {
 #[derive(Debug, Clone, Copy, defmt::Format)]
 pub enum ImuStatusLedCommand {
     Configuring,
+    Calibrating,
     Ok,
     Error,
 }
@@ -109,6 +112,9 @@ async fn dotstar_task_entry(
             ControlBoardLedCommand::Imu(imu_status_led_command) => match imu_status_led_command {
                 ImuStatusLedCommand::Configuring => {
                     dotstars.set_color(PURPLE, ControlDotstarIndex::Imu.into())
+                }
+                ImuStatusLedCommand::Calibrating => {
+                    dotstars.set_color(MAGENTA, ControlDotstarIndex::Imu.into())
                 }
                 ImuStatusLedCommand::Ok => {
                     dotstars.set_color(GREEN, ControlDotstarIndex::Imu.into())

@@ -25,7 +25,7 @@
 //! The robot ID knob sets the dribbler current setpoint (ID × 0.01); ID 0 stops
 //! all motion. Max angular acceleration is fixed at 2.0 rad/s². The tuned values
 //! [orbit_radius, inset_angle, max_angular_vel, max_angular_acc] can be read back
-//! over the radio via a parameter read of KF_PROCESS_STD (parameter 0).
+//! over the radio via a parameter read of EKF_PROCESS_STD (parameter 0).
 //!
 //! The ball is placed at the field origin (0, 0).
 
@@ -152,7 +152,7 @@ const DEFAULT_MAX_ANGULAR_ACC: f32 = 4.0 * core::f32::consts::PI; // rad/s
 /// Existing robot parameter reused to read back the tuned pivot values over the
 /// radio. A `PCC_READ` of this name is answered with a VEC4 payload carrying
 /// `[orbit_radius, inset_angle, max_angular_vel, max_angular_acc]`.
-const PIVOT_READBACK_PARAM: ParameterName::Type = ParameterName::KF_PROCESS_STD;
+const PIVOT_READBACK_PARAM: ParameterName::Type = ParameterName::EKF_PROCESS_STD;
 
 // ============================================================================
 // Phase state machine
@@ -472,7 +472,6 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 0, // game_state_in_halt
                 0, // emergency_stop
                 1, // wheel_vel_control_enabled
-                1, // wheel_torque_control_enabled
                 0, // vision_update
                 0, // reset_controller
                 0, // reserved1
@@ -480,6 +479,8 @@ async fn main(main_spawner: embassy_executor::Spawner) {
             _bitfield_align_1: Default::default(),
 
             vision_position_update: [0.0, 0.0, 0.0],
+            vision_capture_us_hi: 0,
+            vision_capture_us_lo: 0,
 
             body_control_mode: if motion_stopped {
                 BodyControlMode::BCM_OFF

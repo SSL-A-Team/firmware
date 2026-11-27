@@ -8,7 +8,7 @@
 //! running the dribbler, then holds position with the dribbler dropped to a low
 //! idle setpoint (0.01) to "capture" the ball, pauses, and drives forward again.
 //! Position mode requires vision, so vision is mocked by echoing the KF state
-//! estimate (from BasicTelemetry) back as the vision pose each tick (see
+//! estimate (from BasicTelemetry) back as the vision position each tick (see
 //! hwtest-line). On-field use needs real vision.
 //!
 //! Phase sequence (loops forever, advancing the target one drive length each cycle):
@@ -271,9 +271,9 @@ async fn main(main_spawner: embassy_executor::Spawner) {
     // robot keeps driving forward, capturing, and repeating.
     let mut target_x: f32 = DRIVE_DISTANCE_M;
 
-    // Mocked vision pose, fed back from the KF state estimate. Starts at the
+    // Mocked vision position, fed back from the KF state estimate. Starts at the
     // origin until the first BasicTelemetry arrives.
-    let mut mock_vision_pose: [f32; 3] = [0.0, 0.0, 0.0];
+    let mut mock_vision_pos: [f32; 3] = [0.0, 0.0, 0.0];
 
     // Latest estimated body speed² (m²/s²), from the KF velocity estimate. Used
     // to decide when the forward drive has settled at the target (avoids sqrt in
@@ -296,18 +296,18 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         Timer::after_millis(LOOP_INTERVAL_MS).await;
 
         // ── mock vision: echo the latest KF state estimate from telemetry ────
-        // Drain queued telemetry, keeping the most recent BasicTelemetry pose
+        // Drain queued telemetry, keeping the most recent BasicTelemetry position
         // estimate (mm/mrad → m/rad) to send back as the mocked vision update,
         // and the linear speed estimate (mm/s → m/s) to detect drive completion.
         while let Some(pkt) = telemetry_subscriber.try_next_message_pure() {
             if let TelemetryPacket::Basic(b) = pkt {
-                mock_vision_pose = [
-                    b.kf_body_pos_estimate[0] as f32 / 1000.0,
-                    b.kf_body_pos_estimate[1] as f32 / 1000.0,
-                    b.kf_body_pos_estimate[2] as f32 / 1000.0,
+                mock_vision_pos = [
+                    b.pos_est[0] as f32 / 1000.0,
+                    b.pos_est[1] as f32 / 1000.0,
+                    b.pos_est[2] as f32 / 1000.0,
                 ];
-                let vx = b.kf_body_vel_estimate[0] as f32 / 1000.0;
-                let vy = b.kf_body_vel_estimate[1] as f32 / 1000.0;
+                let vx = b.vel_est[0] as f32 / 1000.0;
+                let vy = b.vel_est[1] as f32 / 1000.0;
                 est_speed_sq = vx * vx + vy * vy;
             }
         }
@@ -337,7 +337,7 @@ async fn main(main_spawner: embassy_executor::Spawner) {
         //   Wait:    additional pause, then advance the target and drive again.
         match phase {
             Phase::Drive => {
-                let x = mock_vision_pose[0];
+                let x = mock_vision_pos[0];
                 let reached = x >= target_x - POS_TOLERANCE_M && x <= target_x + POS_TOLERANCE_M;
                 let settled = est_speed_sq <= VEL_TOLERANCE_MPS * VEL_TOLERANCE_MPS;
                 if reached && settled {
@@ -418,14 +418,15 @@ async fn main(main_spawner: embassy_executor::Spawner) {
                 0, // game_state_in_halt
                 0, // emergency_stop
                 1, // wheel_vel_control_enabled
-                1, // wheel_torque_control_enabled
                 1, // vision_update (mocked from KF estimate — position mode requires vision)
                 0, // reset_controller
                 0, // reserved1
             ),
             _bitfield_align_1: Default::default(),
 
-            vision_position_update: mock_vision_pose,
+            vision_position_update: mock_vision_pos,
+            vision_capture_us_hi: 0,
+            vision_capture_us_lo: 0,
 
             body_control_mode: if motion_stopped {
                 BodyControlMode::BCM_OFF
