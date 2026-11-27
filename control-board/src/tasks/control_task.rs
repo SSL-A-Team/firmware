@@ -497,12 +497,12 @@ impl<
                         if let Ok(resp) = param_cmd_resp {
                             defmt::info!("sending successful parameter update command response");
                             let tp_resp = TelemetryPacket::ParameterCommandResponse(resp);
-                            self.telemetry_publisher.publish(tp_resp).await;
+                            self.telemetry_publisher.publish_immediate(tp_resp);
                         } else if let Err(resp) = param_cmd_resp {
                             defmt::error!("parameter update command failed");
                             defmt::info!("sending failed parameter response");
                             let tp_resp = TelemetryPacket::ParameterCommandResponse(resp);
-                            self.telemetry_publisher.publish(tp_resp).await;
+                            self.telemetry_publisher.publish_immediate(tp_resp);
                         }
                     }
                 }
